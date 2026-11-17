@@ -152,7 +152,8 @@ def jobs_for(rt64, gen_dir):
                     vfl + imgui_fl, imgui_digest))
     out.append((os.path.join(gen_dir, "ui_fonts.cpp"), os.path.join(OUT, "obj", "vk_ui_fonts.o"), COMMON + ["-O0", "-w"], ""))
     for s in upstream.vk_sources():
-        if os.path.basename(s) == "vk_ngx_msvc_rt.cpp":
+        # (vk_crash_window.cpp: the crash helper's window on a PC, drawn through SDL; the console has no such window)
+        if os.path.basename(s) in ("vk_ngx_msvc_rt.cpp", "vk_crash_window.cpp"):
             continue
         rel = os.path.relpath(s, os.path.join(ROOT, "gpu")).replace(os.sep, "_")[:-4]
         lib = os.path.relpath(s, VK).split(os.sep)[0] in ("eden", "sirit")

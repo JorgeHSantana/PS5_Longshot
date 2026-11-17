@@ -71,6 +71,8 @@ What CONTRIBUTING.md doesn't spell out, and agents trip on:
   every anchor resolves, and that the functions behind design.md's rules keep theirs.
 - **The renderer's interface is versioned.** A change to `MkwVkHost` or `MkwVkRenderer` in `gpu/vk/vk_api.h` bumps
   `MKWVK_API_VERSION`.
+- **A switch has a row.** A new `RX_`, `HOS_` or `LONGSHOT_` name read from the environment needs its row in
+  `gpu/vk/switches.def`; a removed one becomes a `GONE(...)` row there (`tests/test_switch_table.py`).
 - **Generated files are generated.** The SPIR-V headers in `gpu/vk/shaders/` (`*_spv.h`) are compiled from the shader
   beside them, and name its SHA-256: regenerate them with glslang (the shaders' tests show the command) rather than
   editing them.
@@ -80,6 +82,9 @@ What CONTRIBUTING.md doesn't spell out, and agents trip on:
   (no `CP_ACP`; `tests/test_utf8_paths.py`).
 - **No CI, and no game in the checks.** Forgejo runs no checks yet: run `python -I -B tests/run_all.py` yourself
   and say so in the PR. The checks run without a dump; a run in the game is yours to do locally and report.
+- **Builds and game runs go through the PC's job queue** (`scripts/job_queue.py`; `scripts/dev_build.py` for bases,
+  packs and runtimes): `--mode timing` for numbers, `--mode shared` for every other game run. Never on a RAM file system
+  (`/tmp` is often one): [Sharing a PC](docs/development.md#sharing-a-pc-the-job-queue).
 - **Test a change against a base, not in a new full build**: `scripts/dev_packs.py`, [Testing a change against a
   base](docs/development.md#testing-a-change-against-a-base). Agents sharing a PC share one base and agree before
   moving it; it is for development and A/B runs only. Bases, packs and runtimes are built from the game: never send them.

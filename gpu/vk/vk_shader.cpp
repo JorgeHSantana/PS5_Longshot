@@ -30,6 +30,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "vk_new.h"   // (NewNothrow)
 #include "shader_recompiler/backend/spirv/mma_layout.h"
 #include "shader_recompiler/ir_opt/passes.h"
 #include "shader_recompiler/ir_opt/fragment_output_guard.h"
@@ -99,6 +100,7 @@ void ptr_diag_log(uint64_t key, const char* kind) {
 }
 } // namespace
 #include "vk_shader.h"
+#include "mesh_mode.h"
 #ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
 #include "longshot_env.h"
 #endif
@@ -1083,6 +1085,7 @@ std::atomic<int64_t> st_translated, st_failed, st_translate_ns;
 // were counted nowhere
 constexpr int64_t kFailNamed = 30;
 std::atomic<int64_t> st_left_out, st_not_translated, st_mesh_not_translated, st_stage_failed;
+std::atomic<int64_t> st_translate_wait_ns;   // (the translations a draw waited for, program_pick: the performance summary's hitches)
 
 } // namespace
 
@@ -1218,6 +1221,18 @@ bool mesh_nocull_wanted(uint64_t code_key) {
     return false;
 }
 
+} // namespace
+uint32_t mesh_fallback_layout() {
+    static const uint32_t layout = [] {
+        const mesh_rule::Choice c = mesh_rule::fb_layout(getenv("RX_VK_MESH_FB_LAYOUT"));
+        // (once, on a GPU that translates a fallback program: which layout its records take, set or not)
+        logf("vk: mesh fallback records: %s (%s)", c.mode == 1 ? "line after line (soa)" : "record after record (aos)", c.why);
+        return (uint32_t)c.mode;
+    }();
+    return layout;
+}
+namespace {
+
 bool reads_c3_2320_bit4(const Shader::IR::Value& v) {   // (BitwiseAnd32 of #4 and GetCbufU32 #3, #2320, through Identity)
     using namespace Shader::IR;
     const Value r = v.Resolve();
@@ -1321,7 +1336,9 @@ uint64_t translator_stamp() {
         // (and the vendor fixes of the translation, vk_vendor.h: out-of-bounds fetches, NaN tests, the gather offset)
         const uint32_t flags = (position_invariant ? 1u : 0u) | (frag_nan_guard ? 2u : 0u) | (mma_software ? 4u : 0u) |
                                (global_table_loop ? 8u : 0u) | (fetch_bounds ? 16u : 0u) | (nan_bits ? 32u : 0u) |
-                               (profile().need_gather_subpixel_offset ? 64u : 0u) | (fetch_bounds_buffers ? 128u : 0u);
+                               (profile().need_gather_subpixel_offset ? 64u : 0u) | (fetch_bounds_buffers ? 128u : 0u) |
+                               // (and the software multiplies' form, vk_coopmat.cpp choose_software_form: 0 for the loop, as before)
+                               (mma_software ? mma_software_form << 8 | (mma_software_form && mma_software_quad ? 1024u : 0u) : 0u);
         add(&flags, sizeof flags);
         add(mma_order_a.data(), sizeof(uint32_t) * mma_order_a.size());
         add(mma_order_b.data(), sizeof(uint32_t) * mma_order_b.size());
@@ -1364,6 +1381,9 @@ void translate_into(Program& p, const NvnState& s, const Code* vsc, const Code* 
         ~ModuleProgram() { module_program = 0; }
     } module_for{p.key};
     try {
+        // (issue 1280: an allocation refused in the translation fails this program, as before the renderer's new_handler,
+        // rather than wait 5 s and stop the game: a bad shader can ask for a size no PC has)
+        const NewNothrow nothrow;
         if (driver_faulted_program(p.key)) throw std::runtime_error("the driver faulted on this program before: not asked of it again");
         Shader::Backend::Bindings bindings{};
         int questions = 0;
@@ -1609,6 +1629,9 @@ void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const 
         Shader::Optimization::g_nvn2_miss_log_this = !only || !strncmp(hex, only, strlen(only));
     }
     try {
+        // (issue 1280: an allocation refused in the translation fails this program, as before the renderer's new_handler,
+        // rather than wait 5 s and stop the game: a bad shader can ask for a size no PC has)
+        const NewNothrow nothrow;
         Shader::Backend::Bindings bindings{};
         std::vector<std::vector<uint32_t>> kept;   // (each stage's SPIR-V, for the program cache: mesh programs were never kept,
                                                    // so each was translated and its pipeline built in the middle of play, every run)
@@ -1661,6 +1684,7 @@ void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const 
         mrt.mesh_fallback_capacity = Shader::Backend::SPIRV::MESH_FALLBACK_CAPACITY;
         mrt.mesh_fallback_task = task_t != nullptr;
         mrt.mesh_fallback_task_threads = task_t ? task_t->program.workgroup_size[0] : 0;
+        mrt.mesh_fallback_layout = fallback ? mesh_fallback_layout() : 0;
         const std::vector<uint32_t> mspirv = Shader::Backend::SPIRV::EmitSPIRV(fallback ? profile_pinned() : profile_graphics(VK_SHADER_STAGE_MESH_BIT_EXT), mrt, mesh_t->program, bindings);
         kept.push_back(mspirv);
         Stage ms;
@@ -1676,6 +1700,7 @@ void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const 
             vrt.mesh_fallback = true;
             vrt.mesh_fallback_vertex = true;
             vrt.mesh_fallback_capacity = Shader::Backend::SPIRV::MESH_FALLBACK_CAPACITY;
+            vrt.mesh_fallback_layout = mrt.mesh_fallback_layout;
             vrt.convert_depth_mode = host->depth_minus_w() != 0;
             const Shader::Stage saved_stage{mesh_t->program.stage};
             // (the generated vertex stage has no descriptors of its own: its inputs are the records. Only the stores
@@ -2093,7 +2118,9 @@ const Program* program_pick(const NvnState& s, ProgramKind kind, const uint8_t c
     variants.push_back(std::move(p));
     static const bool sync = env_on("RX_VK_SYNC_SHADERS");
     if (compute || sync) {   // (compute: dispatches are never left out, so they are translated where they are)
+        const auto t0 = std::chrono::steady_clock::now();
         translate_into(*raw, s, stage_code[0], stage_code[1], compute ? stage_code[5] : nullptr, color_types);
+        st_translate_wait_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
         return raw->failed ? nullptr : raw;
     }
     struct Job {
@@ -2603,6 +2630,9 @@ void shader_fail_lines() {
 }
 double shader_translate_ms() {
     return st_translate_ns.load() / 1e6;
+}
+double shader_translate_wait_ms() {
+    return st_translate_wait_ns.load() / 1e6;
 }
 
 void program_released(const nvn_prog* p) {

@@ -119,6 +119,8 @@ std::string program_code_keys(const NvnState& s);   // (longshot) " stage:key" f
 const Program* program_pick(const NvnState& s, ProgramKind kind, const uint8_t color_types[8]);   // (program_for without its cache)
 void program_wait(const Program* p);
 uint64_t program_cache_stamp();   // (what the kept programs and pipelines are good for)
+/// (longshot) RX_VK_MESH_FB_LAYOUT, read once (mesh_mode.h mesh_rule::fb_layout): the compute fallback's record layout
+uint32_t mesh_fallback_layout();
 size_t program_cache_load_some(const std::unordered_set<uint64_t>& wanted, const std::function<void(Program&)>& fn,
                                bool computes = true, bool fallbacks = false);   // (computes: and every kept compute program)
 /// The precompile of every shader of the game (longshot_shaders.bin, from nx2/shader_census.py): how many programs it names, 0: none
@@ -197,6 +199,9 @@ void shader_stats(int64_t* translated, int64_t* failed);
 /// (longshot) After the preparation's "N failed": a line for each "not translated" line's programs, all of them (those lines stop at 30)
 void shader_fail_lines();
 double shader_translate_ms();
+/// (longshot) The time draws waited for a translation (program_pick's, in place; shader_translate_ms: every translation's,
+/// the jobs' behind the game included)
+double shader_translate_wait_ms();
 void program_released(const nvn_prog* p);
 /// (longshot) A guest program as the game makes it (nvnProgramSetShaders), before any draw (vk_programs.cpp): its stages' code keys
 /// as Program::codes has them (vertex or mesh, fragment, task, the header-only stage; a compute program's stage in codes[0]),

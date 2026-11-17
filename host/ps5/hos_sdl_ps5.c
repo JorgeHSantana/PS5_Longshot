@@ -72,6 +72,15 @@ int hos_sdl_desktop_size(int *width, int *height) {
 int hos_sdl_refresh_mhz(void *window) { (void)window; return mode_mhz; }
 void hos_sdl_pixel_size(void *window, int *width, int *height) { (void)window; *width = mode_w, *height = mode_h; }
 void hos_sdl_window_size(void *window, int *width, int *height) { (void)window; *width = mode_w, *height = mode_h; }
+/* (one display, the console's own, always the whole screen: nothing to list and no other to move to) */
+struct MkwVkMonitor;
+int hos_sdl_monitor_list(void *window, struct MkwVkMonitor *out, uint32_t *tokens, int cap) {
+    (void)window, (void)out, (void)tokens, (void)cap;
+    return 0;
+}
+uint32_t hos_sdl_window_display(void *window) { (void)window; return UINT32_MAX; }
+int hos_sdl_fullscreen_target(void *window, int on, uint32_t token) { (void)window, (void)on, (void)token; return 1; }
+int hos_sdl_is_fullscreen(void *window) { (void)window; return 1; }
 void hos_sdl_icon(void *window, const char *png) { (void)window, (void)png; }
 
 /* The plane surface of the display mode of the wanted size, 59.94 Hz where the display offers it (the modes come
@@ -170,12 +179,18 @@ static void audio_fill(int16_t *frames, int count, void *user) {
             }
         }
 }
-int hos_sdl_audio_open(int freq, int channels, int s16, void (*pull)(void *user, uint8_t *out, int len), void *user) {
+/* (one output, the console's: no device to choose, and its token is the stream's handle) */
+static int audio_token;
+void *hos_sdl_audio_open(unsigned device, int freq, int channels, int s16, void (*pull)(void *user, uint8_t *out, int len),
+                         void *user) {
+    (void)device;
     if (freq != 48000) hos_log("ps5: the game's sound is %d Hz, played as 48000", freq);
-    if (channels < 1 || channels > 8) return 0;
+    if (channels < 1 || channels > 8) return NULL;
     audio_pull = pull, audio_user = user, audio_channels = channels, audio_s16 = s16;
-    return audio_start(audio_fill, NULL);
+    return audio_start(audio_fill, NULL) ? &audio_token : NULL;
 }
+void hos_sdl_audio_close(void *audio) { if (audio) audio_stop(); }
+int hos_sdl_audio_alive(void *audio) { return audio != NULL; }
 int hos_sdl_audio_channels(void) { return 2; }
 
 /* ---- microphones: none ---- */

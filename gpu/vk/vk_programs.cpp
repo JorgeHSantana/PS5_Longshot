@@ -156,7 +156,7 @@ bool ids_ready() {
         ids.open(cache.substr(0, cache.find_last_of("\\/") + 1) + "longshot_module_ids.bin", program_cache_stamp(),
                  ip.shaderModuleIdentifierAlgorithmUUID);
         logf("vk: module identifiers: %zu known (longshot_module_ids.bin): a learned compute variant's pipeline is made at its "
-             "program's create call without its code (RX_VK_MODULE_IDS=0: off)", ids.size());
+             "program's create call without its code", ids.size());
     });
     return ids_on.load(std::memory_order_acquire);
 }
@@ -347,10 +347,13 @@ std::atomic<bool> struck_last_session{false};   // (load_default.h: the session 
 void programs_load_decide(bool native_mesh) {
     struck_last_session = load_default::strike_take(load_fallback_path());
     const load_default::Choice c = load_default::choose(getenv("RX_VK_LOAD"), native_mesh, load_default::marker_there(load_fallback_path()),
-                                                        env_on("RX_VK_PROGRAM_CACHE_ZSTD"));   // (as vk_progcache.cpp disk_init reads it)
-    load_mode.store(c.create ? 1 : 0, std::memory_order_release);
+                                                        env_on("RX_VK_PROGRAM_CACHE_ZSTD"));
+    const bool host_v14 = (!getenv("RX_VK_LOAD") && host && host->version <= 14);
+    const bool load_create = host_v14 ? false : c.create;
+    load_mode.store(load_create ? 1 : 0, std::memory_order_release);
     logf("vk: programs are loaded %s: %s (RX_VK_LOAD=create or start says which)",
-         c.create ? "when the game makes them (create)" : "before the title (start)", c.why);
+         load_create ? "when the game makes them (create)" : "before the title (start)",
+         host_v14 ? "executable host has version <= 14 (load-on-create requires host >= 21)" : c.why);
 }
 bool programs_load_at_create() { return load_mode.load(std::memory_order_acquire) == 1; }
 namespace {
@@ -436,8 +439,7 @@ void module_id_learned(uint64_t key, uint64_t variant, VkShaderModule module) {
     if (ids.add(key, variant, got.identifier, got.identifierSize)) ids_learned++;
 }
 void module_ids_on() {
-    static const bool off = getenv("RX_VK_MODULE_IDS") && !atoi(getenv("RX_VK_MODULE_IDS"));
-    if (!off) ids_on.store(true, std::memory_order_release);
+    ids_on.store(true, std::memory_order_release);
 }
 
 void programs_frames_note() {

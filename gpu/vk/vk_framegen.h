@@ -11,11 +11,18 @@ bool framegen_on();
 /// (the present goes to the window as without it)
 bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4], bool native_pq);
 /// (longshot) Who made the made frames of the sets shown lately (the last 64, about a second at 60): what the Insert menu's
-/// Frame generation by row and the FPS counter name. None: none made (Off, nothing to blend from, none for half a second)
-enum class FgMaker { None, BuiltIn, Dlss, Fsr3 };
+/// Frame generation by row and the FPS counter name. None: none made (Off, nothing to blend from, none for half a second).
+/// DlssPaused: DLSS FG chosen, and the sets were the game's frames alone, with no Upscaler picture to make frames from (the
+/// game's own menus, movies and loading screens: vk_dlss.cpp dlss_fg_holds)
+enum class FgMaker { None, BuiltIn, Dlss, Fsr3, DlssPaused };
 FgMaker framegen_maker();
 /// The first frame the last framegen_record made (null when it made none), w x h, GENERAL
 VkImage framegen_made_image(uint32_t* w, uint32_t* h);
+/// (longshot) The gameplay upscale's picture (its output, at level), recorded right after the upscale wrote it, before the
+/// game draws its HUD into it: copied while AMD FSR 3.1's frame interpolation is asked for, so that framegen_record can mark
+/// the HUD for it (what the game drew over the picture since). Anything else (null, another format or shape) is left alone
+struct Texture;
+void framegen_hud_before(VkCommandBuffer cmd, Texture* picture, uint32_t level);
 /// After that recording's submit (value): the display thread shows its frames
 void framegen_queue(uint64_t value);
 /// The window's present of an image (GENERAL, w x h; crop as above or null), vk_replay.cpp: the display thread's

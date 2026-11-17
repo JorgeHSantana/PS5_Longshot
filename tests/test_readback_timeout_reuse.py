@@ -99,6 +99,7 @@ static void call() { if (lost) vk_calls_after_lost++; }
 VkResult vkCreateCommandPool(VkDevice, const VkCommandPoolCreateInfo*, const void*, VkCommandPool* p) { *p = &the_pool; return VK_SUCCESS; }
 VkResult vkAllocateCommandBuffers(VkDevice, const VkCommandBufferAllocateInfo*, VkCommandBuffer* c) { *c = &the_cmd; return VK_SUCCESS; }
 VkResult vkCreateFence(VkDevice, const VkFenceCreateInfo*, const void*, VkFence* f) { *f = &the_fence; return VK_SUCCESS; }
+void vkDestroyCommandPool(VkDevice, VkCommandPool, const void*) {}
 VkResult vkResetCommandPool(VkDevice, VkCommandPool, uint32_t) {
     call();
     if (pending && !lost) violation("vkResetCommandPool with its command buffer still pending on the GPU");
@@ -141,7 +142,6 @@ static void logf(const char*, ...) {}
 static void full_barrier(VkCommandBuffer, const char* = nullptr) {}
 static void destroy_buffer(VkBuffer, VmaAllocation) {}
 static void watch_tex(const Texture*, const char*) {}
-static bool remade_skip_old() { return false; }
 static bool remade_log_on() { return false; }
 static uint64_t evicted_key(uint64_t gpu, uint32_t, uint32_t, uint32_t) { return gpu; }
 struct Evicted { uint64_t frame; bool rendered; };

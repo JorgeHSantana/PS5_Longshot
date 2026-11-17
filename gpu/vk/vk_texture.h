@@ -37,6 +37,8 @@ struct Texture {
     std::vector<uint8_t> tail_bound;            // (per layer, or [0] with SINGLE_MIPTAIL: its mip tail has memory)
     std::vector<VkDeviceMemory> sparse_chunks;  // (the device memory blocks are taken from, 64 MB at a time)
     VkDeviceSize chunk_used = 0;
+    struct SparseFree { VkDeviceMemory memory; VkDeviceSize offset, size; };
+    std::vector<SparseFree> sparse_free;        // (taken for binds that failed: given out again before the chunks)
     VkSparseImageMemoryRequirements sparse_req{};
     uint32_t sparse_type = 0;
     VkDeviceSize sparse_align = 0;
@@ -73,6 +75,9 @@ struct Texture {
     bool writeback_noted = false;  // (in the list of textures waiting for that)
     uint64_t written_back_hash = 0; // (its memory's hash after that write-back: still its own texels there, or the CPU's since)
     uint64_t verify_hash = 0;      // (RX_VK_VERIFY_DIM: its guest memory's hash when last uploaded)
+    uint64_t blocks_hash = 0;      // (longshot) decoded ASTC: its blocks' hash at its last whole upload, 0 when unknown (astc_reuse.h)
+    bool freed_listed = false;     // (finalized by the game and listed by blocks_hash: its image may serve a new texture)
+    bool reuse_retire = false;     // (its image served one: it goes at the next texture_frame unless used again first)
     uint32_t checked_epoch = 0;
     uint64_t upload_value = 0;   // (the submission its last upload was recorded in, and the parallel replay's segment
     uint64_t upload_seg = 0;     // that recorded it: one before it in the stream uploads it again)
@@ -144,6 +149,9 @@ int texture_segment_end(int index);
 uint32_t texture_epoch();
 /// Changes whenever a texture is destroyed (pointers to textures kept elsewhere go stale)
 uint64_t texture_destroy_generation();
+/// (longshot) Whether t, listed at gpu, is still that texture with that image: not destroyed since (t is only compared until
+/// it is found, so a freed one is never read). Replay thread
+bool texture_alive(uint64_t gpu, const Texture* t, VkImage image);
 // (longshot, RX_VK_FRAME_TRACE: time no other column has; totals in ns, the trace takes their differences)
 int64_t texture_readback_wait_ns();   // (a read-back's submit and wait for the GPU: the write-backs before an eviction)
 int64_t texture_frame_ns();           // (texture_frame as a whole: each present's eviction, compaction and sweeps)
