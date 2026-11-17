@@ -44,6 +44,7 @@
 #include "vk_menu_keys.h"   // (which gamepad buttons confirm and go back: those A and B are bound to)         // (how it looks: Dear ImGui, vk_imgui.h)
 #include "vk_dlss.h"
 #include "vk_framegen.h"   // (Frame generation by: who makes the frames now, framegen_maker)
+#include "fg_by.h"         // (PS5: the row's two more values)
 #include "vk_bug_report.h"   // (the Gameplay tab's Bug report: what it writes, and how)
 #include "../../host/hos_wide_size.h"   // (the widescreen picture's size, as host/hos_main.c works it out)
 #include "../../host/audio_output_devices.h"
@@ -83,6 +84,7 @@ extern char** environ;
 #endif
 
 namespace mkwvk {
+int display_refresh_mhz();   // (vk_main.cpp: the window's display, mHz. PS5: the Frame generation row's names)
 int64_t slot_wait_ns();   // (vk_replay.cpp: the replay's waits for a recording slot so far, the FPS counter's Dev line)
 int display_refresh_mhz();   // (vk_main.cpp: the window's display, asked once a second at most: the FPS counter's V-Sync target)
 HWND app_window();
@@ -130,8 +132,20 @@ const char* hint_in(const char* const* t, int n, int lo, int v, int variant) {
         static const char* const t[] = {__VA_ARGS__};                                                                        \
         return hint_in(t, (int)(sizeof t / sizeof t[0]), lo, v, variant);                                                    \
     }
+/// (PS5) The display's refresh rate in whole Hz (59.94 is 60), 60 when not known
+int console_hz() {
+    const int hz = (display_refresh_mhz() + 500) / 1000;
+    return hz > 0 ? hz : 60;
+}
 const char* tx_framegen(int v) {
     static const char* t[] = {"Off", "Auto", "2x", "3x", "4x", "5x", "6x", "7x", "8x"};
+#ifdef __PROSPERO__   // (the console's display takes a frame at each refresh, so Auto leaves the game at its own rate and
+                     // fills the refreshes it misses, and Nx holds the game at the refresh rate over N: 30 fps at 2x on
+                     // a 60 Hz screen. Named for what each does to the game, which "Auto" and "2x" did not say)
+    static char b[9][48];
+    if (v == 1) return snprintf(b[1], sizeof b[1], "Fill to %d fps", console_hz()), b[1];
+    if (v >= 2 && v <= 8) return snprintf(b[v], sizeof b[v], "%dx (game at %d fps)", v, console_hz() / v), b[v];
+#endif
     return t[v];
 }
 const char* tx_onoff(int v) { return v ? "On" : "Off"; }
@@ -1108,6 +1122,18 @@ MENU_HINTS(hn_preset, 0, "Each row as you set it. Changing most rows yourself co
 MENU_HINTS(hn_gpu, 0, "The best dedicated GPU.")
 /// Frame generation: how many frames are made for each of the game's
 const char* hn_framegen(int v, int variant) {
+#ifdef __PROSPERO__   // (the console: what each value does to the game's own rate there, as its name says: tx_framegen)
+    if (v >= 1 && variant == 1) return "The console's memory is very short: no frames are made until there is memory to spare again.";
+    if (variant > 0) return nullptr;
+    if (v >= 1 && variant < 0 && framegen_memory_level() >= 2) return "The console's memory is very short: no frames are made until there is memory to spare again.";
+    if (v == 1) return "The game runs at its own rate, and frames are made only for the display's refreshes it does not reach: the least input delay.";
+    if (v >= 2) {
+        static char h[9][160];
+        v = std::min(v, 8);
+        if (v == 2) return snprintf(h[v], sizeof h[v], "The game is held at %d fps at most, with one made frame between each two of its own: more input delay.", console_hz() / v), h[v];
+        return snprintf(h[v], sizeof h[v], "The game is held at %d fps at most, with %d made frames between each two of its own: more input delay.", console_hz() / v, v - 1), h[v];
+    }
+#endif
     // (2x: by AMD FSR 3.1 where it runs, from the scene's depth and motion: vk_framegen.cpp. Variant 1 is that text)
     if (v == 2 && (variant < 0 ? fsr3fi::frames_wanted() != 0 : variant == 1))
         return "One made frame between each two of the game's, by AMD FSR 3.1 from the scene's depth and motion.";
@@ -1133,6 +1159,8 @@ const char* framegen_maker_name() {
     case FgMaker::Fsr3: return "FSR 3.1 FG";
     case FgMaker::BuiltIn: return "Built-in FG";
     case FgMaker::DlssPaused: return "DLSS FG paused";
+    case FgMaker::Mihawk: return "MihawkGen FG";
+    case FgMaker::Lossless: return "Lossless Scaling FG";
     default: return nullptr;
     }
 }
@@ -1141,6 +1169,9 @@ const char* framegen_maker_name() {
 /// Who makes the frames now (the game's own menus give DLSS-G nothing to make them from) is the row's line and the FPS
 /// counter's (framegen_maker_name), not the choice's name
 const char* tx_framegen_by(int v) {
+#ifdef __PROSPERO__   // (the console's row: Built-in FG, FSR 3.1 FG, MihawkGen, Lossless Scaling; no DLSS there. fg_by.h)
+    return v == fg_by::kMihawk ? "MihawkGen" : v == fg_by::kLossless ? "Lossless Scaling" : v == fg_by::kBuiltIn ? "Built-in FG" : "FSR 3.1 FG";
+#endif
     if (framegen_by_dlss_offered() && (v == 0 || dlss_fg_forced())) return "DLSS FG";
     return v == 1 ? "Built-in FG" : "FSR 3.1 FG";
 }
@@ -1175,6 +1206,27 @@ const char* framegen_skip_text(int why, unsigned most) {
 /// (every one): the choice's; at DLSS FG "Not DLSS FG now: " with each reason, and the paused line; the switch's line; then
 /// "DLSS FG cannot run: " with each of its reasons
 const char* hn_framegen_by(int v, int variant) {
+#ifdef __PROSPERO__   // (the console's generators, fg_by.h: no DLSS there, so none of the lines below. Variants: the
+                     // value's line, then the ones for when its generator is not making the frames)
+    static const char* const ps5[] = {
+        nullptr,   // (the console's row starts at Built-in FG)
+        "The renderer's own: made from the finished picture alone.",
+        "AMD FSR 3.1 frame interpolation, made from the scene's depth and motion: any GPU.",
+        "PS5_MihawkGen's trained network, from the finished picture. Above 3x the built-in one makes the frames.",
+        "Lossless Scaling's frame generation, with the shaders of your own Lossless.dll. Above 4x the built-in one makes the frames.",
+    };
+    static const char* const missing[] = {
+        nullptr, nullptr, nullptr,
+        "MihawkGen's network did not load (framegen/network.fgw): the built-in one makes the frames.",
+        "No Lossless.dll was read from the game's lossless folder: MihawkGen or the built-in one makes the frames.",
+    };
+    v = std::clamp(v, (int)fg_by::kLeast, (int)fg_by::kMost);
+    if (variant == 0) return ps5[v];
+    if (variant == 1) return v == fg_by::kBuiltIn ? nullptr : "The console's memory is short: the built-in one makes the frames until there is memory to spare again.";
+    if (variant > 1) return variant == 2 ? missing[v] : nullptr;
+    if (v == fg_by::kBuiltIn || opts.framegen < 1) return ps5[v];
+    return framegen_by_short() ? "The console's memory is short: the built-in one makes the frames until there is memory to spare again." : missing[v] && framegen_by_missing() ? missing[v] : ps5[v];
+#endif
     static const char* const t[] = {
         "NVIDIA DLSS Frame Generation (RTX 40 and newer), made from the Upscaler's depth and motion.",
         "The renderer's own: made from the finished picture alone.",
@@ -2423,7 +2475,7 @@ void save() {
         // host/nn_hid.c binds_load; 4: Descriptor reuse on by default, see menu_init and vk_draw.cpp desc_slotgen_on; 5: the
         // Menu shortcut "Insert, F1 or Esc" by default, see menu_init; 6: the Aspect ratio's 16:9 from before moves on a
         // screen narrower than 16:9, see menu_init and host/hos_wide_size.h)
-        fprintf(f, "options_version=6\n");
+        fprintf(f, "options_version=7\n");
         fputs(others.c_str(), f);
         if (!can_bind()) fputs(kept.c_str(), f);
         for (int i = 0; i < HOS_KEY_N && can_bind(); i++) {   // (the stick's and camera's rows, HOS_KEY_MOVE_*/CAM_*, have no pad_ line; the ocarina note rows do)
@@ -2967,7 +3019,9 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         if (v == *r.value) return;
     }
     // (longshot) Frame generation by where DLSS FG cannot run: FSR 3.1 FG (0; a 2 is the same) and Built-in FG (1)
+#ifndef __PROSPERO__   // (the console's row has its own range: menu_init)
     if (r.value == &opts.framegen_by && !framegen_by_dlss_offered()) v = (v % 2 + 2) % 2;
+#endif
     if (stops_at_ends(r)) v = std::min(std::max(v, r.lo), r.hi);   // (a scale: it stops at its ends)
     if (r.value == &opts.pad_layout) {
         if (v > 2) v = dir > 0 ? 0 : 2;
@@ -5201,6 +5255,17 @@ void menu_init() {
     if (done) return;
     done = true;
     for (auto& count : item_counts) count.store(-1, std::memory_order_relaxed);
+#ifdef __PROSPERO__
+    // (PS5: the Frame generation by row is the console's generators there, fg_by.h. The table has the PC's row as it is
+    // written; its range and its help are set here, before the options file is read. Lossless Scaling's frames are read
+    // from the player's own Lossless.dll: without the file the row does not offer them, and a file's choice of it is read
+    // as PS5_MihawkGen's, the end of the row's range)
+    for (Row& r : rows)
+        if (r.value == &opts.framegen_by) {
+            r.lo = fg_by::kLeast, r.hi = framegen_lossless_file() ? fg_by::kMost : fg_by::kMihawk;
+            r.help = "Who makes the frames. Lossless Scaling's is offered with your own Lossless.dll in the game's lossless folder. Changes at once.";
+        }
+#endif
     bool has_options = false;
     bool has_output = false;   // (an output_res= line: the Output resolution chosen; none: hos_output_default, as the host)
     bool has_memory_budget = false;   // (a file from before memory_budget: its preset's)
@@ -5240,6 +5305,9 @@ void menu_init() {
                         const int bit = 1 << i;
                         opts.hold_toggle = atoi(eq + 1) == 1 ? opts.hold_toggle | bit : opts.hold_toggle & ~bit;
                     }
+#ifdef __PROSPERO__   // (a file's 0, the row's value before it had the console's generators: the network's, as it played)
+            if (!strcmp(line, "frame_generation_by") && atoi(eq + 1) < fg_by::kLeast) opts.framegen_by = fg_by::kDefault;
+#endif
             has_resolution |= !strcmp(line, "resolution");
             has_output |= !strcmp(line, "output_res");
             v2 |= !strcmp(line, "options_version");
@@ -5284,6 +5352,11 @@ void menu_init() {
         // (Descriptor reuse is on by default from options_version 4: a file from before wrote its 0 whether chosen or not, as
         // the off default it then was; fewer stutters and a better 1% low in the field, the flash checks clean, 2026-11-10)
         if (version < 4) opts.descriptor_reuse = 1;
+#ifdef __PROSPERO__
+        // (PS5: Frame generation is the row's from options_version 7. Until then the console set 2x at every start, over
+        // the file (host/hos_main.c), and a file from before wrote its 0 whether chosen or not: 2x for it too, as it played)
+        if (version < 7) opts.framegen = 2;
+#endif
         // (Esc opens the menu by default from options_version 5, as a PC game's pause menu: a file from before wrote its
         // Menu shortcut 0, Insert or F1, whether chosen or not, and moves to Insert, F1 or Esc, where Insert and F1 still
         // work. F1 only was chosen: kept)
@@ -5325,7 +5398,9 @@ void menu_init() {
     fps_level_now.store(fps_stats::level_of(opts.show_fps), std::memory_order_relaxed);
     output_field_show();   // (longshot: Custom output size, the size of the player's own, as the file has it)
     // (the environment over the saved rows, for this run only: env_override, save)
-    if (const char* e = getenv("RX_VK_FRAMEGEN_MULT")) env_override(&opts.framegen, std::min(std::max(atoi(e), 2), 8));
+    // (1 is Auto, a frame for each of the display's refreshes: with 2 as the least, and the console setting 2 at every
+    // start (host/hos_main.c, until options_version 7), Auto could not be had there by the menu, the file or the variable)
+    if (const char* e = getenv("RX_VK_FRAMEGEN_MULT")) env_override(&opts.framegen, std::min(std::max(atoi(e), 1), 8));
     if (const char* e = getenv("RX_VK_PACE")) env_override(&opts.pace, !env_value_off(e));
     if (const char* e = getenv("RX_VK_UPSCALE"))
         for (Row& r : rows)

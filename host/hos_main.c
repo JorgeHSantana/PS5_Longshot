@@ -2389,12 +2389,13 @@ int main(int argc, char **argv) {
            ps5_tex_reserve). Hyrule Castle Town has not been played at 1024 with those: RX_VK_TEX_MAX_DIM=512 in the game
            folder's env file is the old limit.) The game runs
            at 26-40 fps in the forest on these cores with the GPU half idle:
-           PS5_MihawkGen's network makes every other frame, shown on an even line (65 fps out of 33); FSR 3.1's frame
-           interpolation is off (RX_VK_FSR_FG=1 puts it back where RX_VK_MIHAWKGEN=0 leaves the frame to it). */
+           PS5_MihawkGen's network makes every other frame, shown on an even line (65 fps out of 33). Who makes the
+           frames is the menu's Frame generation by row there (gpu/vk/fg_by.h): FSR 3.1 FG is one of its values. */
         static const char *const defaults[][2] = {
             {"RX_VK_TEX_MAX_DIM", "1024"}, {"RX_VK_TEX_SKIP_MB", "16"}, {"RX_VK_ASTC_BC_ALL", "1"},
-            {"RX_VK_ASTC_BC_MB", "0"}, {"RX_VK_FRAMEGEN_MULT", "2"}, {"RX_VK_PACE", "1"},
-            {"RX_VK_FSR_FG", "0"},
+            /* (frame generation's 2x is the menu row's default on the console, gpu/vk/vk_menu.h: set here it was forced
+               at every start, over the player's choice in the menu and over Auto) */
+            {"RX_VK_ASTC_BC_MB", "0"}, {"RX_VK_PACE", "1"},
             /* (every shader translated before the first play, where hookshot_shaders.bin is beside the game, without the
                driver's part: with it the 4,128 compute programs alone went at ~1.3 a second, hours in all; without, ~26) */
             {"RX_VK_NO_WARM", "1"},

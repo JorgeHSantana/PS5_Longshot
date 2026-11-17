@@ -6,6 +6,9 @@
 namespace mkwvk {
 
 bool framegen_on();
+/// (PS5) Once a game's present, on the replay thread, before framegen_on is asked for it: frame generation's step for
+/// the console's memory left, and its images let go when it is off. It waits for the display thread; nothing elsewhere
+void framegen_memory_tick();
 /// Records the frame's processing into the present's recording (src: the window texture's view, sw x sh, the crop
 /// x, y, w, h; native_pq: the encoding of that captured present); false when interpolation cannot run
 /// (the present goes to the window as without it)
@@ -14,8 +17,18 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
 /// Frame generation by row and the FPS counter name. None: none made (Off, nothing to blend from, none for half a second).
 /// DlssPaused: DLSS FG chosen, and the sets were the game's frames alone, with no Upscaler picture to make frames from (the
 /// game's own menus, movies and loading screens: vk_dlss.cpp dlss_fg_holds)
-enum class FgMaker { None, BuiltIn, Dlss, Fsr3, DlssPaused };
+enum class FgMaker { None, BuiltIn, Dlss, Fsr3, DlssPaused, Mihawk, Lossless };   // (the last two: the console's, fg_by.h)
 FgMaker framegen_maker();
+/// (PS5) The generator the Frame generation by row names was asked for and is not there (no Lossless.dll, no network
+/// file): another makes the frames, and the row's line says so
+bool framegen_by_missing();
+/// (PS5) The console's memory is short and the renderer's own makes the frames in place of the row's generator
+bool framegen_by_short();
+/// (PS5) There is a Lossless.dll where Lossless Scaling's frames are read from (vk_framegen.cpp lsfg_dirs): the Frame
+/// generation by row offers them only then
+bool framegen_lossless_file();
+/// (PS5) Frame generation's step for the memory left: 0 the row's generator, 1 the renderer's own, 2 none (fg_by.h level_next)
+int framegen_memory_level();
 /// The first frame the last framegen_record made (null when it made none), w x h, GENERAL
 VkImage framegen_made_image(uint32_t* w, uint32_t* h);
 /// (longshot) The gameplay upscale's picture (its output, at level), recorded right after the upscale wrote it, before the

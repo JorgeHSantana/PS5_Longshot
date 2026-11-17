@@ -5006,6 +5006,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         // before it submits its next frame, and the interpolation's GPU work (~1 ms) held it back. The display
         // thread's present follows it on the one queue. RX_VK_SHOT_MADE shots need it in this recording.)
         static const bool fg_inline = env_on("RX_VK_SHOT_MADE");
+        framegen_memory_tick();
         const bool fg_after = framegen_on() && tex && !fg_inline;
         interpolated = framegen_on() && tex && fg_inline &&
                        framegen_record(r.cmd, texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample), sw,

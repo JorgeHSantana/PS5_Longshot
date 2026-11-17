@@ -98,4 +98,9 @@ struct Inputs {
 /// Forgets the sequence, so the next frame is made with the reset flag set: a cut, a load, a resize.
 void reset();
 
+/// (PS5) Its images go back to the console's memory at once (about 450 MiB at 3840x2160 with the HUD's copies): the
+/// Frame generation by row left it, memory is short or frame generation is off. The caller has every queue idle
+/// (vk_framegen.cpp drop_size), so nothing is kept for a later submission. Asked again, generate makes them again
+void release();
+
 } // namespace mkwvk::fsr3fi

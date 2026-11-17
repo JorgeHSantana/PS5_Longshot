@@ -19,6 +19,7 @@
 #include <utility>
 
 #include "vk_fsr3fi.h"
+#include "vk_framegen.h"   // (PS5: framegen_by_short)
 #include "vk_menu.h"    // (the Frame generation row)
 #include "vk_gprof.h"   // (RX_VK_PASS_TIMING: a span per pass, so the report names them)
 #include "vk_texture.h"
@@ -349,7 +350,13 @@ uint32_t asked() {
     }();
     if (env >= 0) return env ? 1u : 0u;
     // (DLSS FG on the row: where DLSS-G makes none; FSR 3.1 FG: all of them; Built-in FG: the renderer's own)
+#ifdef __PROSPERO__
+    // (the console's row has its own generators after FSR 3.1 FG, fg_by.h: asked at its own value alone, and not while the
+    // console's memory is short, when the renderer's own makes the frames: vk_framegen.cpp memory_level)
+    return opts.framegen >= 1 && opts.framegen_by == 2 && !framegen_by_short() ? 1u : 0u;
+#else
     return opts.framegen >= 1 && opts.framegen_by != 1 ? 1u : 0u;
+#endif
 }
 
 /// kKeepStatic, unless RX_VK_FSR_FG_HUD=0 (AMD's passes, the HUD moved with the scene: for an A/B)
@@ -1255,5 +1262,15 @@ uint32_t generate(VkCommandBuffer cmd, const Inputs& in, const float* times, uin
 VkImage made_image(uint32_t i) { return i < g.ready ? g.made[i].image : VK_NULL_HANDLE; }
 
 void reset() { g.first_frame = true; }
+
+void release() {
+    if (g.sized) logf("vk: fsr3fi: not asked for: its images (%ux%u) let go", g.width, g.height);
+    for (Image* t : all_images()) destroy_now(*t);
+    for (auto& d : dead) destroy_now(d.second);
+    dead.clear();
+    g.sized = false, g.ready = g.general = 0;
+    g.width = g.height = g.render_width = g.render_height = 0;
+    g.first_frame = true;
+}
 
 } // namespace mkwvk::fsr3fi
