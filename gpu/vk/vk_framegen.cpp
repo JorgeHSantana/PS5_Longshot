@@ -634,6 +634,9 @@ void display_main() {
     struct { int on_time, late, skipped; int64_t since; } stat{};
     int64_t next_show = 0, shown_at = 0;
     int hist[6] = {};
+    // (PS5) the delay meter: from the game handing a frame over (the job's time) to that frame's present call having
+    // returned, and how long the present calls themselves took, the made frames' [0] and the game's [1]
+    struct { int64_t sum, most, call[2]; int n, calls[2]; } lag{};
     for (;;) {
         Job j;
         {
@@ -651,6 +654,12 @@ void display_main() {
         if (j.at - stat.since > 5000000000LL) {
             logf("vk: frame interpolation: %d frames shown on time, %d late (over 2 ms); shown apart: <7 ms %d, 7-9 %d, 9-12 %d, "
                  "12-17 %d, 17-25 %d, over 25 %d", stat.on_time, stat.late, hist[0], hist[1], hist[2], hist[3], hist[4], hist[5]);
+            if (lag.n)
+                logf("vk: frame interpolation: the game's frame presented %.1f ms after it was handed over (%.1f at most, %d "
+                     "frames); a present call took %.1f ms for a made frame and %.1f for the game's",
+                     lag.sum / 1e6 / lag.n, lag.most / 1e6, lag.n, lag.calls[0] ? lag.call[0] / 1e6 / lag.calls[0] : 0.0,
+                     lag.calls[1] ? lag.call[1] / 1e6 / lag.calls[1] : 0.0);
+            lag = {};
             memset(hist, 0, sizeof hist);
             stat = {0, 0, 0, j.at};
         }
@@ -704,6 +713,12 @@ void display_main() {
                 reflex_present_frame = (timed ? j.set->game[k] : k == j.set->made) ? j.set->reflex_id : 0;
                 antilag_present_frame = (timed ? j.set->game[k] : k == j.set->made) ? j.set->antilag_id : 0;
                 present_image(j.set->frame[k].image, fg.w, fg.h, nullptr, j.set->frame[k].view);
+            }
+            {
+                const int64_t done = now_ns();
+                const int game = (timed ? j.set->game[k] : k == j.set->made) ? 1 : 0;
+                lag.call[game] += done - t, lag.calls[game]++;
+                if (game) lag.sum += done - j.at, lag.most = std::max(lag.most, done - j.at), lag.n++;
             }
             menu_note_frame(!timed && k == j.set->made);
             if (shown_at) {
