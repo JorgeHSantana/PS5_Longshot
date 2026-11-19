@@ -29,7 +29,7 @@ def main():
         (exefs / "main").write_bytes(b"NSO0 one")
         (work / "hot_funcs.txt").write_text("f_80000000\n")
         (work / "image" / "chunks.txt").write_text("80001000\n")
-        env = {"A64_HOT_CHUNK": "1", "OOT_WORK": str(work)}
+        env = {"A64_HOT_CHUNK": "1", "OOT_WORK": str(work), "A64_HOT_FUNCS": str(work / "hot_funcs.txt")}
         with mock.patch.dict(os.environ, {k: v for k, v in os.environ.items() if not k.startswith(("A64_", "OOT_", "RX_"))}, clear=True):
             key = make_game.lift_key(str(exefs), str(work), env)
             check("the same inputs give the same key", key == make_game.lift_key(str(exefs), str(work), dict(env)))
@@ -112,7 +112,51 @@ def main():
     check_key_after_lift()
     check_lift_env()
     check_hot_list_override()
+    check_selected_hot_list()
     print("ok: the lift key follows the game, the tools (the modules the lift imports), the hot list, the chunks and the settings")
+
+
+def check_selected_hot_list():
+    """Only the selected profile's contents affect translation, including a path inherited from the shell."""
+    with tempfile.TemporaryDirectory(prefix="longshot-selected-hot-list-") as folder:
+        root = Path(folder)
+        exefs, work = root / "exefs", root / "work"
+        exefs.mkdir()
+        work.mkdir()
+        default = work / "hot_funcs.txt"
+        selected = root / "external hot list.txt"
+        default.write_text("f_80000000\n")
+        selected.write_text("f_80000004\n")
+        env = {"A64_HOT_FUNCS": str(selected)}
+        clean = {k: v for k, v in os.environ.items() if not k.startswith(("A64_", "OOT_", "RX_"))}
+        with mock.patch.dict(os.environ, clean, clear=True):
+            key = make_game.lift_key(str(exefs), str(work), env)
+            inputs = make_game.lift_key(str(exefs), str(work), env, planning=False)
+            selected.write_text("f_80000008\n")
+            check("editing the same external profile path changes the key",
+                  make_game.lift_key(str(exefs), str(work), env) != key)
+            check("editing the external profile also invalidates the in-flight input guard",
+                  make_game.lift_key(str(exefs), str(work), env, planning=False) != inputs)
+            selected.write_text("f_80000004\n")
+            default.write_text("f_8000000c\n")
+            check("an unselected work profile does not change the key",
+                  make_game.lift_key(str(exefs), str(work), env) == key)
+            with mock.patch.dict(os.environ, {"A64_HOT_FUNCS": str(selected)}):
+                inherited = make_game.lift_key(str(exefs), str(work), {})
+                selected.write_text("f_80000008\n")
+                check("an inherited external profile's contents change the key",
+                      make_game.lift_key(str(exefs), str(work), {}) != inherited)
+                disabled = make_game.lift_key(str(exefs), str(work), {"A64_HOT_FUNCS": ""})
+                selected.write_text("f_80000010\n")
+                default.write_text("f_80000014\n")
+                check("an explicit empty child setting hashes neither profile",
+                      make_game.lift_key(str(exefs), str(work), {"A64_HOT_FUNCS": ""}) == disabled)
+            with mock.patch.object(make_game, "ROOT", str(root)), mock.patch.object(make_game, "lift_sources", return_value=[]):
+                relative = {"A64_HOT_FUNCS": selected.name}
+                key = make_game.lift_key(str(exefs), str(work), relative)
+                selected.write_text("f_80000018\n")
+                check("a relative profile is hashed from the child's working directory",
+                      make_game.lift_key(str(exefs), str(work), relative) != key)
 
 
 def check_key_after_lift():
@@ -141,7 +185,7 @@ def check_key_after_lift():
         exefs.mkdir()
         (work / "image").mkdir(parents=True)
         (exefs / "main").write_bytes(b"NSO0 one")
-        env = {"A64_HOT_CHUNK": "1"}
+        env = {"A64_HOT_CHUNK": "1", "A64_HOT_FUNCS": str(work / "hot_funcs.txt")}
         with mock.patch.dict(os.environ, {k: v for k, v in os.environ.items() if not k.startswith(("A64_", "OOT_", "RX_"))}, clear=True):
             before = make_game.lift_key(str(exefs), str(work), env)
             (work / "image" / "hot_pieces.txt").write_text("f_80000000 1\n")   # (what the first lift's split_hot leaves)

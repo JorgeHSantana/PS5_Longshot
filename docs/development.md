@@ -882,10 +882,11 @@ A build reads and writes tens of gigabytes. When the game folder or the build fi
 | `RX_CPM=<dir>` | The CPM cache (Vulkan and SPIR-V headers, VMA, FFmpeg) |
 | `RX_TARGET=windows` | On Linux: the Windows game, with llvm-mingw's Linux build in `LONGSHOT_MINGW` |
 | `RX_RELEASE=1` | A release build (`make_game.py` sets it): no console window, the shaders prepared before the title |
+| `A64_HOT_FUNCS=<file>` or `A64_HOT_FUNCS=` | Explicit hot-function list (empty disables it), unless `LONGSHOT_HOT_LIST=0`. Relative paths are read from the checkout root, not the caller's directory. The lift key hashes the selected list's contents, not unused lists |
 | `RX_PGO=gen` or `RX_PGO=<file>` | The hot code counting its branches for a profile, or built with one (`make_game.py` passes the shipped profile) |
 | `RX_VK_PGO=gen` or `RX_VK_PGO=<file>` | The Vulkan back end's own files counting their branches for a profile, or built with one (`make_game.py` passes `work/longshot_vk.profdata` when it is there, else the committed `assets/profiles/longshot_vk.profdata.xz`; a compiler that can't read it builds without): [the renderer's play profile](#the-renderers-play-profile) |
 | `RX_HOT_OPT=<level>` | The hot pieces' optimisation level (default `O2`); `O1` for [a faster build for development](#a-faster-build-for-development) |
-| `LONGSHOT_HOT_LIST=0` | Builds with no [hot list](#the-hot-list): every lifted function at `-O1`, as every player's build was before the list was committed (an A/B against it, or a shorter build: 25 s on 12 cores in an incremental pair, more from scratch and on fewer cores). Unset: the checkout's `work/hot_funcs.txt`, else a list `A64_HOT_FUNCS` names in the shell, else the committed `assets/profiles/hot_funcs.txt`. The lift key holds the choice, so switching it translates the game again |
+| `LONGSHOT_HOT_LIST=0` | Builds with no [hot list](#the-hot-list): every lifted function at `-O1`, as every player's build was before the list was committed (an A/B against it, or a shorter build: 25 s on 12 cores in an incremental pair, more from scratch and on fewer cores). Otherwise: explicit `A64_HOT_FUNCS`, then the checkout's `work/hot_funcs.txt`, then the committed `assets/profiles/hot_funcs.txt` |
 | `LONGSHOT_CHUNK_OPT=all` or `=<file>` | Compiles the lifted chunks at `-O2` instead of `-O1`: `all`, or a file naming them (a `code_*.c` a line, or an `f_` name a line for the chunks that define it). A compile-only choice like `RX_HOT_OPT`: the lift's C is unchanged, the object keys name the flags, and a `-O2` object is never taken for a `-O1` one. The hot pieces keep `RX_HOT_OPT`. The cut below brings an all-`O2` build from 23:06 to 4:37 here; [an all-O2 build](#an-all-o2-build) has what it measured |
 | `LONGSHOT_CHUNK_PART_MB=<MB>` | With `LONGSHOT_CHUNK_OPT`: the size of the parts a chunk sent to `-O2` is cut into (default 6), each compiled as its own object beside the build's others. `-O2`'s passes cost more than linearly in a function's size, so the parts compile sooner than the whole chunk and side by side; the lifted C is not changed. `0` compiles the whole chunks, as before |
 | `LONGSHOT_CHUNK_LEVEL=<level>` | With `LONGSHOT_CHUNK_OPT`: the optimisation level its chunks compile at (default `O2`; `O1`, `O2` or `O3`). The level is in the object key, so a `-O3` object is never taken for a `-O2` one |
@@ -935,7 +936,7 @@ in: the lift puts them in `code_hot.c` (their float helpers inline), `nx2/split_
 committed: `assets/profiles/hot_funcs.txt` (680 functions; where and how it was recorded: `assets/profiles/README.md`),
 which `make_game.py` (`hot_list_for`) gives the lift as `A64_HOT_FUNCS`, copied to `<work>/hot_funcs.txt` (read where it
 is when `--work` is the checkout's own `work/`); the AppImage and the Windows builder carry it. A developer's own list goes
-first: the checkout's `work/hot_funcs.txt`, else one named by `A64_HOT_FUNCS` in the shell. `LONGSHOT_HOT_LIST=0` builds
+first: an explicit `A64_HOT_FUNCS` in the shell, else the checkout's `work/hot_funcs.txt`. `LONGSHOT_HOT_LIST=0` builds
 with none. The build log says which (`the hot list: ...`), and the lift how many of its names it found (`hot functions
 (A64_HOT_FUNCS): 680 of 680 listed found, in code_hot.c`).
 

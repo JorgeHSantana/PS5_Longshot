@@ -4,8 +4,8 @@
     assets/profiles/README.md; and no listed function is one whose text edit in nx2/oot_patches.py finds its place by a
     float helper call (a64_fpx_<op>(c, : a hot function's are rewritten to their inline copies, a64_lift.hot_text, so that
     edit would be lost with a WARNING line only: the step divides' hook, which keeps the game's speed above 60 fps, is one);
-  - which list a build takes: the committed one, copied into the work folder; the checkout's own work/hot_funcs.txt first;
-    a list A64_HOT_FUNCS names in the shell next; none with LONGSHOT_HOT_LIST=0. A work folder's copy from an earlier build
+  - which list a build takes: none with LONGSHOT_HOT_LIST=0, else an explicit A64_HOT_FUNCS, the checkout's own list,
+    or the committed list. A work folder's copy from an earlier build
     is replaced or removed, never used for a build that has no list (issue 505), and the checkout's own file is never
     touched; with --work in the checkout's own work folder and no list of its own, the committed one is read where it is
     (no copy there, which would count as the checkout's own list from then on);
@@ -150,7 +150,6 @@ class WhichListABuildTakes(unittest.TestCase):
     def test_the_checkouts_own_goes_first(self):
         own = self.root / "work" / "hot_funcs.txt"
         own.write_text("f_80003000\n")
-        shutil.copyfile(own, self.work / "hot_funcs.txt")   # (main's copy of the checkout's work files, before hot_list_for)
         got = self.take()
         self.assertEqual(got, str(self.work / "hot_funcs.txt"))
         self.assertEqual((self.work / "hot_funcs.txt").read_text(), "f_80003000\n")
@@ -158,6 +157,7 @@ class WhichListABuildTakes(unittest.TestCase):
 
     def test_a_list_named_in_the_shell(self):
         mine = self.d / "mine.txt"
+        (self.root / "work" / "hot_funcs.txt").write_text("f_80003000\n")
         mine.write_text("f_80004000\n")
         (self.work / "hot_funcs.txt").write_text("f_8000dead\n")   # (a copy from an earlier build)
         self.assertIsNone(self.take(A64_HOT_FUNCS=str(mine)))
@@ -165,7 +165,8 @@ class WhichListABuildTakes(unittest.TestCase):
         self.assertEqual(mine.read_text(), "f_80004000\n")
         # (the shell's list at the work folder's own path stays)
         shutil.copyfile(mine, self.work / "hot_funcs.txt")
-        self.assertIsNone(self.take(A64_HOT_FUNCS=str(self.work / "hot_funcs.txt")))
+        relative = os.path.relpath(self.work / "hot_funcs.txt", self.root)
+        self.assertIsNone(self.take(A64_HOT_FUNCS=relative))
         self.assertTrue((self.work / "hot_funcs.txt").exists())
 
     def test_none(self):
