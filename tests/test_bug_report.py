@@ -184,16 +184,17 @@ def no_private(files, home, user, game):
 
 def wiring():
     menu = (ROOT / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
-    at = menu.index('{TAB_GAMEPLAY, "Bug report", nullptr')
-    row = menu[at:menu.index("},", at)]
+    # (the row: its module's, gpu/vk/menu/bug_report.cpp, #1633; Restart and Quit after it, session.cpp's)
+    module = (ROOT / "gpu" / "vk" / "menu" / "bug_report.cpp").read_text(encoding="utf-8")
+    row = module[module.index('.label = "Bug report"'):module.index("menu::last()")]
     for word in ("report.txt", "logs", "picture", "user name", "No saves", "nothing is sent"):
         check(word in row, "the row's help does not say " + word)
-    check(menu.index('"Bug report"') < menu.index('{TAB_GAMEPLAY, "Restart"') and
-          "constexpr int kBugReportRow = kRestartRow - 1;" in menu, "the row is not the one before Restart")
-    check("&r == &rows[kBugReportRow]) bug_report_save()" in menu[menu.index("void menu_tick() {"):],
+    session = (ROOT / "gpu" / "vk" / "menu" / "session.cpp").read_text(encoding="utf-8")
+    check('.key = "bug_report"' in module and session.count('menu::after("bug_report")') == 2 and
+          session.index('"restart"') < session.index('"quit"'), "the row is not the one before Restart")
+    check(".on_activate = MENU_HOOK(bug_report_save)" in row and "r.setting->on_activate()" in menu[menu.index("void menu_tick() {"):],
           "A or Enter on the row does not save the report")
-    check(menu.count('&selr == &rows[kBugReportRow] || is_share_row(selr) ? "Save" : is_vibration_test_row(selr) ? "Test" : "Open"') +
-          menu.count('&r == &rows[kBugReportRow] || is_share_row(r) ? "Save" : is_vibration_test_row(r) ? "Test" : "Open"') >= 2,
+    check('.verb = "Save"' in row and menu.count("setting->verb ?") >= 2,
           "a prompt (the menu's, or the compact bar's) does not say Save for the row")
     save = menu[menu.index("void bug_report_save() {"):]
     save = save[:save.index("\n}\n")]

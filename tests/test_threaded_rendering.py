@@ -40,6 +40,9 @@ from pathlib import Path
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 
 ROOT = Path(__file__).resolve().parents[1]
+import sys  # noqa: E402
+sys.path.insert(0, str(ROOT / "tests"))
+from menu_model_fixture import menu_text  # noqa: E402
 VK = ROOT / "gpu" / "vk"
 
 # The rule and the count: threaded_rendering.h alone, and usable_cores cut from vk_progcache.cpp on stand-ins
@@ -331,7 +334,9 @@ def read_sources():
                  internal=VK / "vk_internal.h", policy=VK / "device_policy.h", main=VK / "vk_main.cpp",
                  switches=VK / "switches.def", native=ROOT / "host" / "nvn_native.c", readme=ROOT / "README.md",
                  docs=ROOT / "docs" / "development.md")
-    return {k: p.read_text(encoding="utf-8") for k, p in paths.items()}
+    s = {k: p.read_text(encoding="utf-8") for k, p in paths.items()}
+    s["menu"] = menu_text(ROOT)   # (vk_menu.cpp and its modules, their rows as table lines, #1633: threads.cpp's row)
+    return s
 
 
 def constant(rule, name):
@@ -572,11 +577,14 @@ def main():
     bad = check_sources(s)
     if bad:
         raise SystemExit("FAIL: " + "\nFAIL: ".join(bad))
-    for path in sorted(list(VK.glob("*.cpp")) + list(VK.glob("*.h")) + list((ROOT / "host").glob("*.c"))):
+    for path in sorted(list(VK.glob("*.cpp")) + list(VK.glob("*.h")) + list((VK / "menu").glob("*.cpp")) +
+                       list((ROOT / "host").glob("*.c"))):
         text = path.read_text(encoding="utf-8", errors="replace")
         reads = len(re.findall(r'getenv\("RX_VK_ASYNC"\)', text))
-        # (vk_menu.cpp's one is threaded_env, the row's line that says the switch is set: it decides nothing)
-        if reads != (1 if path.name in ("vk_replay.cpp", "vk_menu.cpp") else 0):
+        # (the menu's one is threaded_env, the row's line that says the switch is set: it decides nothing. Its module's,
+        # gpu/vk/menu/threads.cpp, #1633; vk_menu.cpp's before the modules)
+        menu_reader = "threads.cpp" if (VK / "menu" / "threads.cpp").exists() else "vk_menu.cpp"
+        if reads != (1 if path.name in ("vk_replay.cpp", menu_reader) else 0):
             raise SystemExit("FAIL: %s reads RX_VK_ASYNC itself (%d times): only render_thread_mode() decides by it, once, so "
                              "the row and the switch cannot disagree" % (path.relative_to(ROOT).as_posix(), reads))
 

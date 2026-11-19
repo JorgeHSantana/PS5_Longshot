@@ -77,6 +77,14 @@ What CONTRIBUTING.md doesn't spell out, and agents trip on:
   `MKWVK_API_VERSION`.
 - **A switch has a row.** A new `RX_`, `HOS_` or `LONGSHOT_` name read from the environment needs its row in
   `gpu/vk/switches.def`; a removed one becomes a `GONE(...)` row there (`tests/test_switch_table.py`).
+- **A saved menu row has a key.** A row of the Insert menu that holds a setting is saved under its module's row's own
+  `.key` (its line in `longshot_options.ini`, and its name over the control bridge). A row added needs its key in
+  `tests/test_menu_ini_keys.py`'s FROZEN; a row renamed or moved keeps its old key, or players lose that setting.
+- **A menu row goes in a module.** A feature's rows go in a file of `gpu/vk/menu/` with their own code, hooks and place
+  (`MENU_MODULE`, `after`/`before`), never into `vk_menu.cpp`'s table (only the core's headings and the menu's custom
+  section are left there) or its checks by row. Code that needs the renderer goes under `#ifndef MENU_LAYOUT_ONLY`, its
+  hooks as `MENU_HOOK(...)`: the checks build every module without Vulkan. The development guide's
+  [A row of the Insert menu](docs/development.md#a-row-of-the-insert-menu).
 - **Generated files are generated.** The SPIR-V headers in `gpu/vk/shaders/` (`*_spv.h`) are compiled from the shader
   beside them, and name its SHA-256: regenerate them with glslang (the shaders' tests show the command) rather than
   editing them.

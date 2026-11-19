@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # (tests/srccut.py: python -I leaves this folder off the path)
 from srccut import block   # noqa: E402
+from menu_model_fixture import menu_model_prelude  , menu_text# noqa: E402
 
 # (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/longshot_env.h)
 ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "longshot_env.h")
@@ -48,7 +49,7 @@ def main():
     sdl = (ROOT / "host" / "pad_sdl.c").read_text(encoding="utf-8")
     api = (ROOT / "gpu" / "vk" / "vk_api.h").read_text(encoding="utf-8")
     replay = (ROOT / "gpu" / "vk" / "vk_replay.cpp").read_text(encoding="utf-8")
-    menu = (ROOT / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
+    menu = menu_text()   # (vk_menu.cpp and its modules' rows, #1633)
     header = (ROOT / "gpu" / "vk" / "vk_menu.h").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
@@ -124,7 +125,7 @@ int main(void) {
     init = block(menu, "void menu_init(")
     loop = block(init, "for (Row& r : rows) {")
     check("ini_key(r)" in loop, "menu_init's options loop no longer reads rows by ini_key")
-    cxx = r'''#include <algorithm>
+    cxx = menu_model_prelude() + r'''#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>

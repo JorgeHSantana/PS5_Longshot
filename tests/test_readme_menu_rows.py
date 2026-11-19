@@ -1,31 +1,48 @@
 """README.md's option table has a line for every row of the Insert menu's Graphics, Audio, Gameplay, Controls and NFC tabs.
 
 Four rows had none: Ultrawide menus, Mesh shaders, Discord status (which is on by default) and the Controls page's
-Button prompts. The rows are read from gpu/vk/vk_menu.cpp's table and the lines from the readme's
-"| Tab | Option | Choices | Default |" table; nothing runs. Restart and Quit are actions with no choice to list; the
+Button prompts. The rows are the menu as built (#1633: gpu/vk/vk_menu.cpp's own and the modules', gpu/vk/menu/, in the order
+the model works out: tests/menu_model_fixture.py built_menu compiles and runs it, with no game) and the lines are the
+readme's "| Tab | Option | Choices | Default |" table. Restart and Quit are actions with no choice to list; the
 Controls page's two rows have lines of their own among the Controls tab's; the Motion page's rows are on the Motion
 line, the Graphics tab's section titles have none, and the Debug tab's lines at the table's end are left out.
 
-    python -I -B tests/test_readme_menu_rows.py
+    python -I -B tests/test_readme_menu_rows.py [--cxx g++]
 """
+import argparse
+from functools import lru_cache
 from pathlib import Path
-import re
+import sys
 import unittest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves the check's own folder off the path)
+from menu_model_fixture import built_menu  # noqa: E402
+
+RUN_ALL_ARGS = ["--cxx", "g++"]
+
 ROOT = Path(__file__).resolve().parents[1]
-MENU = (ROOT / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 ACTIONS = {"Restart", "Quit"}
+PAGES = {"GRAPHICS": "graphics", "AUDIO": "audio", "GAMEPLAY": "gameplay", "CONTROLS": "controls", "PAGE": "controls_page",
+         "NFC": "nfc", "DEBUG": "debug"}
+CXX = "g++"
 
 
-# (the Graphics tab's section titles: rows with heading, the last field, set; nothing to choose on them)
-HEADING = r'\{TAB_\w+,\s*"([^"]+)",\s*nullptr,[^{}]*,\s*-1,\s*true\}'
-HEADINGS = re.findall(HEADING, MENU)
-ROWS = re.sub(HEADING, "", MENU)
+@lru_cache(maxsize=None)
+def built():
+    pages, diags = built_menu(CXX)
+    if diags:
+        raise SystemExit("the menu as built has diagnostics: %s" % diags)
+    return pages
+
+
+def headings():
+    return [it.label for items in built().values() for it in items if it.heading]
 
 
 def menu_rows(tabs="GRAPHICS|AUDIO|GAMEPLAY|CONTROLS|PAGE|NFC"):
-    return re.findall(r'\{TAB_(%s),\s*"([^"]+)"' % tabs, ROWS)
+    """(tab, label) of the tabs' rows, each tab's in the menu's order, the tabs as named"""
+    return [(tab, it.label) for tab in tabs.split("|") for it in built().get(PAGES[tab], []) if not it.heading]
 
 
 def table_lines(include_debug=False):
@@ -41,7 +58,7 @@ class ReadmeMenuRowsTests(unittest.TestCase):
         self.assertGreater(len(menu_rows()), 40)
         self.assertGreater(len(table_lines()), 40)
         self.assertIn(("GRAPHICS", "Quality preset"), menu_rows())
-        self.assertIn("Resolution and upscaling", HEADINGS)
+        self.assertIn("Resolution and upscaling", headings())
 
     def test_every_row_of_the_four_tabs_has_a_line(self):
         listed = {cells[1] for cells in table_lines()}
@@ -55,9 +72,7 @@ class ReadmeMenuRowsTests(unittest.TestCase):
 
     def test_the_lines_keep_the_menus_order(self):
         page = {name for _, name in menu_rows("PAGE")}   # (the Controls page's rows: listed with the Controls tab's)
-        tabs = ["GRAPHICS", "AUDIO", "GAMEPLAY", "CONTROLS", "NFC"]   # (a tab shows its rows in the table's order, wherever they sit)
-        rows = sorted(menu_rows("GRAPHICS|AUDIO|GAMEPLAY|CONTROLS|NFC"), key=lambda row: tabs.index(row[0]))
-        order = [name for _, name in rows if name not in ACTIONS and name not in page]
+        order = [name for _, name in menu_rows("GRAPHICS|AUDIO|GAMEPLAY|CONTROLS|NFC") if name not in ACTIONS and name not in page]
         listed = [cells[1] for cells in table_lines() if cells[1] not in page]
         self.assertEqual(listed, order)
 
@@ -81,4 +96,8 @@ class ReadmeMenuRowsTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--cxx", default="g++")
+    known, rest = parser.parse_known_args()
+    CXX = known.cxx
+    unittest.main(argv=[sys.argv[0]] + rest)

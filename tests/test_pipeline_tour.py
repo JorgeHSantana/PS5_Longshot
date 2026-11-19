@@ -28,6 +28,9 @@ import threading
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves the check's own folder off the path)
+from menu_model_fixture import menu_text  # noqa: E402
+
 RUN_ALL_SKIP = {"windows": "the tour runs on Linux (/proc, the bridge's Unix socket): checked on Linux"}
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,7 +54,8 @@ def text(path):
 
 def source(tour, a):
     """What the tour reads from the source, and what it relies on there"""
-    main_c, hid, menu, ctl_c = text("host/hos_main.c"), text("host/nn_hid.c"), text("gpu/vk/vk_menu.cpp"), text("host/control.c")
+    # (the menu: vk_menu.cpp and its modules' rows, #1633)
+    main_c, hid, menu, ctl_c = text("host/hos_main.c"), text("host/nn_hid.c"), menu_text(), text("host/control.c")
     # the bridge: a teleport by index is the Debug tab's OOT_TELEPORT_ACTION + index, the age switch OOT_AGE_ACTION
     if "action = OOT_TELEPORT_ACTION + asked - 1" not in main_c or "action = OOT_AGE_ACTION" not in main_c:
         fail("host/hos_main.c no longer takes the bridge's teleport and age switch as the Debug tab's actions")

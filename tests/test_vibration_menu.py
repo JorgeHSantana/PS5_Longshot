@@ -1,7 +1,7 @@
 """The Controls page's Vibration, Vibration strength and Test vibration rows, and how the host hears them.
 
-gpu/vk/vk_menu.cpp's Vibration row, set_row, ini_key and the Test vibration row's texts are compiled from the source with
-stubs and run: Vibration's three choices (Auto, Basic, Off) go round and are saved as vibration=; Test vibration is an
+The rows are gpu/vk/menu/controller.cpp's (#1633), with their texts; gpu/vk/vk_menu.cpp's set_row and ini_key and the
+module's texts are compiled from the source with stubs and run: Vibration's three choices (Auto, Basic, Off) go round and are saved as vibration=; Test vibration is an
 action with no value, whose cell and help say, for each of host/vibration.h's VIB_SAY_* the host can report, what plays
 the controller used last (a table one short would show the wrong line for the last ones). The option ids the host reads
 them by (host/pad_sdl.c) are checked against the renderer's option table (gpu/vk/vk_replay.cpp); the Test vibration press
@@ -21,11 +21,13 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # (tests/srccut.py: python -I leaves this folder off the path)
 from srccut import block   # noqa: E402
+from menu_model_fixture import menu_model_prelude, menu_text   # noqa: E402
 
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 
 ROOT = Path(__file__).resolve().parents[1]
 MENU = ROOT / "gpu" / "vk" / "vk_menu.cpp"
+MODULE = ROOT / "gpu" / "vk" / "menu" / "controller.cpp"
 
 
 def read(*parts):
@@ -109,7 +111,6 @@ int output_for_aspect(int) { return opts.output_res; }
 %(set_row)s
 void arrow(Row& r, bool right) { %(arrow)s }
 %(texts)s
-%(is_test)s
 int main() {
     Row mode = {TAB_CONTROLS, "Vibration", &opts.vibration, %(lo)s, %(hi)s, %(step)s, tx_vibration, nullptr, nullptr, false, true};
     CHECK(mode.lo == 0 && mode.hi == 2 && mode.step == 1);
@@ -132,7 +133,6 @@ int main() {
     CHECK(opts.preset == 3 && presets == 0 && saves > 0 && temporal_resets == 0);
     /* Test vibration: an action, no value saved; its cell and help say what plays the controller, for every report */
     Row test = {TAB_CONTROLS, "Test vibration", nullptr, 0, 0, 0, nullptr, nullptr, hn_vibration_test};
-    CHECK(is_vibration_test_row(test) && !is_vibration_test_row(mode));
     static const char* cells[] = {"No controller", "Off", "Motors", "HD rumble", "Fine haptics (cable)",
                                   "Fine haptics (Bluetooth)", "Four motors", "HD rumble (RenHDrum)", "Motors: no sound card",
                                   "Motors: no RenHDrum", "Motors (Bluetooth)"};
@@ -157,7 +157,8 @@ int main() {
 
 def rows(menu):
     """Vibration, then Vibration strength, then Test vibration, on the Controls tab; none of the rows they replaced"""
-    order = sorted((menu.index('"%s"' % n), n) for n in ("Vibration", "Vibration strength", "Test vibration"))
+    rows_at = menu[menu.index("Row module_rows[] = {"):]   # (the modules' rows, menu_text's table lines: #1633)
+    order = sorted((rows_at.index('"%s"' % n), n) for n in ("Vibration", "Vibration strength", "Test vibration"))
     check([n for _, n in order] == ["Vibration", "Vibration strength", "Test vibration"],
           "the Controls page does not show Vibration, Vibration strength, Test vibration in that order")
     for gone in ('"Rumble strength"', '"Haptic feedback"', '"Haptic strength"', '"Haptic status"', '"Test haptics"'):
@@ -169,7 +170,8 @@ def fixture(menu, header):
     check(row is not None, "the menu lost its Vibration row")
     arrow = re.search(r"\n\s*(set_row\(r, \*r\.value \+ \(press\[4\] \? r\.step : -r\.step\), press\[4\] \? 1 : -1\);)", menu)
     check(arrow is not None, "the arrows no longer step a row with set_row")
-    texts = menu[menu.index("const char* tx_vibration(int v) {"):menu.index("// (longshot) Menu size:")]
+    module = MODULE.read_text(encoding="utf-8")   # (the texts: the module's, #1633)
+    texts = module[module.index("const char* tx_vibration(int v) {"):module.index("// (end of the vibration texts")]
     return FIXTURE % {
         "options": re.search(r"struct Options \{.*?\n\};", header, re.S).group(0),
         "tabs": re.search(r"enum MenuTab \{.*?\};", menu, re.S).group(0),
@@ -180,20 +182,28 @@ def fixture(menu, header):
         "set_row": definition(menu, "void set_row"),
         "arrow": "bool press[5] = {false, false, false, !right, right}; " + arrow.group(1),
         "texts": texts,
-        "is_test": one_line(menu, "bool is_vibration_test_row"),
         "lo": row.group(1), "hi": row.group(2), "step": row.group(3),
     }
 
 
 def presses(menu):
     """Test vibration's Confirm asks the host's rumble_test (a strength change does too), and is labelled Test"""
-    tick = definition(menu, "void menu_tick")
-    at = tick.index("else if (press[7] && is_vibration_test_row(r)) {")
-    branch = tick[at:tick.index("}", at)]
+    # (#1633: a module's button: its press its on_activate, its prompt its verb (menu_tick and the prompts, for every
+    # module's button: tests/test_menu_tune.py))
+    module = MODULE.read_text(encoding="utf-8")
+    test = module[module.index('.label = "Test vibration"'):]
+    test = test[:re.search(r"\}(?:\)|, menu::)", test).start()]   # (the row's fields, up to its place)
+    check(re.search(r"\.on_activate = (MENU_HOOK\()?menu_rumble_test\b", test) is not None,
+          "Test vibration's Confirm does not ask menu_rumble_test")
+    branch = definition(menu, "void menu_rumble_test")
     check("host->rumble_test()" in branch and "host->version >= 32" in branch,
           "Test vibration's Confirm does not ask the host's rumble_test")
-    check(menu.count('is_vibration_test_row(selr) ? "Test"') + menu.count('is_vibration_test_row(r) ? "Test"') >= 2,
-          "Test vibration's Confirm is not labelled Test")
+    check('.verb = "Test"' in test, "Test vibration's Confirm is not labelled Test")
+    # (its cell and its help line: the module's text and hint, as every module's button draws them (row_value_cell,
+    # draw_options); the fixture runs both for every report)
+    check(".kind = menu::Kind::Action" in test and ".value" not in test, "Test vibration is not an action with no value")
+    check(".text = [](int) { return std::string(vibration_cell()); }" in test and ".hint = hn_vibration_test" in test,
+          "Test vibration's cell or help line does not say what plays the controller")
     check("host->rumble_test()" in definition(menu, "void menu_rumble_tick"),
           "a Vibration strength change no longer gives a short buzz")
 
@@ -251,14 +261,14 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--cxx", default=os.environ.get("CXX", "g++"))
     a = p.parse_args()
-    menu, header = MENU.read_text(encoding="utf-8"), read("gpu", "vk", "vk_menu.h")
+    menu, header = menu_text(ROOT), read("gpu", "vk", "vk_menu.h")   # (vk_menu.cpp and its modules' rows, #1633)
     rows(menu)
     presses(menu)
     option_ids()
     host()
     with tempfile.TemporaryDirectory(prefix="vibration-menu-") as tmp:
         src, exe = Path(tmp) / "vibration_menu.cpp", Path(tmp) / "vibration_menu"
-        src.write_text(fixture(menu, header), encoding="utf-8")
+        src.write_text(menu_model_prelude() + fixture(menu, header), encoding="utf-8")   # (the Row a module describes: #1633)
         subprocess.run([a.cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "host"), str(src), "-o",
                         str(exe)], check=True)
         subprocess.run([str(exe)], check=True)

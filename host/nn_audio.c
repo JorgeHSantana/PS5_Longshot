@@ -830,7 +830,7 @@ static int au_device_channels(void) {
 #else
 static int au_device_channels(void) { return hos_sdl_audio_channels(); }
 #endif
-/* (longshot) The Insert menu's Audio output (gpu/vk/vk_menu.cpp): audio_output= in longshot_options.ini (host/options_path.c),
+/* (longshot) The Insert menu's Audio output (gpu/vk/menu/audio.cpp): audio_output= in longshot_options.ini (host/options_path.c),
    0 Auto, 1 Stereo, 2 5.1, 3 Mono (stereo with a live final average). A number past them is the nearest, as the menu reads
    it. Read from the file, as host/nn_applet.c reads the Handheld profile: the game asks for its speakers only once,
    at its start */
@@ -1403,7 +1403,7 @@ static int64_t audio_mix_deadline(int64_t now, int64_t next, int64_t period) {
     return next;
 }
 
-/* ---- the player's volume (the Insert menu's Audio tab, gpu/vk/vk_menu.cpp) ------------------------------------- */
+/* ---- the player's volume (the Insert menu's Audio tab, gpu/vk/menu/volume.cpp) --------------------------------- */
 /* The frame's samples (frames x channels, interleaved) scaled from `from`, the gain the last frame ended at, to `want`,
    step by step over the frame, so a change does not click. The gains are 0 to 1: nothing clips. Returns the gain the
    frame ended at. tests/test_audio_volume.py */

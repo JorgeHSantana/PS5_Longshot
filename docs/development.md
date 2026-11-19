@@ -1550,8 +1550,10 @@ The Fullscreen monitor row saves `fullscreen_monitor_id` (an opaque destination 
 Auto (current monitor). The transient menu ordinal is not saved. Windows identities are monitor interface
 paths; Linux identities use unique SDL backend-qualified display names. Choose through the menu rather
 than editing these keys; unavailable choices fall back temporarily without discarding the saved identity.
-Only `compile_shaders=`, the build's choice, stays in the game folder's file, where `make_game.py` writes it. The file holds the Insert menu's rows as `<key>=<number>`: the row's name in lower
-case with `_` for spaces (`frame_generation=2`, `invert_camera_x=1`), except Output resolution, which is `output_res`.
+Only `compile_shaders=`, the build's choice, stays in the game folder's file, where `make_game.py` writes it. The file holds the Insert menu's rows as `<key>=<number>`: each row's key
+written down (`frame_generation=2`, `invert_camera_x=1`, `output_res`): its module's row's own `.key`
+([A row of the Insert menu](#a-row-of-the-insert-menu));
+`tests/test_menu_ini_keys.py` keeps the keys players' files hold.
 `gpu/vk/vk_menu.cpp` writes the whole file at every change (`save`), with `options_version=5`,
 `microphone_device=<name>` when a microphone is chosen by name, and the controls (`pad_<button>`, `key_<button>` and `toggle_<button>`:
 the README's [Controls](../README.md#controls)). The microphone list retains up to 64 recording endpoints, shared by physical
@@ -1708,6 +1710,82 @@ See [control.md](control.md) for the fields, sampling, bounds and examples.
 agent sets it when it runs the game as its low-rights user. Only a local user account's SID is taken (`S-1-5-21-...`, a
 RID of 1000 or more); a group such as Everyone or Users is refused and logged. Unset, the pipe is the game's user's
 alone. Set it in the environment: `longshot_env.txt` leaves it out. See [control.md](control.md#security).
+
+### A row of the Insert menu
+
+Every row of the menu is a feature module's ([#1633](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/1633)): one
+feature's rows in a file of `gpu/vk/menu/`, described once with the code that is theirs (their state, texts, hints and
+actions), and placed by the module itself. `gpu/vk/menu_model.h` is the model (no ImGui or Vulkan in it);
+`gpu/vk/menu_module.h` is what a module includes. The build compiles every `gpu/vk/menu/*.cpp` with the renderer
+(`nx2/build.py` `vk_sources`), so a new feature is a new file: nothing in `vk_menu.cpp` changes. A section and its rows
+(`gpu/vk/menu/hdr.cpp`):
+
+```cpp
+MENU_MODULE(hdr) {
+    menu::tab("graphics")
+        .heading("hdr", "HDR", menu::after("screen"))   // (a section of its own, after the core's Screen)
+        .row({.key = "hdr", .label = "HDR", .help = "...", .value = &opts.hdr, .lo = 0, .hi = 2, .preset_exempt = true,
+              .text = [](int v) { return std::string(tx_hdr(v)); }, .hint = hdr_sdr_hint})
+        .row({.key = "hdr_paper_white", .label = "HDR paper white", .help = "...", .value = &opts.hdr_white,
+              .lo = 80, .hi = 400, .step = 10, .preset_exempt = true, .shown = [] { return opts.hdr != 0; }, .text = nits});
+}
+```
+
+A button whose hooks ask the renderer (`gpu/vk/menu/laptop.cpp`):
+
+```cpp
+#ifndef MENU_LAYOUT_ONLY
+#include "vk_internal.h"   // (dev: the GPU's type)
+bool laptop_row() { return dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU; }
+#endif
+
+MENU_MODULE(laptop) {
+    menu::tab("debug")
+        .row({.key = "weak_laptop", .label = "Set up for a weak laptop", .help = "...", .kind = menu::Kind::Action,
+              .choices = {"Apply", "Applied"},   // (its cell's texts: the cell as wide as the widest)
+              .shown = MENU_HOOK(laptop_row),
+              .text = MENU_HOOK([](int) { return std::string(laptop_applied ? "Applied" : "Apply"); }),
+              .on_activate = MENU_HOOK(weak_laptop_apply)}, menu::after("save_pipeline_list").order(100));
+}
+```
+
+- **Its key is its line** in `longshot_options.ini` and its name over the control bridge. Every saved row's key is in
+  FROZEN in `tests/test_menu_ini_keys.py`: a new row's key goes there on purpose, and a row renamed or moved keeps its key,
+  or players lose that setting.
+- **Its texts are the translations' keys**: a row moved keeps its label, help and choices to the character, and a value's
+  text keeps its printf format (`"%d nits"`, `menu_text::percent`), which the translations match.
+- **Where it goes**: `after(key)` or `before(key)` puts it beside a row (into that row's section), `first()`, `last()`,
+  `order(n)` and `at(n)` among its section's. A row anchors on a row's key, not a section's id: to start a section's rows,
+  `.section(id)` and then the row. A section (`heading(id, label, place)`) is placed among the tab's the same way. The
+  tabs are `graphics`, `audio`, `gameplay`, `controls`, `nfc`, `mods` (its lines the host's, drawn by the menu's own code), `debug` and the pages `motion`, `fps_details`,
+  `controls_page`; the core's sections are `resolution`, `screen` and `developer`, the modules' `framegen`, `hdr`,
+  `detail` and `gpu`. With no wishes, a module's rows follow the section's own. The order is worked out once, the same
+  whatever order the modules register in.
+- **What the menu draws**: Choice, Toggle and Slider rows, headings, Action rows (a button: its `text` in the value cell,
+  its `choices` the texts it can show, `on_activate` its press, `verb` in the prompts, `confirm` for a second press) and
+  Page rows (`opens` one of the pages above). A Line or a Custom item from a module is left out and logged.
+- **Its hooks** replace the checks by row elsewhere: `shown` (instead of a line in `row_shown`), `locked` (why it can't
+  change now), `text`, `hint` (`MODULE_HINTS` makes one from a table), `step_fn`, `on_change`, `on_activate`,
+  `restart_value`, `stops_at_ends` (a Choice held at its ends; a Slider is, unless it `wraps`, as Sharpness), `restart`,
+  `preset_exempt` (a row a preset doesn't set: the window, the controls, HDR).
+- **What needs the renderer is fenced.** The checks compile every module with `MENU_LAYOUT_ONLY`, without Vulkan: code
+  that needs the renderer's headers goes under `#ifndef MENU_LAYOUT_ONLY`, and a hook that calls it is
+  `MENU_HOOK(...)` (nullptr there). A hook that reads `opts` alone needs neither. What a module asks of the renderer
+  itself is declared in `menu_module.h`'s "what modules ask the renderer" section and defined in `vk_menu.cpp`; what
+  `vk_menu.cpp` uses of a module goes in its header beside it (`gpu/vk/menu/output.h`).
+- **The table has room for 256** rows and headings from the modules (`kModuleRowsMax`: a row's text and hint go through
+  a function of its slot's own); past it a row is left out and logged, and `tests/test_menu_module_slots.py` fails.
+
+What is left in `vk_menu.cpp`'s own table is the core's three section headings and the menu's custom section: the rows it
+still draws and presses with its own code until the panels are reworked (Custom output size's text field, the Controls
+row's bindings grid, the Debug tools' panel). The model has them as `Custom` items, their label the fallback for another
+presenter (`bespoke_row`).
+
+The checks: `tests/test_menu_modules.py` builds every module over the core's tabs, sections and rows (no game) and fails on
+a missing anchor, a cycle or a doubled key; `test_menu_sections.py` and `test_readme_menu_rows.py` read the menu as built,
+so README.md's option table follows the built order. A check that reads a row's fields uses
+`tests/menu_model_fixture.py` (`menu_text()`: the menu's sources with the modules' rows as table lines; `built_menu()`:
+the pages as built).
 
 ### CRT output stage
 

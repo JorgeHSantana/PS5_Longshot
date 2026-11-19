@@ -53,6 +53,8 @@ class ShaderStampCacheTests(unittest.TestCase):
             "gpu/vk/vk_bank.cpp": "int bank;\n",
             "gpu/vk/vk_draw.cpp": "int draw;\n",
             "gpu/vk/vk_menu.cpp": "int menu;\n",
+            "gpu/vk/menu/audio.cpp": "int menu_audio;\n",   # (#1633: the Audio tab's module, a user of the playback header)
+            "gpu/vk/menu/hdr.cpp": "int menu_hdr;\n",       # (a module that is not)
             "gpu/vk/vk_state.h": "struct State {};\n",
             "gpu/vk/vk_api.h": "struct Api {};\n",
             "gpu/vk/vk_dlss.cpp": "int dlss;\n",
@@ -198,8 +200,9 @@ class ShaderStampCacheTests(unittest.TestCase):
                 before = self.jobs(linux)
                 path.write_bytes(b"enum { HOS_OUTPUT_ID_CAP = 8192 };\n")
                 after = self.jobs(linux)
-                # Main's dependency tracking keeps this host contract on its one renderer consumer.
-                self.assertEqual(self.changed(before, after), {"gpu/vk/vk_menu.cpp"})
+                # Main's dependency tracking keeps this host contract on its renderer consumers: the menu and, since
+                # #1633, the Audio tab's module (gpu/vk/menu/audio.cpp includes it too), no other module
+                self.assertEqual(self.changed(before, after), {"gpu/vk/vk_menu.cpp", "gpu/vk/menu/audio.cpp"})
                 self.assertEqual([f for f in before["gpu/vk/vk_shader.cpp"]["flags"] if f.startswith("-DLONGSHOT_SHADER_STAMP=")],
                                  [f for f in after["gpu/vk/vk_shader.cpp"]["flags"] if f.startswith("-DLONGSHOT_SHADER_STAMP=")])
 
@@ -282,7 +285,7 @@ class ShaderStampCacheTests(unittest.TestCase):
     # (RX_VK_PGO, after ProjectReLink: the back end's own files, not Eden's recompiler, sirit, Dear ImGui, the fonts, zstd or the
     # POSIX calls)
     def own(self, jobs):
-        return {n for n in jobs if n.startswith(("gpu/vk/vk_", "gpu/third_party/suyu/"))}
+        return {n for n in jobs if n.startswith(("gpu/vk/vk_", "gpu/vk/menu/", "gpu/third_party/suyu/"))}   # (the menu's modules too, #1633)
 
     def test_no_profile_is_the_build_as_it_was(self):
         for linux in (False, True):

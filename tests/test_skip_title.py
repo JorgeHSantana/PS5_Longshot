@@ -15,6 +15,10 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves the check's own folder off the path)
+from menu_model_fixture import menu_text  # noqa: E402
 
 RUN_ALL_ARGS = ["--cc", "gcc"]
 
@@ -121,7 +125,7 @@ int main(int argc, char **argv) {
 
 
 def check_menu():
-    menu = MENU.read_text(encoding="utf-8")
+    menu = menu_text()   # (vk_menu.cpp and its modules' rows, #1633)
     header = HEADER.read_text(encoding="utf-8")
     api = API.read_text(encoding="utf-8")
     replay = REPLAY.read_text(encoding="utf-8")

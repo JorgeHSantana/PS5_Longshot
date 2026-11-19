@@ -14,6 +14,10 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves the check's own folder off the path)
+from menu_model_fixture import menu_model_prelude, menu_model_member, menu_text  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 MENU = ROOT / "gpu" / "vk" / "vk_menu.cpp"
@@ -121,6 +125,11 @@ int framegen_capped(int framegen, int) { return framegen; }
 void arrow(Row& r, bool right) { %(arrow)s }
 int main() {
     Row r = {TAB_CONTROLS, "Vibration strength", &opts.rumble, %(lo)s, %(hi)s, %(step)s, nullptr, nullptr%(exempt)s};
+    /* (#1633: the row a module's, gpu/vk/menu/controller.cpp: its key and its stop at the ends, as the module says) */
+    static menu::Setting described;
+    described.key = %(key)s;
+    described.stops_at_ends = %(stops_flag)s;
+    r.setting = &described;
     CHECK(r.lo == 25 && r.hi == 200 && r.step == 25);
     CHECK(opts.rumble == 100 && opts.vibration == 0);
     CHECK(!std::strcmp(ini_key(r), "rumble_strength"));
@@ -173,12 +182,16 @@ def wheel_free(menu):
 
 
 def menu_fixture():
-    menu = MENU.read_text(encoding="utf-8")
+    menu = menu_text()   # (vk_menu.cpp and its modules' rows, #1633)
     header = read("gpu", "vk", "vk_menu.h")
     row = re.search(r'\{TAB_CONTROLS, "Vibration strength", &opts\.rumble, (-?\d+), (\d+), (\d+), tx_percent,', menu)
     if not row:
         raise SystemExit("the menu lost its Vibration strength row")
     exempt = block(menu, row.start()).rstrip().endswith(", true}")   # (Row::preset_exempt: a control, not the preset's)
+    described = re.search(r'\.key = ("\w+"),\s*\.label = "Vibration strength",(.*?)\}(?:\)|, menu::)', read("gpu", "vk", "menu", "controller.cpp"),
+                          re.S)
+    if not described:
+        raise SystemExit("gpu/vk/menu/controller.cpp: no Vibration strength row")
     load = menu.index("bool has_resolution = false;")   # (the ini's load, not save()'s read of its other lines)
     load = block(menu, menu.rindex('if (FILE* f = fopen(ini_path().c_str(), "r"))', 0, load))
     if "opts.rumble = rumble_step(opts.rumble);" not in load:
@@ -203,6 +216,7 @@ def menu_fixture():
         "arrow": "bool press[5] = {false, false, false, !right, right}; " + arrow.group(1),
         "exempt": ", nullptr, false, true" if exempt else "",   # (after the help: no hint, no restart)
         "lo": row.group(1), "hi": row.group(2), "step": row.group(3),
+        "key": described.group(1), "stops_flag": "true" if ".stops_at_ends = true" in described.group(2) else "false",
     }
 
 
@@ -241,7 +255,7 @@ def main():
     option_ids()
     with tempfile.TemporaryDirectory(prefix="rumble-menu-") as tmp:
         src, exe = Path(tmp) / "rumble_menu.cpp", Path(tmp) / "rumble_menu"
-        src.write_text(menu_fixture(), encoding="utf-8")
+        src.write_text(menu_model_prelude() + menu_fixture(), encoding="utf-8")
         subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror", str(src), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
     print("PASS: the menu's Vibration strength stops at 25% and 200%, and option 9 is its own")

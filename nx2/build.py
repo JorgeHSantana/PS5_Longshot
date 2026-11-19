@@ -629,13 +629,16 @@ def ngx_link(sdk, mingw):
 
 def vk_sources():
     """The Vulkan back end (longshot_vk.dll, gpu/vk/vk_api.h): Eden's shader recompiler with its SPIR-V back end
-    (gpu/vk/eden), sirit with Eden's mesh shader patch (gpu/vk/sirit) and the back end itself (gpu/vk/*.cpp)"""
+    (gpu/vk/eden), sirit with Eden's mesh shader patch (gpu/vk/sirit) and the back end itself (gpu/vk/*.cpp, and the Insert
+    menu's modules, gpu/vk/menu/*.cpp)"""
     vk = os.path.join(GPU, "vk")
     out = []
     for sub in ("eden", os.path.join("sirit", "src")):
         for d, _, files in os.walk(os.path.join(vk, sub)):
             out += [os.path.join(d, f) for f in files if f.endswith(".cpp")]
     out += [os.path.join(vk, f) for f in os.listdir(vk) if f.endswith(".cpp") and f != NGX_MSVC_RT]
+    menu = os.path.join(vk, "menu")   # (the Insert menu's feature modules, gpu/vk/menu_module.h: #1633)
+    out += [os.path.join(menu, f) for f in os.listdir(menu) if f.endswith(".cpp")] if os.path.isdir(menu) else []
     vc = os.path.join(GPU, "third_party", "suyu", "video_core")
     out += [os.path.join(vc, "textures", f) for f in ("decoders.cpp", "astc.cpp")]   # (suyu's unswizzle and ASTC decoder)
     return sorted(out)
@@ -2079,7 +2082,9 @@ def main():
             lib = os.path.relpath(src, vk).split(os.sep)[0] in ("eden", "sirit")
             obj = os.path.join(obj_dir, "vk_" + name + ".o")
             extras = ((logo_text if os.path.basename(src) == "vk_imgui.cpp" else b"") +
-                      (output_device_deps if os.path.basename(src) == "vk_menu.cpp" else b"") +
+                      # (the playback devices' header, outside vdeps_roots: its users, the menu and its Audio tab's module, #1633)
+                      (output_device_deps if os.path.relpath(src, vk).replace(os.sep, "/") in ("vk_menu.cpp", "menu/audio.cpp")
+                       else b"") +
                       (ngx_deps if os.path.basename(src) == "vk_dlss.cpp" else b"") +
                       (xess_deps if os.path.basename(src) == "vk_xess.cpp" else b"") +
                       (imgui_deps if os.path.basename(src) in imgui_users else b""))
