@@ -196,7 +196,7 @@ read (one rule for the ones that have moved there) and how to read those lines:
 Set `HOS_OOT_TRACE_SAVES=1` to log save requests and report when the transition autosave is suppressed. The trace defaults to off.
 
 The running game reads its switches from the environment or from `longshot_env.txt` beside `image.bin` (one
-`NAME=VALUE` a line, `#` for notes; `HOS_ENV_FILE=<path>` reads that file instead; `HOS_OPTIONS_FILE=<path>`, from the
+`NAME=VALUE` a line, `#` for notes, on a line of their own or after a value and a space; `HOS_ENV_FILE=<path>` reads that file instead; `HOS_OPTIONS_FILE=<path>`, from the
 environment only, does the same for the settings, `longshot_options.ini`, so a scripted run leaves the player's as they are). The environment goes first: a name
 already set when the game starts keeps its value and the file's line for it is left out (the log says so). A switch
 that stands in for a menu row lasts for its run; the options file keeps the player's value (`env_override` in
@@ -218,7 +218,11 @@ and the recommendation) and documents it here. There are several hundred more, m
 experiments: `grep -rnE '(getenv|env_on)\("' host gpu/vk` lists them, and the comment where each is read says what it
 does. An on/off switch ("(set)" below) is on for `1` or any other value, and off when it is unset, empty, `0`, `false`,
 `off` or `no` (`env_on` in `gpu/vk/compat/longshot_env.h`, `kit.env_on` in Python); it used to be that any value turned
-one on, `0` included. A switch that takes a number or a list reads its value as it says.
+one on, `0` included. A switch that is on until it is turned off (`HOS_AUDIO=0`, `HOS_VCORES=0`) reads the same words:
+unset it keeps its default, and `0`, `false`, `off` or `no` turn it off, as does an empty value where the system allows one
+(on Windows an empty value is the same as unset; `HOS_WIDE_UI` empty falls to its menu row) (`env_on_or`); that is every such
+switch of `host/`, while some of `gpu/vk`'s are still read as numbers, where only `0` is off. A switch that takes a number or a
+list reads its value as it says.
 
 `RX_VK_MESH_NOCULL=<prefix,...>` turns off the culling in the task shaders whose native code key starts with one of
 the prefixes. On a Steam Deck, `RX_VK_MESH_NOCULL=2c56dc1006942f74` avoids the same hang without leaving anything out:

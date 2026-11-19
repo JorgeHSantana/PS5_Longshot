@@ -5548,7 +5548,7 @@ void menu_init() {
     first_start = !has_options;
     sync_transition_autosave();
     const char* handheld_env = getenv("HOS_HANDHELD");   // (host/nn_applet.c handheld(): the environment over the file's)
-    if (!has_output && !(handheld_env ? atoi(handheld_env) != 0 : opts.handheld != 0)) {
+    if (!has_output && !(handheld_env ? !env_value_off(handheld_env) : opts.handheld != 0)) {
         // (none chosen, a new install: the size host/nn_applet.c took at boot, the game's 2560x1440 or the main screen's where
         // it has fewer pixels (a Steam Deck's 1280x800), hos_output_default. Saved from now on, so the two never part.
         // HOS_OUTPUT_RES, below, is over it, as over a chosen one)

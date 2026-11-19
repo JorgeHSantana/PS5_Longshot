@@ -335,8 +335,7 @@ static void parse_script(void) {
     npresses = 0;
     script_t0 = hos_now_ns();
     {
-        const char *e = getenv("HOS_INPUT_FRAME_CLOCK");
-        script_frame_clock = e && atoi(e) != 0;
+        script_frame_clock = env_on("HOS_INPUT_FRAME_CLOCK");
         if (script_frame_clock) {
             script_frame0 = InterlockedCompareExchange64(&hos_present_count, 0, 0);
             hos_log("hid: input frame clock origin=%lld native presents; rate=60", (long long)script_frame0);
@@ -831,7 +830,7 @@ static void pads_read(uint64_t *buttons, int32_t stick[4]) {
 /* Whether the controllers count while another window is in front: HOS_INPUT_BACKGROUND=1 or 0 decides when it is set,
    otherwise the Insert menu's "Controller in background" row */
 static int pads_in_background(const char *env, int menu) {
-    return env ? atoi(env) != 0 : menu != 0;
+    return env ? !env_value_off(env) : menu != 0;
 }
 
 /* (longshot) Whether a pad's motion counts: when its buttons do, with the game's window in front, or behind another
@@ -1096,7 +1095,7 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
     static const char *native_env;
     static int native_looked;
     if (!native_looked) native_looked = 1, native_env = getenv("HOS_MOUSE_NATIVE");
-    const int mode = native_env ? atoi(native_env) != 0 : rx_option(6, 0);   /* (2: Off, the mouse never captured) */
+    const int mode = native_env ? !env_value_off(native_env) : rx_option(6, 0);   /* (2: Off, the mouse never captured) */
     const int native = mode == 1;
     int hos_mouse_native(void);
     void hos_mouse_native_free(int free);

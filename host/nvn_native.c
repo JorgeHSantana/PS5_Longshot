@@ -1129,7 +1129,7 @@ static CRITICAL_SECTION held_cs;
 static int held_ready, hold_on = -1;
 static void held_init(void) {
     if (!held_ready) { InitializeCriticalSection(&held_cs); held_ready = 1; }
-    if (hold_on < 0) { const char *e = getenv("HOS_NVN_HOLD"); hold_on = e && atoi(e) != 0; }   /* (off: see below) */
+    if (hold_on < 0) hold_on = env_on("HOS_NVN_HOLD");   /* (off: see below) */
 }
 static void held_flush(void) {
     held_init();
@@ -1231,7 +1231,7 @@ NV(nvnEventGetValue) {
         int now = nowait;
         if (now < 0) {
             const char *e = getenv("HOS_PRESENT_NOWAIT");
-            now = e ? atoi(e) != 0 : rx_option(HOS_OPT_RENDER_THREAD, -1);
+            now = e ? !env_value_off(e) : rx_option(HOS_OPT_RENDER_THREAD, -1);
             if (now >= 0) nowait = now = now != 0;
         }
         if (now > 0 && (c->x[30] == 0x805904a0 || c->x[30] == 0x80590530)) { RET(1); return; }
