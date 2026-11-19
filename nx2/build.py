@@ -482,7 +482,7 @@ def tree_headers(*roots, skip=()):
         # gpu/vk header change rebuilt the WebGPU renderer)
         for d, dirs, files in os.walk(root):
             dirs[:] = sorted(x for x in dirs if x not in skip)
-            found += [os.path.join(d, f) for f in files if f.endswith((".h", ".hpp", ".inc"))]
+            found += [os.path.join(d, f) for f in files if f.endswith(HEADER_EXTS)]
         for path in sorted(found):
             h.update(os.path.basename(path).encode() + open(path, "rb").read())
     return h.hexdigest().encode()
@@ -494,7 +494,10 @@ def tree_headers(*roots, skip=()):
 # says which headers it read. The next build names the object by those of them under the same folders, their names and
 # contents (renderer_deps), and the blob stays for a file with no depfile yet or one that cannot be read. What a file reads from
 # elsewhere (the Vulkan and SPIR-V headers, the compiler's) counts as before: by the flags and the system headers' stamp.
-HEADER_EXTS = (".h", ".hpp", ".inc")
+# What an #include can name: .def and .inl too (gpu/vk/switches.h includes switches.def twice). Without them a new switch row
+# compiled nothing again, and an update or a pack kept the old switch table in vk_main.o and vk_shader.o. The folders' blob
+# (tree_headers) takes the same list. An object that reads none of them keeps its key
+HEADER_EXTS = (".h", ".hpp", ".inc", ".inl", ".def")
 _HEADER_DIGESTS = {}   # (a header's path -> its name and content's sha1, once a run: many files read the same headers)
 DEPFILE_DEPS = b"depfile:"   # (what renderer_deps' dependency text starts with when it comes from a depfile)
 DEPFILE_PENDING = "depfile-pending"   # (the stamp of an object compiled now from a depfile key, until rekey_depfiles keys it)
