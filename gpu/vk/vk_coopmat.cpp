@@ -459,9 +459,11 @@ bool software_forms_agree(Shader::Backend::SPIRV::SoftwareMmaForm form, bool qua
     return *differ == 0;
 }
 
-/// RX_VK_MMA_UNROLL=0: the loop; 1: the unrolled forms tried on any GPU; unset: on RADV, where they were measured (the Steam Deck)
-bool software_unroll_wanted(VkDriverId driver, const char* env) {
-    return env ? !env_value_off(env) : driver == VK_DRIVER_ID_MESA_RADV;
+/// RX_VK_MMA_UNROLL=0: the loop; 1: the unrolled forms tried on any GPU; unset: on RADV and on AMD RDNA 4 (RX 9 / GFX12)
+/// with AMD's Windows driver, where they were measured (the Steam Deck and an RX 9060 XT)
+bool software_unroll_wanted(VkDriverId driver, bool rdna4, const char* env) {
+    const bool def = driver == VK_DRIVER_ID_MESA_RADV || (rdna4 && driver == VK_DRIVER_ID_AMD_PROPRIETARY);
+    return env ? !env_value_off(env) : def;
 }
 
 void choose_software_form() {
@@ -469,8 +471,9 @@ void choose_software_form() {
     namespace spirv = Shader::Backend::SPIRV;
     spirv::mma_software_form = (uint32_t)SoftwareMmaForm::Loop;
     const char* env = std::getenv("RX_VK_MMA_UNROLL");
-    if (!software_unroll_wanted(dev.driver_id, env)) {
-        logf("vk: software matrix multiplies looped (%s)", env ? "RX_VK_MMA_UNROLL=0" : "not RADV, RX_VK_MMA_UNROLL=1 tries the unrolled form");
+    if (!software_unroll_wanted(dev.driver_id, is_rdna4(dev.props.vendorID, dev.props.deviceName), env)) {
+        logf("vk: software matrix multiplies looped (%s)",
+             env ? "RX_VK_MMA_UNROLL=0" : "not RADV or RDNA 4 on AMD's Windows driver, RX_VK_MMA_UNROLL=1 tries the unrolled form");
         return;
     }
     // (A through quad broadcasts where every stage has quad operations, as the translator may emit the function in any stage that

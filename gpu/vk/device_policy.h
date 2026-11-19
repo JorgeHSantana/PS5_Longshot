@@ -86,6 +86,7 @@ struct DeviceFacts {
     bool radv_gcn() const { return radv() && !storage_io16; }
     bool deck_apu() const { return gpu_clock::deck_apu(device_name); }
     bool handheld() const { return (steam_deck_env && integrated()) || deck_apu(); }   // (auto_profile's hw.handheld)
+    bool rdna4() const { return amd() && device_name && (std::strstr(device_name, "RX 9") || std::strstr(device_name, "GFX12")); }
 };
 
 // The rules that are a number or a yes from one or two facts, each as its site has it. device_policy() calls them with
@@ -379,8 +380,9 @@ struct DevicePolicy {
     // to 32 lanes and 64-lane waves" until this rule moved here, which RX_VK_NO_SUBGROUP_PIN made true of every 64-lane
     // card and which took Vega (GFX9) for GCN too. RX_VK_BATCH. Read (vk_replay.cpp batch_on)
     bool batch_submits = false;
-    // RADV: the software matrix multiplies' unrolled forms are tried (measured on the Steam Deck); a test shader on the
-    // device then says which is used. RX_VK_MMA_UNROLL. Site (vk_coopmat.cpp), step 7
+    // RADV and AMD RDNA 4 on AMD's Windows driver: the software matrix multiplies' unrolled forms are tried (measured on the
+    // Steam Deck and an RX 9060 XT); a test shader on the device then says which is used. RX_VK_MMA_UNROLL. Site
+    // (vk_coopmat.cpp), step 7
     bool mma_unroll_try = false;
     // Mesa's Intel driver, with dynamic indexing of storage buffer arrays: the tables searched in loops, as Mesa inlines
     // the written-out form (Windows not tried). RX_VK_GM_LOOP. Site (vk_coopmat.cpp table_loop_wanted), step 7
@@ -547,7 +549,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
     // measured on one card
     // (corrected: GCN by the one definition, radv_gcn. To go back: f.radv() && !(f.sg32_stages == 0 && f.subgroup_size > 32))
     p.batch_submits = f.radv() && !f.radv_gcn();
-    p.mma_unroll_try = f.radv();
+    p.mma_unroll_try = f.radv() || (f.rdna4() && f.driver_id == VK_DRIVER_ID_AMD_PROPRIETARY);
     p.global_table_loop = f.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA && f.storage_buffer_array_dynamic_indexing;
     p.occ_copy = f.driver_id == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS && f.discrete();
     p.fsr4_tune = f.amd();
@@ -580,7 +582,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
     }
     p.auto_render_third = integrated && f.cpus_all > 0 && f.cpus_all <= 4;
     p.rtx = f.nvidia() && std::strstr(f.device_name, "RTX");
-    p.rdna4 = f.amd() && (std::strstr(f.device_name, "RX 9") || std::strstr(f.device_name, "GFX12"));
+    p.rdna4 = f.rdna4();
     p.workers = workers(f.cpus_all);
     p.capture_helpers = capture_helpers(f.cpus_all);
     p.texture_threads = texture_threads(f.cpus_all);

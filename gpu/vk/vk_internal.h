@@ -50,6 +50,11 @@ void device_wait_idle_locked();
 // hdr_sdr_count: how many, for the log's and the menu's line for each
 enum HdrSdrWhy : int { hdr_sdr_none, hdr_sdr_no_extension, hdr_sdr_os_off, hdr_sdr_driver, hdr_sdr_unknown, hdr_sdr_count };
 
+inline bool is_rdna4(uint32_t vendor_id, const char* device_name) {
+    return vendor_id == 0x1002 && device_name &&
+           (std::strstr(device_name, "RX 9") || std::strstr(device_name, "GFX12"));
+}
+
 struct Device {
     VkInstance instance = VK_NULL_HANDLE;
     VkPhysicalDevice physical = VK_NULL_HANDLE;
