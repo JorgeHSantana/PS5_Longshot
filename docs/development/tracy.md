@@ -30,8 +30,11 @@ the host's files and the back end's own are compiled with `TRACY_ENABLE` (and th
 sampler's call stacks), Tracy's client (`public/TracyClient.cpp`) goes into the game's executable, and the lifted game
 code is not compiled again. The process has one client: the executable exports Tracy's C API (`___tracy_*`) and
 `longshot_vk.so` calls it there, as it calls the host's `hos_posix_*`. On Windows the executable's import library
-(`longshot_tracy.lib` in the work folder) is what `longshot_vk.dll` links; that configuration is written and not yet
-built by anyone.
+(`longshot_tracy.lib` in the work folder) is what `longshot_vk.dll` links, and the renderer's zones reach the capture
+through it. Tracy's client asks for its system libraries by `#pragma comment(lib, ...)` lines that are under
+`_MSC_VER`, which llvm-mingw's clang does not define, so `nx2/build.py` names the ones the game does not link
+anyway: `ws2_32` for its sockets and `secur32` for the user name it shows the viewer (`GetUserNameExA`); without the
+second the executable does not link.
 
 ## Capture
 
@@ -47,8 +50,14 @@ tracy -a 127.0.0.1                                 # or the viewer, live; it als
 
 Start either before the game to have the start-up too: it waits for the game. Keep the file in the checkout's
 `build-linux/` or another folder that is never committed or sent. `tracy-capture -s <seconds>` ended some captures
-at once here; Ctrl-C (or `timeout -s INT <seconds> tracy-capture ...`) ends one and saves it. `TRACY_PORT=<n>` in the
-game's environment and `-p <n>` give a second game a port of its own (8086 is the default).
+at once here (on Windows `-s 60` saved its minute); Ctrl-C (or `timeout -s INT <seconds> tracy-capture ...`) ends one
+and saves it. `TRACY_PORT=<n>` in the game's environment and `-p <n>` give a second game a port of its own (8086 is
+the default).
+
+`tracy-csvexport run.tracy` gives each zone's count and times; with `-u`, every zone one per line (start, length,
+thread), the zone's text in the last column, commas and all. Its threads are numbers, without their names: a
+`vcore wait`'s text (who gave the core) is one way to tell them apart. An export is made from the game like the
+capture: it stays on your PC.
 
 The client is started by the game's `main`, not before it (`TRACY_MANUAL_LIFETIME`): the crash window's helper is
 the same executable, and with a client of its own it took the next port and outlived the game, so a later capture
@@ -69,6 +78,11 @@ from debug information or the dynamic symbols, the executable has neither for th
 as `[unknown] + <address>` (exporting the names from a Tracy build's executable is being checked). Context switches, CPU usage of other programs and kernel
 frames need more than a user has (`perf_event_paranoid` of -1, or the game run with `CAP_PERFMON`/as root): without
 them the capture has none of those, and everything else.
+
+On Windows Tracy samples and records context switches through Event Tracing for Windows, which its manual says
+needs an administrator; the captures made here ran as a user with `TRACY_NO_SAMPLING=1`, so neither has been tried.
+Nor are there zones in the game's code, whose list is for ELF objects (below): a thread that holds a core outside
+every zone runs the game's code, or host code that has no zone, and the capture cannot say which.
 
 ## What the zones are
 

@@ -2285,8 +2285,10 @@ def main():
                             ["-lbcrypt", "-lmfplat", "-lmfuuid", "-lstrmiids", "-lole32"] if FFMPEG else []) +
                            ([os.path.join(dav1d_windows(), "lib", "libdav1d.a")] if dav1d_windows() else []) +
                            (["-lc++", "-lunwind"] if toolchain.mingw() else []) +   # (llvm-mingw: the C++ parts' runtime, linked in; MSVC's comes by itself)
-                           # (LONGSHOT_TRACY: the client's sockets, and its exported C API's import library for the back end)
-                           (["-lws2_32"] + linker("/implib:" + os.path.join(out, TRACY_IMPLIB)) if TRACY else []),
+                           # (LONGSHOT_TRACY: the client's sockets, the user name it shows the viewer (GetUserNameExA, which
+                           # TracySystem.cpp asks secur32 for only under MSVC), and its exported C API's import library
+                           # for the back end)
+                           (["-lws2_32", "-lsecur32"] + linker("/implib:" + os.path.join(out, TRACY_IMPLIB)) if TRACY else []),
                            exe)
         undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
         if r.returncode:
