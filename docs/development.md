@@ -818,6 +818,30 @@ The renderer's memory, every 600 presents in the log (`vk: budget:`, what each p
 | `HOS_SHADOW_BUCKET=<step>` | The storage a character's shadow map reserves (`host/shadow_slot.h`). OoT sizes each near character's square depth map anew every frame (384 from far, up to 1920 near) and makes a frame's render targets one after another in a first-fit heap, so a map a few pixels larger moved every target after it to a new address: 15-16 textures made a frame in Castle Town's market with the camera turning. Such a map is answered the storage size and alignment of the next multiple of the step up (384 by default: 768, 1152, 1536, 1920), so the targets after it stay where they are until it crosses a step; the texture keeps its own size. `0`: every texture its own storage, as before |
 | `HOS_FMA_FAST=0` | The correctly rounded FMA in front of suyu's exact bodies off (`nx2/fma_soft.h`; default on). It exists only in a build without FMA3 (an x86-64-v2 build, which `host_march()` makes for a CPU without AVX2: Intel before Haswell, AMD before Excavator): there the guest's FMADD/FMSUB/FNMADD/FNMSUB/FMLA otherwise go to the multi-word exact body, about 180 ns a call. Same values and FPSR either way (`tests/test_fma_soft.py`); `0` is for finding out whether it is the cause of something |
 
+
+#### The driver's own shader cache (Linux)
+
+Each start logs the driver's shader cache twice (`gpu/vk/driver_cache_env.h`):
+
+- `vk: driver shader cache at the start: N MB (...)` is the size of NVIDIA's folder and of each of Mesa's layouts
+  (`mesa_shader_cache`, `mesa_shader_cache_sf`, `mesa_shader_cache_db`) in Mesa's folder: `MESA_SHADER_CACHE_DIR`,
+  else `$XDG_CACHE_HOME`, else `~/.cache`. The count stops after 50,000 files or 250 ms; the size is then "at least".
+- `vk: driver shader cache: Mesa's cache in <folder> (<what chose it>), layout ...; RADV's VRS ...` says which folder this
+  start's driver cache is in and whether RADV's VRS is forced. A variable the host set or dropped itself is named in
+  `LONGSHOT_DRIVER_ENV_SET` (a comma-separated list; not a switch), and this line calls it Longshot's. RADV forces VRS only on
+  gfx10.3 and later GPUs, where it has `VK_KHR_fragment_shading_rate`. It does so when `RADV_FORCE_VRS_CONFIG_FILE` names a
+  file that exists (the Steam Deck's Game Mode sets it for Half Rate Shading), or, without that variable, when
+  `RADV_FORCE_VRS` is other than `1x1`. Forced VRS gives every graphics pipeline another key. Measured on a Steam Deck OLED
+  (RADV, Mesa 26.2.0-devel): with Game Mode's file, empty or `1x1`, the 32,438 noted pipelines compiled at about 20 a second
+  (25-30 minutes) instead of loading in 22 s. The variable naming no file, or Mesa's folder alone, changed nothing.
+
+Each completed build of the noted or predicted pipelines adds its environment (keys and folder) to `cache/longshot_driver_env.txt`,
+which keeps the last 8. The next start compares its own against that list. If no build had its keys, it warns that neither cache
+has its pipelines. If a build had its keys in another folder and the prediction ran, it adds an info line: the predicted
+pipelines are only in the driver's cache, so each is compiled when first drawn. The Builder prepares in the desktop's
+environment and Steam starts the game in its own, so read these lines first when the start from Steam compiles what the
+preparation built.
+
 ### Building
 
 A build reads and writes tens of gigabytes. When the game folder or the build files folder is on a hard drive,
