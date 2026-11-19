@@ -704,6 +704,7 @@ bool create_device() {
         dev.sg32_stages = pin ? sc.requiredSubgroupSizeStages : 0;
         dev.max_workgroup_subgroups = sc.maxComputeWorkgroupSubgroups;
         dev.subgroup_size = sg.subgroupSize;
+        dev.subgroup_min = sc.minSubgroupSize;
         dev.subgroup_max = sc.maxSubgroupSize > sg.subgroupSize ? sc.maxSubgroupSize : sg.subgroupSize;
         dev.driver_id = drv.driverID;
         // (RADV on GCN 1-4, GFX6-8: no 16-bit shader inputs and outputs there, which RADV has from GFX9 (packed 16-bit math) on.

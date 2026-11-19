@@ -528,6 +528,12 @@ void software_multiplies(const char* why) {
 bool table_loop_wanted(VkDriverId driver, bool dynamic_indexing, const char* env) {
     return (env ? !env_value_off(env) : driver == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA) && dynamic_indexing;
 }
+/// (longshot, mma_layout.h mesh_fallback_pages, mesh_fallback_global_attributes and mesh_fallback_shared_warp) Intel's Mesa driver
+/// only, where they were measured; env is RX_VK_MESH_PAGES, RX_VK_MESH_GLOBAL_ATTRS or RX_VK_MESH_SHARED_WARP, 0 or 1 over the
+/// default (tests/test_mesh_fallback_pages.py, tests/test_mesh_fallback_global_attrs.py, tests/test_mesh_fallback_shared_warp.py)
+bool mesh_pages_wanted(VkDriverId driver, const char* env) {
+    return env ? !env_value_off(env) : driver == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA;
+}
 } // namespace
 
 void coopmat_init() {
@@ -545,6 +551,18 @@ void coopmat_init() {
     Shader::Backend::SPIRV::global_table_loop = table_loop_wanted(dev.driver_id, dev.features.shaderStorageBufferArrayDynamicIndexing,
                                                                   std::getenv("RX_VK_GM_LOOP"));
     if (Shader::Backend::SPIRV::global_table_loop) logf("vk: storage buffer tables searched in loops (RX_VK_GM_LOOP=0: written out)");
+    Shader::Backend::SPIRV::mesh_fallback_pages = mesh_pages_wanted(dev.driver_id, std::getenv("RX_VK_MESH_PAGES"));
+    if (Shader::Backend::SPIRV::mesh_fallback_pages)
+        logf("vk: the mesh fallback's global loads read the guest page table (RX_VK_MESH_PAGES=0: they search the storage buffers)");
+    Shader::Backend::SPIRV::mesh_fallback_global_attributes = mesh_pages_wanted(dev.driver_id, std::getenv("RX_VK_MESH_GLOBAL_ATTRS"));
+    if (Shader::Backend::SPIRV::mesh_fallback_global_attributes)
+        logf("vk: the mesh fallback's attribute regions in a pool of the records buffer (RX_VK_MESH_GLOBAL_ATTRS=0: in workgroup memory)");
+    Shader::Backend::SPIRV::mesh_fallback_shared_warp = mesh_pages_wanted(dev.driver_id, std::getenv("RX_VK_MESH_SHARED_WARP"));
+    Shader::Backend::SPIRV::mesh_fallback_shared_warp_check =
+        Shader::Backend::SPIRV::mesh_fallback_shared_warp && env_on("RX_VK_MESH_SHARED_WARP_CHECK");
+    if (Shader::Backend::SPIRV::mesh_fallback_shared_warp)
+        logf("vk: the mesh fallback's warps in workgroup memory, its stages at any lane count (RX_VK_MESH_SHARED_WARP=0: the subgroup's)%s",
+             Shader::Backend::SPIRV::mesh_fallback_shared_warp_check ? "; checked against the subgroup's (RX_VK_MESH_SHARED_WARP_CHECK)" : "");
     // (longshot) the translation's vendor fixes (device_policy.h fetch_bounds, nan_bits): out-of-bounds texel fetches answer 0,
     // NaN tests on bits
     Shader::Backend::SPIRV::fetch_bounds = dev.policy.fetch_bounds;

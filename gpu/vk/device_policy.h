@@ -272,10 +272,12 @@ struct DevicePolicy {
     // pass the same position. By the vendor, so NVK goes without them as NVIDIA's own compiler does: whether Mesa's
     // compiler needs them wants a run on NVK. RX_VK_NO_INVARIANT turns them off. Read (vk_coopmat.cpp coopmat_init)
     bool position_invariant = false;
-    // Intel: a colour pass tests EQUAL against what another program wrote, and Intel's compiler does not give the two the
-    // same position to the last bit (holes in the ground); 64 units towards the camera. By the vendor: the site names no
-    // GPU, driver or version, so which of Intel's two compilers it is wants a run. RX_VK_EQ_BIAS=<units>, 0 off. Read
-    // (vk_draw.cpp dynamic_state)
+    // Intel's Windows driver: a colour pass tests EQUAL against what another program wrote, and its compiler does not give
+    // the two the same position to the last bit (holes in the ground, issue 17, Arc B390); 64 units towards the camera.
+    // Not Mesa's: the game's EQUAL holds there (Iris Xe, Mesa 26.2.7: Kakariko, the Death Mountain gate and trail
+    // without a hole), and the margin's LESS_OR_EQUAL passes everything in front, not only the last bits: the terrain
+    // drew over the canyon's rocks on Death Mountain Trail, a flat wall where its depth pass had none. RX_VK_EQ_BIAS=<units>,
+    // 0 off. Read (vk_draw.cpp dynamic_state)
     float equal_depth_bias = 0;
     // AMD but RADV: task and mesh programs built without the driver's optimizer, which hung the GPU (RX 6600, issues 461
     // and 484); on RADV they reset it built without (issue 1000). RX_VK_MESH_OPT. Site (vk_draw.cpp), step 4
@@ -507,7 +509,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
     }
     p.frag_shuffle_fallback = f.driver_id == VK_DRIVER_ID_AMD_PROPRIETARY;
     p.position_invariant = !f.nvidia();
-    p.equal_depth_bias = f.intel() ? 64.0f : 0.0f;
+    p.equal_depth_bias = f.driver_id == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS ? 64.0f : 0.0f;
     p.mesh_no_optimizer = f.amd() && !f.radv();
     // (corrected: the driver the deadlock is in, RADV, and not "AMD off Windows", which also took AMDVLK. To go back:
     // !f.windows && f.amd(), here and in create_device)

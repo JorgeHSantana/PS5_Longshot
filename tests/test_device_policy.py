@@ -211,15 +211,18 @@ PCS = [
             "room_in_blocks_rule squeeze_damped threaded_auto_render threaded_auto_recorder",
          num=(64, 0, 0, 2, 0, 4, 4741, 2032, 641, 481, 962, -1, 256, 12, 32, 16, 97, 3, 4, 4, 6, 6, 3)),
     # (corrected: compute_builds_serial is off, as issue 496 is the compiler of Intel's Windows driver; by the vendor it
-    # was on here. The equal-depth margin and the part split still ask the vendor and reach Mesa's driver: their sites
-    # name no driver, so a run on ANV has to say, and the study doubts both)
+    # was on here. No equal-depth margin either: the game's EQUAL holds on Mesa's compiler (Iris Xe, Mesa 26.2.7:
+    # Kakariko, the Death Mountain gate and trail without a hole), and the margin's LESS_OR_EQUAL let the terrain draw
+    # in front of the canyon's rocks on Death Mountain Trail, a flat wall where the depth pass had none. The part split
+    # still asks the vendor and reaches Mesa's driver: its site names no driver, so a run on ANV has to say, and the
+    # study doubts it)
     dict(name="Iris Xe, ANV",
          facts=(0x8086, 0x9A49, "INTEL_OPEN_SOURCE_MESA", 0, "INTEGRATED_GPU", "Mesa 26.0.1", "Mesa Intel(R) Xe Graphics (TGL GT2)", 0, 0,
                 11850, 10000, 15800, 8, 8, 4, 0, 1, 1, 0, 0, 1, 1, 32, 32, 0xFF),
          on="fetch_bounds networks_left_out gather_offset position_invariant split_before_draw dma_buf_imports "
             "allowance_at_count_rule ub_snapshot global_table_loop small_vram_textures astc_bc_all linux_hold_caps_budget "
             "threaded_auto_render drop_modules_small_ram",
-         num=(64, 0, 20000, 1, 85, 16, 2560, 2048, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 2, 2, 4, 4, 2)),
+         num=(0, 0, 20000, 1, 85, 16, 2560, 2048, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 2, 2, 4, 4, 2)),
     # (neither discrete nor integrated: no mirrors, yet a dedicated card's budgets, blocks at the start and 97% line.
     # The study doubts it: the two tests are not a partition)
     dict(name="llvmpipe",
