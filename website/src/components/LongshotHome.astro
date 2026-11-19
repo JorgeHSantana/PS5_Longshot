@@ -7,7 +7,7 @@ import { buildFeed } from '../lib/progress-feed.ts';
 const feed = await buildFeed();
 const stable = feed?.stableRelease;
 const date = (value: string) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
-// The game's newest version for the release section: the stable one, else the newest published v-tag (an rc).
+// The game's newest version for the release section: the stable one, else the newest published v-tag.
 // Kept apart from the launcher's, which has version numbers of its own (MagicBeanDev/LongshotLauncher#135).
 const tagOf = (url: string) => decodeURIComponent(url.split('/').at(-1) || '');
 const preview = (feed?.items || []).filter(i => i.kind === 'release' && /^v\d/.test(tagOf(i.url)))

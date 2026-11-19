@@ -41,12 +41,11 @@ deleted by hand.
 
 ## Channels
 
-The launcher builds from one of three channels:
+The launcher builds from one of two channels:
 
 | Channel | What it is |
 |---|---|
 | **Stable** | The released version. Choose this to play. |
-| **Release candidate** | The next version, before it's released. |
 | **Nightly** | Built after every change. Untested: it may break your saves or settings, so back them up first. |
 
 To go back to a released version, build one from the **Stable** channel. When you report a problem, say the exact

@@ -17,7 +17,7 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: the version's name (v3.1.0, v3.1.0-rc.1, nightly-<count>-<commit>); its files are uploaded
+        description: the version's name (v3.1.0, nightly-<count>-<commit>); its files are uploaded
         type: string
         required: true
       ref:

@@ -40,10 +40,10 @@ test('the launcher download buttons get a channel picker, hidden until a script 
 
 test('a channel moves the launcher links, and only them', () => {
   assert.equal(launcherHref('/download/launcher/windows', 'nightly'), '/download/launcher/nightly/windows');
-  assert.equal(launcherHref('/download/launcher/nightly/windows-portable', 'rc'), '/download/launcher/rc/windows-portable');
-  assert.equal(launcherHref('/download/launcher/rc/linux', ''), '/download/launcher/linux');
-  assert.equal(launcherHref('/download', 'rc'), '/download');
-  assert.equal(launcherHref('/download/launcher/nightly', 'rc'), '/download/launcher/nightly');
+  assert.equal(launcherHref('/download/launcher/nightly/windows-portable', 'stable'), '/download/launcher/stable/windows-portable');
+  assert.equal(launcherHref('/download/launcher/stable/linux', ''), '/download/launcher/linux');
+  assert.equal(launcherHref('/download', 'stable'), '/download');
+  assert.equal(launcherHref('/download/launcher/nightly', 'stable'), '/download/launcher/nightly');
 });
 
 test('symptom cards keep every line of the help page, its anchors and the old topic anchors', async () => {

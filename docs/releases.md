@@ -14,7 +14,7 @@ GitHub, and nothing is compatible with Hookshot's 2.x updates (NotRexed/Hookshot
 |---|---|
 | **A release** | A Forgejo release of the repository: a tag, a page with the notes, and the product's files with `SHA256SUMS` and `SHA256SUMS.sig`. Nothing else: no package registry, no pointer files |
 | **Two products** | Longshot releases its **builders** (Windows and Linux). The launcher releases **itself**. Each from its own repository, with its own versions |
-| **Three channels each** | `stable` (tag `vX.Y.Z`), `rc` (tag `vX.Y.Z-rc.N`, and every stable), `nightly` (every push to `main`). Read from the release list |
+| **Two channels each** | `stable` (tag `vX.Y.Z`) and `nightly` (every push to `main`). Read from the release list |
 | **One key** | CI signs `SHA256SUMS` with the release key (ECDSA P-256). The launcher has the public key built in |
 | **tools.lock** | The builders' build tools, Windows' and Linux's, are not in Longshot's releases: `tools.lock` names each one (URLs, SHA-256, size) |
 | **Tags, not release PRs** | A maintainer releases by pushing a tag. CI checks the number against the commits, builds, signs and publishes. Notes by git-cliff |
@@ -62,7 +62,6 @@ launcher (`Core/ReleaseManifest.cs`, `Newest`) and in `scripts/release.py` (`new
 | Channel | Offers | For |
 |---|---|---|
 | `stable` | the newest `vX.Y.Z` that is published and not a pre-release | playing |
-| `rc` | the newest `vX.Y.Z-rc.N` or `vX.Y.Z` that is published | trying the next version before it is stable |
 | `nightly` | the newest `nightly-<count>-<8 hex>` that is published, by its count | every change, untested |
 
 - A **draft** is on no channel. CI creates each release as a draft, uploads every file, and publishes it last, so a run
@@ -72,14 +71,15 @@ launcher (`Core/ReleaseManifest.cs`, `Newest`) and in `scripts/release.py` (`new
 - The **nightlies** past the newest 5 are deleted, with their tags, by the run that makes a new one. Nothing else is pruned.
 - A push to `main` whose commits since the newest nightly put nothing in its notes (only `ci:` or `chore:`, which
   cliff.toml skips) makes **no nightly**: `release.py nightly-news` says no. The next one comes with what follows.
-- Anything else in the list is on no channel: a 2.x tag, a git describe name. (The builders' tools are not releases:
+- Anything else in the list is on no channel: a 2.x tag, a git describe name, an old release candidate (`vX.Y.Z-rc.N`:
+  there were some before the channel was dropped). (The builders' tools are not releases:
   they are packages, below.)
 - A nightly's count is the number of commits: for Longshot since the fork (e2a4d45, "Rename the project to Longshot"), for
   the launcher since its first commit.
 
 **Each build has its channel, and the launcher has its own.** In the launcher, *Settings > Channel for new builds* picks
 the channel a new build follows (each build keeps its own). *Settings > Launcher updates* picks the channel the launcher
-updates **itself** from: LongshotLauncher's stable, rc or nightly, independent of any build's. It defaults to the channel
+updates **itself** from: LongshotLauncher's stable or nightly, independent of any build's. It defaults to the channel
 of the launcher the player installed (a stable launcher follows stable).
 
 **No downgrades, no replays.** There is no pointer file to replay: the list is what it is. The launcher never updates a
@@ -218,8 +218,8 @@ Both repositories have the same workflows in `.forgejo/workflows/`, on Forgejo A
 | `third-party.yml` | the third_party rule (`scripts/check_third_party.py`) | (none) |
 
 Longshot also keeps `build-linux.yml` and `build-windows.yml` (also run on pull requests that change code) and
-`vulkan-dlss.yml` (the upscalers' build checks). A tag on a commit CI has released already (its nightly, or a stable's
-release candidate) is still built again, since every file carries its version (a release never ships a file that names
+`vulkan-dlss.yml` (the upscalers' build checks). A tag on a commit CI has released already (its nightly) is still built
+again, since every file carries its version (a release never ships a file that names
 another), but `release.py released-as` finds that release, checks its signed `SHA256SUMS` (one that does not check stops
 the run), and the build checks that ship no file and passed in its run are not run again. Every job runs on Linux: Longshot's Windows files are cross-built there,
 and what only Windows can check is a tester's (RELEASING.md, *Needs a Windows tester*). The runners are in Longshot's [docs/forgejo-runners.md](https://git.magicbean.dev/MagicBeanDev/Longshot/src/branch/main/docs/forgejo-runners.md).
@@ -229,10 +229,9 @@ and what only Windows can check is a tester's (RELEASING.md, *Needs a Windows te
 Pull requests are squash-merged, and their titles are Conventional Commits, so the commits on `main` say what changed. For
 a tag, `scripts/release.py check-tag` (in `release.yml`, before anything is built) refuses:
 
-- a name that is not `vX.Y.Z` or `vX.Y.Z-rc.N` of the product's numbers;
+- a name that is not `vX.Y.Z` of the product's numbers;
 - a tag that is not on `main`;
-- a tag that is not above every release there is (a stable `vX.Y.Z` is above its own `vX.Y.Z-rc.N`, so a stable tagged on
-  the same commit as a release candidate is the normal way);
+- a tag that is not above every release there is;
 - a number lower than the commits since the last stable call for:
 
 | Since the last stable | At least |
@@ -247,10 +246,9 @@ The first release of each product only needs its first number (Longshot `v3.0.0`
 ## Release notes
 
 git-cliff writes them at release time from the commit titles since the previous tag, with the repository's `cliff.toml`.
-For a stable, that is since the previous stable, so its notes cover its release candidates. A release candidate after the
-first has two lists: its own, headed `## <tag> (<date>), new since rc.N`, the commits since the rc before; then
-`## Earlier release candidates: rc.1, rc.2 (since <stable>)`, what those brought since the last stable in one list
-(`release.py notes`, git-cliff's `--ignore-tags`). The headings are Features,
+For a stable, that is since the previous stable. A nightly after the first has two lists: its own, headed
+`## <tag> (<date>), new since <nightly>`, the commits since the nightly before; then `## Earlier changes (since <stable>)`,
+what came since the last stable in one list (`release.py notes`). The headings are Features,
 Fixes, Performance, Reverted, Documentation, Code, Build and Tests; `ci` and `chore` are left out. The notes go on the
 release page only: nothing is committed back to `main`, and there is no changelog file to keep up (Hookshot's is in
 NotRexed/Hookshot).
@@ -262,7 +260,7 @@ right thing:
   installer), *Download for Linux* (the AppImage), and a small link to the portable zip, all through git-cdn.magicbean.dev
   (the same paths as git.magicbean.dev, from Cloudflare's edge).
 - **Longshot's releases** start with "To play, get the Longshot Launcher": the same big links, to the newest launcher of
-  the **same channel** (an rc to the launcher's rc, a nightly to its nightly, a stable to its stable) through the links
+  the **same channel** (a nightly to the launcher's nightly, a stable to its stable) through the links
   below, then "Don't download the files below": they are the builders the launcher installs.
 
 ## Download links
@@ -273,11 +271,11 @@ the newest launcher of each channel, read from LongshotLauncher's release list b
 | Link | Goes to |
 |---|---|
 | `https://longshot.magicbean.dev/download` | a page: the launcher for the visitor's system, from the best channel there is, and every channel |
-| `https://longshot.magicbean.dev/download/launcher/<os>` | that file of the best channel there is: stable, else rc, else nightly |
+| `https://longshot.magicbean.dev/download/launcher/<os>` | that file of the best channel there is: stable, else nightly |
 | `https://longshot.magicbean.dev/download/launcher/<channel>` | the channel's newest release page |
 | `https://longshot.magicbean.dev/download/launcher/<channel>/<os>` | that file of the channel's newest release |
 
-`<channel>` is `stable`, `rc` or `nightly`; `<os>` is `windows` (the setup), `windows-portable` (the zip) or `linux` (the
+`<channel>` is `stable` or `nightly`; `<os>` is `windows` (the setup), `windows-portable` (the zip) or `linux` (the
 AppImage). A channel with no release yet answers with a page that says so and offers the newest there is. The READMEs'
 download buttons and Longshot's release pages use these links; there are none for Longshot's builder files, which only
 the launcher downloads.

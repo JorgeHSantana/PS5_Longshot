@@ -70,7 +70,7 @@ what does not yet. Open problems are collected in tracking issues, linked below.
 
 Windows without installing: [portable zip](https://longshot.magicbean.dev/download/launcher/windows-portable) · Not sure?
 [longshot.magicbean.dev/download](https://longshot.magicbean.dev/download) picks for your computer. These links give the
-newest launcher (stable, or until there is one, the release candidate); for each channel's own, see
+newest launcher (stable, or until there is one, the nightly); for each channel's own, see
 [release channels](#release-channels).
 
 **Download the launcher, not the builder.** The files on [Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases)
@@ -234,12 +234,11 @@ does the same with `--cli --update <game folder>`.
 
 ### Release channels
 
-The launcher builds from one of three channels:
+The launcher builds from one of two channels:
 
 | Channel | What it is | The launcher |
 |---|---|---|
 | **Stable** | The released version. Choose this to play. | [Windows](https://longshot.magicbean.dev/download/launcher/stable/windows) · [portable](https://longshot.magicbean.dev/download/launcher/stable/windows-portable) · [Linux](https://longshot.magicbean.dev/download/launcher/stable/linux) |
-| **Release candidate** | The next version, before it is released. | [Windows](https://longshot.magicbean.dev/download/launcher/rc/windows) · [portable](https://longshot.magicbean.dev/download/launcher/rc/windows-portable) · [Linux](https://longshot.magicbean.dev/download/launcher/rc/linux) |
 | **Nightly** | Built from `main` after every change; the newest five stay on the releases page. Untested: it may break your saves or settings, so copy them first. | [Windows](https://longshot.magicbean.dev/download/launcher/nightly/windows) · [portable](https://longshot.magicbean.dev/download/launcher/nightly/windows-portable) · [Linux](https://longshot.magicbean.dev/download/launcher/nightly/linux) |
 
 A nightly launcher builds Longshot's nightlies by default; any launcher can build from any channel. To go back, build a

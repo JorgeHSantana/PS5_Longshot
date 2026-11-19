@@ -8,8 +8,7 @@ published, and how the Longshot Launcher installs it, is in [releases.md](releas
 
 | Channel | Versions | Made by |
 |---|---|---|
-| `stable` | `vX.Y.Z` | a tag `vX.Y.Z` pushed on a commit of `main` |
-| `rc` | `vX.Y.Z-rc.N`, and the stables: it offers the newest of both | a tag `vX.Y.Z-rc.N` on `main` (a stable moves it too) |
+| `stable` | `vX.Y.Z` | a tag `vX.Y.Z` pushed on a tested nightly's commit of `main` |
 | `nightly` | `nightly-<commits since the fork>-<8 hex of the commit>`, e.g. `nightly-412-1a2b3c4d` | every push to `main` |
 
 The `v` belongs to the tag, not to the version. Build metadata is not used. A nightly's count starts at the fork, the commit
@@ -19,10 +18,11 @@ update.
 
 One version covers the game (`longshot.exe` / `longshot`), the Vulkan back end, the lift pipeline and its scripts, and the
 builders: they are built from the same commit and released together. The **Longshot Launcher is released apart**, from
-MagicBeanDev/LongshotLauncher, with its own numbers (from v1.0.0) on the same three channels.
+MagicBeanDev/LongshotLauncher, with its own numbers (from v1.0.0) on the same two channels.
 
-The order (the launcher's `Core/Versions.cs`): stables and release candidates in semver order (`v3.1.0-rc.1` <
-`v3.1.0-rc.2` < `v3.1.0`), nightlies by their count. A nightly and a stable are not ordered: the launcher never offers one
+The order (the launcher's `Core/Versions.cs`): stables in semver order (`v3.1.0` < `v3.1.1` < `v3.2.0`), nightlies by
+their count. There are no release candidates any more: the old `vX.Y.Z-rc.N` tags (up to `v3.0.0-rc.8`) are on no
+channel. A nightly and a stable are not ordered: the launcher never offers one
 as an update of the other, and a build stays on its channel unless the player picks another.
 
 The "public" surface the rules protect is the command line of `make_game.py` and the builders, the `RX_` and `HOS_`
@@ -44,9 +44,8 @@ There are no release pull requests: a maintainer pushes a tag, and CI does the r
 | a `feat` | the next minor: `v3.3.0` |
 | only `fix`, `perf` and the rest | the next patch: `v3.2.2` |
 
-It also refuses a tag that is not on `main` or not above every release there is. Every stable is first a release
-candidate: `vX.Y.Z-rc.1`, then `-rc.2` and so on while fixes come in, then `vX.Y.Z` on the candidate that was good (the
-same commit). `python -I scripts/release.py next` prints the number and the notes before tagging.
+It also refuses a tag that is not on `main` or not above every release there is. A stable is tagged on the commit
+of a nightly that testers played: the nightly channel is where the next version is tried. `python -I scripts/release.py next` prints the number and the notes before tagging.
 
 ## Where the version appears
 

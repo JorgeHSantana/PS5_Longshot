@@ -1344,7 +1344,7 @@ shaders"), [getting started](getting-started.md), [common problems](common-issue
 2026-11-06). Change them all together.
 
 **Measure them again** after a change to the lift, the compile flags, the shader preparation or the toolchain
-(`tools.lock`), and before each release candidate. Build the way a player does, in new folders, so nothing is reused:
+(`tools.lock`), and before each stable. Build the way a player does, in new folders, so nothing is reused:
 
 ```sh
 export XDG_DATA_HOME=$PWD/data XDG_CACHE_HOME=$PWD/cache    # no tools, work folder or objects from earlier builds

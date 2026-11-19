@@ -146,8 +146,8 @@ notes and chat. Forgejo's `/releases/latest` covers stable only; these cover eac
 | Link | Goes to |
 |---|---|
 | `/download` | a page: the launcher for the visitor's system (by its User-Agent), from the best channel there is, and every channel |
-| `/download/launcher/<os>` | that file of the best channel there is: stable, else rc, else nightly |
-| `/download/launcher/<channel>` | the newest release page of `stable`, `rc` or `nightly` |
+| `/download/launcher/<os>` | that file of the best channel there is: stable, else nightly |
+| `/download/launcher/<channel>` | the newest release page of `stable` or `nightly` (`rc`, the channel there was, goes to stable) |
 | `/download/launcher/<channel>/<os>` | that file of the channel's newest release, such as `/download/launcher/stable/windows` |
 | `/download/launcher/versions.json` | the available launcher versions and their exact file links, using the same channel rules and cached release list |
 

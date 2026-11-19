@@ -548,7 +548,7 @@ since the last stable call for:
 | `feat` | the next minor: `v3.3.0` |
 | `fix`, `perf`, or any other type | the next patch: `v3.2.2` |
 
-Each is first a release candidate (`v3.3.0-rc.1`). git-cliff turns the titles into the release notes: Features, Fixes,
+A stable is tagged on a tested nightly's commit. git-cliff turns the titles into the release notes: Features, Fixes,
 Performance, and so on (`ci` and `chore` are left out). The details are in [docs/versioning.md](docs/versioning.md) and
 [docs/releases.md](docs/releases.md).
 
