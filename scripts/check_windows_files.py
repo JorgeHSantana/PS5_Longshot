@@ -29,7 +29,8 @@ TOP = ("LongshotBuilder.exe", "VERSION", "recomplauncher.json", "tools.lock")
 BUILDER = ("LongshotBuilder.exe", "LongshotBuilder.dll", "LongshotBuilder.deps.json", "LongshotBuilder.runtimeconfig.json",
            "LongshotBuilder-Setup.exe", "LICENSE",
            "hostfxr.dll", "hostpolicy.dll", "coreclr.dll", "clrjit.dll", "System.Private.CoreLib.dll",
-           "tools/nx2/make_game.py", "tools/scripts/tools.py", "tools/version.txt")
+           "tools/nx2/make_game.py", "tools/scripts/tools.py", "tools/version.txt",
+           "tools/third_party/renhdrum/renhdrum.dll")   # (RenHDrum, some controllers' vibration: scripts/renhdrum.py build)
 # (the libraries the setup may import: Windows' own, and the UCRT's api-ms-win-crt-*; never llvm-mingw's libc++ or winpthread)
 SETUP_IMPORTS = re.compile(r"^(kernel32|user32|gdi32|advapi32|shell32|ole32|comctl32|winhttp|bcrypt|shlwapi|oleaut32)\.dll$"
                            r"|^api-ms-win-crt-[a-z0-9-]+\.dll$", re.I)

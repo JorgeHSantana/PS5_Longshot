@@ -2321,6 +2321,9 @@ static int game_main(int argc, char **argv) {
         call_guest(c, hos_module_init[i], sp, what);
     }
     call_guest(c, hos_entry_nnMain, sp, "nnMain");
+    /* (longshot) the game is over: RenHDrum's backends stop and let go of the pads (host/rumble_renhdrum.c) */
+    void hos_sdl_vibration_shutdown(void);
+    hos_sdl_vibration_shutdown();
     hos_log("nnMain returned");
     void hos_crash_clean_end(void);
     hos_crash_clean_end();

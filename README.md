@@ -507,7 +507,9 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Invert camera Y | Off, On | Off |
 | | Camera speed | 50% to 400%, in steps of 25 | 100% |
 | | Stick dead zone | Default (24%), 5%, 10%, 15%, 20%, 30% | Default (24%) |
-| | Rumble strength | Off, 25% to 150%, in steps of 25 | 100% |
+| | Vibration | Auto, Basic, Off | Auto |
+| | Vibration strength | 25% to 200%, in steps of 25 | 100% |
+| | Test vibration | an action: Confirm buzzes the controller used last; the value says what plays it | Motors |
 | | Layout preset | Nintendo (Def), Xbox / PC, Swap Face, Switch 2 Pro; Custom once you bind a button yourself (on the Controls page) | Nintendo (Def) |
 | | Button prompts | Auto, Switch, Xbox, PlayStation 4, PlayStation 5, Steam Deck, Keyboard (on the Controls page; changes at once where the game allows it, else after a restart) | Auto |
 | | Motion | Opens the Motion page: Motion controls (Off, On; On), Motion sensitivity X (10% to 600%) and Y (10% to 300%, in steps of 10; 100%), Invert motion X and Y (Off, On; Off), Motion deadzone (Low, Standard, High; Standard) | |
@@ -853,8 +855,14 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   game's own camera speed option still picks the speed this multiplies.
 - **Stick dead zone:** how far a stick moves from center in any direction before it counts. Default is about 24%. Use
   a lower value for a precise stick or a higher one for a stick that drifts. The game also applies its own dead zone.
-- **Rumble strength** scales the controller's rumble: 100% is the game's own, Off turns it off. The game's HD rumble
-  goes to a controller's heavy and light motors by its frequency.
+- **Vibration** picks how the controllers vibrate. Auto, the default, plays the best each one can: a DualSense on a USB
+  cable its voice coils (the game's fine vibration, both bands as they are), a Switch Pro Controller or Joy-Con its own
+  HD rumble, every other controller its two motors. Basic plays the two motors on every controller. Off stops it all.
+- **Vibration strength** scales it, every controller's: 100% is what the game asks for, from 25% to 200%. A change gives
+  a short buzz at the new strength. The game's bands go to a controller's heavy and light motors by their frequency.
+- **Test vibration** buzzes the controller used last for half a second, and its value says what plays that controller now
+  (Motors, HD rumble, Fine haptics (cable), ...); its help line says why, for example a DualSense whose sound card was not
+  found, or RenHDrum missing.
 - **Motion controls** (Controls tab, Motion page): the controller's gyroscope aims where the game uses motion, as on the Switch. It works with
   Switch Pro controllers and pads in Switch mode, DualSense and DualShock 4 (through SDL). Its row
   says whether the connected pad has a gyroscope; Off leaves the game seeing a pad lying still. **Motion sensitivity X/Y**
@@ -896,7 +904,7 @@ play on a controller or the keyboard, until the mouse moves.
 **Rumble:** a Nintendo Switch Pro Controller or Joy-Con plays the game's HD rumble as the Switch does, each side and
 both frequency bands as the game asks, with SDL3 (the Windows game brings it; on Linux the system's SDL3, where it has
 one). Other controllers, Switch 2 controllers, a pair of Joy-Cons used as one controller, and SDL2's own library get
-the game's rumble on their two motors. The menu's Rumble strength scales it too. `HOS_HD_RUMBLE=0` sends the Switch
+the game's rumble on their two motors. The menu's Vibration strength scales it too. `HOS_HD_RUMBLE=0` sends the Switch
 controllers the motor rumble too. On Linux, SDL talks to the Switch controller itself through its hidraw device, which
 needs read and write access for your user; Steam's udev rules (the `steam-devices` package on most distributions) give
 it. Without them the kernel's hid-nintendo driver runs the controller, and it gets the motor rumble. HD rumble goes to
@@ -922,6 +930,19 @@ have the controller: close Steam (it takes it for Steam Input) and any bridge su
 says another program has it. A controller that stops taking rumble (it happens; the log says so) plays its own buzz and
 click instead until it is unplugged and plugged in again. Not over Bluetooth, where the controller speaks a pairing of
 Nintendo's own. `HOS_SWITCH2=0` leaves the controller alone.
+
+**DualSense haptics (RenHDrum):** a DualSense on a USB cable is also a four-channel 48 kHz sound card, and its third and
+fourth channels drive its voice coils. With RenHDrum beside the game (`renhdrum.dll`, `renhdrum.so` on Linux), Longshot
+sends them the game's own vibration values as they are (both bands, both sides, no flattening to two motors), so the pad
+plays the game's fine vibration instead of a rough imitation of it; Vibration's Auto does it, and Vibration strength
+scales it. On Linux, the sound card is opened through the system's SDL as on Windows. Without RenHDrum, or with no sound
+card found, nothing breaks: the pad gets its motors, and Test vibration says why. RenHDrum is MIT OR Apache-2.0
+(`third_party/renhdrum/NOTICE`), built from its source in `third_party/renhdrum/`: the Longshot Builder carries it and puts
+it beside the game, and a build from a checkout gets it with `python -I scripts/renhdrum.py build`.
+
+RenHDrum can also play a DualSense over Bluetooth (its voice coils, through HID report 0x32), an Xbox One or Series
+controller's four motors (the triggers' too) and a Switch controller's HD rumble. Those are being tested: set
+`HOS_RUMBLE_BACKEND=renhdrum` to try them, and tell us how they feel (`motors` and `hd` pick the others for every pad).
 
 To change which gamepad button or key presses a Switch button, or which keys move, walk and turn the camera, open the
 Controls tab's Controls page. Choose a row and a column (Gamepad or Keyboard), press <kbd>Enter</kbd> (or the bottom

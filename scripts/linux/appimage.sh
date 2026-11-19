@@ -56,7 +56,19 @@ cp -a gpu/render/*.h "$T/gpu/render/"
 # (every gpu/vk header the host's sources include: v2.0.6 shipped without oot_cheat_items.h and no Linux build finished, issue 990.
 # tests/test_appimage_headers.py checks that this covers what host/ includes)
 for h in $(grep -rhoE 'gpu/vk/[A-Za-z0-9_/]+[.]h' host | sort -u); do if [ -f "$h" ]; then mkdir -p "$T/$(dirname "$h")" && cp -a "$h" "$T/$h"; fi; done
+# (RenHDrum's C header: host/rumble_renhdrum.c, which every player's build compiles, includes it)
+mkdir -p "$T/third_party/renhdrum/include"
+cp third_party/renhdrum/include/renhdrum.h "$T/third_party/renhdrum/include/"
 cp -a third_party/opus "$T/third_party/"
+# (RenHDrum, which some controllers' vibration plays through (host/rumble_renhdrum.c): renhdrum.so, built by the workflow
+# (scripts/renhdrum.py build --target linux) and named by RENHDRUM_SO; a player's build puts it beside the game. Without it
+# every controller keeps its motors or its own HD rumble)
+if [ -n "${RENHDRUM_SO:-}" ]; then
+    mkdir -p "$T/licenses/renhdrum"
+    cp "$RENHDRUM_SO" "$T/third_party/renhdrum/renhdrum.so"
+    cp third_party/renhdrum/LICENSE-MIT third_party/renhdrum/LICENSE-APACHE third_party/renhdrum/NOTICE \
+       third_party/renhdrum/PROVENANCE.md "$T/licenses/renhdrum/"
+fi
 cp -a third_party/kenney_input "$T/third_party/"
 cp -a third_party/kenney_input_keyboard "$T/third_party/"
 # (the Vulkan back end's sources, which every player's build compiles (nx2/build.py), and, for NVIDIA DLSS when ticked in the

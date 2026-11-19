@@ -6,7 +6,7 @@ data is involved. Python's standard library only.
         key). --host (default: this system): windows is tools.lock's, the one players get; linux is the same release's Linux
         build (LINUX_LLVM_MINGW below), which the release's Windows files are made with on the Linux runner
     python -I scripts/builder_package.py package <out folder> --publish <dotnet publish folder> --setup <setup exe>
-            [--third-party-objects <folder>]
+            [--third-party-objects <folder>] [--renhdrum <dll>]
         the builder's folder, LongshotBuilder\\ in the zip: the published builder, the setup (a game folder's longshot.exe:
         make_game.py copies it there), LICENSE,
         the tracked gpu, host, nx2, scripts and third_party under tools\\, the play profiles (assets/profiles/: the hot list
@@ -14,7 +14,8 @@ data is involved. Python's standard library only.
         (assets/pipeline_states/, which must be there and read). None of tools.lock's tools: the setup or the launcher adds
         those on the player's PC. --third-party-objects: the third-party code's objects (nx2/third_party_objects.py make, with
         llvm-mingw and tools.lock's cpm), as tools\\third_party_objects, which a player's build links instead
-        of compiling them
+        of compiling them. --renhdrum: renhdrum.dll (scripts/renhdrum.py build), as tools\\third_party\\renhdrum\\renhdrum.dll,
+        which a player's build places beside the game (nx2/build.py) for the controllers RenHDrum plays (host/vibration.h)
     python -I scripts/builder_package.py zip <package folder> <version> --setup <setup exe> --out <zip>
         LongshotBuilder-<version>-windows-x64.zip: LongshotBuilder.exe (the setup), LongshotBuilder\\ (the package),
         tools.lock, VERSION and recomplauncher.json (RecompLauncher reads it at the top). Deterministic: the same files give
@@ -103,6 +104,17 @@ def package(a):
             print("error: %s has no manifest.json (nx2/third_party_objects.py make)" % objects, file=sys.stderr)
             return 1
         shutil.copytree(objects, os.path.join(tools, "third_party_objects"))
+    dll = getattr(a, "renhdrum", None)
+    if dll:   # (scripts/renhdrum.py build: where nx2/build.py looks for it, as in a checkout)
+        spec = importlib.util.spec_from_file_location("renhdrum", os.path.join(ROOT, "scripts", "renhdrum.py"))
+        renhdrum = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(renhdrum)
+        with open(dll, "rb") as f:
+            bad = renhdrum.problems(f.read())
+        if bad:
+            print("error: %s: %s" % (dll, "; ".join(bad)), file=sys.stderr)
+            return 1
+        copy(dll, os.path.join(tools, "third_party", "renhdrum", "renhdrum.dll"))
     print("package folder: %s" % out)
     return 0
 
@@ -166,6 +178,7 @@ def main():
     s.add_argument("--publish", required=True)
     s.add_argument("--setup", required=True)
     s.add_argument("--third-party-objects")
+    s.add_argument("--renhdrum")
     s = sub.add_parser("zip")
     s.add_argument("package")
     s.add_argument("version")

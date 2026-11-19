@@ -1585,6 +1585,7 @@ and clock inputs; actual Windows/Linux capture and menu rendering still require 
 | `crt_lines` | 0 240 virtual lines (default), 1 480, 2 720; capped at half the destination height, at least one line |
 | `hud_layout` | The HUD layout row, on a screen that is not 16:9: 0 the HUD's corners at the screen's edges (default), 1 the HUD in the middle 16:9 (fitted to the width on a narrower screen). Read at each present (`host/hos_wide_ui.c`, option 71): a change shows at once. `HOS_WIDE_UI`, when set, stands over it |
 | `sharpness`, `rumble_strength`, `motion_sensitivity_x`, `motion_sensitivity_y`, `walk_speed` | percent |
+| `vibration` | 0 Auto, 1 Basic (every controller's motors), 2 Off: the Controls page's Vibration row (`host/vibration.h`). An options file from before it, whose `rumble_strength` is 0, reads as Off. `rumble_strength` is the Vibration strength row, 25 to 200 |
 | `mouse_sensitivity` | hundredths: 100 is 1.00 |
 | `field_of_view` | 50 to 150 percent of the current vertical gameplay FOV; 100 is the original. Applies immediately, before projection and culling. The resulting vertical angle stays within 5 to 140 degrees |
 | `shadow_resolution` | the sun's shadow maps: 0 Auto (the default: by the memory tier, `memory_budget` or else Auto (this PC)'s, the game's 1600 on Minimum and Low, 2200 on Balanced, 3072 from High up; `menu_shadow_res`), 1 Game's (1600 pixels a side), 2 High (2200), 3 Highest (3072). Read each frame (`host/oot_shadow.c`), so a change applies at once. A Quality preset sets it back to 0 |

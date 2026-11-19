@@ -1390,6 +1390,10 @@ static void vibration_send(uint64_t handle, uint64_t value) {
     }
     void hos_sdl_rumble_hd(int side, const float value[4]);   /* pad_sdl.c: the value as it is, for HD rumble */
     hos_sdl_rumble_hd(dev, v);
+    /* (longshot) the same four values, as they are, to RenHDrum's backends (host/rumble_renhdrum.c): they keep the
+       bands apart, which rumble_map above has just flattened for the motors */
+    void rh_push(int side, const float value[4]);
+    rh_push(dev, v);
     void hos_sdl_rumble(float low, float high);   /* pad_sdl.c */
     hos_sdl_rumble(amp[0][0] > amp[1][0] ? amp[0][0] : amp[1][0], amp[0][1] > amp[1][1] ? amp[0][1] : amp[1][1]);
 }

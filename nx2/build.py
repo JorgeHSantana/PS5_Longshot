@@ -1690,6 +1690,18 @@ def compile_one(job):
     return src, time.time() - t, None
 
 
+def copy_renhdrum(out, name):
+    """(longshot) RenHDrum beside the game (renhdrum.dll, renhdrum.so on Linux): host/rumble_renhdrum.c loads it by full
+    path from the game's own folder, for the controllers it plays (host/vibration.h). scripts/renhdrum.py build makes it,
+    the Builder and the AppImage carry it in third_party/renhdrum/. Optional: without it every controller keeps its motors
+    or its own HD rumble"""
+    rh = os.path.join(kit.HERE, "..", "third_party", "renhdrum", name)
+    dst = os.path.join(out, name)
+    if os.path.exists(rh) and (not os.path.exists(dst) or os.path.getsize(dst) != os.path.getsize(rh)):
+        import shutil
+        shutil.copyfile(rh, dst)
+
+
 def main():
     kit.wait_for_quiet('the compile')
     p = argparse.ArgumentParser()
@@ -2246,6 +2258,7 @@ def main():
         if sdl and os.path.exists(sdl):
             import shutil
             shutil.copyfile(sdl, os.path.join(out, "libSDL2-2.0.so.0"))
+        copy_renhdrum(out, "renhdrum.so")
     elif a.standalone and not vk_only:
         exe = os.path.join(out, "longshot.exe")   # (+ longshot.map: crash offsets -> f_<guest address>)
         t = time.time()
@@ -2291,6 +2304,7 @@ def main():
         if os.path.exists(sdl3) and (not os.path.exists(sdl3_dst) or os.path.getsize(sdl3_dst) != os.path.getsize(sdl3)):
             import shutil
             shutil.copyfile(sdl3, sdl3_dst)
+        copy_renhdrum(out, "renhdrum.dll")
     if vk_jobs:   # (longshot_vk.dll beside the exe: loaded by host/rx_backend.c)
         vdll = os.path.join(out, VK_LIB)
         vrsp = os.path.join(out, "vk_objs.rsp")

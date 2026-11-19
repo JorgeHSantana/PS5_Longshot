@@ -164,6 +164,7 @@ SW(HOS_RESTART_OF, diag, int, "unset: no earlier run to wait for", "The process 
 SW(HOS_RES_LOG, diag, bool, "off", "Logs the 3D's resolution scale and the game's dynamic-resolution fields every 300 presents.")
 SW(HOS_RES_SCALE, player, float, "the menu's Resolution scale", "The fixed-resolution path's 3D scale, over the Insert menu's Resolution row.")
 SW(HOS_RT_POOL_MB, tune, int, "the game's pool scaled with the output's pixels: at least 512 MB, 900 MB past 4K", "Sets the size of the game's render-target pool in MB, over the scaled default.")
+SW(HOS_RUMBLE_BACKEND, attempt, enum, "auto: the Vibration row's Auto (RenHDrum for a DualSense on a cable, a Switch controller's own HD rumble, the motors otherwise)", "renhdrum: RenHDrum for every controller it can play (a DualSense over Bluetooth, an Xbox One or Series controller's four motors, a Switch controller's packets), for testers; motors: every controller's motors; hd: no RenHDrum at all (host/vibration.h).")
 SW(HOS_SAMPLE, diag, string, "off", "Samples the named thread's instruction pointer every millisecond (with HOS_PROFILE_EVERY).")
 SW(HOS_SAMPLE_ALL, diag, string, "off (HOS_PROFILE=1 sets it to the profile folder's all.txt)", "Writes every game and renderer thread's stack every 2 ms to the path, while <path>.go exists.")
 SW(HOS_SAMPLE_FILE, diag, string, "unset: HOS_SAMPLE logs its most frequent places only", "Writes every HOS_SAMPLE sample's whole stack to the given file.")

@@ -84,6 +84,14 @@ enum { HOS_OPT_TRANSITION_AUTOSAVE = 59 };
    as the right stick) read it by its number, as they read 8. The existing option callback: no new member. 59 is the
    transition autosave's and 60 stays the item wheel's.) */
 enum { HOS_OPT_MOUSE_INVERT_X = 61 };
+/* (longshot) Vibration: 0 Auto, 1 Basic, 2 Off (host/vibration.h). Auto plays the best each controller can do (a
+   DualSense on a cable its voice coils through RenHDrum, a Switch controller its own HD rumble, the others their motors),
+   Basic every controller's motors, Off nothing. The strength is option 9, every backend's. 63 and 64: 58 is the render
+   thread's, 59 transition autosave, 60 reserved for the item wheel, 61 mouse invert X; 62, 65 and 66 are free */
+enum { HOS_OPT_VIBRATION = 63 };
+/* (longshot) What plays the controller used last, written back by the host each poll (host/pad_sdl.c): its kind times 16
+   plus what it says (host/vibration.h's VIB_PAD_*, VIB_SAY_*); Test vibration's cell and help read it. */
+enum { HOS_OPT_VIBRATION_STATUS = 64 };
 /* (HOS_OPT_HUD_LAYOUT, 71: Graphics' HUD layout, host/hos_wide_ui.c reads it at each present by its number: on a screen
    that is not 16:9, 0 the HUD's corners at the screen's edges, 1 the HUD in the middle 16:9 as before #95 (on a narrower
    screen fitted to its width, as the menus). HOS_WIDE_UI, when set, stands over it. The existing option callback: no new

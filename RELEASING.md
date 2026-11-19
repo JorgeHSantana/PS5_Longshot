@@ -213,6 +213,11 @@ for Linux. A bump is a pull request that changes its line:
   `add` publishes the archive as a new package version (`<name>-<system>/<version>/<sha256>-<name>.zip`, under the
   organization's *Packages*) and writes the line. A version's files never change: new bytes are a new version. Check that nothing made
   from the game is in it (CONTRIBUTING.md). A play profile is not a tool: play profiles are committed in `assets/profiles/`.
+  - **`renhdrum.dll` is not one of these tools.** The Builder's release builds it from the source in
+    `third_party/renhdrum` (`scripts/renhdrum.py build` in `.forgejo/workflows/build-windows.yml`, with the llvm-mingw
+    above and a pinned Rust) and ships it in the package, where a player's build finds it. A newer RenHDrum:
+    `third_party/renhdrum/PROVENANCE.md` says how. A newer Rust: `RUST_VERSION` and the parts' SHA-256 in
+    `scripts/renhdrum.py` (static.rust-lang.org has a `.sha256` beside each part).
 - **A Linux tool** (LLVM, FFmpeg or dav1d, SDL2, the Vulkan headers, the sysroot): they are all ours, made from
   `scripts/linux/deps.sh`'s pinned downloads, on the system the AppImage is for (Ubuntu 22.04: the sysroot is its C library).
   1. Change the version and its `sha256` pin in `scripts/linux/deps.sh` (a tag archive's pin is what it unpacks to: the

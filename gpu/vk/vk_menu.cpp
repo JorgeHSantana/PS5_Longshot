@@ -1040,7 +1040,43 @@ const char* hn_mic(int v, int variant) {
     if (variant > 1) return nullptr;
     return missing ? "Not plugged in: Default stands in until it is back." : "This microphone, by its name. A change applies at once.";
 }
-const char* tx_rumble(int v) { return v ? tx_percent(v) : "Off"; }
+// (longshot) Vibration (host/vibration.h): what plays each controller, and how strongly. Auto plays the best a controller
+// can do, Basic its motors, Off nothing; the strength is one percent of what the game asks for, every backend's. The host
+// writes back what plays the controller used last (HOS_OPT_VIBRATION_STATUS: its kind times 16, plus what it says), which
+// Test vibration's cell and help show.
+const char* tx_vibration(int v) {
+    static const char* t[] = {"Auto", "Basic", "Off"};
+    return (unsigned)v < 3 ? t[v] : t[0];
+}
+std::atomic<int> vibration_status_cache{0};   // (no controller until the host reports)
+int vibration_says() { return vibration_status_cache.load(std::memory_order_relaxed) % 16; }
+const char* vibration_cell() {
+    static const char* t[] = {"No controller", "Off", "Motors", "HD rumble", "Fine haptics (cable)",
+                              "Fine haptics (Bluetooth)", "Four motors", "HD rumble (RenHDrum)", "Motors: no sound card",
+                              "Motors: no RenHDrum", "Motors (Bluetooth)"};
+    const int s = vibration_says();
+    return (unsigned)s < sizeof t / sizeof t[0] ? t[s] : t[2];
+}
+const char* vibration_why(int s) {
+    static const char* t[] = {
+        "No controller is connected.", "Vibration is Off.", "Its two motors play the game's vibration.",
+        "Its own HD rumble plays the game's vibration as it is.",
+        "Its voice coils play the game's fine vibration, through its USB cable.",
+        "Its voice coils play the game's fine vibration over Bluetooth. Still being tested.",
+        "All four of its motors play, the triggers' too. Still being tested.",
+        "RenHDrum makes its HD rumble. Still being tested.",
+        "Its fine haptics play through the sound card it has on a USB cable, which was not found: its motors play "
+        "meanwhile.",
+        "Its fine haptics need RenHDrum beside the game (renhdrum.dll, or renhdrum.so on Linux), which is not there: its "
+        "motors play.",
+        "Over Bluetooth its motors play; on a USB cable, its voice coils play the game's fine vibration."};
+    return (unsigned)s < sizeof t / sizeof t[0] ? t[s] : nullptr;
+}
+// (under Test vibration's help: what plays the controller now; every one, for the help's height)
+const char* hn_vibration_test(int v, int variant) {
+    (void)v;
+    return vibration_why(variant < 0 ? vibration_says() : variant);
+}
 // (longshot) Menu size: how large the overlays are drawn (vk_ui.h unit), Medium unless the player chooses Small or Large. It
 // was Auto by default, Large in fullscreen at 1080 lines and up while a controller opened the menu: the menu changed size with
 // the input that opened it, and the version in its banner no longer fitted. An options file's menu_size=0 (that Auto): Medium
@@ -1802,8 +1838,15 @@ Row rows[] = {
      "How far a stick moves from center in any direction before the game sees it. "
      "Lower for a precise stick, higher for one that drifts. "
      "The game's own dead zone still follows.", nullptr, false, true},
-    {TAB_CONTROLS, "Rumble strength", &opts.rumble, 0, 150, 25, tx_rumble,
-     "How strongly the controller rumbles, in percent of the game's rumble. Off turns it off.", nullptr, false, true},
+    {TAB_CONTROLS, "Vibration", &opts.vibration, 0, 2, 1, tx_vibration,
+     "How the controller vibrates. Auto plays the best it can: a DualSense on a USB cable its voice coils, a Switch "
+     "controller its own HD rumble, every other controller its motors. Basic plays the motors on every controller. Off "
+     "stops it.", nullptr, false, true},
+    {TAB_CONTROLS, "Vibration strength", &opts.rumble, 25, 200, 25, tx_percent,
+     "How strongly the controller vibrates, in percent of what the game asks for. A change gives a short buzz at the new "
+     "strength.", nullptr, false, true},
+    {TAB_CONTROLS, "Test vibration", nullptr, 0, 0, 0, nullptr,
+     "A short buzz on the controller used last. The value says what plays its vibration now.", hn_vibration_test},
     {TAB_MOTION, "Motion controls", &opts.gyro, 0, 1, 1, tx_gyro,
      "Aims and looks with the controller's gyroscope where the game uses motion, as on the Switch. Works with Switch Pro "
      "controllers and pads in Switch mode, DualSense and DualShock 4. Shown beside it: whether the connected pad has one.", hn_gyro,
@@ -2304,8 +2347,9 @@ bool mouse_read = false;   // (the menu has read the mouse since it opened)
 bool is_slider(const Row& r) { return !strcmp(r.name, "Microphone gain") || r.value == &opts.sharpness || r.value == &opts.mouse_sens || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov; }
 /// (a scale: the arrows and a click stop at its ends; Rumble strength would go from Off to its strongest)
 bool stops_at_ends(const Row& r) { return !strcmp(r.name, "Microphone gain") || r.value == &opts.ultrawide || r.value == &opts.mouse_sens || r.value == &opts.rumble || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov; }
-/// (the ini's Rumble strength on the menu's steps: 0 to 150, the nearest 25)
-int rumble_step(int v) { return (std::min(std::max(v, 0), 150) + 12) / 25 * 25; }
+/// (the ini's Vibration strength, rumble_strength=, on the menu's steps: 25 to 200, the nearest 25. 0 was Off before the
+/// Vibration row, which menu_init turns into Vibration Off)
+int rumble_step(int v) { return (std::min(std::max(v, 25), 200) + 12) / 25 * 25; }
 // (longshot) A run's environment over a saved row (RX_VK_PACE=1, HOS_OUTPUT_RES=...): for that run only. save() writes the
 // player's own value while the row still holds the environment's; once the player changes the row, theirs is kept. (These
 // were copied into the row and the next save wrote them into longshot_options.ini, so a test run's switch stayed for good)
@@ -2362,6 +2406,9 @@ const char* ini_key(const Row& r) {
     if (r.value == &opts.dlss_pre_bloom) return "dlss_pre_bloom";   // (as RX_VK_DLSS_PRE_BLOOM)
     if (r.value == &opts.handheld) return "handheld_profile";   // (the Profile row; host/nn_applet.c reads it at the start)
     if (r.value == &opts.ultrawide) return "ultrawide";   // (the Aspect ratio row; host/hos_main.c reads it at the start)
+    // (longshot) Vibration (host/vibration.h), and its strength under the key it had as Rumble strength
+    if (r.value == &opts.vibration) return "vibration";
+    if (r.value == &opts.rumble) return "rumble_strength";
     static char k[48];
     size_t n = 0;
     for (const char* p = r.name; *p && n + 1 < sizeof k; p++) k[n++] = *p == ' ' ? '_' : (char)tolower(*p);
@@ -2790,6 +2837,8 @@ void weak_laptop_apply() {
     logf("menu: Set up for a weak laptop: Render resolution %d%%, the game's own upscaler, plain scale, handheld profile (after a "
          "restart), Minimum's mip trimming", ur::percent(opts.resolution));
 }
+/// (longshot) the Test vibration row: an action, not a page (the host's rumble_test, as a strength change gives)
+bool is_vibration_test_row(const Row& r) { return !r.value && r.tab == TAB_CONTROLS && !strcmp(r.name, "Test vibration"); }
 std::string game_folder() {
     char exe[MAX_PATH];
     const DWORD n = game_module_path(exe, MAX_PATH);
@@ -4105,6 +4154,7 @@ void row_value_cell(ui::Ctx& c, const Row& r, ImVec2 va, ImVec2 vb, bool selecte
         else if (pending == &r) choice_cell(c, va, vb, "Press again to confirm", selected, false, false);
         else if (is_share_row(r)) choice_cell(c, va, vb, share_value.empty() ? "Save" : share_value, selected, false, false);   // (an action, not a page)
         else if (&r == &rows[kBugReportRow]) choice_cell(c, va, vb, bug_report_cell(), selected, false, false);   // (how the last report went)
+        else if (is_vibration_test_row(r)) choice_cell(c, va, vb, vibration_cell(), selected, false, false);   // (longshot: what plays it)
         else {
             choice_cell(c, va, vb, "", selected, false, false);
             ui::triangle(c, ImVec2(vb.x - 15 * s, mid), 10 * s, 1, selected ? ui::kGoldInk : ui::kInk);
@@ -4209,6 +4259,7 @@ void draw_options(ui::Ctx& c) {
     if (is_nfc_scan(selr)) hint = nfc_scan_says(-1);
     if (is_share_row(selr) && !share_said.empty()) hint = share_said.c_str();   // (what the last save did)
     if (&selr == &rows[kBugReportRow]) hint = bug_report_hint();   // (the Bug report: where it was saved, or why not)
+    if (is_vibration_test_row(selr) && selr.hint) hint = selr.hint(0, -1);   // (longshot: what plays the controller now)
     const std::string pending_line = (cur_tab == TAB_GRAPHICS || cur_tab == TAB_DEBUG) && restart_pending() ? restart_line(c, 16 * s, hx1 - hx0 - 66 * s) : "";
     static float help_tall = 0, help_tall_w = 0;
     static std::string help_said;   // (Save my pipeline list's line as measured: measured again when it changes)
@@ -4240,7 +4291,7 @@ void draw_options(ui::Ctx& c) {
             if (const char* says = cheat_confirm(selr.cheat)) prompt_list[prompts_n++] = {ui::kConfirm, says};
             prompt_list[prompts_n++] = {ui::kCompact, "Compact", compact_key_name};
         } else {
-            prompt_list[prompts_n++] = {ui::kConfirm, is_nfc_tap(selr) ? "Tap" : is_nfc_remove(selr) ? "Remove" : is_nfc_scan(selr) ? "Scan" : confirms ? (pending == &selr ? "Confirm" : selr.name) : &selr == &rows[kBugReportRow] || is_share_row(selr) ? "Save" : "Open"};
+            prompt_list[prompts_n++] = {ui::kConfirm, is_nfc_tap(selr) ? "Tap" : is_nfc_remove(selr) ? "Remove" : is_nfc_scan(selr) ? "Scan" : confirms ? (pending == &selr ? "Confirm" : selr.name) : &selr == &rows[kBugReportRow] || is_share_row(selr) ? "Save" : is_vibration_test_row(selr) ? "Test" : "Open"};
         }
         if (cur_tab == TAB_MOTION || cur_tab == TAB_FPS_DEV) prompt_list[prompts_n++] = {ui::kBack, "Back"};   // (Esc: to Controls, or Gameplay)
         else {
@@ -4354,7 +4405,7 @@ void draw_tune_bar(ui::Ctx& c) {
     if (r.cheat >= 0 && cheat_confirm(r.cheat)) {
         tune_prompts[1] = {ui::kConfirm, cheat_confirm(r.cheat)};
     } else if (!r.value && r.cheat < 0) {
-        tune_prompts[1] = {ui::kConfirm, confirms ? (pending == &r ? "Confirm" : r.name) : &r == &rows[kBugReportRow] || is_share_row(r) ? "Save" : "Open"};
+        tune_prompts[1] = {ui::kConfirm, confirms ? (pending == &r ? "Confirm" : r.name) : &r == &rows[kBugReportRow] || is_share_row(r) ? "Save" : is_vibration_test_row(r) ? "Test" : "Open"};
     }
     const float pw = ui::prompts(c, ImVec2(0, 0), tune_prompts, 4, false);
     const float px0 = bx0 + (bw - pw) * 0.5f;
@@ -5459,6 +5510,7 @@ void menu_init() {
     if (FILE* f = fopen(ini_path().c_str(), "r")) {
         char line[4096]; // Endpoint IDs are opaque and must not be cut into multiple settings.
         bool has_resolution = false;
+        bool has_vibration = false;   // (longshot: an options file from before the Vibration row has no vibration= line)
         bool v2 = false;
         int version = 0;
         int old_dynres = -1;   // (the row before Resolution: 0, the full scale, is its 100%; 1 is Auto)
@@ -5487,6 +5539,7 @@ void menu_init() {
                         opts.hold_toggle = atoi(eq + 1) == 1 ? opts.hold_toggle | bit : opts.hold_toggle & ~bit;
                     }
             has_resolution |= !strcmp(line, "resolution");
+            has_vibration |= !strcmp(line, "vibration");   // (longshot)
             has_output |= !strcmp(line, "output_res");
             v2 |= !strcmp(line, "options_version");
             if (!strcmp(line, "options_version")) version = atoi(eq + 1);
@@ -5523,6 +5576,9 @@ void menu_init() {
         }
         if (!has_resolution && old_dynres >= 0) opts.resolution = old_dynres ? 0 : 1;
         if (menu_auto) opts.menu_size = 2;
+        // (longshot) Rumble strength's Off, from before the Vibration row: Vibration Off, at the strength it had by default
+        if (!has_vibration && opts.rumble <= 0) opts.vibration = 2, opts.rumble = 100;
+        opts.vibration = std::min(std::max(opts.vibration, 0), 2);
         opts.rumble = rumble_step(opts.rumble);   // (a hand-edited 60: 50, on the arrows' steps)
         // (Game speed is Real time by default now: Per frame played at half speed at 30 fps, the "slow motion" players
         // reported. An options file from before kept the old default whether chosen or not: Real time for it too)
@@ -5742,6 +5798,8 @@ int menu_shadow_res() {
 int menu_transition_autosave() { return transition_autosave_enabled.load(std::memory_order_relaxed); }
 int menu_damage_taken() { return cheats_on() ? opts.damage_taken : 1; }   // (Normal while the tools are off; the choice is kept)
 int menu_take_cheat_action() { return cheat_action.exchange(0, std::memory_order_relaxed); }
+// (longshot) what plays the controller used last, as the host wrote it back (menu_option_set)
+int menu_vibration_status_option() { return vibration_status_cache.load(std::memory_order_relaxed); }
 
 void menu_note_present_sizes(uint32_t picture_w, uint32_t picture_h, uint32_t window_w, uint32_t window_h) {
     const auto c = [](uint32_t v) { return (uint64_t)std::min(v, 0xffffu); };
@@ -5869,6 +5927,10 @@ void menu_option_set(int id, int value) {
             int expected = value ? 0 : 1;
             player_flight.compare_exchange_strong(expected, value != 0, std::memory_order_relaxed);
         }
+        return;
+    }
+    if (id == HOS_OPT_VIBRATION_STATUS) {   // (longshot: what plays the controller used last, host/pad_sdl.c)
+        vibration_status_cache.store(value, std::memory_order_relaxed);
         return;
     }
     if (id != 7) return;
@@ -6761,6 +6823,10 @@ void menu_tick() {
         else if (press[7] && is_laptop_row(r)) weak_laptop_apply(), press[7] = false, changed = true;
         else if (press[7] && &r == &rows[kBugReportRow]) bug_report_save(), press[7] = false, changed = true;
         else if (const FieldRow* f = press[7] ? field_row(r) : nullptr) edit_start(*f->field, f->apply), changed = true;   // (longshot)
+        else if (press[7] && is_vibration_test_row(r)) {   // (longshot: Test vibration, before the page branch below)
+            if (host && host->version >= 32 && host->rumble_test) host->rumble_test();
+            press[7] = false, changed = true;
+        }
         else if (press[7] && !r.value && can_bind()) page = 1, csel = 0, ccol = menu_hit::kCtlPrimary, changed = true;
         {   // (a scan ends by itself: its line drawn again, and the tag it saved in the row's list)
             static int scan_was = 0;
@@ -6821,8 +6887,8 @@ void menu_tick() {
     }
 }
 
-/// (longshot) Once a present: the Rumble strength row changed with the menu open, and the new strength is felt at once, a
-/// short rumble, which also shows that the controller rumbles (Off is silent). Whatever changed it: the keys, the mouse
+/// (longshot) Once a present: the Vibration strength row changed with the menu open, and the new strength is felt at once,
+/// a short buzz, which also shows that the controller vibrates. Whatever changed it: the keys, the mouse
 void menu_rumble_tick() {
     static int was = -1;
     if (was >= 0 && opts.rumble != was && menu_is_open() && host && host->version >= 32 && host->rumble_test) host->rumble_test();
