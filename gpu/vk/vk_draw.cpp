@@ -9940,6 +9940,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
             return false;
         }
     }
+    descriptor_arrays_log(background ? "the preparation in play" : "the preparation");   // (the programs' indexed arrays: vk_programs.cpp)
     if (!background) crash_markers::end(warming);
     // (the driver's part left out, by a start that ended in it or in play, is not tried again for this driver: as before)
     prepared_for.warmed = warmed;
