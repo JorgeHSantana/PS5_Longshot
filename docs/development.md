@@ -1113,7 +1113,8 @@ python -I scripts/dev_packs.py rt   ../base-main ../rt-my-fix my-fix
 - **`pack`** needs a checkout whose history contains the base's commit (rebase it first). Its commits, its
   uncommitted changes and its untracked files all count.
   - **How it builds:** a change to renderer files alone (`gpu/vk/`, `imgui`, FidelityFX) that the game is not
-    built from builds the renderer alone (`RX_VK_ONLY`, no lift: seconds to minutes). Any other change builds the
+    built from builds the renderer alone (`RX_VK_ONLY`, no lift: seconds to minutes). It compiles `LONGSHOT_JOBS` files at
+    once, or one for every four CPU threads when that is unset. Any other change builds the
     game with `make_game.py` (`LONGSHOT_NO_PREPARE=1`), both modules and the game folder. The renderer files the
     game is built from are found in the checkout: what `host/` includes from `gpu/`, what `build.py` adds to the
     game's dependencies, and what those include.
