@@ -65,7 +65,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import job_queue  # noqa: E402  (same folder; python -I does not add it to the path)
 
-COMPILE_ONLY_ENV = ("RX_HOT_OPT", "RX_PGO", "RX_VK_PGO", "RX_VK_PGO_FILE")   # (make_game.py's: left out of the lift key)
+COMPILE_ONLY_ENV = ("RX_HOT_OPT", "RX_PGO", "RX_VK_PGO", "RX_VK_PGO_FILE", "RX_A64_RT_O2")   # (make_game.py's: left out of the lift key)
 PY_PACKAGES = ("capstone", "unicorn", "zstandard", "numpy")
 HOT_QUICK = {"RX_HOT_OPT": "O1"}   # (docs/development.md, A faster build for development: compile-only, never in the lift key)
 WINDOWS = os.name == "nt"

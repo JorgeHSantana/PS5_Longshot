@@ -1279,12 +1279,20 @@ def hot_flags(fl):
     return [("-" + os.environ.get("RX_HOT_OPT", "O2")) if f == "-" + OPT else f for f in fl] + split_giants_flags()
 
 
-def source_flags(src, gen, fl, split_fl, hot_fl, deps, bar_kb):
-    """A source's flags: the hot pieces' hot_fl; a lifted chunk's split_fl at -O2 when LONGSHOT_CHUNK_OPT selects it (no light
-    flags), else light or not (lifted_flags); fl for the rest"""
+def a64_rt_flags(fl):
+    """Shared A64 instruction/runtime helpers (a64_rt.c, a64_suyu.c): -O2 by default, or fl's OPT when RX_A64_RT_O2 is off"""
+    rt_o2 = os.environ.get("RX_A64_RT_O2", "1").strip().lower() not in ("", "0", "false", "off", "no")
+    return [("-O2" if rt_o2 else "-" + OPT) if f == "-" + OPT else f for f in fl], rt_o2
+
+
+def source_flags(src, gen, fl, split_fl, hot_fl, deps, bar_kb, a64_rt_fl=None):
+    """A source's flags: the hot pieces' hot_fl; the shared A64 helpers' a64_rt_fl; a lifted chunk's split_fl at -O2 when
+    LONGSHOT_CHUNK_OPT selects it (no light flags), else light or not (lifted_flags); fl for the rest"""
     name = os.path.basename(src)
     if name.startswith("code_hot"):
         return hot_fl
+    if name in ("a64_rt.c", "a64_suyu.c"):
+        return a64_rt_fl if a64_rt_fl is not None else a64_rt_flags(fl)[0]
     if name.startswith("code_") and os.path.dirname(src) == gen:
         return chunk_flags(src, split_fl) or lifted_flags(src, split_fl, deps, bar_kb)
     return fl
@@ -1788,6 +1796,11 @@ def main():
     # (longshot) code_hot.c, the lift's hot functions together (A64_HOT_FUNCS + A64_HOT_CHUNK=1): at RX_HOT_OPT
     # (default O2, so the hot callees inline into their hot callers) and with the giants split, as the lifted chunks are
     hot_fl = hot_flags(fl)
+    # The shared instruction/runtime helpers are small, unlike the cold lifted game chunks. Optimize their bodies
+    # without raising the level of those giant chunks; keep every other semantic flag unchanged.
+    a64_rt_fl, rt_o2 = a64_rt_flags(fl)
+    print("build: shared A64 runtime helpers at %s (RX_A64_RT_O2=0: cold-code level)" %
+          ("O2" if rt_o2 else OPT), flush=True)
     # (longshot) RX_PGO=gen: code_hot.c counts its branches (host/pgo_rt.c writes them; -O1 builds much sooner, and the counters are
     # placed before the optimiser, so a profile from it fits the -O2 build). RX_PGO=<merged .prof>: built with that profile
     if PGO == "gen":
@@ -1811,7 +1824,7 @@ def main():
     for s in srcs:
         name = os.path.basename(s)
         obj = os.path.join(obj_dir, name[:-2] + ".o")
-        sfl = source_flags(s, gen, fl, split_fl, hot_fl, deps, bar_kb)
+        sfl = source_flags(s, gen, fl, split_fl, hot_fl, deps, bar_kb, a64_rt_fl)
         selected = part_mb and name.startswith("code_") and not name.startswith("code_hot") and os.path.dirname(s) == gen \
             and (CHUNK_OPT_O2 == "*" or name in CHUNK_OPT_O2)
         parts = chunk_parts(s, part_mb, split_dir, split_flag) if selected else None
