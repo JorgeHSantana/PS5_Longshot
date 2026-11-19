@@ -36,7 +36,7 @@
 #endif
 #include "vk_texture.h"
 #ifdef LONGSHOT_LSFG
-#include "lsfg/lsfg_backend.h"   // (Lossless Scaling's frame generation: gpu/vk/lsfg)
+#include "lsfg_backend.h"   // (Lossless Scaling's frame generation: gpu/vk/lsfg over third_party/lsfg, ps5/build.py)
 namespace mkwvk {
 extern VmaAllocator vma;   // (vk_vma.cpp)
 }
