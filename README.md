@@ -833,8 +833,8 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 - **Send performance statistics** (a tick on the launcher's page, off by default): the game counts how its frames,
   hitches and movies went on each map, with one-second samples of Link's X/Y/Z position and camera yaw/pitch. The
   launcher sends five-minute batches to the team at its next start, with the GPU, driver, CPU, OS and renderer but no
-  paths, user name or ID. The relay rounds positions into 100-unit cells and angles into 45-degree yaw and 30-degree
-  pitch bins. It costs a few nanoseconds a frame; unticking it deletes
+  paths, user name or ID. The game sends positions rounded to the nearest 100 units, and angles as the middle of their
+  45-degree yaw and 30-degree pitch bin, never the exact place. It costs a few nanoseconds a frame; unticking it deletes
   what hasn't been sent. What is in a summary: [performance statistics](docs/performance-statistics.md).
 - **Controller in background:** On keeps the controller working while another window has the focus. The keyboard and
   mouse still need the game's window.
