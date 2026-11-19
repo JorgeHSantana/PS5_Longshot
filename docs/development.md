@@ -1392,8 +1392,10 @@ python -I scripts/pipeline_tour.py compare <new tour dir>/play.bin <old tour dir
 ```
 
 `tour` runs its parts (the opening; the child overworld; the dungeons at both ages; the adult overworld) one after another,
-one game at a time, in a reflinked copy of the game folder (`<game folder>-tour`: on btrfs or XFS, and refused when one is
-there from an earlier tour), at nice 19 (on `--cpus` if given), in games of `--chunk` stops
+one game at a time, in a copy of the game folder (`<game folder>-tour`: reflinked on btrfs or XFS; elsewhere, as on ext4,
+`romfs/` hard-linked, as the game only reads it, and the rest copied, about 11 GB, refused when the drive lacks the room or
+`romfs/` is on another drive, and checked after the tour for any change to `romfs/`; refused when one is there from an
+earlier tour), at nice 19 (on `--cpus` if given), in games of `--chunk` stops
 (8; a fresh game each, as one game's memory only grows), and merges their lists; `--publish` then runs
 `nx2/pipeline_states.py tour` with the GPU and build the bridge reported and the settings and route the runs used
 (`merge` merges any lists). Each game runs under a memory guard (the script's `MEM`, `--mem key=value`): it starts only with
