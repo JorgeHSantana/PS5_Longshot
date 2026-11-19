@@ -70,6 +70,9 @@ int main() { return 0; }
         (not spdx, "files of the lsfg folders without their SPDX line: " + ", ".join(spdx)),
         ("LONGSHOT_LSFG" in build and '"third_party", "lsfg"' in build, "ps5/build.py does not compile third_party/lsfg"),
         (build.index('os.path.join(VK, "lsfg"), "-I" + LSFG') > 0, "gpu/vk/lsfg is not before third_party/lsfg on the include path"),
+        ("::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (the chain records into cmd directly, outside vk_work.h)\n    const bool made = lsfgen.be->RecordShared(cmd);" in framegen
+         and "void lsfg_take(VkCommandBuffer cmd, VkImage out, float t) {\n    ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);" in framegen,
+         "the chain records into cmd without draining the recorder thread first (RX_VK_RECORDER=thread)"),
         ("if (!fg_by::wants_lossless(fg.by)) return false;" in framegen, "Lossless Scaling's chain is not asked for by the row"),
         ("framegen_lossless_file() ? fg_by::kMost : fg_by::kMihawk" in menu,
          "without a Lossless.dll the row still offers Lossless Scaling"),
