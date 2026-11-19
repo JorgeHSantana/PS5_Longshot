@@ -1239,7 +1239,9 @@ The rules worth knowing (the script's notes have all of them):
   ignores them). `env` prints PowerShell's `$env:` lines; `vk` builds `longshot_vk.dll` and checks it exports `mkwvk_init`
   (an undefined symbol already fails the link there). The game's files are found in `~\Games` and `~\Games\Longshot` (the
   launcher's builds), else name them (`LONGSHOT_DEV_ROMFS`, `LONGSHOT_DEV_EXEFS`). A drive with little room: point
-  `LONGSHOT_DEV_HOME` and the two stores at one folder on a bigger drive, so the objects stay hard links.
+  `LONGSHOT_DEV_HOME` and the two stores at one folder on a bigger drive, so the objects stay hard links. The queue sees
+  a player there as on Linux: a `longshot.exe` whose environment has no `LONGSHOT_JOB` (read from the process itself, as
+  Linux reads `/proc`) holds timed runs and `--when-idle` jobs, and `status` names it.
 
 ### Build times
 
