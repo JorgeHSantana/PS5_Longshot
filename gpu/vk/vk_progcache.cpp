@@ -36,6 +36,7 @@
 #include "shader_recompiler/shader_info.h"
 #include "longshot_env.h"
 #include "fallback_loaded.h"
+#include "start_steps.h"
 #include "fallback_size_policy.h"
 #include "vk_paths.h"
 #include "vk_internal.h"
@@ -777,6 +778,18 @@ std::vector<uint64_t> program_cache_compute_keys() {
     for (const auto& kv : disk_records)
         if (!kv.second.empty() && (kv.second[0].kind & 1)) keys.push_back(kv.first);
     return keys;
+}
+size_t program_cache_fallback_steps() {
+    disk_init();
+    // (the records program_cache_load_some(..., fallbacks) would take now, then what is in memory: start_steps::create_steps)
+    std::unordered_map<uint64_t, std::vector<DiskRecord>> taken;
+    if (disk_on) {
+        std::lock_guard lk(disk_mu);
+        for (const auto& kv : disk_records)
+            if (!kv.second.empty() && (kv.second[0].kind & 4)) taken.emplace(kv.first, kv.second);
+    }
+    std::lock_guard lk(shader_mu);
+    return start_steps::create_steps(taken, programs);
 }
 std::string program_cache_path() {
     disk_init();

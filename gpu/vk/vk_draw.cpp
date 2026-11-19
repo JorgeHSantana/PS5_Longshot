@@ -76,6 +76,7 @@
 #include "translate_wait.h"
 #include "precompile_save.h"   // (the pipeline cache written before the title after a long precompile)
 #include "bounded_wait.h"   // (the load-at-create start's wait for its builds, bounded by their progress)
+#include "start_steps.h"    // (a first start's warm and load at create on the bar as one count)
 #include "quick_pipe.h"
 
 #include "vk_builtin_spv.h"   // (RX_VK_SHADER_DIR)
@@ -10310,8 +10311,16 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
         // (and where the driver's own cache lost what the marker says was built: notes_lost_by_driver)
         if (precompile_covers_notes() && !env_on("LONGSHOT_PREPARE_ONLY") && notes_lost_by_driver())
             remove(precompile_built_path().c_str());
-        if (!precompile_covers_notes()) precompile_warm(progress);
-        if (precompile_covers_notes()) return precompile_at_create(progress);
+        // (a first start's two passes on the bar as one count: start_steps. The second's steps counted before the warm, which only
+        // borrows the programs; a --prepare-shaders run has no second pass, and its warm ends the bar)
+        const bool warms = !precompile_covers_notes();
+        const bool then = warms && !env_on("LONGSHOT_PREPARE_ONLY");
+        start_steps::begin(progress, then, then ? program_cache_fallback_steps() : 0);
+        if (warms) precompile_warm(progress ? start_steps::warm : nullptr);
+        if (precompile_covers_notes()) {
+            precompile_at_create(progress ? start_steps::create : nullptr);
+            return start_steps::end();
+        }
         // (the window was closed in it; or this is the preparation's own process, which leaves no marker: its warm filled
         // the driver's cache, the first start of the game warms again and loads at create calls from then on)
         if (prepare_stopped() || env_on("LONGSHOT_PREPARE_ONLY")) return;
