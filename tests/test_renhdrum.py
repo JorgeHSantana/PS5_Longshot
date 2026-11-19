@@ -3,8 +3,9 @@
 
 `check` reads the file's headers only. Over made-up PE and ELF images: a good one passes; one needing a library a player
 would have to install (the VC++ Runtime, llvm-mingw's libunwind.dll or libc++; a libstdc++) fails and names it; one
-without an export host/rumble_renhdrum.c binds fails and names it; one for another machine fails; a file that is
-neither stops with a message, not a traceback. The script never loads the library (no ctypes): checking never runs it.
+without an export host/rumble_renhdrum.c binds fails and names it; one for another machine fails; one of the other
+system's format fails (a Linux library named renhdrum.dll: Windows refuses it with a "Bad Image" box, 0xc000012f); a
+file that is neither stops with a message, not a traceback. The script never loads the library (no ctypes): checking never runs it.
 
 `build` is run with cargo and the toolchain stubbed: the command is a locked, offline build of the tracked source, for
 x86_64-pc-windows-gnullvm linked by the llvm-mingw given (the unwinder static, no time stamp) or for
@@ -14,7 +15,8 @@ refused and not kept.
 
 The Builder's release builds the DLL (.forgejo/workflows/build-windows.yml) and scripts/builder_package.py --renhdrum puts
 it where nx2/build.py looks in a player's tools (tools/third_party/renhdrum/renhdrum.dll), refusing one that fails the
-check; scripts/check_windows_files.py wants it in the zip. The AppImage's workflow builds the .so and scripts/linux/
+check or is not a Windows DLL; the step builds it for Windows, on the Linux runner the release is made on (without
+--target it built a Linux library there); scripts/check_windows_files.py wants it in the zip. The AppImage's workflow builds the .so and scripts/linux/
 appimage.sh carries it. third_party/renhdrum holds the source, with its upstream archive named.
 
     python -I -B tests/test_renhdrum.py
@@ -171,6 +173,18 @@ class Check(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 rh.main(["check", os.path.join(d, "none.dll")])
 
+    def test_the_other_systems_format(self):
+        # (a Linux library named renhdrum.dll: Windows will not load it, "Bad Image" 0xc000012f; and a DLL named .so)
+        with tempfile.TemporaryDirectory() as d:
+            for name, data in (("renhdrum.dll", elf()), ("renhdrum.so", pe())):
+                path = os.path.join(d, name)
+                with open(path, "wb") as f:
+                    f.write(data)
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    self.assertEqual(rh.main(["check", path]), 1, name)
+                self.assertIn("not usable", out.getvalue(), name)
+
     def test_nothing_is_loaded(self):
         src = (ROOT / "scripts" / "renhdrum.py").read_text(encoding="utf-8")
         for word in ("ctypes", "LoadLibrary", "CDLL", "WinDLL"):
@@ -302,7 +316,7 @@ class Ships(unittest.TestCase):
     def test_the_release_builds_and_packs_it(self):
         wf = (ROOT / ".forgejo" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
         step = wf[wf.index("- name: renhdrum.dll"):wf.index("- name: Package folder")]
-        self.assertIn('scripts/renhdrum.py build --llvm-mingw "$LLVM_MINGW"', step)
+        self.assertIn('scripts/renhdrum.py build --target windows --llvm-mingw "$LLVM_MINGW"', step)
         package = wf[wf.index("- name: Package folder"):]
         self.assertIn('--renhdrum "$RUNNER_TEMP/renhdrum/renhdrum.dll"', package[:package.index("- name: The zip")])
         checker = load("check_windows_files_under_test", ROOT / "scripts" / "check_windows_files.py")
@@ -314,7 +328,7 @@ class Ships(unittest.TestCase):
             publish, setup = os.path.join(d, "publish"), os.path.join(d, "setup.exe")
             os.makedirs(publish)
             open(setup, "wb").close()
-            for name, data, want in (("good.dll", pe(), 0), ("bad.dll", pe(exports=()), 1)):
+            for name, data, want in (("good.dll", pe(), 0), ("bad.dll", pe(exports=()), 1), ("elf.dll", elf(), 1)):
                 dll, out = os.path.join(d, name), os.path.join(d, "out-" + name)
                 with open(dll, "wb") as f:
                     f.write(data)

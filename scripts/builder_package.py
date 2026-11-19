@@ -110,7 +110,7 @@ def package(a):
         renhdrum = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(renhdrum)
         with open(dll, "rb") as f:
-            bad = renhdrum.problems(f.read())
+            bad = renhdrum.problems(f.read(), "windows")   # (a Linux library under the name: a "Bad Image" box on Windows)
         if bad:
             print("error: %s: %s" % (dll, "; ".join(bad)), file=sys.stderr)
             return 1

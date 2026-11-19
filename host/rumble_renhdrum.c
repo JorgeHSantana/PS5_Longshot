@@ -64,8 +64,15 @@ static HMODULE open_library(void) {
     memcpy(path + n, file, sizeof file);
     if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) return why("renhdrum.dll is not beside the game"), (HMODULE)NULL;
     /* (LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR: its own folder, for what it imports too, and System32; no PATH, no current folder) */
+    /* (SEM_FAILCRITICALERRORS: a file that is not a usable DLL fails here, and its controllers keep their motors, rather
+       than Windows stopping the game's start with a "Bad Image" box: a release once shipped a Linux library under this
+       name, 0xc000012f. The thread's own mode, put back after) */
+    DWORD mode = 0;
+    BOOL quiet = SetThreadErrorMode(SEM_FAILCRITICALERRORS, &mode);
     HMODULE m = LoadLibraryExW(path, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
-    if (!m) why("renhdrum.dll would not load (error %lu)", (unsigned long)GetLastError());
+    DWORD err = m ? 0 : GetLastError();
+    if (quiet) SetThreadErrorMode(mode, NULL);
+    if (!m) why("renhdrum.dll would not load (error %lu)", (unsigned long)err);
     return m;
 #else
     char path[4096];

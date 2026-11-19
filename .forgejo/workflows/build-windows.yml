@@ -155,14 +155,16 @@ jobs:
             python -I -B nx2/third_party_objects.py make "$RUNNER_TEMP/third_party_objects" --jobs "$(nproc)"
       # (renhdrum.dll, the DualSense haptics' back end (host/haptic.c): built here from third_party/renhdrum with
       # scripts/renhdrum.py's pinned Rust and the llvm-mingw above, so a player's build places it beside the game with no
-      # Rust on their PC. The pinned Rust's parts are kept like the downloads above, and checked by their SHA-256 each time)
+      # Rust on their PC. The pinned Rust's parts are kept like the downloads above, and checked by their SHA-256 each time.
+      # --target windows: this runner is Linux, and the default is the system it runs on; without it the release shipped a
+      # Linux library named renhdrum.dll, which Windows refused at the game's start with a "Bad Image" box)
       - uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/renhdrum-rust
           key: renhdrum-rust-${{ hashFiles('scripts/renhdrum.py') }}
       - name: renhdrum.dll
         run: >-
-          python -I scripts/renhdrum.py build --llvm-mingw "$LLVM_MINGW" --cache "$RUNNER_TEMP/renhdrum-rust"
+          python -I scripts/renhdrum.py build --target windows --llvm-mingw "$LLVM_MINGW" --cache "$RUNNER_TEMP/renhdrum-rust"
           --out "$RUNNER_TEMP/renhdrum/renhdrum.dll"
       # (it stops when assets/pipeline_states/, the sources of the pipeline state list every release ships, hold none or one does not read)
       - name: Package folder

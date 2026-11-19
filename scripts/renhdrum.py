@@ -176,9 +176,16 @@ def elf_info(data):
         fail("not a usable ELF image (%s)" % e)
 
 
-def problems(data):
-    """What makes the library unusable by host/rumble_renhdrum.c on a player's PC: [] when nothing does"""
-    if data[:4] == b"\x7fELF":
+def problems(data, target=None):
+    """What makes the library unusable by host/rumble_renhdrum.c on a player's PC: [] when nothing does. target (windows,
+    linux): the system it is for, whose format it must be. A Linux library named renhdrum.dll is refused by Windows with a
+    "Bad Image" box at the game's start (0xc000012f): the release once built one, on its Linux runner with no --target"""
+    is_elf = data[:4] == b"\x7fELF"
+    if target == "windows" and is_elf:
+        return ["a Linux (ELF) library, not a Windows DLL (scripts/renhdrum.py build --target windows)"]
+    if target == "linux" and not is_elf:
+        return ["not a Linux (ELF) library (scripts/renhdrum.py build --target linux)"]
+    if is_elf:
         machine, deps, exports = elf_info(data)
         ok_machine, own = 62, SYSTEM_NEEDED   # (EM_X86_64)
     else:
@@ -198,10 +205,12 @@ def cmd_check(a):
         fail("%s is not there (python -I scripts/renhdrum.py build makes it)" % shown(a.file))
     with open(a.file, "rb") as f:
         data = f.read()
+    # (the game's names: renhdrum.dll on Windows, renhdrum.so on Linux)
+    target = {".dll": "windows", ".so": "linux"}.get(os.path.splitext(a.file)[1].lower())
     deps = elf_info(data)[1] if data[:4] == b"\x7fELF" else pe_info(data)[1]
     print("%s: %d bytes, sha256 %s" % (shown(a.file), len(data), hashlib.sha256(data).hexdigest()))
     print("  needs: %s" % (", ".join(sorted(deps)) or "(nothing)"))
-    bad = problems(data)
+    bad = problems(data, target)
     for p in bad:
         print("  " + p)
     print("  usable" if not bad else "  not usable")
@@ -328,7 +337,7 @@ def cmd_build(a):
             fail("cargo made no %s" % built)
         with open(built, "rb") as f:
             data = f.read()
-        bad = problems(data)
+        bad = problems(data, target)
         if bad:
             fail("what was built is not usable: " + "; ".join(bad))
         os.makedirs(os.path.dirname(out), exist_ok=True)
