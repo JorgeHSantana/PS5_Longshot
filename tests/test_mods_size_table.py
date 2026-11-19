@@ -289,6 +289,7 @@ DWORD GetModuleFileNameA(HMODULE m, LPSTR out, DWORD cap) { (void)m; return (DWO
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 void hos_log(const char *f, ...) { va_list ap; va_start(ap, f); printf("log: "); vprintf(f, ap); printf("\n"); va_end(ap); }
 int hos_binding(int set, int button, int slot) { (void)set; (void)button; (void)slot; return -1; }
 int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]) { (void)buttons; (void)stick; return 0; }
@@ -297,6 +298,14 @@ void hos_sdl_pad_first_name(char *out, size_t cap) { if (cap) *out = 0; }
 int hos_regions(uint64_t (*out)[2], int cap) { (void)out; (void)cap; return 0; }
 int64_t hos_now_ns(void) { return 0; }
 int rx_option(int id, int otherwise) { (void)id; return otherwise; }
+const char *hos_options_file(void) {   /* (host/options_path.c: beside the game, as for a game started without --user) */
+    static char p[4096];
+    snprintf(p, sizeof p - 32, "%s", getenv("TEST_GAME_EXE"));
+    size_t n = strlen(p);
+    while (n && p[n - 1] != '/' && p[n - 1] != '\\') n--;
+    snprintf(p + n, sizeof p - n, "longshot_options.ini");
+    return p;
+}
 void hos_mods_init(const char *image_path);
 int hos_mods_romfs(const char *rel, char *out, size_t cap);
 const char *hos_romfs_dir;
