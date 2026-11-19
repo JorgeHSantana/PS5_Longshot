@@ -1139,6 +1139,7 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
 
 static void vibration_send(uint64_t handle, uint64_t value);
 volatile int64_t hos_hid_last_read;
+volatile uint64_t hos_hid_buttons;   /* (the buttons the game was last given: HidNpadButton bits) */
 
 /* (longshot) The sticks' direction pseudo-buttons, HidNpadButton_StickLLeft, Up, Right, Down (bits 16-19) and the
    right stick's (20-23), which real hid sets from the axes (y up): past half their travel, as yuzu's TransformToStick
@@ -1189,6 +1190,7 @@ static void npad_states(Ctx *c) {
     }
     if (connected) {
         read_input(&buttons, &taps, stick);
+        hos_hid_buttons = buttons;   /* (cheats.c: the cheats' button conditions) */
         uint64_t axes = 0;
         uint64_t flight = 0;
         int height = 0;

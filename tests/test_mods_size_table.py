@@ -14,7 +14,8 @@ with the prompts' entries merged into it. On made-up tables, no game data:
   its size.
 
 The documented, authored file-mod example in docs/mods.md also goes through the same Linux filesystem fixture:
-discovery, whole-path order, disabling and restart, default/HOS_MODS roots, case/slash lookup and ignored ExeFS.
+discovery, whole-path order, disabling and restart, default/HOS_MODS roots, case/slash lookup and an ExeFS folder
+that is listed and never served as RomFS.
 
 python -I -B tests/test_mods_size_table.py [--cc gcc]
 """
@@ -234,7 +235,9 @@ def documented_example_checks(exe, tmp):
         return out
 
     log = run("HOS_MODS root, discovery, full-path order and lookup", mods, expected)
-    check("03-code-only: exefs patches are left out" in log, "the example's ExeFS warning is missing")
+    # (a mod with only an exefs folder is listed with what it has; its patches belong to the build, not to this loader)
+    check("03-code-only: 0 RomFS files (0 replace the game's, 0 added), ExeFS patches" in log,
+          "the example's ExeFS mod is not listed with its ExeFS folder")
     run("default root beside the executable", None, expected)
     # Every invocation is a new process: the loader deliberately indexes once per start.
     (mods / "contents").rename(mods / "-contents")
@@ -255,7 +258,7 @@ def routing_checks(cc, tmp, zstandard, host):
     posix = (ROOT / "host/posix/win32_posix.c").read_text(encoding="utf-8")
     src = tmp / "src"
     src.mkdir(parents=True)
-    for f in ("mods.c", "prompts.c", "texts.c"):   # (beside a hos.h of the test's: hos_log, and what the live prompts read: none
+    for f in ("mods.c", "mods_list.c", "prompts.c", "texts.c", "zs.c"):   # (beside a hos.h of the test's: hos_log, and what the live prompts read: none
                                                    # here; texts.c: mods.c asks it for a path no mod and no prompt has)
         (src / f).write_bytes((host / f).read_bytes())
     (src / "hos.h").write_text("#pragma once\n#include <stddef.h>\n#include <stdint.h>\nvoid hos_log(const char *f, ...);\n"
@@ -297,6 +300,7 @@ int hos_xinput_pads(void) { return 0; } /* no controllers in this routing fixtur
 void hos_sdl_pad_first_name(char *out, size_t cap) { if (cap) *out = 0; }
 int hos_regions(uint64_t (*out)[2], int cap) { (void)out; (void)cap; return 0; }
 int64_t hos_now_ns(void) { return 0; }
+const char *hos_romfs_dir;   /* (no game RomFS here: mods.c merges no table of its own, the last mod's is the base) */
 int rx_option(int id, int otherwise) { (void)id; return otherwise; }
 const char *hos_options_file(void) {   /* (host/options_path.c: beside the game, as for a game started without --user) */
     static char p[4096];
@@ -325,7 +329,7 @@ int main(int argc, char **argv) {
                     "-I", str(ROOT / "host"), "-I", str(ROOT / "host/posix"), "-I", str(ZSTD),
                     "-include", str(ROOT / "gpu/vk/compat/longshot_env.h"),   # (texts.c is a copy: its own path to it is gone)
                     str(src / "mods.c"),
-                    str(src / "prompts.c"), str(src / "texts.c"), str(tmp / "posix.c"), str(tmp / "main.c"),
+                    str(src / "mods_list.c"), str(src / "prompts.c"), str(src / "texts.c"), str(src / "zs.c"), str(ROOT / "host/restbl.c"), str(tmp / "posix.c"), str(tmp / "main.c"),
                     *(str(ZSTD / f) for f in ZSTD_SOURCES), "-o", str(exe)], check=True)
 
     documented_example_checks(exe, tmp / "documented-example")

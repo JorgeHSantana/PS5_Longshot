@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 34
+#define MKWVK_API_VERSION 35
 enum { HOS_MONITOR_CURRENT = 1, HOS_MONITOR_PRIMARY = 2 };
 typedef struct MkwVkMonitor {
     char id[512];             /* opaque persistent preference; never a runtime handle or list index */
@@ -321,7 +321,19 @@ typedef struct MkwVkHost {
        its warm-up), 0 the switch's normal value, 1 the A/B's, 2 or 3 those sides in a transition (a flip inside the frame,
        or less than 0.3 s before its end), which scripts/ab_summary.py leaves out */
     int (*ab_frame)(int64_t from_ns, int64_t to_ns);
+    /* (version 35: 24 is the audio outputs, 25 the microphone test, 26 the performance summary, 27 the frame trace, 28 the renderer's out of memory note, 29 the monitors, 30 the performance sample's tracking, 31 the renderer's quick invalidate, 32 the rumble test, 33 the NFC tags, 34 the A/B within one run) the Mods tab (host/mods.c, host/cheats.c). mod_info: mod i in the list's order, 0 past the end
+       (name: its folder; detail: what it has; note: what of it is not used and why, "" none); mod_edit: op 0 off, 1 on, 2 up a
+       place, 3 down a place, kept at once and applied at the next start; mods_changed: 0 while the order and the switches are
+       the start's, else a number for them (the restart question). cheat_info: cheat i of the mods that were on at the start,
+       0 past the end (kind: MKWVK_CHEAT_*); cheat_set: a data cheat on or off, at once */
+    int (*mod_info)(int i, const char **name, const char **detail, const char **note, int *enabled);
+    void (*mod_edit)(int i, int op);
+    uint64_t (*mods_changed)(void);
+    int (*cheat_info)(int i, const char **name, const char **mod, const char **note, int *kind, int *on);
+    void (*cheat_set)(int i, int on);
 } MkwVkHost;
+/* (version 35) a cheat's kind: a heading (no opcodes), a data cheat (switched), a master cheat (always on), not supported (note) */
+enum { MKWVK_CHEAT_HEADING, MKWVK_CHEAT_DATA, MKWVK_CHEAT_MASTER, MKWVK_CHEAT_UNSUPPORTED };
 
 /* One completed temporal-upscale sample; all zero while inactive. */
 typedef struct MkwVkJitter {

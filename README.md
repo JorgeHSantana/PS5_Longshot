@@ -227,7 +227,7 @@ Before updating, copy your saves somewhere safe: the `user` folder in the game f
 | `longshot_options.ini`: the menu's choices and your controls | `image.bin` and the shader list |
 | `longshot_env.txt` | `language.txt`, written again with the game's language |
 | | `texts`: the texts reworded for a PC, made again |
-| `mods` | |
+| `mods`, and `mods.json` (the mods' order and switches), wherever it is | `exefs_patches.txt`, written again with the ExeFS patches the build applied |
 
 Without the launcher: from a clone, `git pull`, then `python -I nx2/make_game.py --update <game folder>`; a builder
 does the same with `--cli --update <game folder>`.
@@ -262,6 +262,7 @@ The build reads your game and never changes it.
 | The launcher, each version's builder and its tools (`toolchains`), the build files (`work`) | `%LOCALAPPDATA%\LongshotLauncher` (the installed program in `%LOCALAPPDATA%\Programs\LongshotLauncher`; the portable one's data in `LongshotLauncher-data` beside it) | `~/.local/share/longshot/launcher` (the portable AppImage's in `<AppImage>.home` beside it) |
 | A builder without the launcher (`--cli`) and its tools | `%LOCALAPPDATA%\LongshotBuilder` | `~/.local/share/longshot/builder` and `~/.cache/longshot-builder` |
 | The in-game menu's choices and your controls | `longshot_options.ini` in `%APPDATA%\Longshot` when the launcher starts the game, the same for every version (a portable launcher's in `LongshotLauncher-data\user`); in the game folder when you start the game yourself | `longshot_options.ini` in the game folder |
+| Which [mods](#mods) are on, and their order | `mods.json` beside `longshot_options.ini` | `mods.json` in the game folder |
 | The shader and pipeline caches, and the logs | `cache` and `logs` in the game folder | `cache` and `logs` in the game folder |
 
 - **Caches and logs:** the game keeps its shader and pipeline caches in the game folder's `cache` folder (several GB, made
@@ -988,35 +989,52 @@ The file saves enabled flags, not held state; a restart starts with no button la
 ## Mods
 
 Put mods in a `mods` folder in the game folder, beside `longshot.exe` (or point `HOS_MODS` at another folder), in the
-layout emulators use: `mods/<name>/romfs/...` holds files that replace or add to the game's own. Deeper layouts such as
-`mods/contents/<title id>/<name>/romfs` work too. A folder whose name starts with `-` or `_` is off. When two mods
-have the same file, the one whose whole path relative to `mods` sorts last (ignoring case) wins. Use `01-...`, `02-...`
-at the same level to set the order. Stop the game before changing mods, then restart.
+layout emulators use: `mods/<name>/romfs/...` holds files that replace or add to the game's own, `mods/<name>/exefs/`
+patches to the game's code (`.ips`, IPS32, `.pchtxt`), and `mods/<name>/cheats/E0F3CCFAF50065AE.txt` Atmosphere cheats.
+Deeper layouts such as `mods/contents/<title id>/<name>/romfs` work too. A folder whose name starts with `-` or `_` is off.
+
+The Insert menu's **Mods** tab (shown when there are mods) lists them in their order, each On or Off: Left and Right
+switch the selected one, Enter picks it up and Up and Down move it. When two mods have the same file, the one lower in
+the list wins; out of the box the list is in the order of the mods' paths under `mods` (ignoring case), so `01-...`,
+`02-...` still set it. The order and
+the switches are kept in `mods.json` and apply at the next start (closing the menu offers the restart). `mods.json` is
+beside `longshot_options.ini` ([Where the files go](#where-the-files-go)): in the game folder when you start the game
+yourself, in `%APPDATA%\Longshot` when the launcher starts it, so an update or another version keeps your list (a
+list you made starting the game yourself is copied there the first time, as your settings are). A game folder's
+`longshot_mods.txt` from an earlier build is read into it once and renamed `longshot_mods.txt.imported`. The log
+(`longshot_log.txt`) names the list's file, each mod and the files read from it.
 
 One of the game's texts names the console: the hint for playing the ocarina by microphone says to use its built-in one.
 The build rewords it for a PC ("your microphone") in your own text files, in each of the game's languages, into the game
 folder's `texts` folder, and the game reads those instead. A mod's own text file wins, and `HOS_TEXTS=0` in
 `longshot_env.txt` shows the game's own.
 
-Only RomFS mods are loaded. `exefs` patches (`.pchtxt`, `.ips`) are left out: Longshot compiles the game's code ahead
-of time, so patching its instructions would need a rebuild. The log (`longshot_log.txt`) names each mod and the files
-read from it.
-
-A mod file larger than the game's own does not load unless the resource size table allows for it:
-`System/Resource/ResourceSizeTable.Product.111.Nin_Ounce_NVN2.rsizetable.zs` gives each file the memory the game sets
-aside for it (by the CRC32 of its path without `.zs`; for a texture, its decompressed size + 280). Past that, the game
-goes on without the mod's file, or a loading screen waits for good. A mod that makes files bigger (HD
-textures, longer parameter files) ships the table with its entries grown. Since only one mod's table is used, mods that
-each grow files need one table with all their entries, in the mod that sorts last. Longshot merges the button prompts'
-entries into that table (each file gets the larger of the two), so your controller's icons stay in texts; the log says
-`(with the button prompts' sizes merged in)` after the table's line. A table it cannot read that way (not the game's
-format, or a zstd frame that does not give its size) is used as it is, with the Switch's icons.
+A mod file larger than the game's own needs a larger entry in the resource size table
+(`System/Resource/ResourceSizeTable.Product.111.Nin_Ounce_NVN2.rsizetable.zs`, which gives each file the memory the game
+sets aside for it). Longshot makes that table at each start with mods: the game's, with every mod's own table merged in
+(the larger entry wins) and the entry of every file a mod serves raised to fit its size, so mods that each grow files
+(HD textures, longer parameter files) load together, without one table holding all their entries. The button prompts'
+entries are kept in it too, so your controller's icons stay in texts. It is written to `modcache/rsizetable.zs` in the
+game folder. If it cannot be made, the last mod's own table is used with the button prompts' entries merged into it, as
+before.
 If a mod includes tables for several game versions, the prompts use the table name from the game's own RomFS,
 not the first table found in the mod. Other versions' tables do not change the prompts' font or its size entries.
 
-Players: the [mods guide](docs/using-mods.md) covers installing, turning off and checking mods. For authors: the
-[existing file contract and game-free example](docs/mods.md) cover discovery, conflicting files,
-disabling and what this loader does not provide. The example contains only invented text, not a seed or game data.
+**ExeFS patches** change the game's code, which Longshot compiles ahead of time: they are applied when the game is
+built, so a new patch, a changed one or a mod with patches switched on or off takes effect after the next build (build
+the same folder again in Longshot Builder, or `nx2/make_game.py --update <folder>`). The Mods tab says when a mod's
+patches wait for a build. A patch file is for this game when its name (IPS) or its `@nsobid` line (pchtxt) is the code's
+build id, `E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348`; others are left out. The build takes the mods' order and switches from the same `mods.json` as the game (the one the
+game last started with; `make_game.py --user <folder>` names the user folder's). `exefs_patches.txt` in the game folder lists
+what the build applied. Bytes a patch writes into a word that the game's loader relocates (a pointer in its data) are
+left out, and the file's line there says how many.
+
+**Cheats** of the mods that are on are listed under them on the Mods tab and switched there, at once. Cheats that change
+memory run as Atmosphere runs them, every frame (opcodes 0 to A and C0 to C3); a cheat that writes the game's code is
+listed as not supported (make it an ExeFS patch instead). `{Master}` codes are always on.
+
+Players: the [mods guide](docs/using-mods.md) covers installing, turning off and checking mods. For authors: the [file contract and game-free example](docs/mods.md) cover discovery, the order out of the box,
+conflicting files, disabling and what this loader does not provide. The example contains only invented text, not a seed or game data.
 
 ## Build from source
 

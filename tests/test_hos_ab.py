@@ -362,12 +362,17 @@ def wiring_checks():
     if not 0 <= present.index("hos_ab_present();") < present.index("vk->nvn_present(t, crop)"):
         fail("host/rx_backend.c: rx_nvn_present does not count the frame (hos_ab_present) before the renderer presents")
     table = re.sub(r"/\*.*?\*/", "", block(backend, "static const MkwVkHost vk_host = {"), flags=re.S)
-    if [v.strip() for v in table.split(",") if v.strip()][-2] != "hos_ab_frame":
-        fail("host/rx_backend.c: vk_host does not end with hos_ab_frame (MkwVkHost.ab_frame, version 34)")
+    names = [v.strip() for v in table.split(",") if re.fullmatch(r"\w+", v.strip())]
+    # (the Mods tab's functions, version 35, come after it)
+    if "hos_ab_frame" not in names or names[names.index("hos_ab_frame") + 1:] != [
+            "hos_mod_info", "hos_mod_edit", "hos_mods_changed", "hos_cheat_info", "hos_cheat_set"]:
+        fail("host/rx_backend.c: vk_host does not have hos_ab_frame (MkwVkHost.ab_frame, version 34) right before the "
+             "Mods tab's functions")
     api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
     if int(re.search(r"#define MKWVK_API_VERSION (\d+)", api).group(1)) < 34 or \
-            "int (*ab_frame)(int64_t from_ns, int64_t to_ns);\n} MkwVkHost;" not in api:
-        fail("gpu/vk/vk_api.h: MkwVkHost does not end with ab_frame at version 34 or later")
+            not re.search(r"int \(\*ab_frame\)\(int64_t from_ns, int64_t to_ns\);\n    /\* \(version 35: .*?\*/\n"
+                          r"    int \(\*mod_info\)\(", api, re.S):
+        fail("gpu/vk/vk_api.h: MkwVkHost does not have ab_frame at version 34 right before the Mods tab's functions")
     replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
     if "host->version >= 34 && host->ab_frame ? host->ab_frame(l_at, at) : -1" not in replay:
         fail("gpu/vk/vk_replay.cpp: the frame trace does not ask the host for ab_side (only from a version 34 host)")

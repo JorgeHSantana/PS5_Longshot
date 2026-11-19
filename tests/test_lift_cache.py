@@ -263,7 +263,9 @@ def check_lift_env():
                   make_game.lift_key(str(d / "b" / "exefs"), str(d / "b" / "work"), env("b")) == key)
             check("RX_RELEASE does not change the key", make_game.lift_key(exefs, work, dict(env("a"), RX_RELEASE="")) == key)
             for name, changes in (("RX_VK_NO_PROGRAM_CACHE", False), ("RX_MARCH", False), ("SUYU_RECOMP_STRICT", True),
-                                  ("RX_TARGET", True), ("A64_NO_VFPX", True)):
+                                  ("RX_TARGET", True), ("A64_NO_VFPX", True),
+                                  ("OOT_EXEFS_PATCHES_SHA1", True), ("OOT_EXEFS_PATCHES", False), ("HOS_MODS", False),
+                                  ("HOS_OPTIONS_FILE", False)):
                 with mock.patch.dict(os.environ, {name: "1"}):
                     check("%s in the environment %s the key" % (name, "changes" if changes else "leaves"),
                           (make_game.lift_key(exefs, work, env("a")) != key) == changes)

@@ -1671,6 +1671,24 @@ launcher would send. The sender's switches (`LONGSHOT_PERF_MAX_SENDS`, `LONGSHOT
 `LONGSHOT_PERF_KEEP_SENT`, `LONGSHOT_PERF_URL`) are read from the launcher's environment, not `longshot_env.txt`:
 [performance statistics, Switches](performance-statistics.md#switches).
 
+`mods.json` is the list of which mods are on and in which order (`host/mods.c`, `host/mods_list.c`; its shape and rules are
+in [mods.md](mods.md#the-list-modsjson)). It is wherever the options file is, by the same rule, so the launcher's user
+folder holds one list for every build; a game folder's list is copied there once when it has none, as the settings are
+(`carry_state`). The game writes only what the Mods tab changed in the run onto the file as it is then, so keys it does
+not know and what a launcher changed meanwhile are kept, and a file that is not a list is never written over (it is kept
+as `mods.json.bad`). When the game is built, `make_game.py --user <folder>` tells the build the user folder; without it
+the build reads where the game last read the list (`modcache/mods_json.txt` in the game folder, which the game writes
+when the list is not in the game folder; followed only to a file that is there), else the game folder's, and its log
+says which. A game folder's `longshot_mods.txt`, the list of builds before this, is read once into `mods.json` and
+renamed `longshot_mods.txt.imported`.
+
+The Mods tab keeps a file of its own beside it, `mods.json`: `"mods"`, an entry a mod in the list's order with its `id`
+(`local/<name>`) and `enabled`, and `"cheats"` for the cheats' switches. A mod the file doesn't name comes after the
+named ones, by name, and is on; with no file the order is the folders' names'. `nx2/exefs_patches.py` reads the same
+file when the game is built, for the mods whose ExeFS patches go in. Two more files are written, not edited:
+`exefs_patches.txt` (the build: the patch files it applied, which the Mods tab compares with the mods' folders) and
+`modcache/rsizetable.zs` (the game, at each start with mods: the merged resource size table).
+
 `HOS_CONTROL=<socket path>` turns on the control bridge: a local socket a tool or coding agent drives the running game
 through (inputs timed in frames, screenshots, waits, the Insert menu's settings, quit), with `scripts/longshot_ctl.py`
 as its client. `status.game` holds Link's position/facing, the camera's yaw, event/loading/age, life, maximum life,

@@ -2125,8 +2125,10 @@ COMPILE_ONLY_ENV = ("RX_HOT_OPT", "RX_PGO", "RX_VK_PGO", "RX_VK_PGO_FILE", "RX_A
 # SUYU_RECOMP_ is the emitter's own (third_party/a64-kit/lift/suyu/arm64_to_c.h), and was not in the key.
 # tests/test_lift_cache.py checks that every variable the lift's sources read is one of these, a path, or in LIFT_ENV_NOT_OUTPUT
 LIFT_ENV_PREFIXES = ("A64_", "SUYU_RECOMP_")
-LIFT_ENV_NAMES = ("RX_TARGET",)   # (toolchain.py: the target the emitter and its tables are made for)
-LIFT_PATH_ENV = ("OOT_WORK", "OOT_EXEFS", "OOT_ROMFS", "OOT_DUMP", "A64_HOT_FUNCS")
+# (OOT_EXEFS_PATCHES_SHA1: the mods' ExeFS patches, nx2/exefs_patches.py: the lift writes them into main before it translates it,
+# so their list's hash is in the key; the list itself is a file in the work folder, named by OOT_EXEFS_PATCHES)
+LIFT_ENV_NAMES = ("RX_TARGET", "OOT_EXEFS_PATCHES_SHA1")   # (RX_TARGET, toolchain.py: the target the emitter and its tables are made for)
+LIFT_PATH_ENV = ("OOT_WORK", "OOT_EXEFS", "OOT_ROMFS", "OOT_DUMP", "A64_HOT_FUNCS", "OOT_EXEFS_PATCHES")
 LIFT_ENV_NOT_OUTPUT = {   # (read by the lift's sources, and no change to what it writes)
     "LONGSHOT_LIFT_JOBS": "how many processes", "LONGSHOT_LIFT_NO_FORK": "how they are started", "RX_JOBS": "how many processes",
     "EMSDK": "where the compiler is", "LONGSHOT_MINGW": "where the compiler is",
@@ -2134,6 +2136,8 @@ LIFT_ENV_NOT_OUTPUT = {   # (read by the lift's sources, and no change to what i
     "RX_VK_NO_F16": "nx2/bake_ds's own run",
     "HOS_NO_FASTFP": "the game's runtime (FASTFP_HEADER in nx2/fastfp.py, read by the lifted C at play)",
     "HOS_FMA_FAST": "the game's runtime (nx2/fma_soft.h, read by the generated C at play)",
+    "HOS_MODS": "where make_game.py finds the mods (exefs_patches.collect); the lift reads the patches' list, whose hash is in the key",
+    "HOS_OPTIONS_FILE": "where make_game.py finds mods.json (exefs_patches.list_file); the lift reads the patches' list, whose hash is in the key",
 }
 
 
@@ -2628,6 +2632,10 @@ def parse_args():
     p.add_argument("--romfs-from", default=os.environ.get("LONGSHOT_ROMFS_FROM") or None, metavar="FOLDER",
                    help="with --nup: another game folder unpacked from the same .nup, whose game files this build hard-links instead of "
                         "reading the .nup again (LONGSHOT_ROMFS_FROM: a launcher sets it; a builder that does not know it unpacks)")
+    p.add_argument("--user", metavar="FOLDER",
+                   help="the user folder the game is started with (the launcher's, the game's own --user): mods.json there says "
+                        "which mods' ExeFS patches go in and in which order. Not given: where the game last read its list "
+                        "(the game folder's modcache/mods_json.txt), else mods.json in the game folder")
     p.add_argument("--no-prepare-shaders", action="store_true",
                    help="leave the shaders' preparation to the game's first start (the builder's \"Prepare shaders now\" unticked)")
     p.add_argument("--compile-shaders", choices=tuple(COMPILE_LEVELS),
@@ -3027,6 +3035,25 @@ def main(a=None):
     if vk_profile:
         env["RX_VK_PGO"] = vk_profile
 
+    # (hookshot) the mods' ExeFS patches (nx2/exefs_patches.py): the lift writes them into main before it translates it, so they
+    # are part of its key; none (no mods, or none with ExeFS patches for this version): the lift and its key as without mods
+    import exefs_patches
+    patch_files = exefs_patches.collect(exefs, out, user=getattr(a, "user", None))   # (mods.json: exefs_patches.list_file)
+    patches_json = os.path.join(work, "exefs_patches.json")
+    if any(f["kind"] in ("code", "data") for f in patch_files):
+        with open(patches_json, "w", encoding="utf-8") as f:
+            json.dump(patch_files, f)
+        env[exefs_patches.ENV] = patches_json
+        with open(patches_json, "rb") as f:
+            env[exefs_patches.ENV + "_SHA1"] = hashlib.sha1(f.read(), usedforsecurity=False).hexdigest()
+    elif os.path.exists(patches_json):
+        os.remove(patches_json)
+    built_list = os.path.join(work, "exefs_patches.txt")   # (put in the game folder once the build is in: below)
+    if patch_files:
+        exefs_patches.write_list(patch_files, built_list)
+    elif os.path.exists(built_list):
+        os.remove(built_list)
+
     say("stage", "lift", "Translating the game to PC code")
     # (the same game, tools and settings as the lift before: its C is what this lift would write, and nothing recompiles from it. A
     # rebuild after a change to host/ alone skips the minutes of the lift)
@@ -3265,6 +3292,12 @@ def main(a=None):
             except OSError:
                 pass
     place_ngx_runtime(out)
+    # (hookshot) which of the mods' ExeFS patch files this game was built with (host/mods.c: the Mods tab says which wait for a build)
+    patch_list = os.path.join(out, "exefs_patches.txt")
+    if os.path.exists(os.path.join(work, "exefs_patches.txt")):
+        shutil.copyfile(os.path.join(work, "exefs_patches.txt"), patch_list)
+    elif os.path.exists(patch_list):
+        os.remove(patch_list)
     if fsr_wanted(a, out) and getattr(a, "fetch_fsr_runtime", False):
         place_fsr_runtime(out)
     if getattr(a, "fetch_xess_runtime", False):
