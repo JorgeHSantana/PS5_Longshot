@@ -579,7 +579,11 @@ It writes `report.md` into the folder:
   Presentation threads' inclusive time, and where the main thread waits (overall and in stutters).
 - **Stutters:** the slowest frames one by one: their trace columns, what each thread ran in them, where the main thread
   waited, and the virtual-core waits in them.
-- **GPU:** the log's last pass timing block.
+- **GPU:** the log's last pass timing block. Its `by kind` lines name a span by its label's first word. Where task and
+  mesh programs run as compute shaders (`vk: mesh shaders:` says the compute path, as on a Steam Deck), the fills,
+  barriers and dispatches before each fallback draw are kind `fallback` (`fallback prog <key>` among the labels), and an
+  indirect mesh draw's argument conversion with its barriers is kind `meshconv`: neither is counted in `dispatch` or
+  `barrier`, or left as time between the spans.
 
 It also writes the profile for a profiler's own viewer (`scripts/profile_trace.py`, which makes them alone too; both
 viewers read the file in the browser, nothing is uploaded):

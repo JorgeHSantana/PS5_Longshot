@@ -7094,6 +7094,7 @@ bool mesh_indirect_convert(VkCommandBuffer cmd, const DrawArgs& d) {
         mesh_ring_at += bytes;
     }
     end_pass(cmd);
+    GprofSpan gp(cmd, "meshconv (an indirect mesh draw's arguments -> {count, 1, 1}, with its barriers)");   // (RX_VK_PASS_TIMING)
     VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
     VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
     di.memoryBarrierCount = 1, di.pMemoryBarriers = &mb;
@@ -7438,6 +7439,11 @@ bool fallback_record(VkCommandBuffer cmd, Program& p, const DrawArgs& d) {
     fallback_records_address = f->records_address;
     const uint32_t capacity = Shader::Backend::SPIRV::MESH_FALLBACK_CAPACITY;
     end_pass(cmd);
+    // (RX_VK_PASS_TIMING: the fills, barriers and dispatches below as one span of their own, "fallback prog <key>", not glue
+    // between the spans; its barriers are in it, not among the "barrier" spans. After end_pass, which closes the pass's span)
+    char label[32] = "";
+    if (gprof_on()) snprintf(label, sizeof label, "fallback prog %016llx", (unsigned long long)p.key);
+    GprofSpan span(cmd, label);
     // (the shared pair: the last fallback draw on it, of any program of this thread, has read it before it is reset)
     full_barrier(cmd);
     const uint32_t groups{(uint32_t)std::clamp(d.groups[0], 0, (int)capacity)};
