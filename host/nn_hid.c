@@ -1141,6 +1141,20 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
 static void vibration_send(uint64_t handle, uint64_t value);
 volatile int64_t hos_hid_last_read;
 
+/* (longshot) The sticks' direction pseudo-buttons, HidNpadButton_StickLLeft, Up, Right, Down (bits 16-19) and the
+   right stick's (20-23), which real hid sets from the axes (y up): past half their travel, as yuzu's TransformToStick
+   does (input_converter.cpp, the threshold's default 0.5 in input_poller.cpp). The bits are libnx's hid.h
+   HidNpadButton_StickLLeft = BITL(16) .. HidNpadButton_StickRDown = BITL(23); the game reads none of them, a mod may */
+static uint64_t stick_buttons(const int32_t stick[4]) {
+    uint64_t b = 0;
+    for (int i = 0; i < 2; i++) {
+        const int32_t x = stick[2 * i], y = stick[2 * i + 1], half = 16383;
+        b |= (uint64_t)(x < -half) << (16 + 4 * i) | (uint64_t)(y > half) << (17 + 4 * i) |
+             (uint64_t)(x > half) << (18 + 4 * i) | (uint64_t)(y < -half) << (19 + 4 * i);
+    }
+    return b;
+}
+
 /* GetNpadStates(State* out, int count, unsigned int const& npadId): the latest state first */
 static void npad_states(Ctx *c) {
     uint64_t out = ARG(0);
@@ -1211,6 +1225,7 @@ static void npad_states(Ctx *c) {
     if (connected) buttons = hos_title_input(buttons);
     uint64_t hos_frame_step_buttons(uint64_t buttons);   /* nn_vi.c: the frame step of the wheel and quick menus */
     if (connected) buttons = hos_frame_step_buttons(buttons);
+    buttons |= stick_buttons(stick);
     int64_t s = ++sampling;
     for (int i = 0; i < count; i++) {
         uint64_t e = out + (uint64_t)i * STATE_SIZE;
