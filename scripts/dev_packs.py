@@ -2,12 +2,15 @@
 from a copy of that base. For development and A/B tests only: it calls nx2/make_game.py and nx2/build.py as they are and
 changes nothing in what players build (docs/development.md, *Testing a change against a base*).
 
-    python -I scripts/dev_packs.py base <dir> --romfs <romfs> --exefs <exefs> [--seed <game folder>] [--predict-s N]
+    python -I scripts/dev_packs.py base <dir> --romfs <romfs> --exefs <exefs> [--seed <game folder>] [--predict-s N] [--romfs-in-place]
         Build this checkout (no uncommitted or untracked sources: a base is a commit) into <dir>/game, keeping its work folder
         <dir>/work. --seed copies the shader caches of an earlier game folder first, as a player's update keeps them: they are
         stamped by the shader translator, so the prepare redoes only what changed instead of starting cold. --predict-s N
         (development only; 0, the default, builds them all) stops building the whole game's predicted pipelines after N
         seconds (RX_VK_PREDICT_S): the rest are built in play when first drawn, so warm the base for the scenes you test.
+        --romfs-in-place: the base's game folder gets no romfs (make_game.py --romfs-in-place); its runtimes have none either,
+        and the game is started with --romfs <romfs> (where a hard link is refused, as in a Windows sandbox that may only read
+        the dump, the link was a 26 GB copy).
     python -I scripts/dev_packs.py warm <dir> --run "<command with {runtime}>" [--run ...]
         Play a runtime with no pack once per --run command (split as a POSIX shell would; {runtime} is its folder; it uses
         <dir>/warm-runtime when rt made it there beforehand), copy the caches play made or grew back into the base's game
@@ -21,13 +24,16 @@ changes nothing in what players build (docs/development.md, *Testing a change ag
             the renderer alone (RX_VK_ONLY: no lift, no game; seconds to minutes);
           - anything else: the game with make_game.py (LONGSHOT_NO_PREPARE=1), which builds both modules, in one work folder
             shared by the base's packs (pack_folders), so after the first game pack the lift is skipped while the translator,
-            the HLE list and the hot list stay the same.
+            the HLE list and the hot list stay the same. It reads the romfs where it is (LONGSHOT_ROMFS_IN_PLACE=1: no copy or
+            links in its game folder, so the comparison with the base reads none of it; LONGSHOT_PACK_ROMFS=copy links it as
+            before, for a change that writes into the romfs).
         The pack keeps a module when an object it is linked from differs from the base's (module_changed), and any other file
         of the built game folder that differs from the base's (button prompts and the like). A runtime prepares again when the
         shader translator (what nx2/build.py stamps the shader caches with) or the shader seed changed.
     python -I scripts/dev_packs.py rt <dir> <runtime> [<pack>...]
-        A game folder to run: the base's, its romfs hard-linked (read-only), the rest copied (the caches are written in play),
-        the packs' files over it, prepared again if a pack needs it.
+        A game folder to run: the base's, its romfs hard-linked (read-only; none for a --romfs-in-place base), the rest copied
+        (the caches are written in play; a copy-on-write clone where the file system makes one), the packs' files over it,
+        prepared again if a pack needs it.
     python -I scripts/dev_packs.py ls <dir>
 
 A pack's modules come from the same base as the rest of the runtime, so the game and the renderer always match
@@ -397,6 +403,8 @@ def prepare(game, b, required=True):
     # from before the levels)
     level = (getattr(mg, "folder_compile_level", lambda g: None)(game) or "most") if hasattr(mg, "COMPILE_LEVELS") else None
     cmd = [os.path.join(game, GAME), "--prepare-shaders"] + (["--compile-shaders", level] if level else [])
+    if b.get("romfs_in_place") and not os.path.isdir(os.path.join(game, "romfs")):   # (a --romfs-in-place base and its runtimes)
+        cmd += ["--romfs", b["romfs"]]
     print("+ %s%s" % (" ".join([GAME] + cmd[1:]), " (RX_VK_PREDICT_S=%d)" % b["predict_s"] if b.get("predict_s") else ""), flush=True)
     try:
         code = subprocess.run(cmd, cwd=game, check=required, env=dict(mg.game_env(), **base_env(b.get("predict_s", 0)))).returncode
@@ -410,6 +418,34 @@ def prepare(game, b, required=True):
         print("the shaders were not prepared now (%s): the game prepares them at its first start" % why, flush=True)
         return why
     return None
+
+
+ROMFS_IN_PLACE_ENV = "LONGSHOT_ROMFS_IN_PLACE"   # (make_game.py --romfs-in-place; a tree from before ignores it and links)
+
+
+def pack_env(environ):
+    """A pack's make_game.py environment: no preparation, and the romfs read where it is (no copy or links in its game folder)
+    unless LONGSHOT_PACK_ROMFS=copy (a change that writes into the romfs, which the in-place build may only read)"""
+    env = {"LONGSHOT_NO_PREPARE": "1"}
+    if environ.get("LONGSHOT_PACK_ROMFS", "") != "copy":
+        env[ROMFS_IN_PLACE_ENV] = "1"
+    return env
+
+
+def clone_or_copy(src, dst):
+    """shutil.copy2, but a copy-on-write clone of the file's blocks where the file system makes one (Linux: FICLONE on btrfs and
+    XFS), as nx2/lift_store.py's: a runtime's caches (about 10 GB) cost no disk space or time until the game writes them. Windows'
+    own copy (CopyFile2) clones on ReFS by itself"""
+    if sys.platform.startswith("linux"):
+        import fcntl
+        try:
+            with open(src, "rb") as s, open(dst, "wb") as d:
+                fcntl.ioctl(d.fileno(), 0x40049409, s.fileno())   # (FICLONE)
+            shutil.copystat(src, dst)
+            return dst
+        except OSError:
+            pass
+    return shutil.copy2(src, dst)
 
 
 def make_game(tree, b, work, game, env):
@@ -514,7 +550,11 @@ def cmd_base(a):
     # (make_game.py builds without preparing; the outputs are recorded then, before the preparation, so nothing it writes beside
     # the game (caches, markers, files the renderer adds later) is ever taken for a build's output; then the preparation runs
     # here, with the budget if one is set, which so never reaches make_game.py's lift key)
-    make_game(tree, b, work, game, {"LONGSHOT_NO_PREPARE": "1"})
+    if a.romfs_in_place:
+        b["romfs_in_place"] = True
+    make_game(tree, b, work, game, dict({"LONGSHOT_NO_PREPARE": "1"}, **({ROMFS_IN_PLACE_ENV: "1"} if a.romfs_in_place else {})))
+    if a.romfs_in_place and os.path.isdir(os.path.join(game, "romfs")):   # (a tree from before --romfs-in-place linked it)
+        del b["romfs_in_place"]
     b["outputs"] = build_outputs(game)
     if os.environ.get("LONGSHOT_NO_PREPARE", "0") != "0":   # (as make_game.py reads it: set and not 0)
         b["not_prepared"] = "LONGSHOT_NO_PREPARE is set"
@@ -560,7 +600,7 @@ def cmd_pack(a):
     if how == "game":
         link_objects(b["work"], w["game_work"])
         clear_output(w["game_out"])
-        make_game(tree, b, w["game_work"], w["game_out"], {"LONGSHOT_NO_PREPARE": "1"})
+        make_game(tree, b, w["game_work"], w["game_out"], pack_env(os.environ))
         built, kinds = os.path.join(w["game_work"], "sa", "build"), MODULES
     elif how == "renderer":
         link_objects(b["work"], w["renderer_work"])
@@ -669,9 +709,9 @@ def cmd_rt(a):
     for name in os.listdir(b["game"]):
         s = os.path.join(b["game"], name)
         if os.path.isfile(s):
-            shutil.copy2(s, os.path.join(rt, name))
+            clone_or_copy(s, os.path.join(rt, name))
         elif os.path.isdir(s) and name != "romfs":
-            shutil.copytree(s, os.path.join(rt, name))
+            shutil.copytree(s, os.path.join(rt, name), copy_function=clone_or_copy)
     for rel, (p, src) in over.items():
         dst = os.path.join(rt, rel)
         if not resolves_inside(rt, os.path.dirname(dst)):
@@ -684,6 +724,8 @@ def cmd_rt(a):
             shutil.copy2(src, dst)
     if needs_prepare:
         prepare(rt, b)
+    if not os.path.isdir(os.path.join(b["game"], "romfs")) and b.get("romfs_in_place"):
+        print("%s has no romfs (the base reads it where it is): start the game with --romfs %s" % (rt, b["romfs"]), flush=True)
     with open(os.path.join(rt, "dev_packs.json"), "w", encoding="utf-8") as f:
         json.dump({"base": b["commit"], "packs": a.packs, "modules": {m[0]: sha(os.path.join(rt, m[0])) for m in MODULES}}, f, indent=1)
     print("%s: the base %s%s" % (rt, b["commit"][:8], "".join(", %s from %s" % (m, over[m][0]) for m in (GAME, RENDERER) if m in over)))
@@ -816,6 +858,8 @@ def main(argv=None):
             s.add_argument("--language", default="en-US")
             s.add_argument("--predict-s", type=int, default=0,
                            help="development only: stop building predicted pipelines after this many seconds (0: build all)")
+            s.add_argument("--romfs-in-place", action="store_true",
+                           help="no romfs in the base's game folder: read where it is, and the game started with --romfs")
         else:
             s.add_argument("--work", required=True)
             s.add_argument("--game", required=True)

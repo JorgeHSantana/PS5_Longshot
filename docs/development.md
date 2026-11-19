@@ -874,6 +874,7 @@ A build reads and writes tens of gigabytes. When the game folder or the build fi
 | `A64_LOCAL_REGS=<n>`, `A64_LOCAL_FLAGS=0`, `A64_LOCAL_FUNCS=all` | Guest registers and flags as C locals (`nx2/guest_locals.py`, over the kit's own switches): a function's `<n>` most used guest registers (6 by default; `0`: none) and the flags N, Z, C, V (`A64_LOCAL_FLAGS=0`: not; also not with the kit's `A64_PACKED_FLAGS` experiment, whose packed flag store the locals would not see) live in C locals and are written back to the context only where something else may read them. A function the game's patches touch (`nx2/oot_patches.py`'s `touches`), one that holds an address they name, one with C spliced after an instruction and one whose code starts below its entry (`nx2/lift_fixes.py`'s entry goto) keep the context; the lift stops if a patched function has locals. Only the functions `nx2/ran_funcs.txt` names get locals (the 77,725 a 100-minute play session ran, recorded with `scripts/coverage/cover.py`; addresses only): the others keep the context as before, which saves most of the compile time locals cost and nothing where the game runs. `A64_LOCAL_FUNCS=all` gives every function locals, as does a checkout without the list. Lift-time switches: the lift key holds them |
 | `A64_NO_VBYTES=1`, `A64_NO_VMOVES=1`, `A64_NO_VFPX_ELEM=1` | The lift's vector rewrites off, one each (`nx2/fastvec.py`): TBL with a one-register table and EXT as one SSSE3 instruction (PSHUFB; PALIGNR or two shifts) where the kit writes a byte loop; 128-bit vector loads and DUP by element as one SSE load or shuffle; FMUL by element as a shuffle and a multiply. On by default; set, that pass keeps the kit's text. `tests/test_vbytes.py` and `tests/test_vfpx_elem.py` run each form both ways. Lift-time switches |
 | `LONGSHOT_ROMFS_FROM=<folder>` (or `--romfs-from`) | With `--nup`: another game folder unpacked from the same `.nup`; its game files are hard-linked into this build's, with its kept exefs and its damaged-texture check, instead of reading the `.nup` again. A folder from another `.nup`, with no game files, on another drive or a disk without hard links, or whose linking stops part-way, is passed over: the `.nup` is read. The files are then shared, so nothing may write into either folder's `romfs` |
+| `LONGSHOT_ROMFS_IN_PLACE=1` (or `--romfs-in-place`) | With `--romfs` and `--exefs`: the romfs is read where it is, never hard-linked or copied into the game folder, which then has no `romfs`; start the game with `--romfs <folder>`. `scripts/dev_packs.py` sets it for its packs (below). The variable is passed over by a `.nup` or `--update` build; the switch with them is refused |
 | `LONGSHOT_KEEP_BUILD_FILES=1` | Keeps the lifted C and the objects after a build, so that the next one compiles only what changed |
 | `LONGSHOT_PROMPT_JOBS=<n>` | Processes that draw the button prompts' faces (default one a face, at most the CPU threads and one per GB free) |
 | `LONGSHOT_OBJ_STORE=<dir>` | One store of compiled objects for every work folder (`nx2/object_store.py`): a build in a new `--work` folder compiles only what no other folder built with the same compiler and headers. Hard links (a copy across drives), so keep it on the work folders' drive. Off when unset, empty or `0`; `scripts/dev_packs.py` turns it on (below) |
@@ -1203,12 +1204,18 @@ python -I scripts/dev_packs.py rt   ../base-main ../rt-my-fix my-fix
   `--predict-s N` stops building the whole game's predicted pipelines after N seconds (`RX_VK_PREDICT_S`); the
   rest are built in play when first drawn, so warm the base for the scenes you test (below). For development
   only, never for a player's build: 0, the default, builds them all.
+  `--romfs-in-place` leaves the romfs out of the base's game folder (`make_game.py --romfs-in-place`): its runtimes
+  have none either, its preparation and the game are started with `--romfs <romfs>`. For a romfs the build may only
+  read (a Windows sandbox, where the hard link is refused and was a 26 GB copy).
 - **`pack`** needs a checkout whose history contains the base's commit (rebase it first). Its commits, its
   uncommitted changes and its untracked files all count.
   - **How it builds:** a change to renderer files alone (`gpu/vk/`, `imgui`, FidelityFX) that the game is not
     built from builds the renderer alone (`RX_VK_ONLY`, no lift: seconds to minutes). It compiles `LONGSHOT_JOBS` files at
     once, or one for every four CPU threads when that is unset. Any other change builds the
-    game with `make_game.py` (`LONGSHOT_NO_PREPARE=1`), both modules and the game folder. The renderer files the
+    game with `make_game.py` (`LONGSHOT_NO_PREPARE=1`), both modules and the game folder; it reads the romfs where it
+    is (`LONGSHOT_ROMFS_IN_PLACE=1`), so the game folder has none and the comparison with the base below reads none of
+    it (a copy of it, where the hard link is refused, was hashed whole: half an hour on Windows).
+    `LONGSHOT_PACK_ROMFS=copy` links it as before, for a change that writes into the romfs. The renderer files the
     game is built from are found in the checkout: what `host/` includes from `gpu/`, what `build.py` adds to the
     game's dependencies, and what those include.
   - **What it keeps:** a module when one of the objects it is linked from differs from the base's (its link list,
@@ -1233,8 +1240,9 @@ python -I scripts/dev_packs.py rt   ../base-main ../rt-my-fix my-fix
     work folder it was made in, so the first game pack translates the game once (or copies the base's translation from the lift store,
     below) and the later ones skip the lift while the translator, the HLE functions and the hot list stay the same;
     the base's compiled objects are linked in. Build one pack at a time.
-- **`rt`** makes a game folder to run: the base's, with `romfs` hard-linked (it is never written), the other files
-  copied (the game writes its caches), and the packs' files over them. Two packs that bring the same file are
+- **`rt`** makes a game folder to run: the base's, with `romfs` hard-linked (it is never written; none from a
+  `--romfs-in-place` base), the other files copied (the game writes its caches; a copy-on-write clone on btrfs and
+  XFS), and the packs' files over them. Two packs that bring the same file are
   refused (merge the branches and build one pack); a pack built on another base is refused too, so the game and
   the renderer always come from one base (`MKWVK_API_VERSION`).
 - **`warm`** plays a runtime with no pack once per `--run` command (`{runtime}` in it is the runtime's folder; the command

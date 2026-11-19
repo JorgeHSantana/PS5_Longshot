@@ -2611,6 +2611,9 @@ def place_ngx_runtime(out):
     return dst
 
 
+ROMFS_IN_PLACE_ENV = "LONGSHOT_ROMFS_IN_PLACE"   # (--romfs-in-place, as scripts/dev_packs.py asks it of the build)
+
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--nup")
@@ -2629,6 +2632,10 @@ def parse_args():
     p.add_argument("--game", help="your copy: a .nup file, or a folder with romfs and exefs in it (the same as --nup, or --romfs and --exefs)")
     p.add_argument("--prepare", action="store_true", help="for RecompLauncher: no window, progress lines, --out ~/Games/Longshot unless given")
     p.add_argument("--update", help="a game folder built before: built again from the game files it keeps (the game's update offer)")
+    p.add_argument("--romfs-in-place", action="store_true", default=None,
+                   help="with --romfs (development: scripts/dev_packs.py): read the romfs where it is, without a copy or links in "
+                        "the game folder, which then has no romfs: the game is started with --romfs naming it. "
+                        "LONGSHOT_ROMFS_IN_PLACE=1 asks the same of a --romfs build and is passed over by any other")
     p.add_argument("--romfs-from", default=os.environ.get("LONGSHOT_ROMFS_FROM") or None, metavar="FOLDER",
                    help="with --nup: another game folder unpacked from the same .nup, whose game files this build hard-links instead of "
                         "reading the .nup again (LONGSHOT_ROMFS_FROM: a launcher sets it; a builder that does not know it unpacks)")
@@ -2673,6 +2680,11 @@ def parse_args():
             a.nup = a.game
         else:
             fail("Your copy of the game was not found: %s" % a.game)
+    if a.romfs_in_place and (a.nup or a.update or not a.romfs):
+        fail("--romfs-in-place reads a romfs folder where it is: give it with --romfs and --exefs, not a .nup or --update.")
+    if a.romfs_in_place is None:   # (scripts/dev_packs.py sets it for the builds it runs; a tree from before ignores it and links)
+        a.romfs_in_place = (os.environ.get(ROMFS_IN_PLACE_ENV, "0") not in ("", "0") and bool(a.romfs)
+                            and not a.nup and not a.update)
     a.default_work = p.get_default("work")   # (main: the builder's own work folder, stop_stray_compilers)
     return a
 
@@ -3001,12 +3013,19 @@ def main(a=None):
         if not remaining_assets:
             stand_in_damaged_files(out, romfs)
     else:
-        check_cache_paths(out, (kept, romfs))
+        # (--romfs-in-place: the romfs is read where it is, never linked or copied into the game folder, which so has none; the
+        # game is started with --romfs naming it. scripts/dev_packs.py's packs and bases: where a hard link is refused (a
+        # Windows sandbox may only read the dump) the link was a 26 GB copy, and the pack's comparison with the base read both)
+        in_place = bool(getattr(a, "romfs_in_place", False))
+        if in_place:
+            romfs = os.path.abspath(a.romfs)
+        check_cache_paths(out, (kept,) if in_place else (kept, romfs))
         refuse_dump_links(a.exefs)
         refuse_dump_links(a.romfs)
         shutil.copytree(a.exefs, exefs)   # (unpacked in place: the user's copy stays as it is)
         run(PY + ["nx2/unpack.py", exefs])
-        link_or_copy(a.romfs, romfs)
+        if not in_place:
+            link_or_copy(a.romfs, romfs)
         shutil.rmtree(kept, ignore_errors=True)
         shutil.copytree(exefs, kept)
     check_supported_build(exefs)
