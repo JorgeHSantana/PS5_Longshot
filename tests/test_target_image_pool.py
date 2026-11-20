@@ -86,8 +86,10 @@ class TargetImagePoolTests(unittest.TestCase):
     def test_the_dead_list_pools_before_it_destroys_and_the_pool_is_trimmed_each_present(self):
         frame = block(self.tex, "void texture_frame(uint64_t completed)")
         loop = frame[frame.index("for (auto it = dead.begin(); it != dead.end();) {"):]
-        self.assertLess(loop.index("if (it->pool_key) {"), loop.index("destroy_image(it->image, it->allocation);"))
-        self.assertIn("pool_put(*it);", loop[:loop.index("destroy_image(")])
+        # (the dead images go to the reaper's thread, vk_vma.cpp destroy_image_later, with their views, buffer and memory)
+        gone = "destroy_image_later(it->image, it->allocation, std::move(it->views), it->buffer, it->buffer_alloc, std::move(it->memory));"
+        self.assertLess(loop.index("if (it->pool_key) {"), loop.index(gone))
+        self.assertIn("pool_put(*it);", loop[:loop.index("destroy_image_later(")])
         trim = frame.index("pool_trim();")
         self.assertLess(trim, frame.index("if (!dead_targets::pass_due(frame_no)) {"))   # (every present, not every tenth)
         # (the pool's pressure is the arbiter's level, from the lines this read before: pressure past 90% of the allowance, 1,
@@ -103,8 +105,9 @@ class TargetImagePoolTests(unittest.TestCase):
         self.assertIn("pool_bytes <= cap", trim)
         self.assertIn("pool_destroy(oldest);", trim)
         destroy = block(self.tex, "void pool_destroy(Pooled& p)")
-        self.assertIn("vkDestroyImageView", destroy)
-        self.assertIn("destroy_image(p.image, p.allocation);", destroy)
+        # (its views with it, on the reaper's thread: vk_vma.cpp destroy_image_later)
+        self.assertIn("if (kv.second) views.push_back(kv.second);", destroy)
+        self.assertIn("destroy_image_later(p.image, p.allocation, std::move(views));", destroy)
 
     def test_the_pools_numbers_are_logged(self):
         self.assertIn("render target images: %llu reused from the pool, %llu made new, %llu destroyed from it", self.tex)

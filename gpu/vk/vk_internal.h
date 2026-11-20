@@ -482,6 +482,12 @@ void image_compact_ignore(size_t i);
 /// the last one; then *freed_bytes and *freed_blocks say what went back to the driver in all
 bool image_compact_pass_end(uint64_t* freed_bytes, uint32_t* freed_blocks);
 void destroy_image(VkImage image, VmaAllocation allocation);
+/// (longshot) An image nothing can use again destroyed on the reaper's thread (vk_vma.cpp), with its views, a buffer and memory
+/// objects that go with it: a vmaDestroyImage is a kernel call of a millisecond and more on NVIDIA's Windows driver. Never while
+/// the textures' compaction has a pass open. RX_VK_REAPER=0: at once, here
+void destroy_image_later(VkImage image, VmaAllocation allocation, std::vector<VkImageView> views = {}, VkBuffer buffer = VK_NULL_HANDLE,
+                         VmaAllocation buffer_alloc = nullptr, std::vector<VkDeviceMemory> memory = {});
+size_t images_to_reap();    // (how many it has yet to: queued, and the one in flight; 0 with RX_VK_REAPER=0)
 /// What an allocation really takes (VkMemoryRequirements.size: padding, alignment, the driver's metadata), 0 for none
 uint64_t allocation_size(VmaAllocation allocation);
 /// (mem_account.h) What the images create_image made and destroy_image has not destroyed take, by allocation_size: those in a

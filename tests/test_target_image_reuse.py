@@ -56,6 +56,9 @@ static uint64_t pool_cap() { return cap; }
 static std::set<VkImage> freed, pooled;
 static void destroy_image(VkImage i, VmaAllocation) { if (i) freed.insert(i); }
 static void destroy_buffer(VkBuffer, VmaAllocation) {}
+// (vk_vma.cpp: the reaper's thread destroys it; here at once, as RX_VK_REAPER=0 does)
+static void destroy_image_later(VkImage i, VmaAllocation a, std::vector<VkImageView>, VkBuffer, VmaAllocation,
+                                std::vector<VkDeviceMemory>) { destroy_image(i, a); }
 struct { bool in_pass = false; } compact;
 
 namespace {

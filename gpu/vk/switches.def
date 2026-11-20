@@ -620,6 +620,7 @@ SW(RX_VK_READBACK_LATE, kill, string, "unset: the culling camera block (0x3980 b
 SW(RX_VK_READBACK_NO_CATCHUP, attempt, bool, "off: a readback catches the replay up or settles first", "=1 (A/B) skips the catch-up before a readback: recorded work only.")
 SW(RX_VK_READBACK_OFF_FILE, diag, string, "unset: invalidate always writes GPU-written texels back", "<path>: while that file exists invalidate skips its texture write-back and catch-up (a live A/B).")
 SW(RX_VK_READBACK_WAIT_MS, tune, int, "250 ms", "Longest a readback waits for its write-back's value before reading what memory holds; 0 is no limit.")
+SW(RX_VK_REAPER, kill, bool, "on: the images the renderer lets go of (texture_frame's dead ones, the render-target pool's trimmed ones) destroyed on a thread of their own, never while the textures' compaction has a pass open", "=0 destroys them on the render thread, as before.")
 SW(RX_VK_RECORDER, player, enum, "the Threaded rendering row: thread for On, and Auto from 6 physical cores where the run is safe; else off", "Chooses the command recorder for the run (sync, defer, thread; anything else off), over the Threaded rendering row.")
 SW(RX_VK_RECORDER_IDLE, attempt, enum, "spin, then a condition variable", "wait: the idle recorder spins 20 us then waits on the ring's address (WaitOnAddress/futex) instead.")
 SW(RX_VK_RECORDER_OWN, attempt, bool, "off", "A recording slot resets its own command and descriptor pools at reuse without waiting for the recorder thread.")

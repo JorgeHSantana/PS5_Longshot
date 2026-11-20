@@ -418,9 +418,10 @@ bool pool_take(uint64_t key, VkImage& image, VmaAllocation& allocation, std::uno
     return true;
 }
 void pool_destroy(Pooled& p) {
+    std::vector<VkImageView> views;
     for (auto& kv : p.views)
-        if (kv.second) vkDestroyImageView(dev.device, kv.second, nullptr);
-    destroy_image(p.image, p.allocation);
+        if (kv.second) views.push_back(kv.second);
+    destroy_image_later(p.image, p.allocation, std::move(views));   // (on the reaper's thread: vk_vma.cpp)
     st_pool_destroyed++;
 }
 /// (texture_frame) a dead render target's image the GPU is done with, into the pool
@@ -4683,6 +4684,9 @@ void compact_step(uint64_t completed) {
         logf("vk: VRAM compaction %llu begins: the textures' blocks hold %llu MB, %llu MB of it free space",
              (unsigned long long)compact.runs, (unsigned long long)(block_bytes >> 20), (unsigned long long)(free_bytes >> 20));
     }
+    // (RX_VK_REAPER: the dead images handed to the reaper are freed before a pass opens, as they were here before: a pass VMA
+    // plans with them still in the blocks moves around them and empties fewer. A present or so later; never a wait here)
+    if (images_to_reap()) return;
     static thread_local std::vector<ImageMove> moves;
     uint64_t freed_now = 0;
     uint32_t blocks_now = 0;
@@ -5191,10 +5195,9 @@ void texture_frame(uint64_t completed) {
             it = dead.erase(it);
             continue;
         }
-        for (VkImageView v : it->views) vkDestroyImageView(dev.device, v, nullptr);
-        destroy_image(it->image, it->allocation);
-        if (it->buffer) destroy_buffer(it->buffer, it->buffer_alloc);
-        for (VkDeviceMemory m : it->memory) vkFreeMemory(dev.device, m, nullptr);
+        // (longshot: on the reaper's thread, vk_vma.cpp; a vmaDestroyImage is a millisecond and more on NVIDIA's Windows
+        // driver, and a turn of the camera let go of many in one present)
+        destroy_image_later(it->image, it->allocation, std::move(it->views), it->buffer, it->buffer_alloc, std::move(it->memory));
         it = dead.erase(it);
     }
     pool_trim();
