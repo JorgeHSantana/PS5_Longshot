@@ -27,6 +27,7 @@ FROZEN = {   # (a key: the value its row saves, as players' files hold them)
     "autosave:": "&opts.transition_autosave",
     "button_prompts": "&opts.prompts",
     "camera_speed": "&opts.camera_speed",
+    "colour_vision": "&opts.colour_vision",
     "compact_menu_key": "&opts.compact_menu_key",
     "controller_in_background": "&opts.pad_background",
     "controller_menu_button": "&opts.pad_menu",

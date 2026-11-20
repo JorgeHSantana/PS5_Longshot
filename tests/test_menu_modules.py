@@ -56,23 +56,24 @@ int main() {
     CHECK(menu::diagnostics().empty());
     // (HDR: its section right after Screen's rows, before Detail, its rows in order)
     const std::string g = order("graphics", false);
-    const size_t hdr = g.find("#hdr hdr hdr_paper_white hdr_peak_brightness hdr_contrast hdr_tone_mapper #detail");
+    const size_t hdr = g.find("#hdr hdr hdr_paper_white hdr_peak_brightness hdr_contrast hdr_tone_mapper #accessibility colour_vision #detail");
     CHECK(hdr != std::string::npos && g.find("#screen") < hdr);
     opts.hdr = 0;
     std::string shown = order("graphics", true);
-    CHECK(shown.find("#hdr hdr #detail") != std::string::npos);
+    CHECK(shown.find("#hdr hdr #accessibility colour_vision #detail") != std::string::npos);
     opts.hdr = 1, opts.hdr_white = 200, opts.hdr_peak = 1000, opts.hdr_contrast = 100;
     shown = order("graphics", true);
-    CHECK(shown.find("#hdr hdr hdr_paper_white hdr_peak_brightness hdr_contrast #detail") != std::string::npos);
+    CHECK(shown.find("#hdr hdr hdr_paper_white hdr_peak_brightness hdr_contrast #accessibility colour_vision #detail") != std::string::npos);
     CHECK(value_of("graphics", "hdr") == "Expanded" && value_of("graphics", "hdr_paper_white") == "200 nits" &&
           value_of("graphics", "hdr_peak_brightness") == "1000 nits" && value_of("graphics", "hdr_contrast") == "100%");
     opts.hdr = 2, opts.hdr_tonemap = 1;
     shown = order("graphics", true);
-    CHECK(shown.find("#hdr hdr hdr_paper_white hdr_peak_brightness hdr_contrast hdr_tone_mapper #detail") != std::string::npos);
+    CHECK(shown.find("#hdr hdr hdr_paper_white hdr_peak_brightness hdr_contrast hdr_tone_mapper #accessibility colour_vision #detail") != std::string::npos);
     CHECK(value_of("graphics", "hdr") == "Native (the game's)" && value_of("graphics", "hdr_tone_mapper") == "PsychoV35");
     CHECK(!strcmp(tx_hdr(0), "Off") && !strcmp(tx_hdr(2), "Native (the game's)"));
     for (const char* key : {"hdr", "hdr_paper_white", "hdr_peak_brightness", "hdr_contrast", "hdr_tone_mapper"})
         CHECK(menu::find(key) && menu::find(key)->preset_exempt && !menu::find(key)->restart);
+    CHECK(menu::find("colour_vision") && menu::find("colour_vision")->preset_exempt && !menu::find("colour_vision")->restart);
     if (failures) {
         fprintf(stderr, "the Graphics tab as built: %s\n", g.c_str());
         return 1;

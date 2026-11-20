@@ -92,6 +92,7 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | HDR peak brightness | 400 to 4000 nits, in steps of 100 (while HDR is on) | 1000 nits |
 | | HDR contrast | 50% to 200% around mid grey, in steps of 5 (while HDR is on) | 100% |
 | | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's; with HDR set to Native). Compatible DLSS/DLAA, FSR 4/native AA and shared-chain FSR 3.1 upscaling run automatically; `RX_VK_PSYCHOV35_DLSS=0` disables that compatibility route. Off and the spatial/FXAA TAAU replacement support PsychoV35 directly. FSR 3.1 FG remains separately opt-in and 2x only; legacy own-input FSR upscaling remains unsupported | Vanilla |
+| | Colour vision correction | Off, Protan (red-green), Deutan (red-green), Tritan (blue-yellow). Changes apply immediately. | Off |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
 | | Shadow resolution | Auto (for the card's memory), Game's (1600), High (2200), Highest (3072): the sun's shadow maps, applies at once | Auto |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
@@ -164,6 +165,11 @@ camera, teleport, the inventory and the other tools below the row. Its **Develop
 helper asks you to.
 
 ## About some settings
+
+- **Colour vision correction:** in **Graphics → Accessibility**, choose **Off**, **Protan (red-green)**,
+  **Deutan (red-green)** or **Tritan (blue-yellow)**. The setting takes effect immediately and is remembered.
+  It shifts colour differences while preserving brightness. The three modes are fixed presets and their
+  usefulness varies by player and scene.
 
 - **Quality preset** sets Render resolution, Window scaling filter, Sharpness, Frame pacing, Game speed, Profile and
   Shadow resolution for a card with that much memory. It leaves the Upscaler and Frame generation as you chose them:

@@ -3741,6 +3741,7 @@ void menu_init() {
         }
     }
     first_start = !has_options;
+    menu_colour_vision_changed(opts.colour_vision);
     sync_transition_autosave();
     const char* handheld_env = getenv("HOS_HANDHELD");   // (host/nn_applet.c handheld(): the environment over the file's)
     if (!has_output && !(handheld_env ? !env_value_off(handheld_env) : opts.handheld != 0)) {
@@ -5012,7 +5013,7 @@ void menu_rumble_tick() {
     if (was >= 0 && opts.rumble != was && menu_is_open() && host && host->version >= 32 && host->rumble_test) host->rumble_test();
     was = opts.rumble;
 }
-void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
+void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h, int colour_vision) {
     const bool start = startup_on.load(std::memory_order_acquire);
     const bool fps = opts.show_fps && !start;   // (no game frames yet: not "0 FPS" over the start-up screen)
     const bool open = open_now.load(std::memory_order_relaxed);
@@ -5023,7 +5024,7 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
             ui::Ctx c = ui_ctx(w, h);
             prebake(c);
             ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (Dear ImGui records into cmd directly, its backend through its own pointers: what this thread recorded through vk_work.h reaches cmd first)
-            ui::record(cmd, index, w, h);
+            ui::record(cmd, index, w, h, colour_vision);
             return;
         }
         ui::idle();
@@ -5042,7 +5043,7 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
     if (open) draw_menu(c);
     if (fps) draw_fps(c, open);
     ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (Dear ImGui records into cmd directly, its backend through its own pointers: what this thread recorded through vk_work.h reaches cmd first)
-    ui::record(cmd, index, w, h);
+    ui::record(cmd, index, w, h, colour_vision);
 }
 
 void menu_record_image(VkCommandBuffer cmd, VkImage image, VkImageView view, uint32_t w, uint32_t h) {

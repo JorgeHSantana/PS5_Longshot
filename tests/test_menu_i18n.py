@@ -190,6 +190,16 @@ class MenuI18nTests(unittest.TestCase):
             self.assertIn(" settings (many)", dict(self.tables[table]), table)
             self.assertIn(" settings", dict(self.tables[table]), table)
 
+    def test_colour_vision_modes_translated(self):
+        texts = ("Accessibility", "Colour vision correction", "Protan (red-green)",
+                 "Deutan (red-green)", "Tritan (blue-yellow)",
+                 "Recolours the picture for red-green or blue-yellow colour vision deficiency. Changes apply immediately.")
+        self.assertTrue(set(texts) <= self.menu)
+        for table, pairs in self.tables.items():
+            translated = dict(pairs)
+            with self.subTest(table=table):
+                self.assertTrue(set(texts) <= translated.keys())
+
     def test_conversions_and_spaces(self):
         for table, pairs in self.tables.items():
             keys = [en for en, _ in pairs]

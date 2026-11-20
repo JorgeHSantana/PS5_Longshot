@@ -43,7 +43,7 @@ void framegen_hud_before(VkCommandBuffer cmd, Texture* picture, uint32_t level);
 /// After that recording's submit (value): the display thread shows its frames
 void framegen_queue(uint64_t value);
 /// The window's present of an image (GENERAL, w x h; crop as above or null), vk_replay.cpp: the display thread's
-void present_image(VkImage src, uint32_t w, uint32_t h, const int crop[4], VkImageView view = VK_NULL_HANDLE);
+void present_image(VkImage src, uint32_t w, uint32_t h, const int crop[4], VkImageView view = VK_NULL_HANDLE, bool source_srgb = false, bool allow_scale = true);
 /// (longshot) Present ahead (vk_framegen.cpp display_main): while present_defer_into is set on a thread, present_image
 /// submits the frame's copy into its swapchain image and stops there, with what present_commit needs to show it later. The
 /// copy is then on the queue before the game's next frame, so its present at its time does not wait for that frame's rendering
@@ -67,9 +67,9 @@ VkImageView framegen_scaled_view();   // final scale/CRT view for the existing H
 /// (longshot) The HDR10 picture of src's crop at dw x dh (the Insert menu's HDR), GENERAL; null: none (the SDR picture then;
 /// Native's scaled picture, else black: present_image).
 /// pq: src is the game's own HDR10 picture (Native), its PQ codes as they are at 100% contrast, else graded and written again;
-/// else the SDR picture, expanded
+/// else the SDR picture, expanded. colour_vision: the Colour vision correction row's mode (0 Off), applied after grading
 VkImage framegen_hdr(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4], uint32_t dw, uint32_t dh,
-                     bool pq = false);
+                     bool pq, int colour_vision = 0);
 /// Each present: ultrawide's menus (the Insert menu's setting to the game's side, the sides blurred or black while a menu shows)
 void wide_sides_tick();
 /// Whether ultrawide's menu sides can show at all: Ultrawide with a margin and the Insert menu's setting on

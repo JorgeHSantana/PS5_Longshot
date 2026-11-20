@@ -90,12 +90,12 @@ def check_grading():
     shader = [n.strip() for decl in block.split(";") if decl.strip() for n in decl.split(None, 1)[1].split(",")]
     hdr = function((VK / "vk_framegen.cpp").read_text(encoding="utf-8"), "VkImage framegen_hdr(")
     pushed = re.search(r"const struct \{ float uv\[4\]; float ([^;]*); \} pc", hdr)
-    if shader != ["uv", "white", "peak", "knee", "mode", "contrast", "exposure", "pad0", "pad1"] or not pushed or \
+    if shader != ["uv", "white", "peak", "knee", "mode", "contrast", "exposure", "colour_vision", "pad1"] or not pushed or \
             [n.strip() for n in pushed.group(1).split(",")] != shader[1:] or "{S, I}, 48)" not in hdr:
         sys.exit("FAIL: hdr_encode.comp's push constants %s are not the 48 bytes framegen_hdr pushes" % shader)
     main = text[text.index("void main()"):]
     # (Native at 100% contrast and exposure 1: the game's PQ codes written as they are, before any decode or encode)
-    through = main.index("if (pc.mode >= 0.5 && pc.contrast == 1.0 && pc.exposure == 1.0) {")
+    through = main.index("if (pc.mode >= 0.5 && pc.contrast == 1.0 && pc.exposure == 1.0 && !cv_enabled(int(pc.colour_vision))) {")
     if "imageStore(dst, at, vec4(c, 1.0));\n        return;" not in main[through:through + 200] or \
             through > main.index("pq_decode(c)"):
         sys.exit("FAIL: hdr_encode.comp does not pass Native's PQ codes through as they are at 100% contrast")
@@ -252,7 +252,7 @@ if args.glslang:
         out = Path(d, "h.h")
         subprocess.run([args.glslang, "-V", "--target-env", "vulkan1.2", "--vn", "HDR_ENCODE_COMP_SPV", "-o", str(out),
                         str(SHADERS / "hdr_encode.comp")], check=True, capture_output=True)
-        if out.read_text() != "\n".join(header.splitlines(True)[1:]) and out.read_text() != "".join(header.splitlines(True)[1:]):
+        if out.read_text() != "".join(header.splitlines(True)[2:]):
             sys.exit("FAIL: hdr_encode_comp_spv.h differs from the shader compiled now")
 print("PASS: the HDR10 pass's header is its shader, PQ, the highlight expansion and the contrast grading as intended, "
       "and the HDR paths around it")

@@ -54,6 +54,8 @@
 #include "vk_xfer.h"
 #include "vk_present_rect.h"
 #include "vk_present_trace.h"
+#include "colour_vision.h"
+#include "vk_colour_vision.h"
 
 #include "vk_internal.h"
 #ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
@@ -5106,6 +5108,8 @@ void do_present(const nvn_tex* t, const int crop[4]) {
     VkImage src = VK_NULL_HANDLE;
     VkImageView direct_view = VK_NULL_HANDLE;
     uint32_t sw = 0, sh = 0;
+    bool source_srgb = false;
+    bool direct_scale = false;
     bool shot = false, interpolated = false;
     VkImage made_src = VK_NULL_HANDLE;
     int made_index = 0;
@@ -5154,9 +5158,14 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                                                                                         : "the SDR picture expanded to HDR10");
             }
         }
-        if (tex && !dev.offscreen && (opts.upscale || opts.sharpness || opts.crt_filter || dev.hdr || wide_sides_possible())) {
+        direct_scale = tex && !dev.offscreen &&
+                       (opts.upscale || opts.sharpness || opts.crt_filter || dev.hdr || wide_sides_possible());
+        if (tex && !dev.offscreen && (direct_scale || colour_vision::enabled(menu_colour_vision_mode()))) {
             // Keep the sampled view with the same cached image as the direct present, before advancing its age.
-            direct_view = texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample);
+            VkFormat sampled_format = VK_FORMAT_UNDEFINED;
+            direct_view = texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, &sampled_format);
+            source_srgb = sampled_format == VK_FORMAT_R8G8B8A8_SRGB || sampled_format == VK_FORMAT_B8G8R8A8_SRGB ||
+                          sampled_format == VK_FORMAT_A8B8G8R8_SRGB_PACK32;
             tex->last_frame = texture_frame_no();
             tex->last_value = std::max(tex->last_value, value);
         }
@@ -5499,7 +5508,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
     }
     if (dev.offscreen) frame_log_present();   // (no window: the copy into the offscreen image above is its present)
     if (dev.offscreen || interpolated) return;
-    present_image(src, sw, sh, crop, direct_view);
+    present_image(src, sw, sh, crop, direct_view, source_srgb, direct_scale);
 }
 
 } // namespace
@@ -5767,7 +5776,7 @@ static bool acquire_fence_ready() {
     return true;
 }
 
-void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view) {
+void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view, bool source_srgb, bool allow_scale) {
 #ifdef TRACY_ENABLE
     HT_SCOPE("present_image");
 #endif
@@ -5925,13 +5934,20 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     // format the game presents (do_present): at 100% contrast it writes the game's PQ codes as they are. Never blitted from its
     // image: a blit converts from the image's own format, not the picture's)
     const bool native_pq = present_native_pq.load(std::memory_order_relaxed);
-    const VkImage scaled = src && view ? framegen_scale(f.cmd, view, src, sw, sh, crop, rect.w, rect.h, native_pq) : VK_NULL_HANDLE;
+    const VkImage scaled = allow_scale && src && view ? framegen_scale(f.cmd, view, src, sw, sh, crop, rect.w, rect.h, native_pq) : VK_NULL_HANDLE;
     // (longshot) the Insert menu's HDR: the picture (scaled, or the game's own with its crop) to HDR10, copied in as the SDR one is
+    const int colour = menu_colour_vision_mode();
+    const bool correct_sdr = src && !dev.hdr && colour_vision::enabled(colour);
     const VkImage hdr_image = dev.hdr && src && view
-        ? (scaled ? framegen_hdr(f.cmd, framegen_scaled_view(), rect.w, rect.h, nullptr, rect.w, rect.h, native_pq)
-                  : framegen_hdr(f.cmd, view, sw, sh, crop, rect.w, rect.h, native_pq))
+        ? (scaled ? framegen_hdr(f.cmd, framegen_scaled_view(), rect.w, rect.h, nullptr, rect.w, rect.h, native_pq, colour)
+                  : framegen_hdr(f.cmd, view, sw, sh, crop, rect.w, rect.h, native_pq, colour))
         : VK_NULL_HANDLE;
-    if (hdr_image) {
+    const bool corrected = correct_sdr && index < dev.swap_views.size() && colour_vision_sdr(
+        f.cmd, scaled ? framegen_scaled_view() : view, scaled ? rect.w : sw, scaled ? rect.h : sh,
+        scaled ? nullptr : crop, dst, dev.swap_views[index], rect, colour, !scaled && source_srgb);
+    if (corrected) {
+        trace_route = 4;
+    } else if (hdr_image) {
         trace_route = 3;
         full_barrier(f.cmd);
         blit_crop_to_rect(f.cmd, hdr_image, rect.w, rect.h, nullptr, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, rect);
@@ -5983,7 +5999,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
         const PresentTraceDecision decision = trace.note(sample);
         if (decision == PresentTraceDecision::Emit) {
             const char* kinds[] = {"game", "made", "startup"};
-            const char* routes[] = {"direct", "scaled", "clear", "hdr"};
+            const char* routes[] = {"direct", "scaled", "clear", "hdr", "colour vision"};
             const char* aspects[] = {"unavailable", "invalid", "valid"};
             logf("vk: present geometry: kind=%s source=%ux%u crop=%s:%d,%d %dx%d content=%ux%u output=%ux%u "
                  "destination=%u,%u %ux%u host-aspect=%s:%.9g route=%s view=%d filter-request=%d sharpness-request=%d framegen-request=%d",
@@ -5995,7 +6011,16 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
             logf("vk: present geometry: limit of %u changes reached; further geometry messages suppressed", PresentGeometryTrace::kLimit);
         }
     }
-    menu_record(f.cmd, index, dev.swap_extent.width, dev.swap_extent.height);   // (longshot) Dear ImGui's overlays, over all of it
+    const bool applied_colour = corrected || (hdr_image && colour_vision::enabled(colour));
+    static int last_colour = 0;
+    if (src && applied_colour && colour != last_colour)
+        logf("vk: colour vision mode %d applied in %s", colour, dev.hdr ? "HDR" : "SDR");
+    last_colour = applied_colour ? colour : 0;
+    if (src && colour_vision::enabled(colour) && !applied_colour) {
+        static bool warned;
+        if (!warned) warned = true, logf("vk: colour vision correction unavailable for this presentation route");
+    }
+    menu_record(f.cmd, index, dev.swap_extent.width, dev.swap_extent.height, applied_colour ? colour : 0);   // (longshot) Dear ImGui's overlays, over all of it
     menu_rumble_tick();   // (longshot: the Rumble strength row's own rumble, vk_menu.cpp)
     image_barrier(f.cmd, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     if (vkEndCommandBuffer(f.cmd) == VK_ERROR_DEVICE_LOST) device_lost();
