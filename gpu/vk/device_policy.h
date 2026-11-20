@@ -228,7 +228,7 @@ inline bool parse_decimal(const char* text, double hi, double& out) {
 /// The fields a switch can set (device_policy_env), for DevicePolicy::set and the log's mark
 enum class Sw : unsigned {
     astc_on_cpu, batch_submits, compute_builds_serial, pcache_fetch_lock, split_before_draw, ub_snapshot, split_ub_flush,
-    occ_copy, mirrors, fsr4_tune, position_invariant, equal_depth_bias, cap_spare_max, staging_keep, workers,
+    occ_copy, mirrors, fsr4_tune, position_invariant, equal_depth_bias, cap_spare_max, staging_keep, workers, acquire_ahead,
     fetch_bounds, nan_bits, gather_offset,   // (device_policy_fixes_env's three)
     count
 };
@@ -405,6 +405,16 @@ struct DevicePolicy {
     // main outdoor area (#238). On an RTX 3090 (Linux) the waits are 0.04-0.2 ms and the rule changed nothing measurable.
     // RX_VK_READBACK_LATE (its rules, read at the site; set, it replaces this). Read (vk_replay.cpp readback_late_wanted)
     bool readback_late_newest = false;
+    // Every driver: the window's next image asked for right after each present, on the presenter thread (vk_replay.cpp
+    // acquire_ahead_wanted), so the wait for it overlaps the next frame's work. AMD's driver on Windows hands the image back
+    // from vkAcquireNextImageKHR at once and the wait is in the acquire's fence, which a window's composition signals a few
+    // ms later: with the presenter thread the render thread's presents took 2.3-2.7 ms a frame in a window (0.4 full
+    // screen), and with the image asked for a present ahead 0.24, its image free at 588-600 of 600 presents (RX 9070 XT,
+    // 26.11.2, a 1280x720 window on a 144 Hz desktop, uncapped: +7.9% fps). Drivers that wait in the acquire itself
+    // (NVIDIA's, Mesa's) get a timeout of 0 there, so it never holds the presenter: an RTX 3090 on Linux in a 2560x1440
+    // window measured +3.8% fps by median. RX_VK_ACQUIRE_AHEAD: 0 off (#1458's order, each image asked for at its
+    // present), anything else on. Read (vk_replay.cpp acquire_ahead_on)
+    bool acquire_ahead = false;
     // Linux with NVIDIA's own driver and 20 GB of RAM or less: the pipeline cache's file may be left unread, where
     // NVIDIA's own cache is warm and programs load at create (pcache_load.h decides with those). RX_VK_PCACHE_LOAD. Site
     // (vk_draw.cpp pcache_load_off), step 4
@@ -556,6 +566,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
     p.fsr4_tune = f.amd();
     p.gpu_clock_peak = f.amd() && f.deck_apu();
     p.readback_late_newest = f.handheld();
+    p.acquire_ahead = true;   // (every driver; not under frame generation or FIFO: vk_replay.cpp acquire_ahead_wanted)
     p.pcache_small_pc = !f.windows && f.driver_id == VK_DRIVER_ID_NVIDIA_PROPRIETARY && (f.ram >> 20) && (f.ram >> 20) <= 20480;
 
     // sizes
@@ -648,6 +659,7 @@ template <class Get> void device_policy_env(DevicePolicy& p, const DeviceFacts& 
     flag(Sw::pcache_fetch_lock, "RX_VK_PCACHE_FETCH_LOCK", p.pcache_fetch_lock);
     flag(Sw::split_before_draw, "RX_VK_SPLIT_BEFORE_DRAW", p.split_before_draw);
     flag(Sw::occ_copy, "RX_VK_OCC_COPY", p.occ_copy);
+    flag(Sw::acquire_ahead, "RX_VK_ACQUIRE_AHEAD", p.acquire_ahead);
     {   // (off only: the tuning rewrites AMD's shaders for AMD's GPUs, and a value that says on leaves the default)
         const char* e = nullptr;
         if (word("RX_VK_FSR4_TUNE", e) == 0) p.fsr4_tune = false, mark(Sw::fsr4_tune, "RX_VK_FSR4_TUNE", e);
@@ -773,6 +785,7 @@ template <class Line> void device_policy_log(const DevicePolicy& p, const Device
         l.flag("fsr4_tune", p.fsr4_tune, p.set(Sw::fsr4_tune));
         l.flag("gpu_clock_peak", p.gpu_clock_peak);
         l.flag("readback_late_newest", p.readback_late_newest);
+        l.flag("acquire_ahead", p.acquire_ahead, p.set(Sw::acquire_ahead));
         l.flag("pcache_small_pc", p.pcache_small_pc);
         line(l.text);
     }

@@ -165,6 +165,7 @@ Elsewhere the call returns at once and the thread costs a hand-off.
   are enabled wherever the driver has them.
 - With NVIDIA Reflex its present id goes with the present, and the presenter marks the present's end.
 - Frame interpolation's presents are made by its display thread, as before.
+- **Acquire ahead** (on by default, `RX_VK_ACQUIRE_AHEAD=0` turns it off): after a game frame's present that came back `VK_SUCCESS`, the presenter asks for the next present's image at once (a timeout of 0), while the swapchain is still its own. With AMD's Windows driver `vkAcquireNextImageKHR` returns at once and the wait is in the acquire's fence, which the system signals at its next composition: in a window the render thread waited 2.3 to 2.7 ms a frame for it at its present (RX 9070 XT, a 1280x720 window on a 144 Hz desktop). Asked for a present ahead, the image is nearly always free when the next present comes. Drivers that wait in the acquire itself (NVIDIA's, Mesa's) answer the zero-timeout acquire at once, with an image or with none, so the presenter never waits there. The present still waits up to 250 ms for an image that is not, then holds it (#1376); a swapchain made again lets it go. Not under frame generation or FIFO, and not for the start-up screen. The log's first present says which way it went (`vk: acquire ahead: ...`).
 
 ## Measuring
 

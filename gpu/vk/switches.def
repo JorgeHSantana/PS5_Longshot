@@ -250,6 +250,7 @@ SW(RX_NVN_WATCH_ALL, diag, bool, "off: the Resource Memory thread's writes are n
 SW(RX_NVN_WATCH_TEX, diag, string, "off", "Page-watches the storage of textures of the given <w>x<h> size and logs who writes it, with call stacks.")
 SW(RX_NVN_WATCH_TEXELS_SRC, diag, string, "off", "Page-watches the source data of WriteTexels uploads into textures of the given <w>x<h> size and logs later writes to it.")
 SW(RX_VK_9E5_SWAP, diag, bool, "off", "Swaps R and B in sampled views of RGB9E5 textures, for diagnosing a colour-order fault.")
+SW(RX_VK_ACQUIRE_AHEAD, hw, bool, "on: the next image asked for right after each present, on the presenter thread", "0 asks for each image at its present (#1458's order); 1 asks for the next present's image right after each present (no wait there), so its fence is signaled while the next frame is made (asked for on the presenter thread, after its present), and logs the image-wait counter every 600 presents; never with frame generation or FIFO.")
 SW(RX_VK_ALL_GLOBAL_PROGS, diag, string, "unset: none", "Comma list of compute program key prefixes none of whose memory accesses are bound to a descriptor (a test).")
 SW(RX_VK_ANISO, player, int, "the Insert menu's anisotropic filtering row", "Anisotropy 0 to 16 (0: the game's own) over the menu row for one run.")
 SW(RX_VK_ANTILAG, player, enum, "the Insert menu's AMD Anti-Lag 2 row (opts.antilag)", "0/1 overrides the Anti-Lag 2 menu row for one run; '-' leaves the VK_AMD_anti_lag extension not even enabled.")

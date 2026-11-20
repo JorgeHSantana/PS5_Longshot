@@ -5706,8 +5706,11 @@ std::atomic<uint32_t> present_kind{0};   // (vk_framegen.cpp: 1 while a made fra
 // the swapchain had no image free, twice a frame with frame interpolation.
 std::mutex present_image_mu;
 static bool present_out(uint32_t index, std::unique_lock<decltype(dev.present_mu)>& qk);   // (present_image's end, below)
+static bool acquire_ahead_wanted();   // (acquire ahead: every driver, RX_VK_ACQUIRE_AHEAD; after present_image)
+static void acquire_ahead(VkSwapchainKHR sc, uint64_t generation);
 thread_local PendingPresent* present_defer_into = nullptr;
 static VkFence present_copy_done = VK_NULL_HANDLE;   // (present_image's copy, while it presents: the presenter thread may take it)
+static bool present_acquire_ahead = false;   // (present_image's present, while it presents: the presenter asks for the next image after it)
 namespace {
 bool present_thread_on();
 void present_hand_off(uint32_t index, VkFence done, uint64_t reflex_id);
@@ -5740,8 +5743,56 @@ struct HeldImage {
     bool held = false;
     uint32_t index = 0;
     uint64_t generation = 0;   // (dev.swapchain_generation it was acquired from)
+    // (acquire ahead: acquired on the presenter thread right after the present before, acquire_ahead, not at a present that
+    // found it busy. Its present waits for it up to kImageFreeNs, as for an image acquired then; only then is it held as above)
+    bool ahead = false;
 };
 static HeldImage held_image;
+/// Whether the next image is asked for right after each present: device_policy.h's acquire_ahead (every driver), with
+/// RX_VK_ACQUIRE_AHEAD over it (0 off, anything else on; read once by device_policy_env). Which way it went
+/// is logged at the first present
+static bool acquire_ahead_on() {
+    static const bool on = [] {
+        const bool v = dev.policy.acquire_ahead;
+        if (dev.policy.set(Sw::acquire_ahead))
+            logf("vk: acquire ahead: %s, set by RX_VK_ACQUIRE_AHEAD",
+                 v ? "on: the next image asked for right after each present" : "off: each image asked for at its present (#1458's order)");
+        else if (v)
+            logf("vk: acquire ahead: on by default: the next image asked for right after each present "
+                 "(RX_VK_ACQUIRE_AHEAD=0: off)");
+        else
+            logf("vk: acquire ahead: off by default with this driver: each image asked for at its present, #1458's order "
+                 "(RX_VK_ACQUIRE_AHEAD=1: on)");
+        return v;
+    }();
+    return on;
+}
+/// The image-wait counter below: only with RX_VK_ACQUIRE_AHEAD set to on, for A/B runs (a player's log gets no line every
+/// 600 presents, and the default costs nothing)
+static bool acquire_ahead_counted() {
+    static const bool v = acquire_ahead_on() && dev.policy.set(Sw::acquire_ahead);
+    return v;
+}
+// (RX_VK_ACQUIRE_AHEAD set to on only: what the presents waited for the window's image, the acquire and its fence, said every
+// 600 presents; and what became of the images asked for a present ahead. present_image_mu)
+struct ImageWaits {
+    int64_t ns = 0;
+    uint32_t presents = 0, ahead = 0, ahead_free = 0, ahead_waited = 0, ahead_dropped = 0, ahead_not_given = 0;
+};
+static ImageWaits image_waits;
+static void image_waits_note(int64_t ns) {
+    image_waits.ns += ns;
+    if (++image_waits.presents < 600) return;
+    const ImageWaits& w = image_waits;
+    if (w.ahead || w.ahead_not_given || w.ahead_dropped)
+        logf("vk: the window's image (600 presents): waited for %.2f ms a present (its acquire and its fence); asked for a "
+             "present ahead (RX_VK_ACQUIRE_AHEAD=1) %u times: %u free at their present, %u waited for there, %u let go with "
+             "their swapchain; %u times none given at once", w.ns / 1e6 / w.presents, w.ahead, w.ahead_free, w.ahead_waited,
+             w.ahead_dropped, w.ahead_not_given);
+    else
+        logf("vk: the window's image (600 presents): waited for %.2f ms a present (its acquire and its fence)", w.ns / 1e6 / w.presents);
+    image_waits = {};
+}
 // (250 ms: past a refresh of a 24 Hz display for each image FIFO may hold queued, at frame generation's most; far under the GPU
 // hang watch's 30 s)
 constexpr uint64_t kImageFreeNs = 250000000ull;
@@ -5758,17 +5809,37 @@ static bool image_free(uint64_t timeout_ns) {
     if (vkResetFences(dev.device, 1, &acquire_fence) == VK_ERROR_DEVICE_LOST) device_lost();
     return true;
 }
-/// A held image of a swapchain made again since: let go. Its fence may never be signaled now; then a new one takes its place
-/// (the old one is left as it is, not destroyed: the presentation engine may still signal it). With none made, no acquire
-/// until one is (acquire_fence_ready)
+// (fences held_image_drop let go unsignaled: the presentation engine may still signal them, so they are neither reset nor
+// destroyed then. acquire_fence_ready uses one again once it is signaled, before it makes a new one; at most 8 are kept, past
+// that one is left as it is. present_image's thread, or the presenter's while it owns the swapchain: acquire_ahead)
+static std::vector<VkFence> fences_let_go;
+/// A held image of a swapchain made again since: let go. Its fence may never be signaled now; then another takes its place
+/// (acquire_fence_ready: one let go before and signaled since, else a new one), and this one is kept in fences_let_go. With
+/// none, no acquire until there is one
 static void held_image_drop() {
-    held_image.held = false;
+    if (held_image.ahead) image_waits.ahead_dropped++;
+    held_image.held = false, held_image.ahead = false;
     if (image_free(0)) return;
+    if (fences_let_go.size() < 8) fences_let_go.push_back(acquire_fence);
     acquire_fence = VK_NULL_HANDLE;
 }
-/// Whether there is an unsignaled acquire fence to acquire with, made again here when held_image_drop let the last one go
+/// Whether there is an unsignaled acquire fence to acquire with: when held_image_drop let the last one go, one it let go before
+/// and the engine has signaled since (reset here), else a new one
 static bool acquire_fence_ready() {
     if (acquire_fence) return true;
+    for (auto it = fences_let_go.begin(); it != fences_let_go.end(); ++it) {
+        VkFence was = *it;
+        VkResult r;
+        {
+            const gpu_wait_stats::Exclude pacing;   // (a look, no wait: not counted as a GPU wait)
+            r = vkWaitForFences(dev.device, 1, &was, VK_TRUE, 0);
+        }
+        if (r != VK_SUCCESS) continue;   // (not signaled yet; a lost device: the next wait that meets it says so)
+        if (vkResetFences(dev.device, 1, &was) != VK_SUCCESS) continue;
+        fences_let_go.erase(it);
+        acquire_fence = was;
+        return true;
+    }
     VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VkFence made = VK_NULL_HANDLE;
     if (vkCreateFence(dev.device, &fi, nullptr, &made) != VK_SUCCESS) return false;
@@ -5863,9 +5934,12 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
 #endif
     if (held_image.held && held_image.generation != dev.swapchain_generation) held_image_drop();   // (its swapchain is gone)
     const bool was_held = held_image.held;
+    const bool was_ahead = was_held && held_image.ahead;   // (acquire ahead: asked for on the presenter right after the present before)
     if (!was_held && !acquire_fence_ready()) return;   // (no fence to acquire with: the frame is not shown)
     if (was_held) index = held_image.index;   // (acquired at an earlier present, not free then: no other acquire meanwhile)
     VkResult res = VK_SUCCESS;
+    const bool image_count = acquire_ahead_counted();   // (image_waits: RX_VK_ACQUIRE_AHEAD set only, the default costs nothing)
+    const int64_t image_t0 = image_count ? fps_clock() : 0;
     if (!was_held) res = vkAcquireNextImageKHR(dev.device, dev.swapchain, acquire_timeout, VK_NULL_HANDLE, acquire_fence, &index);
     if (res == VK_ERROR_DEVICE_LOST) device_lost();
     if (acquire_t0) fps_wait(fps_stats::kPace, fps_clock() - acquire_t0);
@@ -5877,6 +5951,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     }
 #ifndef _WIN32
     if (res == VK_TIMEOUT || res == VK_NOT_READY) {
+        if (image_count) image_waits_note(fps_clock() - image_t0);   // (the 100 ms waited, though no frame is shown)
         if (!unseen) logf("vk: the window is not shown (no image back in 100 ms): frames are not shown until it is");
         unseen = true;
         return;
@@ -5893,22 +5968,31 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
         return;
     }
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) return;
-    {   // (the image free before any work for it goes to the queue; a held one is looked at without waiting)
+    {   // (#1376: the image free before any work for it goes to the queue; a held one is looked at without waiting, and one
+        // asked for a present ahead is waited for as one acquired now, once it is not free at once)
         const int64_t free_t0 = fence_t0 ? fps_clock() : 0;
-        const bool ready = image_free(was_held ? 0 : kImageFreeNs);
+        bool ready;
+        if (was_ahead) {
+            ready = image_free(0);
+            if (ready) image_waits.ahead_free++;
+            else image_waits.ahead_waited++, ready = image_free(kImageFreeNs);
+        } else {
+            ready = image_free(was_held ? 0 : kImageFreeNs);
+        }
         if (free_t0) fps_wait(fps_stats::kPace, fps_clock() - free_t0);
+        if (image_count) image_waits_note(fps_clock() - image_t0);
         static int said;     // (the first 16 holds are said, and their ends)
         static bool told;    // (this hold was said)
         if (!ready) {
-            if (!was_held) {
+            if (!was_held || was_ahead) {
                 told = said < 16;
                 if (told) said++, logf("vk: the window's image was not given back in 250 ms (the window hidden?): frames are not "
                                        "shown until it is");
             }
-            held_image = {true, index, dev.swapchain_generation};
+            held_image = {true, index, dev.swapchain_generation, false};
             return;
         }
-        held_image.held = false;
+        held_image.held = false, held_image.ahead = false;
         if (was_held && told) told = false, logf("vk: the window's image was given back: frames are shown again");
     }
     if (vkResetFences(dev.device, 1, &f.done) == VK_ERROR_DEVICE_LOST) device_lost();
@@ -6066,9 +6150,75 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
         present_defer_into->swapchain_generation = dev.swapchain_generation;
         return;
     }
+    // (acquire ahead: the presenter thread asks for the next present's image right after it makes this one, a game frame's)
+    present_acquire_ahead = src && acquire_ahead_wanted();
     present_copy_done = f.done;
     present_out(index, qk);
     present_copy_done = VK_NULL_HANDLE;
+    present_acquire_ahead = false;
+}
+
+// (longshot) Acquire ahead: on by default with every driver (device_policy.h acquire_ahead); RX_VK_ACQUIRE_AHEAD=0 turns it
+// off (each image asked for at its own present, #1458's order), for A/B runs and as the off switch. Since #1376 the
+// window's image is waited for on the CPU, at its present, on every GPU: in its fence
+// (image_free) where the driver hands the image back from vkAcquireNextImageKHR at once (AMD's on Windows), in the acquire
+// itself where it waits there (NVIDIA's, Mesa's). Asked for right after the present before, the image has the next frame's
+// work to come back in, whichever part holds the wait. Measured on AMD's Windows driver: in a window the system gives the
+// image back at its next composition, and with the presenter thread (on every PC) the render thread still waited 2.3-2.7 ms a
+// frame for it (RX 9070 XT, driver 26.11.2, a 1280x720 window on a 144 Hz desktop; full screen 0.4). The rules, the same on
+// every GPU and system where it is on:
+// - Asked for on the presenter thread, right after its own vkQueuePresentKHR of a game frame came back VK_SUCCESS, on the
+//   swapchain that present went to (presenter_loop). The swapchain is one thread's at a time: the presenter's from the
+//   hand-over until it says it is done (presenter.busy), and every other user of the swapchain and of the image's state below
+//   (held_image, acquire_fence, fences_let_go, image_waits) waits for that first (present_thread_drain: present_image before
+//   its acquire, create_swapchain, the lost surface's paths, frame generation's present_commit). The acquire is made with
+//   presenter.mu held, and a drain that gave up after its 5 s clears presenter.ahead under it, so an image is never asked
+//   for ahead after the render thread went on without the presenter. The swapchain's lock (presenter_queue_mu) is taken for
+//   the call, as for the presenter's present; the queue's lock (dev.present_mu) is not: the replay's submits go on meanwhile.
+// - Never waited for: a timeout of 0, so a driver that waits in the acquire never holds the presenter (nor, through it, the
+//   next hand-over). None given at once (VK_NOT_READY, VK_TIMEOUT), or out of date, or the surface lost: nothing is out, and
+//   the next present acquires as when it is off (and meets the same result there; on Linux its 100 ms timeout still tells a
+//   window that is not shown).
+// - At most one image asked for ahead, none while one is held, and only with an unsignaled fence that is not in use
+//   (acquire_fence_ready). Right after frame generation is turned off its last presents ahead may still hold images of
+//   their own; the image asked for ahead is then one more out, as the next present's own acquire would be when it is off.
+// - Its present waits for it up to kImageFreeNs as for an image acquired then, and only then holds it (#1376's path). A
+//   swapchain made again meanwhile lets it go (held_image_drop: its fence reused if signaled, else kept in fences_let_go
+//   until it is).
+// - Not while frame generation runs (its presents ahead hold images of their own, and are made by its display thread), under
+//   FIFO (V-Sync On, or a driver's only mode: the acquire is what paces there, and the presenter waits there for the present
+//   to be shown), or for the start-up screen's presents: each image asked for at its present, as before.
+static bool acquire_ahead_wanted() {
+    if (!acquire_ahead_on()) return false;
+    const int why = framegen_on() ? 1
+                    : dev.swap_mode != VK_PRESENT_MODE_IMMEDIATE_KHR && dev.swap_mode != VK_PRESENT_MODE_MAILBOX_KHR ? 2 : 0;
+    static int told = -1;
+    if (why != told) {
+        told = why;
+        static const char* const whys[] = {"", "frame generation runs", "the swapchain is FIFO (V-Sync On, or the window's only mode)"};
+        if (why) logf("vk: acquire ahead: not now, %s: each image asked for at its present", whys[why]);
+        else logf("vk: acquire ahead: each next image asked for on the presenter thread right after the present");
+    }
+    return !why;
+}
+/// (the presenter thread, presenter.mu held, the swapchain its own (presenter.busy); right after its present of a game frame
+/// came back VK_SUCCESS on sc, the swapchain of generation) The next present's image, asked for now. A lost device ends the
+/// process in device_lost, so the locks held there are no matter
+static void acquire_ahead(VkSwapchainKHR sc, uint64_t generation) {
+    if (held_image.held || generation != dev.swapchain_generation || !acquire_fence_ready()) return;
+    uint32_t index = 0;
+    VkResult res;
+    {   // (the swapchain's lock, as the presenter's present takes it: RX_VK_FG_LATENCY_LOG's waits on the chain never beside it)
+        std::lock_guard pq(dev.presenter_queue_mu);
+        res = vkAcquireNextImageKHR(dev.device, sc, 0, VK_NULL_HANDLE, acquire_fence, &index);
+        if (res == VK_ERROR_DEVICE_LOST) device_lost();
+    }
+    if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {   // (no image: the fence untouched, the next present acquires)
+        image_waits.ahead_not_given++;
+        return;
+    }
+    held_image = {true, index, generation, true};
+    image_waits.ahead++;
 }
 
 bool present_commit(const PendingPresent& p) {
@@ -6186,6 +6336,9 @@ void present_finish(VkResult res, bool on_presenter) {
 //   thread is already its own). With NVIDIA Reflex its present id goes with the present: the presenter presents with it and marks
 //   the present's end.
 // - No wait without end: the copy's fence and the present wait in steps, a device lost ends them, and a drain gives up after 5 s.
+// - Acquire ahead (on by default: acquire_ahead_wanted): after a game frame's present that came back
+//   VK_SUCCESS, the next present's image is asked for here, with a timeout of 0 and presenter.mu held, before the presenter
+//   says it is done; present_image takes it after its drain.
 namespace {
 struct Presenter {
     std::mutex mu;
@@ -6195,6 +6348,8 @@ struct Presenter {
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     VkFence done = VK_NULL_HANDLE;   // (the copy's fence)
     uint64_t reflex_id = 0;          // (NVIDIA Reflex's present id for it, 0 none: present_out)
+    uint64_t generation = 0;         // (dev.swapchain_generation of swapchain)
+    bool ahead = false;              // (acquire ahead after it: present_image's present_acquire_ahead; a drain that gave up clears it)
     int64_t copy_done_at = 0;        // (fps_clock() when the presenter's wait for it ended: the FPS counter's Breakdown)
     bool started = false;
 };
@@ -6236,6 +6391,7 @@ void presenter_loop() {
         const VkSwapchainKHR sc = presenter.swapchain;
         const VkFence done = presenter.done;
         const uint64_t reflex_id = presenter.reflex_id;
+        const uint64_t generation = presenter.generation;
         lk.unlock();
         const auto t0 = std::chrono::steady_clock::now();
         const bool copied = !done || presenter_wait_copy(done);
@@ -6311,6 +6467,11 @@ void presenter_loop() {
         }
         if (copied) present_finish(res, true);
         lk.lock();
+        // (acquire ahead: the next present's image asked for now, while the swapchain is still this thread's and presenter.mu is
+        // held (a drain that gave up meanwhile cleared presenter.ahead). Only after a present made as it is: out of date or
+        // suboptimal asks the next present_image for a new swapchain, which would let the image go again)
+        if (presenter.ahead && res == VK_SUCCESS) acquire_ahead(sc, generation);
+        presenter.ahead = false;
         presenter.busy = false;
         presenter.cv.notify_all();
     }
@@ -6359,6 +6520,7 @@ void present_hand_off(uint32_t index, VkFence done, uint64_t reflex_id) {
     presenter_wait_idle(lk);   // (the frame before's present made: one out at most; the presenter's own waits are bounded)
     presenter.index = index, presenter.swapchain = dev.swapchain, presenter.done = done, presenter.busy = true;
     presenter.reflex_id = reflex_id;
+    presenter.generation = dev.swapchain_generation, presenter.ahead = present_acquire_ahead;
     presenter.copy_done_at = 0;
     presenter.cv.notify_all();
 }
@@ -6370,7 +6532,10 @@ void present_thread_drain() {
     HT_WAIT(ht_w, "present_thread_drain");
 #endif
     std::unique_lock lk(presenter.mu);
-    if (!presenter_wait_idle(lk, 5000)) logf("vk: presenter thread: its present not made in 5 s; going on without it");
+    if (!presenter_wait_idle(lk, 5000)) {
+        presenter.ahead = false;   // (acquire ahead: none after a present the caller goes on without)
+        logf("vk: presenter thread: its present not made in 5 s; going on without it");
+    }
 }
 
 

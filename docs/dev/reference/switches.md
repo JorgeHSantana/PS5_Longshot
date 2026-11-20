@@ -148,6 +148,7 @@ Upscaler switches are in [upscalers](upscalers.md#switches).
 | `HOS_TEST_ALLOC_REFUSE=<label text>` | Refuse host allocations whose label contains the text, to see what a player sees at the commit limit |
 | `RX_VK_UI_GAME_FONT=0` | The menu, counter and start-up screen in the included Libertinus, even where the game's files have its own fonts |
 | `RX_VK_UI_PROMPTS=pad\|keys` | The menu's button prompts for a controller or the keyboard, whatever was used last (screenshots) |
+| `RX_VK_ACQUIRE_AHEAD=0/1` | Acquire ahead, for an A/B: the presenter thread asks for the window's next image right after each present instead of the render thread at the next one. On by default with every driver; `0` off (#1458's order, each image asked for at its present). `1` also logs `vk: the window's image (600 presents)`. It acts only where there is a window (not with `HOS_HEADLESS=1`), and not under frame generation or V-Sync On ([threads](threads.md#the-presenter-thread)) |
 
 ### Settings for one run
 

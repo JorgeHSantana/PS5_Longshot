@@ -46,7 +46,7 @@ amd_retry_no_optimizer amd_cloth_no_optimizer fault_gate_serial task_mesh_fallba
 pcache_fetch_lock split_before_draw astc_on_cpu inline_deku_web_loads networks_left_out dma_buf_imports nv_checkpoints
 allowance_at_count_rule
 mirrors ub_snapshot split_ub_flush native_float_add warp64 batch_submits mma_unroll_try global_table_loop occ_copy
-intel_side_by_side_auto fsr4_tune gpu_clock_peak readback_late_newest pcache_small_pc small_vram_textures astc_bc_all
+intel_side_by_side_auto fsr4_tune gpu_clock_peak readback_late_newest acquire_ahead pcache_small_pc small_vram_textures astc_bc_all
 room_in_blocks_rule squeeze_damped linux_hold_caps_budget dlss_cnn auto_render_third rtx rdna4 threaded_auto_render
 threaded_auto_recorder drop_modules_small_ram""".split()
 # The numbers: the field and how the fixture prints it (sizes in whole MB; -1: no limit)
@@ -95,14 +95,14 @@ PCS = [
     dict(name="RTX 3090 (24 GB), NVIDIA's Linux driver, 24 threads",
          facts=(0x10DE, 0x2204, "NVIDIA_PROPRIETARY", 0, "DISCRETE_GPU", "580.105.08", "NVIDIA GeForce RTX 3090", 0, 0,
                 24576, 24000, 32768, 24, 24, 12, 1, 1, 1, 1, 1, 1, 1, 32, 32, 0),
-         on="inline_deku_web_loads nv_checkpoints allowance_at_count_rule mirrors split_ub_flush native_float_add "
+         on="acquire_ahead inline_deku_web_loads nv_checkpoints allowance_at_count_rule mirrors split_ub_flush native_float_add "
             "room_in_blocks_rule rtx threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 1, 85, 4, 11000, 3072, 768, 512, 3000, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
     # (an 8 GB card: every large ASTC texture as BC3, the squeeze damped, 12 blocks at the start and the 32 MB blocks)
     dict(name="RTX 4070 Laptop (8 GB), NVIDIA's Windows driver",
          facts=(0x10DE, 0x2860, "NVIDIA_PROPRIETARY", 0, "DISCRETE_GPU", "581.57", "NVIDIA GeForce RTX 4070 Laptop GPU", 1, 0,
                 8188, 7400, 16200, 16, 16, 8, 1, 1, 1, 1, 1, 1, 1, 32, 32, 0),
-         on="inline_deku_web_loads nv_checkpoints allowance_at_count_rule mirrors split_ub_flush native_float_add "
+         on="acquire_ahead inline_deku_web_loads nv_checkpoints allowance_at_count_rule mirrors split_ub_flush native_float_add "
             "astc_bc_all room_in_blocks_rule squeeze_damped rtx threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 1, 85, 4, 4776, 2047, 616, 462, 925, -1, 256, 12, 32, 16, 97, 3, 6, 4, 8, 6, 4)),
     # (a 4 GB card. The rules that ask the vendor take NVK for NVIDIA's compiler: no invariant positions, no fetch bounds,
@@ -111,7 +111,7 @@ PCS = [
     dict(name="GTX 1650 (4 GB), NVK",
          facts=(0x10DE, 0x1F82, "MESA_NVK", 0, "DISCRETE_GPU", "Mesa 26.0.1", "NVIDIA GeForce GTX 1650 (NVK TU117)", 0, 0,
                 4096, 3900, 16000, 8, 8, 4, 0, 1, 0, 0, 0, 1, 1, 32, 32, 0),
-         on="inline_deku_web_loads dma_buf_imports allowance_at_count_rule mirrors split_ub_flush "
+         on="acquire_ahead inline_deku_web_loads dma_buf_imports allowance_at_count_rule mirrors split_ub_flush "
             "small_vram_textures astc_bc_all room_in_blocks_rule squeeze_damped dlss_cnn threaded_auto_render "
             "drop_modules_small_ram",
          num=(0, 0, 0, 1, 85, 4, 2200, 1365, 325, 243, 487, 32, 128, 10, 32, 16, 97, 1, 2, 2, 4, 4, 2)),
@@ -119,7 +119,7 @@ PCS = [
     dict(name="RX 6700 XT, AMD's Windows driver (RDNA 2 compiler)",
          facts=(0x1002, 0x73DF, "AMD_PROPRIETARY", 0x800161, "DISCRETE_GPU", "26.10.1 " + AMD_OLD, "AMD Radeon RX 6700 XT", 1, 0,
                 12272, 11500, 32600, 12, 12, 6, 1, 1, 0, 0, 0, 1, 1, 64, 64, 0xFF),
-         on="fetch_bounds networks_left_out nan_bits gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
+         on="acquire_ahead fetch_bounds networks_left_out nan_bits gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_retry_no_optimizer amd_cloth_no_optimizer fault_gate_serial task_mesh_fallback allowance_at_count_rule "
             "mirrors split_ub_flush warp64 fsr4_tune room_in_blocks_rule threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 0, 4, 7158, 2048, 768, 512, 1437, -1, 256, 24, 64, 32, 97, 4, 4, 4, 6, 6, 3)),
@@ -129,7 +129,7 @@ PCS = [
     dict(name="RX 9070 XT, AMD's Windows driver (LLPC)",
          facts=(0x1002, 0x7550, "AMD_PROPRIETARY", 0x800161, "DISCRETE_GPU", "26.10.1 (LLPC)", "AMD Radeon RX 9070 XT", 1, 0,
                 16304, 15300, 32600, 16, 16, 8, 1, 1, 1, 1, 0, 1, 1, 64, 64, 0xFF),
-         on="fetch_bounds networks_left_out gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer amd_cloth_no_optimizer "
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer amd_cloth_no_optimizer "
             "fault_gate_serial allowance_at_count_rule mirrors split_ub_flush warp64 mma_unroll_try fsr4_tune room_in_blocks_rule rdna4 "
             "threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 0, 4, 11000, 3072, 768, 512, 1912, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
@@ -138,7 +138,7 @@ PCS = [
     dict(name="RX 6800 XT, RADV",
          facts=(0x1002, 0x73BF, "MESA_RADV", 0, "DISCRETE_GPU", "Mesa 26.2.5", "AMD Radeon RX 6800 XT (RADV NAVI21)", 0, 0,
                 16368, 16000, 32000, 16, 16, 8, 1, 1, 1, 0, 0, 1, 1, 64, 64, 0xFF),
-         on="fetch_bounds networks_left_out gather_offset position_invariant dma_buf_imports allowance_at_count_rule mirrors "
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant dma_buf_imports allowance_at_count_rule mirrors "
             "split_ub_flush warp64 batch_submits mma_unroll_try fsr4_tune room_in_blocks_rule "
             "threaded_auto_render threaded_auto_recorder",
          num=(0, 2, 0, 1, 85, 4, 11000, 3072, 768, 512, 2000, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
@@ -148,7 +148,7 @@ PCS = [
     dict(name="RX 580 (8 GB), RADV on GCN",
          facts=(0x1002, 0x67DF, "MESA_RADV", 0, "DISCRETE_GPU", "Mesa 26.2.5", "AMD Radeon RX 580 Series (RADV POLARIS10)", 0, 0,
                 8192, 8000, 16000, 8, 8, 4, 0, 1, 1, 0, 0, 0, 1, 64, 64, 0),
-         on="fetch_bounds networks_left_out gather_offset position_invariant dma_buf_imports allowance_at_count_rule mirrors "
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant dma_buf_imports allowance_at_count_rule mirrors "
             "split_ub_flush warp64 mma_unroll_try fsr4_tune astc_bc_all room_in_blocks_rule squeeze_damped "
             "threaded_auto_render drop_modules_small_ram",
          num=(0, 2, 50000, 1, 85, 4, 4778, 2048, 666, 500, 1000, -1, 256, 24, 32, 16, 97, 1, 2, 2, 4, 4, 2)),
@@ -159,7 +159,7 @@ PCS = [
     dict(name="RX Vega 64 (8 GB), RADV on GFX9",
          facts=(0x1002, 0x687F, "MESA_RADV", 0, "DISCRETE_GPU", "Mesa 26.2.5", "AMD Radeon RX Vega (RADV VEGA10)", 0, 0,
                 8176, 7900, 16000, 8, 8, 8, 0, 1, 1, 0, 0, 1, 1, 64, 64, 0),
-         on="fetch_bounds networks_left_out gather_offset position_invariant dma_buf_imports allowance_at_count_rule mirrors split_ub_flush "
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant dma_buf_imports allowance_at_count_rule mirrors split_ub_flush "
             "warp64 batch_submits mma_unroll_try fsr4_tune astc_bc_all room_in_blocks_rule squeeze_damped "
             "threaded_auto_render threaded_auto_recorder drop_modules_small_ram",
          num=(0, 2, 0, 1, 85, 4, 4769, 2044, 658, 493, 987, -1, 256, 12, 32, 16, 97, 1, 2, 2, 4, 4, 2)),
@@ -170,7 +170,7 @@ PCS = [
     dict(name="Steam Deck (LCD), RADV",
          facts=(0x1002, 0x163F, "MESA_RADV", 0, "INTEGRATED_GPU", "Mesa 25.1.0", "AMD Custom GPU 0405 (RADV VANGOGH)", 0, 1,
                 7168, 6800, 14800, 8, 8, 4, 1, 1, 1, 0, 0, 1, 1, 64, 64, 0xFF),
-         on="fetch_bounds networks_left_out gather_offset position_invariant dma_buf_imports allowance_at_count_rule "
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant dma_buf_imports allowance_at_count_rule "
             "split_ub_flush warp64 batch_submits mma_unroll_try fsr4_tune gpu_clock_peak readback_late_newest small_vram_textures astc_bc_all "
             "squeeze_damped linux_hold_caps_budget threaded_auto_render drop_modules_small_ram",
          num=(0, 2, 0, 1, 85, 16, 2560, 1792, 566, 425, 512, -1, 256, 0, 32, 16, 90, 1, 2, 2, 4, 4, 2)),
@@ -180,7 +180,7 @@ PCS = [
     dict(name="RX 6800, AMDVLK",
          facts=(0x1002, 0x73BF, "AMD_OPEN_SOURCE", 0, "DISCRETE_GPU", "2025.Q2.1 (LLPC)", "AMD Radeon RX 6800", 0, 0,
                 16368, 16000, 32000, 12, 12, 6, 1, 1, 0, 0, 0, 1, 1, 64, 64, 0xFF),
-         on="fetch_bounds networks_left_out gather_offset position_invariant mesh_no_optimizer dma_buf_imports "
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant mesh_no_optimizer dma_buf_imports "
             "allowance_at_count_rule mirrors split_ub_flush warp64 fsr4_tune room_in_blocks_rule "
             "threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 1, 85, 4, 11000, 3072, 768, 512, 2000, -1, 256, 24, 64, 32, 97, 5, 4, 4, 6, 6, 3)),
@@ -189,7 +189,7 @@ PCS = [
     dict(name="UHD Graphics (i3-1115G4, 16 GB, 4 threads), Intel's Windows driver",
          facts=(0x8086, 0x9A78, "INTEL_PROPRIETARY_WINDOWS", INTEL | 7088, "INTEGRATED_GPU", "101.7088", "Intel(R) UHD Graphics", 1, 0,
                 8100, 7402, 16100, 4, 4, 2, 0, 1, 1, 0, 0, 1, 1, 32, 32, 0xFF),
-         on="fetch_bounds networks_left_out gather_offset position_invariant intel_compile_gate compute_builds_serial pcache_fetch_lock "
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant intel_compile_gate compute_builds_serial pcache_fetch_lock "
             "split_before_draw allowance_at_count_rule ub_snapshot small_vram_textures astc_bc_all squeeze_damped "
             "auto_render_third",
          num=(64, 0, 0, 2, 0, 16, 2560, 2025, 616, 462, 512, -1, 256, 0, 32, 16, 90, 1, 2, 2, 2, 2, 2)),
@@ -198,7 +198,7 @@ PCS = [
     dict(name="Arc B580, Intel's Windows driver 101.9154",
          facts=(0x8086, 0xE20B, "INTEL_PROPRIETARY_WINDOWS", INTEL | 9154, "DISCRETE_GPU", "101.9154", "Intel(R) Arc(TM) B580 Graphics",
                 1, 0, 12216, 11600, 32500, 20, 20, 14, 1, 1, 1, 0, 0, 1, 1, 32, 32, 0xFF),
-         on="fetch_bounds networks_left_out gather_offset position_invariant compute_builds_serial pcache_fetch_lock split_before_draw "
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant compute_builds_serial pcache_fetch_lock split_before_draw "
             "allowance_at_count_rule mirrors ub_snapshot split_ub_flush native_float_add occ_copy intel_side_by_side_auto "
             "room_in_blocks_rule threaded_auto_render threaded_auto_recorder",
          num=(64, 0, 0, 2, 0, 4, 7126, 2048, 768, 512, 1450, -1, 256, 24, 64, 32, 97, 4, 6, 4, 8, 6, 4)),
@@ -206,7 +206,7 @@ PCS = [
     dict(name="Arc A750, Intel's Windows driver 101.9175",
          facts=(0x8086, 0x56A1, "INTEL_PROPRIETARY_WINDOWS", INTEL | 9175, "DISCRETE_GPU", "101.9175", "Intel(R) Arc(TM) A750 Graphics",
                 1, 0, 8128, 7700, 16200, 12, 12, 6, 1, 1, 1, 0, 0, 1, 1, 32, 32, 0xFF),
-         on="fetch_bounds networks_left_out gather_offset position_invariant intel_compile_gate compute_builds_serial pcache_fetch_lock "
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant intel_compile_gate compute_builds_serial pcache_fetch_lock "
             "split_before_draw allowance_at_count_rule mirrors ub_snapshot split_ub_flush occ_copy astc_bc_all "
             "room_in_blocks_rule squeeze_damped threaded_auto_render threaded_auto_recorder",
          num=(64, 0, 0, 2, 0, 4, 4741, 2032, 641, 481, 962, -1, 256, 12, 32, 16, 97, 3, 4, 4, 6, 6, 3)),
@@ -219,7 +219,7 @@ PCS = [
     dict(name="Iris Xe, ANV",
          facts=(0x8086, 0x9A49, "INTEL_OPEN_SOURCE_MESA", 0, "INTEGRATED_GPU", "Mesa 26.0.1", "Mesa Intel(R) Xe Graphics (TGL GT2)", 0, 0,
                 11850, 10000, 15800, 8, 8, 4, 0, 1, 1, 0, 0, 1, 1, 32, 32, 0xFF),
-         on="fetch_bounds networks_left_out gather_offset position_invariant split_before_draw dma_buf_imports "
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant split_before_draw dma_buf_imports "
             "allowance_at_count_rule ub_snapshot global_table_loop small_vram_textures astc_bc_all linux_hold_caps_budget "
             "threaded_auto_render drop_modules_small_ram",
          num=(0, 0, 20000, 1, 85, 16, 2560, 2048, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 2, 2, 4, 4, 2)),
@@ -228,7 +228,7 @@ PCS = [
     dict(name="llvmpipe",
          facts=(0x10005, 0, "MESA_LLVMPIPE", 0, "CPU", "Mesa 26.0.1 (LLVM 20.1.8)", "llvmpipe (LLVM 20.1.8, 256 bits)", 0, 0,
                 32000, 25600, 32000, 16, 16, 8, 0, 1, 0, 0, 0, 1, 1, 8, 8, 0),
-         on="fetch_bounds networks_left_out position_invariant dma_buf_imports allowance_at_count_rule split_ub_flush room_in_blocks_rule "
+         on="acquire_ahead fetch_bounds networks_left_out position_invariant dma_buf_imports allowance_at_count_rule split_ub_flush room_in_blocks_rule "
             "threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 1, 85, 16, 11000, 3072, 768, 512, 3200, -1, 256, 24, 64, 32, 97, 1, 6, 4, 8, 6, 4)),
     # (a 6 GB card: the small spares and staging, the CNN model. The study doubts its 1700 MB of mirrors, set before
@@ -236,21 +236,21 @@ PCS = [
     dict(name="RTX 3060 Laptop (6 GB), NVIDIA's Windows driver",
          facts=(0x10DE, 0x2520, "NVIDIA_PROPRIETARY", 0, "DISCRETE_GPU", "581.57", "NVIDIA GeForce RTX 3060 Laptop GPU", 1, 0,
                 6144, 5700, 16200, 16, 16, 8, 1, 1, 1, 1, 1, 1, 1, 32, 32, 0),
-         on="inline_deku_web_loads nv_checkpoints allowance_at_count_rule mirrors split_ub_flush native_float_add "
+         on="acquire_ahead inline_deku_web_loads nv_checkpoints allowance_at_count_rule mirrors split_ub_flush native_float_add "
             "astc_bc_all room_in_blocks_rule squeeze_damped dlss_cnn rtx "
             "threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 1, 85, 4, 3584, 1700, 475, 356, 712, 32, 128, 12, 32, 16, 97, 2, 6, 4, 8, 6, 4)),
     dict(name="RTX 4090 (24 GB), NVIDIA's Windows driver",
          facts=(0x10DE, 0x2684, "NVIDIA_PROPRIETARY", 0, "DISCRETE_GPU", "581.57", "NVIDIA GeForce RTX 4090", 1, 0,
                 24564, 23500, 65000, 32, 32, 16, 1, 1, 1, 1, 1, 1, 1, 32, 32, 0),
-         on="inline_deku_web_loads nv_checkpoints allowance_at_count_rule mirrors split_ub_flush native_float_add "
+         on="acquire_ahead inline_deku_web_loads nv_checkpoints allowance_at_count_rule mirrors split_ub_flush native_float_add "
             "room_in_blocks_rule rtx threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 1, 85, 4, 11000, 3072, 768, 512, 2937, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
     # (no mesh shaders: Minimum, and no task + mesh fallback to choose)
     dict(name="RX 5700 (8 GB), AMD's Windows driver (RDNA 1 compiler)",
          facts=(0x1002, 0x731F, "AMD_PROPRIETARY", 0x800161, "DISCRETE_GPU", "25.9.1 " + AMD_OLD, "AMD Radeon RX 5700", 1, 0,
                 8176, 7378, 16300, 12, 12, 6, 0, 1, 0, 0, 0, 1, 1, 64, 64, 0x20),
-         on="fetch_bounds networks_left_out nan_bits gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
+         on="acquire_ahead fetch_bounds networks_left_out nan_bits gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_cloth_no_optimizer fault_gate_serial allowance_at_count_rule mirrors split_ub_flush warp64 fsr4_tune "
             "astc_bc_all room_in_blocks_rule squeeze_damped threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 0, 4, 4769, 2044, 614, 461, 922, -1, 256, 12, 32, 16, 97, 1, 4, 4, 6, 6, 3)),
@@ -260,7 +260,7 @@ PCS = [
     dict(name="Ryzen 9 7900X's graphics (32 GB), AMD's Windows driver, on 8 of 24 threads",
          facts=(0x1002, 0x164E, "AMD_PROPRIETARY", 0x800161, "INTEGRATED_GPU", "26.10.1 " + AMD_OLD, "AMD Radeon(TM) Graphics", 1, 0,
                 16300, 10232, 32600, 24, 8, 4, 1, 1, 0, 0, 0, 1, 1, 64, 64, 0xFF),
-         on="fetch_bounds networks_left_out nan_bits gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
+         on="acquire_ahead fetch_bounds networks_left_out nan_bits gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_cloth_no_optimizer fault_gate_serial allowance_at_count_rule split_ub_flush warp64 fsr4_tune "
             "astc_bc_all threaded_auto_render",
          num=(0, 0, 0, 2, 0, 16, 4096, 3072, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 6, 4, 8, 6, 4)),
@@ -270,7 +270,7 @@ PCS = [
 # else the cases look at: the import chunk (which follows the mirrors) and the texture budget (which follows astc_on_cpu)
 SW = ["astc_on_cpu", "batch_submits", "compute_builds_serial", "pcache_fetch_lock", "split_before_draw", "ub_snapshot",
       "split_ub_flush", "occ_copy", "mirrors", "fsr4_tune", "position_invariant", "equal_depth_bias", "cap_spare_max",
-      "staging_keep", "workers"]
+      "staging_keep", "workers", "acquire_ahead"]
 ENV_FIELDS = SW + ["import_chunk_mb", "texture_budget"]
 NVIDIA, RADV, B580, UHD, AMD_WIN, RAPHAEL, SMALL = (
     "RTX 3090 (24 GB), NVIDIA's Linux driver, 24 threads", "RX 6800 XT, RADV", "Arc B580, Intel's Windows driver 101.9154",
@@ -351,6 +351,16 @@ ENV = [
     (SMALL, {"RX_VK_STAGING_KEEP_MB": "0"}, {"staging_keep": 0}, ["staging_keep"], []),
     (SMALL, {"RX_VK_STAGING_KEEP_MB": "-1"}, {}, [], ["RX_VK_STAGING_KEEP_MB"]),       # (was a huge size: every arena kept)
     (SMALL, {"RX_VK_STAGING_KEEP_MB": "abc"}, {}, [], ["RX_VK_STAGING_KEEP_MB"]),      # (was 0)
+    # acquire ahead: on by default with every driver; 0 turns it off, any other value on (the A/B runs' =1)
+    (AMD_WIN, {"RX_VK_ACQUIRE_AHEAD": "0"}, {"acquire_ahead": 0}, ["acquire_ahead"], []),
+    (AMD_WIN, {"RX_VK_ACQUIRE_AHEAD": "off"}, {"acquire_ahead": 0}, ["acquire_ahead"], []),
+    (AMD_WIN, {"RX_VK_ACQUIRE_AHEAD": "1"}, {}, ["acquire_ahead"], []),
+    (AMD_WIN, {"RX_VK_ACQUIRE_AHEAD": ""}, {}, [], []),                               # (was off: empty is the default now)
+    (NVIDIA, {"RX_VK_ACQUIRE_AHEAD": "0"}, {"acquire_ahead": 0}, ["acquire_ahead"], []),
+    (NVIDIA, {"RX_VK_ACQUIRE_AHEAD": "1"}, {}, ["acquire_ahead"], []),
+    (SMALL, {"RX_VK_ACQUIRE_AHEAD": "on"}, {}, ["acquire_ahead"], []),
+    (RADV, {"RX_VK_ACQUIRE_AHEAD": "0"}, {"acquire_ahead": 0}, ["acquire_ahead"], []),
+    (UHD, {"RX_VK_ACQUIRE_AHEAD": "0"}, {"acquire_ahead": 0}, ["acquire_ahead"], []),
     # a switch of a rule that still decides at its site is not read here
     (NVIDIA, {"RX_VK_MESH_OPT": "1", "RX_VK_NATIVE_FADD": "0", "RX_VK_VRAM_MB": "1"}, {}, [], []),
 ]
@@ -476,10 +486,10 @@ static void env_case(int i, const D& d) {
     device_policy_env(p, f, get);
     std::printf("ENV %d astc_on_cpu=%d batch_submits=%d compute_builds_serial=%d pcache_fetch_lock=%d split_before_draw=%d "
                 "ub_snapshot=%d split_ub_flush=%d occ_copy=%d mirrors=%d fsr4_tune=%d position_invariant=%d equal_depth_bias=%g "
-                "cap_spare_max=%lld staging_keep=%lld workers=%u import_chunk_mb=%u texture_budget=%lld set=%u notes=%s\n",
+                "cap_spare_max=%lld staging_keep=%lld workers=%u acquire_ahead=%d import_chunk_mb=%u texture_budget=%lld set=%u notes=%s\n",
                 i, (int)p.astc_on_cpu, (int)p.batch_submits, (int)p.compute_builds_serial, (int)p.pcache_fetch_lock,
                 (int)p.split_before_draw, (int)p.ub_snapshot, (int)p.split_ub_flush, (int)p.occ_copy, (int)p.mirrors, (int)p.fsr4_tune,
-                (int)p.position_invariant, (double)p.equal_depth_bias, mbs(p.cap_spare_max), mbs(p.staging_keep), p.workers,
+                (int)p.position_invariant, (double)p.equal_depth_bias, mbs(p.cap_spare_max), mbs(p.staging_keep), p.workers, (int)p.acquire_ahead,
                 (unsigned)p.import_chunk_mb, mbs(p.texture_budget), (unsigned)p.set_by_switch, p.switch_notes);
     if (i == 0 || p.set_by_switch) log_block(1000 + i, p, f);   // (the block with switches set: still six lines under their length)
 }
@@ -514,7 +524,7 @@ int main() {
         for (const char* name : {"RX_VK_MIRROR", "RX_VK_SPLIT_UBFLUSH", "RX_VK_UB_SNAPSHOT", "RX_VK_ASTC_CPU", "RX_VK_BATCH",
                                  "RX_VK_COMPUTE_SERIAL", "RX_VK_PCACHE_FETCH_LOCK", "RX_VK_SPLIT_BEFORE_DRAW", "RX_VK_OCC_COPY",
                                  "RX_VK_FSR4_TUNE", "RX_VK_NO_INVARIANT", "RX_VK_EQ_BIAS", "RX_VK_CAP_SPARE_MB",
-                                 "RX_VK_STAGING_KEEP_MB", "RX_VK_WORKERS"})
+                                 "RX_VK_STAGING_KEEP_MB", "RX_VK_WORKERS", "RX_VK_ACQUIRE_AHEAD"})
             env[name] = wordy;
         const DeviceFacts f = facts_of(devices[0]);
         DevicePolicy p = device_policy(f);
@@ -590,6 +600,10 @@ def check_source():
           "texture_rule::integrated_bytes(a, device_vram_bytes(), astc_on_cpu())",
           "own = policy_rule::integrated_texture_budget(driver_budget, system_ram, astc_on_cpu());")),
         ("vk_replay.cpp", "bool batch_on() {", ("const bool v = dev.policy.batch_submits;",)),
+        ("vk_replay.cpp", "static bool acquire_ahead_on() {",
+         ("const bool v = dev.policy.acquire_ahead;", "if (dev.policy.set(Sw::acquire_ahead))")),
+        ("vk_replay.cpp", "static bool acquire_ahead_counted() {",
+         ("acquire_ahead_on() && dev.policy.set(Sw::acquire_ahead)",)),
         ("vk_replay.cpp", "bool occ_copy_wanted() {", ("return dev.policy.occ_copy;",)),
         ("vk_replay.cpp", "bool part_ends_before_draw() {", ("return dev.policy.split_before_draw;",)),
         ("vk_replay.cpp", "void split_part(VkCommandBuffer& cmd) {", ("const bool part_flush = dev.policy.split_ub_flush;",)),
