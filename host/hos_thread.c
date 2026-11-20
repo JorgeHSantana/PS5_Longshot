@@ -115,12 +115,33 @@ static void pin_by_core(HosThread *t) {
     (void)t;
 #endif
 }
+#if !defined(__EMSCRIPTEN__)
+static void vc_note_mask_change(HosThread *t);
+static int vc_mask_changed(uint64_t old_mask, uint64_t new_mask);
+#endif
 void hos_thread_affinity(HosThread *t, int ideal, uint64_t mask) {
     if (ideal >= 0) t->ideal_core = ideal;
-    if (mask) t->core_mask = mask;
+    const uint64_t old_mask = t->core_mask;
+    /* (the real kernel refuses an empty affinity; 0 is this game's own no-affinity convention, and its
+       trampoline caches the entry core for it) */
+    t->core_mask = mask;
     pin_by_core(t);
+#if !defined(__EMSCRIPTEN__)
+    if (vc_mask_changed(old_mask, mask)) vc_note_mask_change(t);
+#else
+    (void)old_mask;
+#endif
 }
 uint64_t hos_thread_mask(HosThread *t) { return t->core_mask; }
+static int hos_thread_wrapper_mask(HosThread *t, uint32_t *out) {
+    if (!t || t->entry != 0x834a2e50ULL || !t->arg) return 0;
+    uint64_t *tt = (uint64_t *)hos_guest_range(t->arg + 0xb8, 8);
+    if (!tt || *tt != t->guest_tt) return 0;
+    uint32_t *m = (uint32_t *)hos_guest_range(t->arg + 0xb0, 4);
+    if (!m) return 0;
+    *out = *m;
+    return 1;
+}
 void hos_thread_boost(int level) {
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
     static int off = -1;
@@ -1501,12 +1522,36 @@ HLE(_ZN2nn2os11SleepThreadENS_8TimeSpanE) {
 
 /* ---- TLS slots --------------------------------------------------------------------------------------------- */
 static volatile LONG slot_used[HOS_TLS_SLOTS];
+/* the guest's core-cache key: f_834aa7e0 allocates 0x84e9f7ac; its slot is where the trampoline writes core+1.
+   The key, the wrapper entry 0x834a2e50 and its +0xb0/+0xb8 fields are this build's addresses: another build
+   matches nothing, core_tls_slot stays -1 and core_tls_alias_now() returns 1, so the code is inert. */
+static volatile int core_tls_slot = -1;
+/* vc_sync_tls writes the slot on the scheduler's thread; allocation and freeing run on the game's. A free clears the
+   slot before it is published as reusable, and a write keeps the validated slot it checked, so neither a freed slot
+   nor a negative index is written. vc_lock is the outer lock (vc_sync_tls runs under it); nothing takes this one
+   while holding another. */
+static SRWLOCK tls_slot_lock = SRWLOCK_INIT;
+static int core_tls_alias_now(void) {
+    if (core_tls_slot < 0) return 1;
+    void *dp = hos_guest_range(0x84e9f668ULL, 8);
+    if (!dp) return 0;
+    const uint64_t d = *(const uint64_t *)dp;
+    if (!d) return 0;
+    void *p = hos_guest_range(d + 0x48, 4);
+    if (!p) return 0;
+    return (int)*(const uint32_t *)p == core_tls_slot;
+}
 
 /* nn::os::AllocateTlsSlot(TlsSlot*, void (*)(unsigned long)) -> Result */
 HLE(_ZN2nn2os15AllocateTlsSlotEPNS0_7TlsSlotEPFvmE) {
     for (int i = 0; i < HOS_TLS_SLOTS; i++) {
         if (!InterlockedCompareExchange(&slot_used[i], 1, 0)) {
             G32(ARG(0)) = (uint32_t)i;
+            if (ARG(0) == 0x84e9f7acULL) {
+                AcquireSRWLockExclusive(&tls_slot_lock);
+                core_tls_slot = i;   /* (in use before the scheduler can see it) */
+                ReleaseSRWLockExclusive(&tls_slot_lock);
+            }
             RET(0);
             return;
         }
@@ -1514,7 +1559,14 @@ HLE(_ZN2nn2os15AllocateTlsSlotEPNS0_7TlsSlotEPFvmE) {
     RET(0x2C01);   /* os::ResultOutOfResource */
 }
 
-HLE(_ZN2nn2os11FreeTlsSlotENS0_7TlsSlotE) { if ((uint32_t)ARG(0) < HOS_TLS_SLOTS) slot_used[(uint32_t)ARG(0)] = 0; }
+HLE(_ZN2nn2os11FreeTlsSlotENS0_7TlsSlotE) {
+    if ((uint32_t)ARG(0) < HOS_TLS_SLOTS) {
+        AcquireSRWLockExclusive(&tls_slot_lock);
+        if ((int)(uint32_t)ARG(0) == core_tls_slot) core_tls_slot = -1;   /* (before the slot can be allocated again) */
+        slot_used[(uint32_t)ARG(0)] = 0;
+        ReleaseSRWLockExclusive(&tls_slot_lock);
+    }
+}
 HLE(_ZN2nn2os11GetTlsValueENS0_7TlsSlotE) { RET((uint32_t)ARG(0) < HOS_TLS_SLOTS ? cur->tls_slots[(uint32_t)ARG(0)] : 0); }
 HLE(_ZN2nn2os11SetTlsValueENS0_7TlsSlotEm) { if ((uint32_t)ARG(0) < HOS_TLS_SLOTS) cur->tls_slots[(uint32_t)ARG(0)] = ARG(1); }
 
@@ -1756,11 +1808,36 @@ int hos_vcores_on(void) {
     return on;
 }
 static int vc_cores(void) { return hos_cores() > 8 ? 8 : hos_cores(); }
+/* (a raw mask change outside the virtual cores is not a remask: 0x40 -> 0x80 on a 6-core host; the
+   thread stays pinned as before) */
+static int vc_mask_changed(uint64_t old_mask, uint64_t new_mask) {
+    const uint64_t all = (1u << vc_cores()) - 1;
+    return (old_mask & all) != (new_mask & all);
+}
+/* the core a mask-0 thread should take: the guest's cached core (seam threads), then its last one, then ideal/lowest */
+static int vc_pref_core(HosThread *t) {
+    int c = -1;
+    const int slot = core_tls_slot;
+    uint32_t wm = 0;
+    const int seam = hos_thread_wrapper_mask(t, &wm);
+    if (seam && slot >= 0 && slot < HOS_TLS_SLOTS && !core_tls_alias_now()) {
+        const uint64_t cached = t->tls_slots[slot];
+        if (cached > 0 && cached <= (uint64_t)vc_cores()) c = (int)cached - 1;
+    }
+    if (c < 0 && t->vc_last > 0) c = t->vc_last - 1;
+    if (c < 0) c = hos_thread_core(t);
+    if (c < 0 || c >= vc_cores()) c = 0;
+    return c;
+}
+/* the bits of the guest mask this host can use; 0 for a mask wholly outside the virtual cores */
+static uint32_t vc_mask(const HosThread *t) {
+    return (uint32_t)(t->core_mask & ((1u << vc_cores()) - 1));
+}
 static unsigned vc_allowed(HosThread *t) {
     const unsigned all = (1u << vc_cores()) - 1;
-    unsigned m = (unsigned)(t->core_mask & all);
-    if (!m) m = 1u << hos_thread_core(t);
-    return m;
+    if (t->core_mask == 0) return all;   /* (the guest's no-affinity value) */
+    const unsigned m = vc_mask(t);
+    return m ? m : (1u << hos_thread_core(t));   /* (nonzero but past the vcores: pinned as before) */
 }
 /* a runs before b: a starved waiter first (the one waiting longest first among them), then by priority */
 static int vc_better(HosThread *a, HosThread *b) {
@@ -1771,12 +1848,61 @@ static int vc_better(HosThread *a, HosThread *b) {
 /* a free core t may run on (its last one, its ideal one, then the lowest), or -1; holding vc_lock */
 static int vc_free_for(HosThread *t) {
     const unsigned m = vc_allowed(t);
+    if (t->core_mask == 0) {
+        const int pref = vc_pref_core(t);
+        if (pref >= 0 && !vc_owner[pref]) return pref;
+        for (int c = 0; c < vc_cores(); c++)
+            if (!vc_owner[c]) return c;
+        return -1;
+    }
     if (t->vc_last > 0 && (m >> (t->vc_last - 1) & 1) && !vc_owner[t->vc_last - 1]) return t->vc_last - 1;
     const int ideal = hos_thread_core(t);
     if ((m >> ideal & 1) && !vc_owner[ideal]) return ideal;
     for (int c = 0; c < vc_cores(); c++)
         if ((m >> c & 1) && !vc_owner[c]) return c;
     return -1;
+}
+/* the guest's TLS core cell follows the core the thread actually holds; a multi-bit mask has none */
+/* The cell is 8-byte aligned. At a take the target is blocked; a same-core mask change writes it from the
+   SetThreadCoreMask thread while the target may read or write it: one checkpoint of disagreement is accepted,
+   and the next take rewrites it. */
+static void vc_sync_tls(HosThread *t, int c) {
+    const uint32_t mask = vc_mask(t);
+    uint32_t wm = 0;
+    if (!hos_thread_wrapper_mask(t, &wm)) return;
+    AcquireSRWLockExclusive(&tls_slot_lock);
+    const int slot = core_tls_slot;   /* (validated, then held: a free clears it under this lock) */
+    if (slot >= 0 && slot < HOS_TLS_SLOTS && !core_tls_alias_now())
+        t->tls_slots[slot] = mask == 0 || (mask & (mask - 1)) == 0 ? (uint64_t)c + 1 : 0;
+    ReleaseSRWLockExclusive(&tls_slot_lock);
+}
+
+/* The holder sees a request at its next checkpoint: its running context's poll (a fiber's while it runs one). */
+static void vc_wake_holder(HosThread *t) {
+    Ctx *rc = t->run_ctx;
+    __atomic_store_n(rc ? &rc->poll : &t->ctx.poll, 1, __ATOMIC_RELAXED);
+}
+/* A post-start mask change can leave the holder on a core the new mask excludes. Ask it to yield at its next
+   checkpoint; the reacquisition uses the new mask. A change that keeps the same core syncs the cell now. */
+static void vc_note_mask_change(HosThread *t) {
+    if (!hos_vcores_on() || !t) return;
+    AcquireSRWLockExclusive(&vc_lock);
+    const uint32_t mask = vc_mask(t);
+    if (t->vc_held) {
+        const int c = t->vc_held - 1;
+        int move;
+        if (t->core_mask == 0) move = (c != vc_pref_core(t));
+        else if (mask == 0) move = 0;   /* (nonzero but past the vcores: pinned as before) */
+        else move = !((mask >> c) & 1);
+        if (move) {
+            __atomic_store_n(&t->vc_kick, 2, __ATOMIC_RELAXED);
+            t->vc_kick_at = hos_now_ns();
+            vc_wake_holder(t);
+        } else {
+            vc_sync_tls(t, c);
+        }
+    }
+    ReleaseSRWLockExclusive(&vc_lock);
 }
 static void vc_take(HosThread *t, int c) {
     vc_owner[c] = t;
@@ -1785,6 +1911,7 @@ static void vc_take(HosThread *t, int c) {
     __atomic_store_n(&t->vc_kick, 0, __ATOMIC_RELAXED);
     t->vc_starved = 0;
     t->vc_held_at = hos_now_ns(), t->vc_kick_at = 0;
+    vc_sync_tls(t, c);
 }
 static void vc_dequeue(HosThread *t) {
     for (int i = 0; i < vc_nq; i++)
@@ -1926,12 +2053,13 @@ static void vc_acquire(HosThread *t) {
                 HosThread *h = vc_owner[k];
                 if ((m >> k & 1) && h && (!worst || h->priority > worst->priority)) worst = h;
             }
-        if (worst && !worst->vc_kick) {
-            __atomic_store_n(&worst->vc_kick, worst->priority > t->priority ? 1 : 2, __ATOMIC_RELAXED);
-            worst->vc_kick_at = hos_now_ns();
-            Ctx *rc = worst->run_ctx;   /* (a fiber's context while it runs one) */
-            __atomic_store_n(rc ? &rc->poll : &worst->ctx.poll, 1, __ATOMIC_RELAXED);
-            vc_st.kicks++;
+        if (worst) {
+            if (!worst->vc_kick) {
+                __atomic_store_n(&worst->vc_kick, worst->priority > t->priority ? 1 : 2, __ATOMIC_RELAXED);
+                worst->vc_kick_at = hos_now_ns();
+                vc_st.kicks++;
+            }
+            vc_wake_holder(worst);   /* (also repairs a request whose interrupt was already taken) */
         }
         SleepConditionVariableSRW(&t->vc_cv, &vc_lock, 1, 0);
         if (t->vc_held) {   /* granted by a release */
@@ -2001,7 +2129,13 @@ static void vc_yield(HosThread *t, int strict) {
     if (!__atomic_load_n(&vc_nq, __ATOMIC_ACQUIRE) && !__atomic_load_n(&t->vc_kick, __ATOMIC_RELAXED)) return;
     AcquireSRWLockExclusive(&vc_lock);
     const int c = t->vc_held - 1;
-    int any = 0;
+    /* a mask change that excludes the held core must move even when nobody waits; a nonzero mask
+       wholly outside the vcores is pinned as before and does not force a move */
+    const uint32_t mask = vc_mask(t);
+    int any;
+    if (t->core_mask == 0) any = (c != vc_pref_core(t));
+    else if (mask == 0) any = 0;
+    else any = !((mask >> c) & 1);
     for (int i = 0; i < vc_nq && !any; i++) {
         HosThread *w = vc_queue[i];
         any = (vc_allowed(w) >> c & 1) && (w->vc_starved || (strict ? w->priority < t->priority : w->priority <= t->priority));
