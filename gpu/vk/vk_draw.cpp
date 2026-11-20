@@ -997,8 +997,13 @@ bool pcache_load_off() {
         bool cgroup_limited = false;
 #ifdef _WIN32
         const bool linux_nvidia = false;
-        const uint32_t ram_mb = 0;
+        // (Windows with NVIDIA's own driver: its GLCache folder answers, with Linux's RAM rule: pcache_load.h)
+        const bool windows_nvidia = dev.driver_id == VK_DRIVER_ID_NVIDIA_PROPRIETARY;
+        MEMORYSTATUSEX ms{};
+        ms.dwLength = sizeof ms;
+        const uint32_t ram_mb = GlobalMemoryStatusEx(&ms) ? (uint32_t)std::min<uint64_t>(ms.ullTotalPhys >> 20, UINT32_MAX) : 0;
 #else
+        const bool windows_nvidia = false;
         const bool linux_nvidia = dev.driver_id == VK_DRIVER_ID_NVIDIA_PROPRIETARY;   // (not NVK: Mesa's, with Mesa's cache)
         const long pages = sysconf(_SC_PHYS_PAGES), page = sysconf(_SC_PAGE_SIZE);
         uint64_t capacity = pages > 0 && page > 0 ? ((uint64_t)pages * (uint64_t)page) >> 20 : UINT64_MAX;
@@ -1012,14 +1017,16 @@ bool pcache_load_off() {
         // (NVIDIA's folder walked only where everything else says not to read the file; its size alone counts, not Mesa's)
         pcache_load::Measured cache{pcache_load::Cache::kUnknown, 0};
         std::string dir;
-        const bool looked = pcache_load::needs_cache(sw, preparing, at_create, linux_nvidia, ram_mb);
-        if (looked) {
+        const bool looked = pcache_load::needs_cache(sw, preparing, at_create, linux_nvidia, ram_mb, windows_nvidia);
+        if (looked && windows_nvidia) {
+            cache = pcache_load::nvidia_cache_windows(getenv("LOCALAPPDATA"), &dir);
+        } else if (looked) {
             const char* c = getenv("__GL_SHADER_DISK_CACHE");
             cache = pcache_load::nvidia_cache(c && *c && env_value_off(c), getenv("__GL_SHADER_DISK_CACHE_PATH"),
                                               getenv("XDG_CACHE_HOME"), getenv("HOME"), &dir);
         }
         const pcache_load::Choice choice =
-            pcache_load::choose(sw, preparing, at_create, linux_nvidia, ram_mb, cache.cache, cache.bytes >> 20);
+            pcache_load::choose(sw, preparing, at_create, linux_nvidia, ram_mb, cache.cache, cache.bytes >> 20, windows_nvidia);
         std::string seen;   // (what was looked at: the switch, or the RAM and NVIDIA's cache where they were)
         if (sw >= 0) seen = std::string("RX_VK_PCACHE_LOAD=") + e;
         else if (choice.why == pcache_load::Why::kRam || looked)

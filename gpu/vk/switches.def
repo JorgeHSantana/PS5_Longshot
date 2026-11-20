@@ -557,7 +557,7 @@ SW(RX_VK_PASS_TIMING, diag, int, "off: no GPU timestamps", "Times each pass on t
 SW(RX_VK_PASS_TRACE, diag, bool, "off", "Records the passes and dispatches of the last frames and logs them around a flash or dark frame.")
 SW(RX_VK_PASS_TRACE_AT, diag, int, "0: off", "<n> logs the passes of the frame at every nth present.")
 SW(RX_VK_PCACHE_FETCH_LOCK, hw, bool, "on for Intel on Windows, off elsewhere (off on Linux)", "1/0 forces on or off fetching pipeline cache data only while no pipeline build uses a cache.")
-SW(RX_VK_PCACHE_LOAD, hw, bool, "read, except on Linux with NVIDIA's driver, 20 GB of RAM or less and NVIDIA's own shader cache on and warm...", "0 never reads or saves the pipeline cache file and its play files; 1 reads it whatever the automatic rule says.")
+SW(RX_VK_PCACHE_LOAD, hw, bool, "read, except with NVIDIA's own driver (Linux or Windows), 20 GB of RAM or less, its shader cache warm and programs loaded at create", "0 never reads or saves the pipeline cache file and its play files; 1 reads it whatever the automatic rule says.")
 SW(RX_VK_PEEK_PROG, diag, string, "unset: nothing logged", "Logs the first words of the storage buffers of programs matching a key prefix, 60 lines.")
 SW(RX_VK_PERF_INTERVAL, tune, int, "300 s between summaries", "Seconds of play between two performance summaries (60 to 840) while Send performance statistics is on.")
 SW(RX_VK_PERF_TEST_CURL, diag, string, "off: the system's curl", "In a test build, sends the summaries to this stand-in instead of curl (gpu/vk/perf_report.cpp).")
