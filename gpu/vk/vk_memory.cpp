@@ -1252,6 +1252,52 @@ uint64_t cap_spare_max() {
     }();
     return v;
 }
+// (longshot, RX_VK_CAP_FREE_ASYNC, on; =0: as before) A capture buffer let go past the spares is destroyed on a thread of its
+// own, not on the thread that retired it (the replay's take, holding pools_mu): freeing a 64-256 MB host-cached memory object is
+// the driver unmapping and releasing every page of it. Only buffers the GPU is done with get here (a retire waits for that), and
+// nothing else holds them; the memory goes back a moment later. At the process's exit (cap_shutting_down) what is queued is left
+bool cap_free_async_on() {
+    static const bool on = [] {
+        const bool v = env_on_or("RX_VK_CAP_FREE_ASYNC", 1);
+        if (!v) logf("vk: capture buffers past the spares destroyed on the replay's thread, as before (RX_VK_CAP_FREE_ASYNC=0)");
+        return v;
+    }();
+    return on;
+}
+std::mutex cap_gone_mu;   // (a leaf: the queue alone)
+std::condition_variable cap_gone_cv;
+std::vector<std::pair<VkBuffer, VmaAllocation>> cap_gone;
+bool cap_gone_started = false;
+void destroy_buffer_later(VkBuffer buffer, VmaAllocation alloc) {
+    {
+        std::lock_guard lk(cap_gone_mu);
+        cap_gone.push_back({buffer, alloc});
+        if (!cap_gone_started) {
+            cap_gone_started = true;
+            try {
+                std::thread([] {
+                    std::vector<std::pair<VkBuffer, VmaAllocation>> batch;
+                    for (;;) {
+                        {
+                            std::unique_lock lk(cap_gone_mu);
+                            cap_gone_cv.wait(lk, [] { return !cap_gone.empty(); });
+                            batch.swap(cap_gone);
+                        }
+                        for (const auto& [b, a] : batch)
+                            if (!cap_shutting_down.load()) destroy_buffer(b, a);
+                        batch.clear();
+                    }
+                }).detach();
+            } catch (...) {   // (no thread: destroyed here, as before)
+                cap_gone_started = false;
+                cap_gone.pop_back();
+                destroy_buffer(buffer, alloc);
+                return;
+            }
+        }
+    }
+    cap_gone_cv.notify_one();
+}
 void cap_buf_free(VkBuffer buffer, VmaAllocation alloc, void* map, uint64_t size, bool from_worker = false) {
     {
         std::lock_guard lk(cap_free_mu);
@@ -1267,6 +1313,7 @@ void cap_buf_free(VkBuffer buffer, VmaAllocation alloc, void* map, uint64_t size
             return;
         }
     }
+    if (cap_free_async_on() && !cap_shutting_down.load()) return destroy_buffer_later(buffer, alloc);
     destroy_buffer(buffer, alloc);
 }
 void cap_buf_retire(std::map<uint64_t, CapBuf>::iterator it) {
@@ -2799,6 +2846,27 @@ void stamp_block_make(Pool& p, uint64_t guest) {
         logf("vk: late pages' fix: stamps for %#llx (pool %#llx; %zu blocks, %llu KB)", (unsigned long long)(key << kStampShift),
              (unsigned long long)p.lo, stamp_blocks.size(), (unsigned long long)(stamp_bytes >> 10));
 }
+// (longshot, RX_VK_LATE_STAMPS_AHEAD, on; =0: as before) A late page with no stamp block yet makes its capture wait (the first
+// time), and with it the blocks of the rest of its pool (all of a pool of 16 MB or less, else the 2 MB around the page), not only
+// the late pages' own: arriving in an area, the game writes 100-190 pages a capture of a new 4-8 MB pool the GPU writes back too,
+// each capture's late pages in other 64 KB blocks, and each new block cost a wait (4 cores: 6-20 waits an arrival, 20-250 ms each
+// while the GPU works through the arrival). The blocks are the same ones a later late page would make, sooner; the fixes' rules
+// (since, the shadow, the pool) are unchanged. Within kStampMax, as any block. tests/test_late_stamps_ahead.py
+bool late_stamps_ahead_on() {
+    static const bool on = [] {
+        const bool v = env_on_or("RX_VK_LATE_STAMPS_AHEAD", 1);
+        if (!v) logf("vk: late pages' fix: a late page's missing stamps made for its own block only, as before (RX_VK_LATE_STAMPS_AHEAD=0)");
+        return v;
+    }();
+    return on;
+}
+void stamp_blocks_around(Pool& p, uint64_t guest) {   // (pools_mu held)
+    constexpr uint64_t kAround = 2ull << 20;   // (a pool past 16 MB: the 2 MB around the page)
+    const uint64_t base = guest & ~(kAround - 1);
+    uint64_t lo = p.lo, hi = p.hi;
+    if (hi - lo > (16ull << 20)) lo = std::max(lo, base), hi = std::min(hi, base + kAround);
+    for (uint64_t b = (lo + kStampMask) & ~kStampMask; b + kStampBlock <= hi; b += kStampBlock) stamp_block_make(p, b);
+}
 struct LateFix { uint64_t dst, src, stamps; uint32_t count, after; };   // (shaders/late_fix.comp's Fix)
 static_assert(sizeof(LateFix) == 32, "late_fix.comp's Fix");
 std::vector<LateFix> late_fixes;   // (of the captures taken, for the next recording; pools_mu)
@@ -2983,6 +3051,7 @@ bool late_fix_build(Capture& c) {
                 const auto it = stamp_blocks.find(a >> kStampShift);
                 if (it == stamp_blocks.end()) {
                     stamp_block_make(*p, a);
+                    if (late_stamps_ahead_on()) stamp_blocks_around(*p, a);
                     fail(3);
                     continue;
                 }
