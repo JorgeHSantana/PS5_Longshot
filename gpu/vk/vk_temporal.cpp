@@ -65,6 +65,7 @@
 #include <vector>
 
 #include "dlss_actor.h"
+#include "longshot_env.h"
 #include "dlss_checks.h"
 #include "dlss_math.h"
 #include "hidden_mesh.h"
@@ -1076,6 +1077,119 @@ void temporal_idle() {
     s.last_frame = 0;   // (a new history when it comes back)
     free_dead(false);
     s.holding = !s.dead.empty();
+}
+
+// ---- (longshot, smoothness) DLSS's feature made before the game's first 3D frame (vk_temporal.h temporal_prewarm_on) ----
+namespace {
+std::atomic<int64_t> prewarm_draws{1 << 30};   // (the last frame's draws: none known yet, not light)
+std::atomic<uint64_t> prewarm_present{0};      // (the game's last picture, width << 32 | height)
+}  // namespace
+
+bool temporal_prewarm_on() {   // (on unless RX_VK_DLSS_PREWARM is 0, off, false or no: the switches' one rule)
+    static const bool on = env_on_or("RX_VK_DLSS_PREWARM", 1);
+    return on;
+}
+void temporal_note_frame(int64_t draws) { prewarm_draws.store(draws, std::memory_order_relaxed); }
+void temporal_note_present(uint32_t width, uint32_t height) {
+    prewarm_present.store((uint64_t)width << 32 | height, std::memory_order_relaxed);
+}
+
+void temporal_prewarm(VkCommandBuffer cmd) {
+    static bool probed = false;   // (the replay thread's alone)
+    if (!probed) {
+        probed = true;
+        if (dev.offscreen && env_switch("RX_VK_PROBE_HEADLESS") != 0) {
+            logf("vk: upscaler: no window: the upscalers asked in the background as the start-up screen does "
+                 "(RX_VK_PROBE_HEADLESS=0: at the first upscale)");
+            upscalers_probe_start();
+        }
+    }
+    // (made again when the Upscaler row or the presented size changes before the game's first 3D frame: a player who picks
+    // DLSS over DLAA at the title gets DLSS's feature, not a DLAA one made for nothing. The row held for 30 frames first, so
+    // stepping through it makes none; four at the most)
+    static bool done = false;
+    static int warmed_mode = -1, seen_mode = -1, warmed_n = 0;
+    static uint64_t warmed_pic = 0, seen_since = 0;
+    if (done || !cmd || !temporal_prewarm_on()) return;
+    State& s = st();
+    // (a gameplay upscale asked for already: too late, it makes its own)
+    if (s.asked_frame.load(std::memory_order_relaxed)) {
+        done = true;
+        return;
+    }
+    const int mode = temporal_mode();
+    const uint64_t frame = texture_frame_no();
+    if (mode != seen_mode) seen_mode = mode, seen_since = frame;
+    // (a light frame: the title, the file select, a loading screen, as texture_ahead.h's kLightDraws)
+    if (prewarm_draws.load(std::memory_order_relaxed) >= 200) return;
+    if (!ur::is_dlss(mode) || frame - seen_since < 30) return;   // (another Upscaler now, or the row just changed)
+    const uint64_t pic = prewarm_present.load(std::memory_order_relaxed);
+    if (mode == warmed_mode && pic == warmed_pic) return;   // (made for this already)
+    const int ngx = dlss_ngx_ready();
+    if (ngx < 0) return;   // (NGX not started yet: the probe's thread starts it)
+    const uint32_t ow = (uint32_t)(pic >> 32), oh = (uint32_t)pic;
+    if (ngx == 0 || !ow || !oh) {
+        if (ngx == 0) done = true;
+        return;
+    }
+    std::lock_guard lk(s.mu);
+    if (s.asked || (s.drawing && warmed_mode < 0)) return void(done = true);
+    warmed_mode = mode, warmed_pic = pic;
+    if (++warmed_n >= 4) done = true;
+    const auto t0 = std::chrono::steady_clock::now();
+    Engine& engine = engine_of(mode);
+    if (!engine.e || engine.failed) return;
+    if (!engine.started) engine.started = true, engine.ok = engine.e->start();
+    if (!engine.ok) return;
+    if (!make_pipelines()) return;
+    (void)make_actor_pipeline();
+    // (the size the scene will have: the output's for DLAA, and for DLSS the full size too, which its scaled mode's range
+    // holds (vk_dlss.cpp prepare): the Render resolution's Auto starts each area at full size)
+    const bool native = ur::full_scale(mode);
+    const uint32_t rw = ow, rh = oh;
+    struct Disturbed {
+        ~Disturbed() { descriptors_disturbed(); }
+    } disturbed;
+    full_barrier(cmd);
+    uint32_t iw = rw, ih = rh;
+    const char* why = nullptr;
+    const int ready = engine.e->prepare(cmd, rw, rh, ow, oh, native, &iw, &ih, &why);
+    if (ready <= 0) {
+        logf("vk: %s: not made ahead (%s)", name_of(mode), why ? why : "not now");
+        return;
+    }
+    s.drawing = engine.e;   // (temporal_idle lets it go if the row leaves DLSS before the game draws)
+    s.holding = true;
+    s.last_frame = 0;       // (the first gameplay frame starts a new history)
+    const VkImageUsageFlags copied = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    if (!make_image(cmd, s.color, VK_FORMAT_R16G16B16A16_SFLOAT, iw, ih, VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
+        !make_image(cmd, s.depth, VK_FORMAT_R32_SFLOAT, iw, ih, copied) ||
+        !make_image(cmd, s.motion, VK_FORMAT_R16G16_SFLOAT, iw, ih, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | copied) ||
+        !make_image(cmd, s.output, VK_FORMAT_R16G16B16A16_SFLOAT, native ? rw : ow, native ? rh : oh,
+                    VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
+        logf("vk: %s: made ahead, its images were not", name_of(mode));
+        return;
+    }
+    // (one evaluation, a new history, on cleared images: NGX's first-evaluation work and the driver's for its kernels done
+    // here too. Its picture goes nowhere; the first gameplay frame's is a new history again)
+    full_barrier(cmd);
+    const VkClearColorValue zero{};
+    const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    for (const Image* im : {&s.color, &s.depth, &s.motion, &s.output})
+        vkCmdClearColorImage(cmd, im->image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
+    full_barrier(cmd);
+    // (not named f: tests/test_temporal_history.py takes the first `f.reset =` in this file as draw_engine's)
+    TemporalFrame warm;
+    warm.color = s.color.shown(), warm.depth = s.depth.shown(), warm.motion = s.motion.shown(), warm.output = s.output.shown();
+    warm.render_w = rw, warm.render_h = rh;
+    warm.reset = true;
+    warm.jitter_phases = (uint32_t)dlss_jitter_phases(rw, rh, native ? rw : ow, native ? rh : oh);
+    const bool evaluated = engine.e->evaluate(cmd, warm);
+    full_barrier(cmd);
+    logf("vk: %s: its feature made ahead of the game's first 3D frame for %ux%u (%.1f ms of the replay's, a light frame%s; "
+         "RX_VK_DLSS_PREWARM)",
+         name_of(mode), ow, oh, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(),
+         evaluated ? ", one evaluation" : ", its evaluation failed");
 }
 
 // ---- (longshot) the depth draws of hidden meshes (vk_draw.cpp hidden_depth_draw has the why) ----

@@ -355,7 +355,12 @@ int prepare(VkCommandBuffer cmd, uint32_t rw, uint32_t rh, uint32_t ow, uint32_t
     static const NVSDK_NGX_PerfQuality_Value scaled[] = {NVSDK_NGX_PerfQuality_Value_MaxQuality, NVSDK_NGX_PerfQuality_Value_DLAA,
                                                         NVSDK_NGX_PerfQuality_Value_Balanced, NVSDK_NGX_PerfQuality_Value_MaxPerf,
                                                         NVSDK_NGX_PerfQuality_Value_UltraPerformance};
-    const bool aa = rw == ow && rh == oh;
+    // (longshot, RX_VK_DLSS_PREWARM, on by default) DLSS, not DLAA (native_aa false), at a full-size frame: the scaled mode whose range holds
+    // the full size too (MaxQuality's, 1280x720 to 2560x1440 at a 2560x1440 output), DLAA's only where none does. The first
+    // frames after a load are full size at the Render resolution's Auto, and a DLAA-mode feature made for them was made again
+    // 17 frames later once the game's size dropped ("the render size 2382x1340 left its range": 119 ms, then 29.5 ms more)
+    const bool full = rw == ow && rh == oh;
+    const bool aa = dlss_checks::dlaa_feature(full, native_aa, temporal_prewarm_on());
     NVSDK_NGX_PerfQuality_Value mode = NVSDK_NGX_PerfQuality_Value_DLAA;
     unsigned max_w = ow, max_h = oh, min_w = ow, min_h = oh;   // (DLAA: the render size is the output's, one size)
     unsigned create_w = ow, create_h = oh;
@@ -373,7 +378,9 @@ int prepare(VkCommandBuffer cmd, uint32_t rw, uint32_t rh, uint32_t ow, uint32_t
         }
         dlss_checks::ModeRange took;
         const int k = dlss_checks::mode_for(rw, rh, ow, oh, ranges, n, &took);
-        if (k < 0) {   // (the size in the log; the feature kept for the sizes it takes, not let go and made again)
+        if (k < 0 && full) {
+            // (no scaled mode holds the full size: DLAA's, as before RX_VK_DLSS_PREWARM)
+        } else if (k < 0) {   // (the size in the log; the feature kept for the sizes it takes, not let go and made again)
             // (vk_temporal.cpp's fail() logs a reason again only when its pointer changes: two buffers, the other one for a
             // new size, so each refused size is logged once, by fail() as any reason)
             static char refused[2][112];
@@ -386,10 +393,10 @@ int prepare(VkCommandBuffer cmd, uint32_t rw, uint32_t rh, uint32_t ow, uint32_t
             }
             return *fail = refused[at], 0;
         }
-        mode = which[k], max_w = took.max_w, max_h = took.max_h, min_w = took.min_w, min_h = took.min_h;
-        create_w = optimal[k][0], create_h = optimal[k][1];
-        if (took.max_w != ranges[k].max_w || took.max_h != ranges[k].max_h || took.min_w != ranges[k].min_w ||
-            took.min_h != ranges[k].min_h)
+        if (k >= 0) mode = which[k], max_w = took.max_w, max_h = took.max_h, min_w = took.min_w, min_h = took.min_h;
+        if (k >= 0) create_w = optimal[k][0], create_h = optimal[k][1];
+        if (k >= 0 && (took.max_w != ranges[k].max_w || took.max_h != ranges[k].max_h || took.min_w != ranges[k].min_w ||
+                       took.min_h != ranges[k].min_h))
             logf("vk: NVIDIA DLSS: the render size %ux%u is a little outside quality mode %d's range (%ux%u to %ux%u): taken by "
                  "it (a rounded size)", rw, rh, (int)mode, ranges[k].min_w, ranges[k].min_h, ranges[k].max_w, ranges[k].max_h);
     }
@@ -549,6 +556,14 @@ void dlss_device_extensions(std::vector<const char*>& want, const std::vector<Vk
 }
 
 void dlss_retry() { st().refused = 0; }
+
+int dlss_ngx_ready() {
+    if (dlss_why() != DLSS_OK) return 0;
+    State& s = st();
+    std::unique_lock lk(s.mu, std::try_to_lock);
+    if (!lk.owns_lock() || !s.ngx_tried) return -1;
+    return s.ngx_ok ? 1 : 0;
+}
 
 void dlss_probe() {
     if (dlss_why() != DLSS_OK || g_why.load(std::memory_order_relaxed) >= 0 || !dev.device) return;
@@ -1223,6 +1238,7 @@ bool dlss_built() { return false; }
 const TemporalEngine* dlss_engine() { return nullptr; }
 void dlss_probe() {}
 void dlss_retry() {}
+int dlss_ngx_ready() { return 0; }
 void dlss_instance_extensions(std::vector<const char*>&, const std::vector<VkExtensionProperties>&) {}
 void dlss_device_extensions(std::vector<const char*>&, const std::vector<VkExtensionProperties>&) {}
 bool dlss_fg_wanted() { return false; }

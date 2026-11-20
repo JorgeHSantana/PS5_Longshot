@@ -3613,6 +3613,8 @@ static void probe_upscalers_soon() {
     });
 }
 
+void upscalers_probe_start() { probe_upscalers_soon(); }
+
 void startup_screen(const StartupView* view) {
     if (!view) {
         startup_on.store(false, std::memory_order_release);

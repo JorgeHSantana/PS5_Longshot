@@ -100,6 +100,21 @@ bool temporal_upscale(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in
 /// engine's own state, the chain's images and deferred frees are let go, so their video memory comes back. Nothing to do
 /// costs one atomic load
 void temporal_idle();
+/// (longshot, smoothness) RX_VK_DLSS_PREWARM (on by default; 0: off): DLSS's feature made before the game's first 3D frame. Its creation (NGX's
+/// CreateFeature, 70-120 ms of the replay thread in play, 33-50 ms headless) and the chain's first evaluate and pipelines were
+/// all in the first gameplay frame after a load. temporal_prewarm makes them in a light frame (the title, the file select, a
+/// loading screen: fewer draws than texture_ahead::kLightDraws) once NGX has started, for the size the game presents at
+/// (temporal_note_present) and the Upscaler row's DLSS or DLAA, with one evaluate (reset) on the chain's cleared images.
+/// The first gameplay frame then finds it made. A key that misses is made again there, as before, and logged with its why.
+/// Also (vk_dlss.cpp prepare): DLSS at a full-size frame takes the scaled mode that holds it, not a DLAA-mode feature
+bool temporal_prewarm_on();
+/// At each recording's start on the replay thread (cmd: its first command buffer). With RX_VK_DLSS_PREWARM=0 it only asks
+/// the upscalers at the first one in a run with no window (HOS_HEADLESS: no start-up screen asks them, and NGX's ~450 ms start
+/// fell into the first gameplay frame of every test run; RX_VK_PROBE_HEADLESS=0: not asked)
+void temporal_prewarm(VkCommandBuffer cmd);
+/// The draws of the last frame (vk_replay.cpp status_tick) and the size of the picture the game presented (do_present)
+void temporal_note_frame(int64_t draws);
+void temporal_note_present(uint32_t width, uint32_t height);
 /// (longshot) The game asked for its gameplay upscale (temporal_upscale) in this frame or the two before: it draws a 3D
 /// scene now, whether or not an engine then drew it (failed, refused, not this frame). Not in its own menus, movies and
 /// loading screens. Without the lock (an atomic frame number)
