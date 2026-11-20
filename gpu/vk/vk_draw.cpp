@@ -10328,6 +10328,63 @@ void prepare_progress_log(const char* what, size_t done, size_t total, std::chro
     else logf("vk: %s: 0 of %zu pipelines in %.0f s (the driver compiles the first ones)", what, total, s);
     compute_compiles_log();
 }
+/// (longshot) The notes' references, walked once a start. notes_lost_by_driver, precompile_warm and precompile_at_create each
+/// walked longshot_pipelines.bin for them (37,474 notes in 1.0 GB on one PC: about 0.25 s a walk with the file in the OS's
+/// cache), two walks on a normal start and three when the driver had lost the notes. All three run one after
+/// the other on precompile_run's thread, before the game, and none of them writes the notes file: build_graphics notes nothing
+/// (pipeline_note is play's, graphics_pipeline, and the state list's, state_list_prepare, which runs before precompile_run), and
+/// the file is opened for appending (notes_open_locked) in precompile_at_create, after its references are taken. The references
+/// are kept with the file's size and time as they were before the walk, and a use that finds either changed (a file grown,
+/// cut or rewritten by anything not foreseen here) walks again: a stale place is never handed out. A walk is kept only when it
+/// read the whole file and the file's size, time and head could be read (not when the file was missing, held by another
+/// program, or a read or seek failed): a walk that failed is not handed to the next use, and a use that cannot read the file
+/// walks again. Not seen: a rewrite at the same size that keeps the time (another program, or
+/// within one tick of a coarse file system); main's references, kept for the session, were as exposed. take: the last use, which
+/// takes them (precompile_at_create, for programs_index); the next use after it walks again
+struct StartNoteRefs {
+    std::vector<NoteRef> refs;
+    int64_t size = -1, time = 0;   // (the file's, before the walk; size -1: there was none)
+    bool kept = false;
+    int walks = 0;                 // (this start's, said in the precompile's lines)
+    double walk_ms = 0;
+};
+StartNoteRefs start_note_refs_kept;   // (precompile_run's thread alone)
+static void notes_file_id(int64_t* size, int64_t* time) {
+    std::error_code ec, ec_time;
+    const std::string path = pipe_notes_path();
+    const uintmax_t n = std::filesystem::file_size(path, ec);
+    const auto t = std::filesystem::last_write_time(path, ec_time);
+    // (and whether its head reads, as notes_open_locked reads it: a file another program has since locked against reads is
+    // walked again, as main's walk at each use saw it)
+    uint64_t head[2];
+    FILE* f = fopen(path.c_str(), "rb");
+    const bool reads = f && fread(head, 8, 2, f) == 2;
+    if (f) fclose(f);
+    *size = ec || ec_time || !reads ? -1 : (int64_t)n;   // (-1: no file, or one not read; a walk is never kept on it)
+    *time = ec_time ? 0 : (int64_t)t.time_since_epoch().count();
+}
+std::vector<NoteRef> start_note_refs(bool take) {
+    StartNoteRefs& k = start_note_refs_kept;
+    int64_t size = -1, time = 0;
+    notes_file_id(&size, &time);
+    if (!k.kept || k.size != size || k.time != time) {
+        const auto t0 = std::chrono::steady_clock::now();
+        bool whole = false;
+        k.refs = pipe_notes_refs(&whole);
+        k.walks++;
+        k.walk_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        int64_t after = -1, after_time = 0;   // (changed while it was walked: used this once, not kept)
+        notes_file_id(&after, &after_time);
+        // (kept only from a walk that read the whole file it found: one that could not open it (another program holding it
+        // with reads denied) or had a read fail part way is used this once and the next use walks again, as main's walks did)
+        k.kept = whole && size >= 0 && after == size && after_time == time;
+        k.size = size, k.time = time;
+    }
+    if (!take) return k.refs;
+    k.kept = false;
+    return std::move(k.refs);
+}
+
 /// (longshot, RX_VK_LOAD=create) The first start after a preparation: every noted pipeline built into the pipeline cache and let
 /// go, so that the loads at the programs' create calls find each one there and never meet a pipeline the prepare should have
 /// compiled. The precompile does the same by keeping them all ready, which is the memory RX_VK_LOAD=create is there to save
@@ -10346,7 +10403,7 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
         fclose(f);
     }
     pcache_init();
-    const std::vector<NoteRef> refs = pipe_notes_refs();
+    const std::vector<NoteRef> refs = start_note_refs(false);
     if (ended_inside >= 2) {
         remove(warming.c_str());
         precompile_built_write(refs.size(), compute_warm_plan().coverage());
@@ -10444,10 +10501,10 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
     }
     logf("vk: precompile: %zu noted pipelines of %zu programs and %zu compute pipelines of %zu compute programs built into the "
          "pipeline cache and let go (%zu and %zu not made, %zu whose program variant is not kept), on %u threads in %.1f s (the "
-         "compute ones %.1f s)%s", built.load(), progs.size(), computes_built.load(), computes.size(), failed.load(),
-         computes_failed.load(), no_program.load(), threads,
+         "compute ones %.1f s; the notes' file walked %d times this start so far)%s", built.load(), progs.size(),
+         computes_built.load(), computes.size(), failed.load(), computes_failed.load(), no_program.load(), threads,
          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(),
-         std::chrono::duration<double>(std::chrono::steady_clock::now() - c0).count(),
+         std::chrono::duration<double>(std::chrono::steady_clock::now() - c0).count(), start_note_refs_kept.walks,
          !all || prepare_stopped() ? "; stopped before the end: the next start goes on"
          : prepare_only ? "; the preparation's own process: the first start of the game builds them again, from the driver's "
                           "cache, into the cache it then loads from" : "");
@@ -10467,7 +10524,7 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
 void precompile_at_create(void (*progress)(size_t done, size_t total)) {
     const auto t0 = std::chrono::steady_clock::now();
     pcache_init();
-    std::vector<NoteRef> refs = pipe_notes_refs();
+    std::vector<NoteRef> refs = start_note_refs(true);   // (its last use this start: programs_index takes them)
     if (!env_on("RX_VK_NO_PROGRAM_CACHE")) {
         std::lock_guard lk(note_mu);
         if (!note_file) {
@@ -10581,10 +10638,11 @@ void precompile_at_create(void (*progress)(size_t done, size_t total)) {
     logf("vk: precompile: load at create (RX_VK_LOAD=create): %zu noted pipelines found, none built; %zu compute programs "
          "named (%zu in the shipped list, %zu dispatched in play here); %zu mesh fallback programs kept ready, %zu of their "
          "noted pipelines with them (%zu in no cache)%s; in %.0f ms. No other program is kept ready by a list: each is loaded "
-         "when the game makes it",
+         "when the game makes it (the notes' file walked %d times this start, in %.0f ms: start_note_refs)",
          notes_n, plan.keys.size(), plan.shipped, plan.learned, kept_n, kept_pipes, kept_cold,
          end == bounded_wait::End::kStalled ? ", some still being built" : "",
-         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(),
+         start_note_refs_kept.walks, start_note_refs_kept.walk_ms);
     // (fallback pipelines that took this long were compiled, not found: written before the title, the start-up screen saying
     // so, as precompile_run does; a start closed before then kept none of them, and the next one compiled them all again)
     static const int save_s = precompile_save::after_s(getenv("RX_VK_PRECOMPILE_SAVE_S"));
@@ -10613,7 +10671,7 @@ void precompile_at_create(void (*progress)(size_t done, size_t total)) {
 bool notes_lost_by_driver() {
     if (!dev.vk13.pipelineCreationCacheControl) return false;
     constexpr size_t kSample = 48;
-    const std::vector<NoteRef> refs = pipe_notes_refs();
+    const std::vector<NoteRef> refs = start_note_refs(false);
     if (refs.size() < kSample) return false;
     FILE* f = fopen(pipe_notes_path().c_str(), "rb");
     if (!f) return false;
@@ -10681,6 +10739,8 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
             precompile_at_create(progress ? start_steps::create : nullptr);
             return start_steps::end();
         }
+        // (no load at create this start: what start_note_refs kept for it is let go here, as each walk's were before)
+        start_note_refs_kept = StartNoteRefs{};
         // (the window was closed in it; or this is the preparation's own process, which leaves no marker: its warm filled
         // the driver's cache, the first start of the game warms again and loads at create calls from then on)
         if (prepare_stopped() || env_on("LONGSHOT_PREPARE_ONLY")) return;
@@ -12023,8 +12083,9 @@ bool precompile_covers_notes() {
     return n == 2 || !compute_warm_plan().all;
 }
 std::string pipe_notes_file() { return pipe_notes_path(); }
-std::vector<NoteRef> pipe_notes_refs() {
+std::vector<NoteRef> pipe_notes_refs(bool* whole) {
     std::vector<NoteRef> refs;
+    if (whole) *whole = false;
     FILE* f = fopen(pipe_notes_path().c_str(), "rb");
     if (!f) return refs;
     uint64_t head[2] = {0, 0};
@@ -12050,6 +12111,7 @@ std::vector<NoteRef> pipe_notes_refs() {
             if (seen.insert(r.key).second) refs.push_back(r);
         }
     }
+    if (whole) *whole = feof(f) && !ferror(f);   // (it ended at the file's end: not at a read or a seek that failed)
     fclose(f);
     return refs;
 }

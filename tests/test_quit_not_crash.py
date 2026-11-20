@@ -107,6 +107,7 @@ thread_local precompile_save::Outcome pcache_save_outcome;   // (vk_draw.cpp: wh
 #endif
 struct NoteRef {};
 std::vector<NoteRef> pipe_notes_refs() { return std::vector<NoteRef>(3); }
+std::vector<NoteRef> start_note_refs(bool) { return pipe_notes_refs(); }   // (vk_draw.cpp: the start's one walk)
 
 /// The step's work, begun. through: done at once. crash: the process ends there, nothing run after it. quit-screen: it goes on
 /// until the close stops it; the other quits and kill: it never stops (no start-up screen, or a compile longer than the close

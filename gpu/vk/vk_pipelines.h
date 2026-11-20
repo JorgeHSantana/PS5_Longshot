@@ -23,8 +23,10 @@ struct NoteRef {
     uint32_t vattr[16]{};
     uint8_t color_types[8]{};
 };
-/// Every note's reference, read by position (26 KB a note: none is read whole)
-std::vector<NoteRef> pipe_notes_refs();
+/// Every note's reference, read by position (26 KB a note: none is read whole). A walk of the whole file each call: the start's
+/// own uses go through start_note_refs (vk_draw.cpp), which walks once a start. whole: set true when the file was opened and
+/// walked to its end with no read or seek failing (a file missing, held, failing part way or with another stamp gives false)
+std::vector<NoteRef> pipe_notes_refs(bool* whole = nullptr);
 std::vector<uint64_t> program_cache_compute_keys();   // (vk_progcache.cpp: the kept compute programs, for the first start's warm)
 size_t program_cache_fallback_steps();   // (vk_progcache.cpp: the load at create's steps, for the first start's bar)
 std::string load_fallback_path();   // (longshot_load_start.txt beside the notes: load_default.h)
