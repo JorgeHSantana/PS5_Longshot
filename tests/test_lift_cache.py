@@ -228,7 +228,7 @@ def check_lift_sources():
     sources = {os.path.abspath(f) for f in make_game.lift_sources()}
     missing = sorted(loaded - sources)
     check("every module the lift loads is in its key (missing: %s)" % missing, not missing)
-    check("the lift's later imports too", {str(ROOT / "nx2" / f) for f in ("oot_patches.py", "oot_wide.py")}
+    check("the lift's later imports too", {str(ROOT / "nx2" / f) for f in ("oot_patches.py", "oot_wide.py", "vecfp.py")}
           <= sources)
     check("the builder's other modules are not", str(ROOT / "nx2" / "build.py") not in sources)
     import re
@@ -264,7 +264,7 @@ def check_lift_env():
                   make_game.lift_key(str(d / "b" / "exefs"), str(d / "b" / "work"), env("b")) == key)
             check("RX_RELEASE does not change the key", make_game.lift_key(exefs, work, dict(env("a"), RX_RELEASE="")) == key)
             for name, changes in (("RX_VK_NO_PROGRAM_CACHE", False), ("RX_MARCH", False), ("SUYU_RECOMP_STRICT", True),
-                                  ("RX_TARGET", True), ("A64_NO_VFPX", True),
+                                  ("RX_TARGET", True), ("A64_NO_VFPX", True), ("A64_VECFP", True),
                                   ("OOT_EXEFS_PATCHES_SHA1", True), ("OOT_EXEFS_PATCHES", False), ("HOS_MODS", False),
                                   ("HOS_OPTIONS_FILE", False)):
                 with mock.patch.dict(os.environ, {name: "1"}):

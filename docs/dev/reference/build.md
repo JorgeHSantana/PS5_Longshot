@@ -67,6 +67,7 @@ Read by the build, not the game, so they are not in `switches.def`.
 | `LONGSHOT_TRACY=1` | A Tracy build ([profiling](profiling.md#tracy)) |
 | `LONGSHOT_NGX_SDK=<dir>`, `LONGSHOT_FSR=1` | Build with NVIDIA DLSS, AMD FSR 4 ([setup](../setup.md#upscaler-sdks-optional)) |
 | `A64_FASTFP`, `A64_LOCAL_REGS`, `A64_LOCAL_FLAGS`, `A64_LOCAL_FUNCS` | Lift-time switches (`nx2/fastfp.py`, `nx2/guest_locals.py`); they change the lift key |
+| `A64_VECFP=0` or a list of `elem`, `vec`, `minmax`, `fcvt` | The SSE fast paths for the float forms the translator otherwise does lane by lane (`nx2/vecfp.py`); each keeps a result only where it is provably Arm's, else the instruction's own C runs. All on by default; `0` lifts exactly as without them. A lift-time switch: it changes the lift key |
 
 ## The compiler memory gate
 
