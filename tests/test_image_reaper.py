@@ -5,7 +5,10 @@ textures' compaction has a pass open (after Project ReLink 31689010, 5224e821). 
 - the reaper frees only while no pass is open, under the lock a pass takes before vmaBeginDefragmentationPass and holds until
   vmaEndDefragmentationPass, so a pass waits for the one free in flight and no free comes inside it; each free outside
   the lock, so the render thread never waits for the queue;
+- the queue is the budget line's pool "reaper", asked first by the arbiter near the VRAM allowance (reap_now);
 - RX_VK_REAPER=0 destroys them at once, as before.
+
+The same code run on threads against stubs (passes, frees, the cap, reap_now): tests/test_image_reaper_threads.py.
 
 python -I -B tests/test_image_reaper.py
 """
@@ -42,15 +45,17 @@ class ImageReaperTests(unittest.TestCase):
 
     def test_the_reaper_frees_nothing_while_a_pass_is_open(self):
         reaper = block(self.vma, "void reaper()")
-        self.assertIn("reap_cv.wait(lk, [] { return !reap_queue.empty() && !compact_in_pass; });", reaper)
+        self.assertIn("reap_cv.wait(lk, [] { return !reap_queue.empty() && !compact_in_pass && !pass_waiting; });", reaper)
         self.assertLess(reaper.index("std::unique_lock lk(reap_mu);"), reaper.index("reap(r);"))
         # (the free outside the lock, so the render thread hands more over meanwhile; marked in flight under it, and a pass
         # that begins waits for it: held through the queue, destroy_image_later waited for every free before its own)
-        order = [reaper.index(x) for x in ("reaping = true;", "lk.unlock();", "reap(r);", "lk.lock();", "reaping = false;",
-                                           "reap_done_cv.notify_one();")]
+        order = [reaper.index(x) for x in ("reaping++;", "lk.unlock();", "reap(r);", "lk.lock();", "reaped_one(r, false);",
+                                           "if (!--reaping) reap_done_cv.notify_all();")]
         self.assertEqual(order, sorted(order))
         begin = block(self.vma, "bool image_compact_pass(")
-        self.assertLess(begin.index("std::unique_lock rk(reap_mu);"), begin.index("reap_done_cv.wait(rk, [] { return !reaping; });"))
+        self.assertLess(begin.index("std::unique_lock rk(reap_mu);"), begin.index("pass_waiting = true;"))
+        # (a pass waiting holds the reaper off its next free: with a queue it would begin one before the pass woke, for good)
+        self.assertLess(begin.index("pass_waiting = true;"), begin.index("reap_done_cv.wait(rk, [] { return !reaping; });"))
         self.assertLess(begin.index("reap_done_cv.wait(rk, [] { return !reaping; });"), begin.index("vmaBeginDefragmentationPass"))
         self.assertLess(begin.index("vmaBeginDefragmentationPass"), begin.index("compact_in_pass = true;"))
         end = block(self.vma, "bool image_compact_pass_end(")
@@ -65,7 +70,7 @@ class ImageReaperTests(unittest.TestCase):
         self.assertLess(step.index("if (images_to_reap()) return;"), step.index("image_compact_pass(moves"))
         count = block(self.vma, "size_t images_to_reap()")
         self.assertIn("std::lock_guard lk(reap_mu);", count)
-        self.assertIn("reap_queue.size() + (reaping ? 1 : 0)", count)
+        self.assertIn("reap_queue.size() + (size_t)reaping", count)
 
     def test_the_switch_destroys_at_once(self):
         later = block(self.vma, "void destroy_image_later(")
@@ -74,6 +79,17 @@ class ImageReaperTests(unittest.TestCase):
         # (no thread: destroyed where it was handed over, as before)
         self.assertLess(later.index("catch (...)"), later.index("reap_queue.push_back"))
         self.assertIn("SW(RX_VK_REAPER, kill, bool,", (ROOT / "gpu" / "vk" / "switches.def").read_text(encoding="utf-8"))
+
+    def test_the_queue_is_a_pool_of_the_budget_line(self):
+        # (mem_account.h: its bytes the driver's until freed, not "other images"; near the allowance the arbiter asks it first)
+        sample = block(self.tex, "void account_sample(uint64_t block_free)")
+        self.assertIn("reaper_bytes(account.reaper_images, account.reaper_buffers);", sample)
+        self.assertIn("known[l] += account.reaper_images[l];", sample)
+        self.assertLess(sample.index("known[l] += account.reaper_images[l];"), sample.index("account.other_images[l] = made"))
+        self.assertIn("account.reaper_buffers[l]", sample[sample.index("buffers_made_bytes"):])
+        registered = self.tex[self.tex.index("add({\"reaper\","):]
+        self.assertIn("1, [](const Ask& a) -> uint64_t { return reap_now(a.want, a.ledger == VRAM); }", registered[:600])
+        self.assertIn("if (compact_in_pass) return 0;", block(self.vma, "uint64_t reap_now(uint64_t want, bool vram)"))
 
     def test_the_reaper_keeps_the_memory_counts(self):
         # (destroy_image and destroy_buffer take an image's and a buffer's bytes off mem_account.h's counts: a vmaDestroyImage

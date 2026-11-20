@@ -487,9 +487,19 @@ void destroy_image(VkImage image, VmaAllocation allocation);
 /// the textures' compaction has a pass open. RX_VK_REAPER=0: at once, here
 void destroy_image_later(VkImage image, VmaAllocation allocation, std::vector<VkImageView> views = {}, VkBuffer buffer = VK_NULL_HANDLE,
                          VmaAllocation buffer_alloc = nullptr, std::vector<VkDeviceMemory> memory = {});
-size_t images_to_reap();    // (how many it has yet to: queued, and the one in flight; 0 with RX_VK_REAPER=0)
+size_t images_to_reap();    // (how many it has yet to: queued, and the frees in flight; 0 with RX_VK_REAPER=0)
+/// (mem_account.h) What the reaper's queue and its frees in flight hold, by ledger ([0] VRAM, [1] system memory): the images'
+/// allocations, and the buffers that go with them
+void reaper_bytes(uint64_t images[2], uint64_t buffers[2]);
+/// (the arbiter, near the VRAM allowance) Queued entries with something in that ledger destroyed now, on this thread, until what
+/// they give back to the driver (their dedicated allocations) covers `want`; none while a compaction pass is open. Returns that:
+/// a share of a block freed gives the driver nothing back, so the arbiter goes on asking the other pools
+uint64_t reap_now(uint64_t want, bool vram);
 /// What an allocation really takes (VkMemoryRequirements.size: padding, alignment, the driver's metadata), 0 for none
 uint64_t allocation_size(VmaAllocation allocation);
+/// A memory object of its own (VMA's dedicated memory), which its free gives back to the driver whole; false for a share of a
+/// block, whose free leaves the block with VMA, and for none
+bool allocation_dedicated(VmaAllocation allocation);
 /// (mem_account.h) What the images create_image made and destroy_image has not destroyed take, by allocation_size: those in a
 /// device-local heap, or those in system memory; whether an allocation's memory is in a device-local heap (false for none);
 /// and whether the device has a heap that is not device-local (an integrated GPU with one heap has none: the driver counts all

@@ -4936,7 +4936,7 @@ struct {
     // (by ledger. dead_to_pool: the part of `dead` that is render targets' images, which go to the pool, not back to the driver)
     uint64_t pool[mem_account::kLedgers], dead[mem_account::kLedgers], dead_to_pool[mem_account::kLedgers],
         dead_buffers[mem_account::kLedgers], other_images[mem_account::kLedgers], staging[mem_account::kLedgers],
-        other_buffers[mem_account::kLedgers];
+        other_buffers[mem_account::kLedgers], reaper_images[mem_account::kLedgers], reaper_buffers[mem_account::kLedgers];
 } account{};
 void account_sample(uint64_t block_free) {
     using mem_account::RAM, mem_account::VRAM;
@@ -4968,6 +4968,9 @@ void account_sample(uint64_t block_free) {
         }
         if (d.buffer_alloc) account.dead_buffers[ledger(d.buffer_alloc)] += allocation_size(d.buffer_alloc);
     }
+    // (handed from the dead list to the reaper's thread, vk_vma.cpp destroy_image_later: still the driver's until it frees them)
+    reaper_bytes(account.reaper_images, account.reaper_buffers);
+    for (const auto l : {VRAM, RAM}) known[l] += account.reaper_images[l];
     for (const auto l : {VRAM, RAM}) {
         const uint64_t made = images_made_bytes(l == VRAM);
         account.other_images[l] = made - std::min(made, known[l]);
@@ -4989,7 +4992,8 @@ void account_sample(uint64_t block_free) {
     for (const Arena& a : arenas) account.staging[ledger(a.allocation)] += a.size, known_buffers[ledger(a.allocation)] += allocation_size(a.allocation);
     memory_account_sample(known_buffers);
     for (const auto l : {VRAM, RAM}) {
-        const uint64_t made = buffers_made_bytes(l == VRAM), known_here = known_buffers[l] + account.dead_buffers[l];
+        const uint64_t made = buffers_made_bytes(l == VRAM),
+                       known_here = known_buffers[l] + account.dead_buffers[l] + account.reaper_buffers[l];
         account.other_buffers[l] = made - std::min(made, known_here);
     }
 }
@@ -5038,6 +5042,13 @@ uint64_t account_ask(const mem_account::Ask& a, uint64_t used, uint64_t allowed)
              for (const auto l : {VRAM, RAM}) r.reuse[l] = account.dead_to_pool[l], r.pending[l] = account.dead[l] - account.dead_to_pool[l];
          }});
     add({"dead buffers", [](Report& r) { both(r, account.dead_buffers), r.pending[VRAM] = r.held[VRAM], r.pending[RAM] = r.held[RAM]; }});
+    // (RX_VK_REAPER: the dead images and their buffers on the reaper's queue, freed a moment later. Asked first: nothing uses
+    // them, and freeing them here is what main did at every present; the reaper's own cap bounds them below the lines)
+    add({"reaper",
+         [](Report& r) {
+             for (const auto l : {VRAM, RAM}) r.held[l] = r.pending[l] = account.reaper_images[l] + account.reaper_buffers[l];
+         },
+         1, [](const Ask& a) -> uint64_t { return reap_now(a.want, a.ledger == VRAM); }});
     add({"other images", [](Report& r) { both(r, account.other_images); }});
     add({"other buffers", [](Report& r) { both(r, account.other_buffers); }});
     // (the textures' blocks' free space goes back to the driver by a compaction: as the pressure begins, compact_step looks at

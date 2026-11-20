@@ -204,11 +204,12 @@ namespace {
 VmaDefragmentationContext compact_ctx = VK_NULL_HANDLE;
 VmaDefragmentationPassMoveInfo compact_pass{};
 bool compact_in_pass = false;
-// (the reaper's, destroy_image_later: its frees and a pass take turns; a pass waits for the one free in flight)
+// (the reaper's, destroy_image_later: its frees and a pass take turns; a pass waits for the frees in flight)
 std::mutex reap_mu;
 std::condition_variable reap_cv;        // (the reaper's: something handed over, or a pass ended)
-std::condition_variable reap_done_cv;   // (a pass's: the free in flight is done)
-bool reaping = false;                   // (under reap_mu: the reaper is freeing one, outside the lock)
+std::condition_variable reap_done_cv;   // (a pass's: the frees in flight are done)
+int reaping = 0;                        // (under reap_mu: frees in flight, outside the lock: the reaper's, a cap's, reap_now's)
+bool pass_waiting = false;              // (under reap_mu: a pass waits for them: the reaper takes no more until it has begun)
 bool compact_over(uint64_t* freed_bytes, uint32_t* freed_blocks) {
     VmaDefragmentationStats st{};
     vmaEndDefragmentation(vma, compact_ctx, &st);
@@ -231,9 +232,16 @@ bool image_compact_pass(std::vector<ImageMove>& moves, uint64_t* freed_bytes, ui
     moves.clear();
     if (!compact_ctx || compact_in_pass) return false;
     std::unique_lock rk(reap_mu);   // (nothing freed by the reaper from here until the pass ends: image_compact_pass_end)
-    reap_done_cv.wait(rk, [] { return !reaping; });   // (the one free in flight, done first)
+    pass_waiting = true;   // (or a reaper with a queue begins its next free before this wakes, and the pass starves)
+    reap_done_cv.wait(rk, [] { return !reaping; });   // (the frees in flight, done first)
+    pass_waiting = false;
     const VkResult r = vmaBeginDefragmentationPass(vma, compact_ctx, &compact_pass);
-    if (r != VK_INCOMPLETE) return compact_over(freed_bytes, freed_blocks);   // (VK_SUCCESS: nothing left to move; or an error)
+    if (r != VK_INCOMPLETE) {   // (VK_SUCCESS: nothing left to move; or an error. The reaper, held for it, goes on)
+        compact_over(freed_bytes, freed_blocks);
+        rk.unlock();
+        reap_cv.notify_one();
+        return false;
+    }
     compact_in_pass = true;
     for (uint32_t i = 0; i < compact_pass.moveCount; i++) moves.push_back({compact_pass.pMoves[i].srcAllocation});
     return true;
@@ -314,7 +322,11 @@ void destroy_image(VkImage image, VmaAllocation allocation) {
 // 5224e821). The views, the buffer and the memory objects that go with an image go with it. VMA is thread-safe here (no
 // externally synchronized flag, vma_init); an image here is one nothing can use again (texture_frame: its last recorded
 // use has finished). The pool's compaction frees nothing while a pass is open (image_compact_pass): the reaper waits for
-// it, and a pass waits for the one free in flight. RX_VK_REAPER=0: destroyed where they were, as before ----
+// it, and a pass waits for the frees in flight. RX_VK_REAPER=0: destroyed where they were, as before.
+// What the queue holds is bounded: past reap_cap() (an 8th of the driver's VRAM allowance, 128 MB to 1 GB: a safety net above an
+// arrival's burst, 444 images and 255 MB and more on a 10 GB card) an image handed over is destroyed where it was, as before;
+// near the allowance the arbiter (mem_account.h, the pool "reaper") has the queue freed at once on its thread (reap_now). A pass open holds the queue as main's dead list held its images then. A line every 10 s
+// says what went and the queue's most (tests/test_image_reaper.py runs this against stubs) ----
 namespace {
 struct Reaped {
     VkImage image;
@@ -323,30 +335,57 @@ struct Reaped {
     VkBuffer buffer;
     VmaAllocation buffer_alloc;
     std::vector<VkDeviceMemory> memory;
+    uint64_t image_bytes = 0, buffer_bytes = 0;   // (allocation_size, at the hand-over)
+    int ledger = 0, buffer_ledger = 0;            // (0: VRAM, 1: system memory: mem_account.h's Ledger)
+    // (by ledger, what its free gives back to the driver: its dedicated allocations' bytes. A share of a block leaves the block
+    // with VMA, and the sparse chunks' sizes are not known here: 0, so the arbiter goes on asking the other pools)
+    uint64_t returns[2]{};
+    /// Something of it in that ledger: its image, its buffer, or (VRAM) a sparse texture's chunks
+    bool in(int l) const { return (image_bytes && ledger == l) || (buffer_bytes && buffer_ledger == l) || (l == 0 && !memory.empty()); }
 };
 std::deque<Reaped> reap_queue;   // (under reap_mu)
+// (under reap_mu: what the queue and the frees in flight hold, by ledger; the queue's most since the last line; what went)
+uint64_t reap_image_bytes[2]{}, reap_buffer_bytes[2]{};
+uint64_t reap_peak_bytes = 0, reap_peak_count = 0, reaped_n = 0, reaped_bytes = 0, reaped_in_place = 0;
+uint64_t reap_held() { return reap_image_bytes[0] + reap_image_bytes[1] + reap_buffer_bytes[0] + reap_buffer_bytes[1]; }
 void reap(Reaped& r) {   // (destroy_image and destroy_buffer: their counts, mem_account.h, go down with them)
     for (VkImageView v : r.views) vkDestroyImageView(dev.device, v, nullptr);
     if (r.image) destroy_image(r.image, r.allocation);
     if (r.buffer) destroy_buffer(r.buffer, r.buffer_alloc);
     for (VkDeviceMemory m : r.memory) vkFreeMemory(dev.device, m, nullptr);
 }
+void reaped_one(const Reaped& r, bool in_place, bool queued = true) {   // (under reap_mu, once its free is done)
+    if (queued) reap_image_bytes[r.ledger] -= r.image_bytes, reap_buffer_bytes[r.buffer_ledger] -= r.buffer_bytes;
+    reaped_n++, reaped_bytes += r.image_bytes + r.buffer_bytes, reaped_in_place += in_place;
+}
+/// (under reap_mu) the reaper's line, at most every 10 s and only when something went
+void reap_tell(std::chrono::steady_clock::time_point now) {
+    static std::chrono::steady_clock::time_point told_at = now;
+    if (now - told_at < std::chrono::seconds(10) || !reaped_n) return;
+    told_at = now;
+    logf("vk: reaper: %llu images (%llu MB) destroyed in 10 s, %llu of them where they were handed over (its cap or VRAM "
+         "pressure); the queue at most %llu (%llu MB)", (unsigned long long)reaped_n, (unsigned long long)(reaped_bytes >> 20),
+         (unsigned long long)reaped_in_place, (unsigned long long)reap_peak_count, (unsigned long long)(reap_peak_bytes >> 20));
+    reaped_n = reaped_bytes = reaped_in_place = 0;
+    reap_peak_count = reap_queue.size(), reap_peak_bytes = reap_held();
+}
 void reaper() {
     SetThreadDescription(GetCurrentThread(), L"mkw_vk reaper");
     std::unique_lock lk(reap_mu);
     for (;;) {
-        reap_cv.wait(lk, [] { return !reap_queue.empty() && !compact_in_pass; });
+        reap_cv.wait(lk, [] { return !reap_queue.empty() && !compact_in_pass && !pass_waiting; });
         Reaped r = std::move(reap_queue.front());
         reap_queue.pop_front();
         // (freed outside the lock, so that the render thread hands more over meanwhile: under it, the lock was held through
         // the whole queue, and destroy_image_later waited for every free before its own, as on the render thread before. A
         // pass that begins waits for this one: reaping, image_compact_pass)
-        reaping = true;
+        reaping++;
         lk.unlock();
         reap(r);
         lk.lock();
-        reaping = false;
-        reap_done_cv.notify_one();
+        reaped_one(r, false);
+        reap_tell(std::chrono::steady_clock::now());
+        if (!--reaping) reap_done_cv.notify_all();
     }
 }
 bool reaper_on() {
@@ -357,6 +396,15 @@ bool reaper_on() {
     }();
     return on;
 }
+/// The most the queue holds: an 8th of the driver's VRAM allowance, 128 MB to 1 GB (256 MB when the allowance is unknown)
+uint64_t reap_cap() {
+    static const uint64_t cap = [] {
+        uint64_t used = 0, allowed = 0;
+        if (!vram_usage(&used, &allowed) || !allowed) return 256ull << 20;
+        return std::clamp<uint64_t>(allowed / 8, 128ull << 20, 1024ull << 20);
+    }();
+    return cap;
+}
 bool reaper_started = false;   // (under reap_mu; false again when no thread could be made)
 }  // namespace
 void destroy_image_later(VkImage image, VmaAllocation allocation, std::vector<VkImageView> views, VkBuffer buffer,
@@ -366,30 +414,86 @@ void destroy_image_later(VkImage image, VmaAllocation allocation, std::vector<Vk
         reap(r);
         return;
     }
+    r.image_bytes = allocation_size(allocation), r.ledger = allocation_in_vram(allocation) ? 0 : 1;
+    r.buffer_bytes = buffer_alloc ? allocation_size(buffer_alloc) : 0, r.buffer_ledger = allocation_in_vram(buffer_alloc) ? 0 : 1;
+    if (allocation_dedicated(allocation)) r.returns[r.ledger] += r.image_bytes;
+    if (allocation_dedicated(buffer_alloc)) r.returns[r.buffer_ledger] += r.buffer_bytes;
+    const uint64_t cap = reap_cap();   // (before the lock: the first one asks the driver)
     {
-        std::lock_guard lk(reap_mu);
+        std::unique_lock lk(reap_mu);
         if (!reaper_started) {
             try {
                 std::thread(reaper).detach();   // (the device lives as long as the process: nothing to join)
             } catch (...) {   // (no thread: destroyed here, as before; the next one tries again)
+                lk.unlock();
                 reap(r);
                 return;
             }
             reaper_started = true;
             logf("vk: images are destroyed on a thread of their own (RX_VK_REAPER=0: on the render thread)");
         }
+        // (past the cap: destroyed here, as before, unless a pass is open, when nothing of the pools may be freed: then it waits
+        // for the pass's end, as it waited in texture_frame's dead list)
+        if (!reap_queue.empty() && reap_held() + r.image_bytes + r.buffer_bytes > cap && !compact_in_pass) {
+            reaping++;
+            lk.unlock();
+            reap(r);
+            lk.lock();
+            reaped_one(r, true, false);   // (never queued: its bytes were not added)
+            if (!--reaping) reap_done_cv.notify_all();
+            return;
+        }
+        reap_image_bytes[r.ledger] += r.image_bytes, reap_buffer_bytes[r.buffer_ledger] += r.buffer_bytes;
         reap_queue.push_back(std::move(r));
+        reap_peak_count = std::max<uint64_t>(reap_peak_count, reap_queue.size()), reap_peak_bytes = std::max(reap_peak_bytes, reap_held());
     }
     reap_cv.notify_one();
 }
 size_t images_to_reap() {
     std::lock_guard lk(reap_mu);   // (the reaper holds it only to take one off the queue)
-    return reap_queue.size() + (reaping ? 1 : 0);
+    return reap_queue.size() + (size_t)reaping;
+}
+void reaper_bytes(uint64_t images[2], uint64_t buffers[2]) {
+    std::lock_guard lk(reap_mu);
+    for (int l = 0; l < 2; l++) images[l] = reap_image_bytes[l], buffers[l] = reap_buffer_bytes[l];
+}
+uint64_t reap_now(uint64_t want, bool vram) {
+    std::vector<Reaped> taken;
+    uint64_t got = 0;   // (what goes back to the driver: the dedicated allocations' bytes in the ledger asked)
+    const int l = vram ? 0 : 1;
+    {
+        std::lock_guard lk(reap_mu);
+        if (compact_in_pass) return 0;   // (nothing of the pools freed inside a pass)
+        // (every entry with something in that ledger, until what goes back covers want: the shares of blocks give nothing back
+        // the driver counts, so with only those queued all of them go, their space for the next images of the blocks)
+        for (auto it = reap_queue.begin(); it != reap_queue.end() && got < want;) {
+            if (!it->in(l)) {
+                ++it;
+                continue;
+            }
+            got += it->returns[l];
+            taken.push_back(std::move(*it));
+            it = reap_queue.erase(it);
+        }
+        reaping += (int)!taken.empty();
+    }
+    if (taken.empty()) return 0;
+    for (Reaped& r : taken) reap(r);
+    std::lock_guard lk(reap_mu);
+    for (const Reaped& r : taken) reaped_one(r, true);
+    if (!--reaping) reap_done_cv.notify_all();
+    return got;
 }
 uint64_t allocation_size(VmaAllocation allocation) {
     VmaAllocationInfo info{};
     if (allocation) vmaGetAllocationInfo(vma, allocation, &info);
     return info.size;
+}
+bool allocation_dedicated(VmaAllocation allocation) {
+    if (!allocation) return false;
+    VmaAllocationInfo2 info{};
+    vmaGetAllocationInfo2(vma, allocation, &info);
+    return info.dedicatedMemory == VK_TRUE;
 }
 uint64_t images_made_bytes(bool in_vram) { return image_bytes[in_vram ? 0 : 1].load(std::memory_order_relaxed); }
 bool allocation_in_vram(VmaAllocation allocation) {
