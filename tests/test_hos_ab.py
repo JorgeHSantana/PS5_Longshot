@@ -447,33 +447,39 @@ def c_fixture(cc, tmp):
 
 
 def flips_collect(cc, tmp):
-    """tests/test_collect_wide.py's 400 rounds with hos_ab_value flipping HOS_COLLECT_WIDE at every walk"""
+    """tests/test_collect_wide.py's rounds with hos_ab_value flipping HOS_COLLECT_WIDE at every walk"""
     t = load("test_collect_wide")
     src = (ROOT / "host/rx_backend.c").read_text(encoding="utf-8")
-    text = (t.FIXTURE.replace("@MARKS_CLEAR@", t.block(src, "static inline int marks_clear_256("))
-            .replace("@COLLECT_IN@", t.block(src, "static int64_t collect_in(")))
+    text = t.fixture(src)
     stub = re.compile(r"^static int hos_ab_value\(const char \*name, int normal\) \{[^\n]*$", re.M)
     end = "    return 0;\n}\n"
     if len(stub.findall(text)) != 1 or not text.endswith(end):
         fail("tests/test_collect_wide.py's fixture has no hos_ab_value stub or end to change: update the test")
-    # (odd walks the A/B's value 0, even ones the normal 1: the last walk, the 401st, is a 32-mark one, so the fixture's own
-    # check of the wide step expects none; every round's pages, their order and the marks left must still be a plain walk's)
-    text = stub.sub(lambda m: "static long ab_calls, ab_old;\nstatic int hos_ab_value(const char *name, int normal) "
-                              "{ (void)name; if (++ab_calls & 1) { ab_old++; return 0; } return normal; }", text)
+    # (odd walks the A/B's value 0, even ones the normal 1, through all the rounds; every round's pages, their order and the
+    # marks left must still be a plain walk's. The fixture's own check of the steps taken, after the rounds, runs with no flip)
+    marker = "    word_wide_calls = wide_calls = vector_calls = vector256_calls = 0;\n"
+    if text.count(marker) != 1:
+        fail("tests/test_collect_wide.py's fixture has no single check of the steps taken to run without a flip: update the test")
+    text = text.replace(marker, "    ab_flip = 0;\n" + marker)
+    text = stub.sub(lambda m: "static long ab_calls, ab_old;\nstatic int ab_flip = 1;\nstatic int hos_ab_value(const char *name, int normal) "
+                              "{ (void)name; if (ab_flip && (++ab_calls & 1)) { ab_old++; return 0; } return normal; }", text)
     text = text[:-len(end)] + "    printf(\"ab: %ld reads, %ld old\\n\", ab_calls, ab_old);\n" + end
     c, exe = Path(tmp) / "collect_flips.c", Path(tmp) / "collect_flips.exe"
     c.write_text(text, encoding="utf-8")
-    subprocess.run([cc, "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror", "-D_CRT_SECURE_NO_WARNINGS", str(c), "-o", str(exe)],
+    # (the fixture defines _CRT_SECURE_NO_WARNINGS itself and includes the switches' header; HOS_COLLECT_VECTOR=0 keeps the
+    # word walk, the one HOS_COLLECT_WIDE flips: the vector walk does not read it)
+    subprocess.run([cc, "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "gpu/vk/compat"), str(c), "-o", str(exe)],
                    check=True, timeout=180)
     env = {k: v for k, v in os.environ.items() if not k.startswith("HOS_")}
-    r = subprocess.run([str(exe), "0"], env=env, capture_output=True, text=True, timeout=300)
+    env["HOS_COLLECT_VECTOR"] = "0"
+    r = subprocess.run([str(exe), "1", "0"], env=env, capture_output=True, text=True, timeout=300)
     m = re.search(r"ab: (\d+) reads, (\d+) old", r.stdout)
     if r.returncode or not m:
         fail("the write marks' walk with HOS_COLLECT_WIDE flipping at every walk found other pages or left other marks:\n%s%s"
              % (r.stdout, r.stderr))
     reads, old = int(m.group(1)), int(m.group(2))
-    if reads != 401 or old != 201:
-        fail("the walk's flips: %d reads, %d of them the old walk (401 and 201 expected)" % (reads, old))
+    if reads < 1600 or old != (reads + 1) // 2:
+        fail("the walk's flips: %d reads, %d of them the old walk (at least 1600, every other one expected)" % (reads, old))
     print("write marks' walk flipping between 256 and 32 marks a step at every walk: every walk right (%d reads, %d old)"
           % (reads, old))
 

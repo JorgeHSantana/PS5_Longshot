@@ -512,6 +512,7 @@ The same steps for people and agents. Forge commands are Tooling's `forge.py`
 | `scripts/memtour.py` | Memory tour |
 | `scripts/flash.py framelog\|probe` | Find a flash in a frame log; name the pass from a texel probe |
 | `scripts/perf.py report\|threads\|renderer\|stacks\|chain\|hotlist\|cpu\|ab` | Read profiles, samples, recordings and A/B traces ([profiling](reference/profiling.md#tools)) |
+| `scripts/collect_bench.py [--cc clang] [--reps N]` | The write marks' walk (`collect_in`, `host/rx_backend.c`) timed game-free, as the word walk and as the vector walk (`HOS_COLLECT_VECTOR`), on mark arrays shaped like the game's: an indication only, warm caches on one thread |
 | `scripts/pipeline_tour.py` | The pipeline tour and the play profile's merge, its parts in `scripts/tours/` ([pipeline states](reference/pipeline-states.md)) |
 | `scripts/shaders.py crt\|fsr3\|host\|all [--check]` | Regenerate (or check) the checked-in SPIR-V headers; `spirv-operands` regenerates `gpu/vk/spirv_operands.h` |
 | `scripts/check_third_party.py` | `third_party/` against its provenance |

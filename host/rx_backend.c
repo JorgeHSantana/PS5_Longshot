@@ -14,6 +14,7 @@
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/dlss_math.h"
 #include "control.h"
+#include "../gpu/vk/compat/longshot_env.h"   /* (env_value_off: the switches' one rule) */
 #include "audio_output_devices.h"
 int hos_monitor_count(void);
 int hos_monitor_info(int index, MkwVkMonitor *out);
@@ -97,6 +98,119 @@ static inline int marks_clear_256(const uint8_t *m) {
     for (int i = 0; i < 32; i++) any |= w[i];
     return !any;
 }
+/* (the vector walk, on x86-64 and arm64: the marks read 256 to a test while none is set, else 64 to a test, in vector loads
+   from any page (SSE2's 16-byte loads, AVX2's 32-byte ones in a build for AVX2, NEON's 16-byte ones on arm64), then each
+   mark read set taken in turn. The word loads (marks_clear_256, and collect_in's 32- and 8-mark tests) test only from a
+   page aligned to their width: a range's unaligned head and tail, and the pages around each set mark, go 32, 8 and 1 at a
+   time. HOS_COLLECT_VECTOR=0: the word walk, for a same-build A/B.
+   The vector loads are the asm's own, not C accesses, so they race nothing in the C model (a memcpy of the marks is a
+   plain read of bytes the writers store atomically): arm64's ld1 of .16b elements is sixteen single-copy atomic byte
+   reads, and x86's movdqu and vmovdqu read each byte whole; the writers' granule. Like the word loads they order nothing:
+   they only choose the pages the walk reads again and clears with the same relaxed load and acquire exchange, so the
+   pages found, their order, the marks cleared and what a found page's exchange makes visible are the word walk's, and so
+   is what a pass does with a mark a producer publishes while it runs: a page after one just taken is decided by a read
+   made after that take (a window's mask is used on only while its next set mark is the next page, else the marks are read
+   again from the page after the take), so it is taken in this pass if its mark is set by then and left set for the next
+   pass if not. The asm is GCC's and clang's: another compiler, or another CPU, builds the word walk alone) */
+#ifndef HOS_MARKS_VECTOR
+#if (defined(__x86_64__) || defined(__aarch64__)) && (defined(__GNUC__) || defined(__clang__))
+#define HOS_MARKS_VECTOR 1
+#else
+#define HOS_MARKS_VECTOR 0
+#endif
+#endif
+#if HOS_MARKS_VECTOR
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#define MARKS_LOADS "16-byte loads (NEON)"
+typedef uint8x16_t marks16;
+static inline marks16 marks_load16(const uint8_t *m) {
+    marks16 v;
+    __asm__ __volatile__("ld1 {%0.16b}, [%1]" : "=w"(v) : "r"(m), "m"(*(const uint8_t (*)[16])m));
+    return v;
+}
+#elif defined(__AVX2__)
+#include <immintrin.h>
+#define MARKS_LOADS "32-byte loads (AVX2)"
+static inline __m256i marks_load32(const uint8_t *m) {
+    __m256i v;
+    __asm__ __volatile__("vmovdqu %1, %0" : "=x"(v) : "m"(*(const uint8_t (*)[32])m));
+    return v;
+}
+#else
+#include <emmintrin.h>
+#define MARKS_LOADS "16-byte loads (SSE2)"
+typedef __m128i marks16;
+static inline marks16 marks_load16(const uint8_t *m) {
+    marks16 v;
+    __asm__ __volatile__("movdqu %1, %0" : "=x"(v) : "m"(*(const uint8_t (*)[16])m));
+    return v;
+}
+#endif
+/* (bit i: m[i] read set, i < 64) */
+static inline uint64_t marks_set64(const uint8_t *m) {
+#if defined(__aarch64__)
+    const marks16 a = marks_load16(m), b = marks_load16(m + 16), c = marks_load16(m + 32), d = marks_load16(m + 48);
+    if (!vmaxvq_u8(vorrq_u8(vorrq_u8(a, b), vorrq_u8(c, d)))) return 0;   /* (none set: nearly every test) */
+    /* (each set mark's bit of its byte, summed in pairs three times: byte j then holds marks 8j to 8j + 7, each its own
+       bit, so no sum carries) */
+    static const uint8_t bits[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
+    const uint8x16_t k = vld1q_u8(bits);
+    const uint8x16_t ab = vpaddq_u8(vandq_u8(vtstq_u8(a, a), k), vandq_u8(vtstq_u8(b, b), k));
+    const uint8x16_t cd = vpaddq_u8(vandq_u8(vtstq_u8(c, c), k), vandq_u8(vtstq_u8(d, d), k));
+    const uint8x16_t abcd = vpaddq_u8(ab, cd);
+    return vgetq_lane_u64(vreinterpretq_u64_u8(vpaddq_u8(abcd, abcd)), 0);
+#elif defined(__AVX2__)
+    const __m256i a = marks_load32(m), b = marks_load32(m + 32), o = _mm256_or_si256(a, b);
+    if (_mm256_testz_si256(o, o)) return 0;   /* (none set: nearly every test) */
+    const __m256i z = _mm256_setzero_si256();
+    const uint64_t za = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(a, z)),
+                   zb = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(b, z));
+    return ~(za | zb << 32);   /* (the marks not 0) */
+#else
+    const marks16 a = marks_load16(m), b = marks_load16(m + 16), c = marks_load16(m + 32), d = marks_load16(m + 48);
+    const __m128i z = _mm_setzero_si128();
+    if (_mm_movemask_epi8(_mm_cmpeq_epi8(_mm_or_si128(_mm_or_si128(a, b), _mm_or_si128(c, d)), z)) == 0xFFFF) return 0;
+    const uint64_t za = (uint16_t)_mm_movemask_epi8(_mm_cmpeq_epi8(a, z)), zb = (uint16_t)_mm_movemask_epi8(_mm_cmpeq_epi8(b, z)),
+                   zc = (uint16_t)_mm_movemask_epi8(_mm_cmpeq_epi8(c, z)), zd = (uint16_t)_mm_movemask_epi8(_mm_cmpeq_epi8(d, z));
+    return ~(za | zb << 16 | zc << 32 | zd << 48);   /* (the marks not 0) */
+#endif
+}
+/* (the 256 marks from m all clear? The widest step of the word walk (marks_clear_256) in the vector loads, from any page:
+   with 64 a test the long ranges, where nearly every mark is clear, were no faster than the word walk's 256, or slower
+   (SSE2: 0.9 times its speed game-free). Four accumulators, so the loads do not wait for each other) */
+static inline int marks_vclear_256(const uint8_t *m) {
+#if defined(__aarch64__)
+    marks16 a = marks_load16(m), b = marks_load16(m + 16), c = marks_load16(m + 32), d = marks_load16(m + 48);
+    for (int i = 64; i < 256; i += 64) {
+        a = vorrq_u8(a, marks_load16(m + i)), b = vorrq_u8(b, marks_load16(m + i + 16));
+        c = vorrq_u8(c, marks_load16(m + i + 32)), d = vorrq_u8(d, marks_load16(m + i + 48));
+    }
+    return !vmaxvq_u8(vorrq_u8(vorrq_u8(a, b), vorrq_u8(c, d)));
+#elif defined(__AVX2__)
+    __m256i a = marks_load32(m), b = marks_load32(m + 32);
+    for (int i = 64; i < 256; i += 64) a = _mm256_or_si256(a, marks_load32(m + i)), b = _mm256_or_si256(b, marks_load32(m + i + 32));
+    a = _mm256_or_si256(a, b);
+    return _mm256_testz_si256(a, a);
+#else
+    marks16 a = marks_load16(m), b = marks_load16(m + 16), c = marks_load16(m + 32), d = marks_load16(m + 48);
+    for (int i = 64; i < 256; i += 64) {
+        a = _mm_or_si128(a, marks_load16(m + i)), b = _mm_or_si128(b, marks_load16(m + i + 16));
+        c = _mm_or_si128(c, marks_load16(m + i + 32)), d = _mm_or_si128(d, marks_load16(m + i + 48));
+    }
+    return _mm_movemask_epi8(_mm_cmpeq_epi8(_mm_or_si128(_mm_or_si128(a, b), _mm_or_si128(c, d)), _mm_setzero_si128())) == 0xFFFF;
+#endif
+}
+_Static_assert(A64_DIRTY_PAGES >= 64, "the vector walk reads 64 marks inside the array");
+/* (the marks of pages p, p + 1, ... below p1 read set: bit i for page p + i. With fewer than 64 left, the 64 marks that
+   end at p1, or that begin at page 0, are read and those outside [p, p1) dropped: all inside the array, as
+   p1 <= A64_DIRTY_PAGES) */
+static inline uint64_t marks_from(uint64_t p, uint64_t p1) {
+    if (p + 64 <= p1) return marks_set64(&a64_dirty[p]);
+    const uint64_t w = p1 >= 64 ? p1 - 64 : 0;
+    return (marks_set64(&a64_dirty[w]) >> (p - w)) & ((1ull << (p1 - p)) - 1);
+}
+#endif
 static int64_t collect_in(const uint64_t (*ranges)[2], int nranges, uint32_t **pages) {
     /* (HOS_COLLECT_WIDE=0: 32 marks a step at most, as before; the pages found are the same either way, so HOS_AB may flip it
        between two walks: host/hos_ab.c) */
@@ -106,31 +220,67 @@ static int64_t collect_in(const uint64_t (*ranges)[2], int nranges, uint32_t **p
         wide_set = !(e && e[0] == '0');
     }
     const int wide = hos_ab_value("HOS_COLLECT_WIDE", wide_set);
+#if HOS_MARKS_VECTOR
+    /* (HOS_COLLECT_VECTOR=0: the word walk, as before; read at the first collection, and logged once) */
+    static int vector_on = -1;
+    int vector = __atomic_load_n(&vector_on, __ATOMIC_RELAXED);
+    if (vector < 0) {
+        const char *e = getenv("HOS_COLLECT_VECTOR");
+        int unread = -1;
+        vector = !(e && env_value_off(e));   /* (the switches' one rule: =0, false, off, no or empty turn it off) */
+        if (__atomic_compare_exchange_n(&vector_on, &unread, vector, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
+            hos_log("mem: the write marks' walk: %s", vector ? "256 marks a test, else 64, in " MARKS_LOADS " (HOS_COLLECT_VECTOR=0: word loads)"
+                                                             : "word loads (HOS_COLLECT_VECTOR=0)");
+    }
+#endif
     size_t n = 0, cap = 4096;
     uint32_t *out = malloc(cap * sizeof *out);
     for (int r = 0; r < nranges; r++) {
         const uint64_t lo = ranges[r][0], hi = ranges[r][1] < hos_guest_size() ? ranges[r][1] : hos_guest_size();
         uint64_t p1 = (hi + 4095) >> 12;
         if (p1 > A64_DIRTY_PAGES) p1 = A64_DIRTY_PAGES;
+#if HOS_MARKS_VECTOR
+        uint64_t at = 0, set = 0;   /* (the vector walk: the marks of pages at, at + 1, ... read set and not yet taken) */
+#endif
         for (uint64_t p = lo >> 12; p < p1;) {
-            if (wide && !(p & 255) && p + 256 <= p1 && marks_clear_256(&a64_dirty[p])) {   /* (256 pages at a time while none is marked) */
-                p += 256;
-                continue;
-            }
-            if (!(p & 31) && p + 32 <= p1) {   /* (32 pages at a time while none is marked) */
-                uint64_t w[4];
-                memcpy(w, &a64_dirty[p], 32);
-                if (!(w[0] | w[1] | w[2] | w[3])) {
-                    p += 32;
+#if HOS_MARKS_VECTOR
+            if (vector) {   /* (256, else 64 marks a test, from any page; then each mark read set, in order) */
+                if (!set) {
+                    if (p + 256 <= p1 && __builtin_expect(marks_vclear_256(&a64_dirty[p]), 1)) {   /* (256 clear marks) */
+                        p += 256;
+                        continue;
+                    }
+                    set = marks_from(p, p1);
+                    at = p;
+                    if (!set) {
+                        p += 64;
+                        continue;
+                    }
+                }
+                p = at + (uint64_t)__builtin_ctzll(set);
+                set &= set - 1;
+            } else
+#endif
+            {
+                if (wide && !(p & 255) && p + 256 <= p1 && marks_clear_256(&a64_dirty[p])) {   /* (256 pages at a time while none is marked) */
+                    p += 256;
                     continue;
                 }
-            }
-            if (!(p & 7) && p + 8 <= p1) {   /* (eight pages a load while none is marked) */
-                uint64_t w;
-                memcpy(&w, &a64_dirty[p], 8);
-                if (!w) {
-                    p += 8;
-                    continue;
+                if (!(p & 31) && p + 32 <= p1) {   /* (32 pages at a time while none is marked) */
+                    uint64_t w[4];
+                    memcpy(w, &a64_dirty[p], 32);
+                    if (!(w[0] | w[1] | w[2] | w[3])) {
+                        p += 32;
+                        continue;
+                    }
+                }
+                if (!(p & 7) && p + 8 <= p1) {   /* (eight pages a load while none is marked) */
+                    uint64_t w;
+                    memcpy(&w, &a64_dirty[p], 8);
+                    if (!w) {
+                        p += 8;
+                        continue;
+                    }
                 }
             }
             if (__atomic_load_n(&a64_dirty[p], __ATOMIC_RELAXED) && __atomic_exchange_n(&a64_dirty[p], 0, __ATOMIC_ACQUIRE)) {
@@ -138,6 +288,12 @@ static int64_t collect_in(const uint64_t (*ranges)[2], int nranges, uint32_t **p
                 out[n++] = (uint32_t)p;
             }
             p++;
+#if HOS_MARKS_VECTOR
+            /* (the reads that decide the pages after one taken come after it, as the word walk's do: the window's mask is
+               kept only while the next mark it read set is the next page; before a gap the marks are read again from here, so
+               a mark published while this page was taken, in the gap, is taken in this pass) */
+            if (vector && set && at + (uint64_t)__builtin_ctzll(set) != p) set = marks_from(p, p1), at = p;
+#endif
         }
     }
     *pages = out;
