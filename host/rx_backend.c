@@ -245,6 +245,10 @@ static void host_slept_ns(int64_t out[2]) {
     out[1] = hos_slept_ns[1] + __atomic_load_n(&hos_acquire_slept_ns, __ATOMIC_RELAXED);
 }
 
+/* (longshot) MkwVkHost.ab_value (version 36): host/hos.h's hos_ab_value, an inline function, as one the renderer can call. Its
+   cost outside an A/B is one load, as for the host's own readers */
+static int host_ab_value(const char *name, int normal) { return hos_ab_value(name, normal); }
+
 /* (longshot) typed text for the Insert menu's text fields (MkwVkHost.take_text): the window's thread puts each character and
    editing key in (host/display.c WM_CHAR and WM_KEYDOWN, host/posix/display_sdl.c SDL's text input and key events), the menu
    takes them out at its frames, in order. Nothing is kept while no field has the keyboard, and the window then takes no text
@@ -313,6 +317,7 @@ static const MkwVkHost vk_host = {
     hos_nfc_count, hos_nfc_name, hos_nfc_tap, hos_nfc_state, hos_nfc_dir, hos_nfc_scan, hos_nfc_scan_name,
     hos_ab_frame,   /* (version 34, longshot: the frame trace's ab_side, host/hos_ab.c) */
     hos_mod_info, hos_mod_edit, hos_mods_changed, hos_cheat_info, hos_cheat_set,
+    host_ab_value,  /* (version 36, longshot: a renderer switch's A/B value, host/hos_ab.c) */
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */

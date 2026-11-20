@@ -347,6 +347,10 @@ WIRED = {
     "HOS_OOT_BARRIER_WAIT": "host/oot_barrier.c",
     # (read at each nn::os::YieldThread; nothing is kept between two yields)
     "HOS_OS_YIELD": "host/hos_thread.c",
+    # (the renderer's, through MkwVkHost.ab_value: read at each recording's start; each recording converts one way whole, the
+    # ring's y and z words are 1 for every value (filled once, slots at 48 bytes): tests/test_mesh_conv.py flips it between
+    # recordings)
+    "RX_VK_MESH_CONV": "gpu/vk/vk_draw.cpp",
 }
 
 
@@ -363,16 +367,20 @@ def wiring_checks():
         fail("host/rx_backend.c: rx_nvn_present does not count the frame (hos_ab_present) before the renderer presents")
     table = re.sub(r"/\*.*?\*/", "", block(backend, "static const MkwVkHost vk_host = {"), flags=re.S)
     names = [v.strip() for v in table.split(",") if re.fullmatch(r"\w+", v.strip())]
-    # (the Mods tab's functions, version 35, come after it)
+    # (the Mods tab's functions, version 35, come after it, then host_ab_value, version 36)
     if "hos_ab_frame" not in names or names[names.index("hos_ab_frame") + 1:] != [
-            "hos_mod_info", "hos_mod_edit", "hos_mods_changed", "hos_cheat_info", "hos_cheat_set"]:
+            "hos_mod_info", "hos_mod_edit", "hos_mods_changed", "hos_cheat_info", "hos_cheat_set", "host_ab_value"]:
         fail("host/rx_backend.c: vk_host does not have hos_ab_frame (MkwVkHost.ab_frame, version 34) right before the "
-             "Mods tab's functions")
+             "Mods tab's functions, and host_ab_value (ab_value, version 36) after them")
+    if "static int host_ab_value(const char *name, int normal) { return hos_ab_value(name, normal); }" not in backend:
+        fail("host/rx_backend.c: host_ab_value is not hos_ab_value")
     api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
-    if int(re.search(r"#define MKWVK_API_VERSION (\d+)", api).group(1)) < 34 or \
+    if int(re.search(r"#define MKWVK_API_VERSION (\d+)", api).group(1)) < 36 or \
             not re.search(r"int \(\*ab_frame\)\(int64_t from_ns, int64_t to_ns\);\n    /\* \(version 35: .*?\*/\n"
-                          r"    int \(\*mod_info\)\(", api, re.S):
-        fail("gpu/vk/vk_api.h: MkwVkHost does not have ab_frame at version 34 right before the Mods tab's functions")
+                          r"    int \(\*mod_info\)\(", api, re.S) or \
+            "int (*ab_value)(const char *name, int normal);\n} MkwVkHost;" not in api:
+        fail("gpu/vk/vk_api.h: MkwVkHost does not have ab_frame at version 34 right before the Mods tab's functions, and "
+             "ab_value (version 36) at its end")
     replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
     if "host->version >= 34 && host->ab_frame ? host->ab_frame(l_at, at) : -1" not in replay:
         fail("gpu/vk/vk_replay.cpp: the frame trace does not ask the host for ab_side (only from a version 34 host)")
@@ -384,6 +392,12 @@ def wiring_checks():
     for path in sorted((ROOT / "host").rglob("*.c")):
         for m in re.finditer(r'hos_ab_value\("([A-Z0-9_]+)"', path.read_text(encoding="utf-8")):
             found.setdefault(m.group(1), []).append(path.relative_to(ROOT).as_posix())
+    for path in sorted((ROOT / "gpu/vk").glob("*.cpp")):   # ((longshot) the renderer's readers: through the host's table)
+        text = path.read_text(encoding="utf-8")
+        for m in re.finditer(r'\bab_value\("([A-Z0-9_]+)"', text):
+            found.setdefault(m.group(1), []).append(path.relative_to(ROOT).as_posix())
+            if "host->version >= 36 && host->ab_value" not in text:
+                fail("%s: ab_value is asked of a host older than version 36" % path.relative_to(ROOT).as_posix())
     if {k: v for k, v in found.items()} != {k: [v] for k, v in WIRED.items()}:
         fail("the switches wired to hos_ab_value are %r, not %r (a switch whose value sets something up once may not be)"
              % (found, WIRED))

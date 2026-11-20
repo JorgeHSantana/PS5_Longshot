@@ -38,6 +38,7 @@
 #endif
 #include "vk_antilag.h"
 #include "vk_draw.h"
+#include "mesh_conv.h"   // (RX_VK_MESH_CONV=2: the indirect mesh draws after a barrier of the game's, scanned there)
 #include "vk_dump.h"
 #include "vk_paths.h"   // (log_path: the frame trace in the game folder's logs/)
 #include "vk_gprof.h"
@@ -421,6 +422,14 @@ int64_t st_gpu_ns, st_gpu_max_ns;
 void fo_recording_begin(const Recording& r);
 void fo_recording_end(const Recording& r);
 void fo_collect(const Recording& r, const uint64_t* t);
+// (longshot) an A/B within the run (HOS_AB=RX_VK_MESH_CONV=<v>): the GPU time of the recordings made with each value, and the
+// frames presented with each, so that the log can give each side's GPU time a frame (the frame trace has no GPU time column).
+// A recording's value: -1 outside the A/B (its warm-up, none set)
+int rec_mc_mode[kRecordings];
+int64_t st_gpu_mc_ns[3], st_mc_frames[3];
+bool ab_running() {
+    return host->version >= 34 && host->ab_frame && host->now_ns && host->ab_frame(0, host->now_ns()) >= 0;
+}
 void gpu_time_collect(Recording& r) {
     if (!ts_pool || !ts_pending[r.slot]) return fo_collect(r, nullptr);
     ts_pending[r.slot] = false;
@@ -434,6 +443,7 @@ void gpu_time_collect(Recording& r) {
         gtl_line('R', r.value, gtl_submit_ns[r.slot], (int64_t)(t[0] * (double)dev.props.limits.timestampPeriod),
                  (int64_t)(t[1] * (double)dev.props.limits.timestampPeriod), r.slot);
     st_gpu_max_ns = std::max(st_gpu_max_ns, ns);
+    if (rec_mc_mode[r.slot] >= 0 && rec_mc_mode[r.slot] < 3) st_gpu_mc_ns[rec_mc_mode[r.slot]] += ns;
     fo_collect(r, t);
 }
 }   // namespace
@@ -463,6 +473,7 @@ void gpu_time_begin(Recording& r) {
 }
 void gpu_time_end(Recording& r) {
     fo_recording_end(r);   // (at every recording's end, right before its submit: submit_recording)
+    rec_mc_mode[r.slot] = ab_running() ? mesh_conv_mode() : -1;   // (the value draw_begin_recording read for it, on this thread)
     if (!ts_pool) return;
     vkCmdWriteTimestamp2(r.cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, ts_pool, 2 * r.slot + 1);
     ts_pending[r.slot] = true;
@@ -1493,6 +1504,44 @@ bool buf_unchanged(int32_t stage, int32_t index, uint64_t addr, uint64_t size, i
     return stage == nstage && index == nindex && addr == naddr && size == nsize;
 }
 
+// (longshot) RX_VK_MESH_CONV=2: the scans after the game's barriers, by why each ended (mesh_conv.h Stop), and the ops that ended
+// them (kStopOp), for the log's line every 120 frames
+std::atomic<int64_t> st_mc_stops[mesh_conv::kStops];
+std::atomic<int64_t> st_mc_stop_ops[64];
+thread_local const uint8_t* mesh_rescan_at = nullptr;   // (the op the last scan ended at, with mesh draws after it: replay())
+/// Right after a barrier of the game's (the pass ended, a full barrier recorded), or right after the op that ended the scan
+/// before with indirect mesh draws after it (a counter's report, an event's wait, a dispatch, a copy: replay() once the op is
+/// recorded): the indirect mesh draws from next up to the next barrier, the first op that may write buffer memory or the
+/// stream's end, converted here at once (vk_draw.cpp mesh_conv_batch: after a full barrier, which leaves out itself after the
+/// game's)
+void mesh_conv_at_barrier(VkCommandBuffer cmd, const uint8_t* next, const uint8_t* end, bool after_op = false) {
+    mesh_rescan_at = nullptr;
+    if (!mesh_conv_batching()) return mesh_conv_batch(cmd, nullptr, 0);
+    // (records no GPU write to buffer memory in stream order: state, binds, draws (one whose program writes memory drops the
+    // batch as it is drawn: vk_draw.cpp), attachment clears (images), uniform updates (kept in the replay's list, written to
+    // memory at the recording's end), counters' resets, render conditions (read on the CPU))
+    static const uint32_t pass_ops[] = {NOP_BEGIN, NOP_JUMP, NOP_CALL, NOP_UPDATE_UB, NOP_SET_RT, NOP_CLEAR_COLOR, NOP_CLEAR_DS,
+                                        NOP_VIEWPORTS, NOP_SCISSOR, NOP_DEPTH_RANGE, NOP_BIND_PROGRAM, NOP_BIND_STATE,
+                                        NOP_BIND_VATTR, NOP_BIND_VSTREAM, NOP_BIND_VBUF, NOP_BIND_UBO, NOP_BIND_SSBO, NOP_BIND_TEX,
+                                        NOP_BIND_SAMP, NOP_STENCIL, NOP_POLY_OFFSET, NOP_DRAW, NOP_DRAW_IDX, NOP_SET_TEX_POOL,
+                                        NOP_SET_SAMP_POOL, NOP_COPY_STRIDE, NOP_BLEND_COLOR, NOP_BIND_IMG, NOP_RESET_COUNTER,
+                                        NOP_DEPTH_CLAMP, NOP_RENDER_ENABLE, NOP_RASTER_DISCARD, NOP_RENDER_COND,
+                                        NOP_PRIMITIVE_RESTART, NOP_BIND_BUFS, NOP_DRAW_INDIRECT, NOP_PUSH_CONST};
+    static const mesh_conv::Ops ops{NOP_END, NOP_BARRIER, NOP_DRAW_MESH, pass_ops, sizeof pass_ops / sizeof pass_ops[0]};
+    thread_local std::vector<mesh_conv::Item> items;
+    thread_local uint32_t cut_by = 0;   // (the op the scan before this one ended at, for the log)
+    uint32_t stop_op = 0;
+    const uint8_t* at = nullptr;
+    // (at most 1 MB of slots and 256 draws a batch: a quarter of the ring, so the batch never comes round onto itself)
+    const mesh_conv::Stop why = mesh_conv::scan(ops, next, end, items, 1ull << 20, 256, &stop_op, &at);
+    st_mc_stops[why].fetch_add(1, std::memory_order_relaxed);
+    if (after_op && !items.empty()) st_mc_stop_ops[cut_by & 63].fetch_add((int64_t)items.size(), std::memory_order_relaxed);
+    // (an op that may write memory ended it: scanned again once the op is recorded, from the op after it. Each op of the
+    // stretch is walked once, however many such ops it has: the occlusion pass's counter reports, ~200 a frame)
+    if (why == mesh_conv::kStopOp) mesh_rescan_at = at, cut_by = stop_op;
+    mesh_conv_batch(cmd, items.data(), items.size());
+}
+
 /// A draw or a dispatch: what a part is a count of (maybe_split)
 bool op_is_work(uint32_t op) {
     return op == NOP_DRAW || op == NOP_DRAW_IDX || op == NOP_DRAW_INDIRECT || op == NOP_DRAW_MESH || op == NOP_DISPATCH ||
@@ -1919,6 +1968,7 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
             end_pass(cmd);
             full_barrier(cmd, "barrier (the game's nvnCommandBufferBarrier)");
             st_barriers++;
+            mesh_conv_at_barrier(cmd, p + h.size, end);   // (RX_VK_MESH_CONV=2)
             break;
         // ---- work ----
         case NOP_CLEAR_COLOR:
@@ -1986,6 +2036,7 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 da.groups[0] = d.y, da.groups[1] = 1, da.groups[2] = 1;
                 if (d.kind == 0) da.first_task = d.x;   // (longshot: the task programs add it, vk_draw.cpp's mesh_args)
                 da.indirect = d.indirect, da.count_addr = d.count_addr, da.max = d.max, da.stride = d.stride;
+                da.op = p;   // (RX_VK_MESH_CONV=2: mesh_conv_at_barrier's scan named it by this)
                 draw(cmd, s, da);
             }
             s.samples_passed += 16;
@@ -2015,6 +2066,9 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
             if (split_after || memory_split_wanted()) early_split_pending = true;
             if (early_split_pending && part_work >= early_gap) early_split(cmd);
         }
+        // (RX_VK_MESH_CONV=2: the op that ended the last scan, with indirect mesh draws after it before the next barrier, is
+        // recorded, and the part's end if any: those draws converted here at once, after a full barrier of their own)
+        if (p == mesh_rescan_at) mesh_conv_at_barrier(cmd, p + h.size, end, true);
         p += h.size;
     }
 }
@@ -4558,6 +4612,33 @@ void log_frame_stats() {
             logf("vk: a frame: the game's barriers by their NVN flags:%s", fl.c_str());
             st_barrier_flags.clear();
         }
+        {   // (longshot, RX_VK_MESH_CONV: the indirect mesh draws' arguments, vk_draw.cpp mesh_indirect_convert and mesh_conv_batch)
+            int64_t mc[7];
+            mesh_conv_stats(mc);
+            int64_t stops[mesh_conv::kStops];
+            for (int i = 0; i < mesh_conv::kStops; i++) stops[i] = st_mc_stops[i].exchange(0, std::memory_order_relaxed);
+            std::string cut;
+            for (int o = 0; o < 64; o++)
+                if (const int64_t n = st_mc_stop_ops[o].exchange(0, std::memory_order_relaxed)) {
+                    char b[32];
+                    snprintf(b, sizeof b, " %d: %.1f;", o, n / 120.0);
+                    cut += b;
+                }
+            logf("vk: a frame: indirect mesh draws' arguments (RX_VK_MESH_CONV=%d): %.1f converted one by one, %.1f from %.1f batches "
+                 "at the game's barriers (%.1f converted in them; %.1f dropped after a write, %.1f the ring came round), %.1f left as "
+                 "they are (no mesh shaders); scans ended at a barrier %.1f, an op %.1f, the end %.1f, full %.1f; the draws "
+                 "batched by a scan right after an op that ended the one before, by op:%s",
+                 mesh_conv_mode(), mc[0] / 120.0, mc[1] / 120.0, mc[2] / 120.0, mc[3] / 120.0, mc[4] / 120.0, mc[5] / 120.0,
+                 mc[6] / 120.0, stops[mesh_conv::kStopBarrier] / 120.0, stops[mesh_conv::kStopOp] / 120.0,
+                 stops[mesh_conv::kStopEnd] / 120.0, stops[mesh_conv::kStopFull] / 120.0, cut.empty() ? " none" : cut.c_str());
+            if (st_mc_frames[0] + st_mc_frames[1] + st_mc_frames[2]) {
+                char b[3][64];
+                for (int m = 0; m < 3; m++)
+                    snprintf(b[m], sizeof b[m], "%d: %.3f ms a frame (%lld frames)", m,
+                             st_mc_frames[m] ? st_gpu_mc_ns[m] / 1e6 / st_mc_frames[m] : 0.0, (long long)st_mc_frames[m]);
+                logf("vk: GPU time by RX_VK_MESH_CONV in the A/B so far: %s; %s; %s", b[0], b[1], b[2]);
+            }
+        }
         static int64_t l_gpu;
         static uint64_t l_made;
         if (call_count_on()) {   // (RX_VK_CALL_COUNT: the replay's calls by kind, a frame and a draw)
@@ -4954,6 +5035,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         presents++;
         presents_now = presents;
         new_refuse_test(presents);
+        if (ab_running()) st_mc_frames[std::clamp(mesh_conv_mode(), 0, 2)]++;   // (RX_VK_MESH_CONV's A/B: the frame's side)
         wide_sides_tick();
         if (presents == 1) hang_watch_start(), gpu_hang_watch_start();
         {   // (EvilBoyce, diagnostics) RX_VK_WATCH_CPU=<present>:<gpu address>[,...] (hex addresses): from that present on, the

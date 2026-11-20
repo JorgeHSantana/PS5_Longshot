@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 35
+#define MKWVK_API_VERSION 36
 enum { HOS_MONITOR_CURRENT = 1, HOS_MONITOR_PRIMARY = 2 };
 typedef struct MkwVkMonitor {
     char id[512];             /* opaque persistent preference; never a runtime handle or list index */
@@ -331,6 +331,11 @@ typedef struct MkwVkHost {
     uint64_t (*mods_changed)(void);
     int (*cheat_info)(int i, const char **name, const char **mod, const char **note, int *kind, int *on);
     void (*cheat_set)(int i, int on);
+    /* (version 36, longshot) a renderer switch's value under that A/B (host/hos_ab.c hos_ab_value): normal outside the A/B, on
+       side 0 and for any other name; the A/B's value on side 1 when name is its switch. name is a string literal (the host
+       keeps the names it has seen by their address). gpu/vk/vk_draw.cpp asks for RX_VK_MESH_CONV at each recording's start,
+       so HOS_AB=RX_VK_MESH_CONV=<v> measures the indirect mesh draws' conversion one way against the other */
+    int (*ab_value)(const char *name, int normal);
 } MkwVkHost;
 /* (version 35) a cheat's kind: a heading (no opcodes), a data cheat (switched), a master cheat (always on), not supported (note) */
 enum { MKWVK_CHEAT_HEADING, MKWVK_CHEAT_DATA, MKWVK_CHEAT_MASTER, MKWVK_CHEAT_UNSUPPORTED };
