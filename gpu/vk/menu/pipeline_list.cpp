@@ -18,6 +18,16 @@
 #include "vk_paths.h"        // (game_module_path: the game folder, its mods)
 #ifdef _WIN32
 #include <windows.h>
+#else   // (the desktop's programs, run on the worker: as vk_menu.cpp had them before the module)
+#include <fcntl.h>
+#include <spawn.h>
+#include <csignal>
+#include <cerrno>
+#include <pthread.h>
+#include <sys/utsname.h>
+#include <sys/wait.h>
+#include <unistd.h>
+extern char** environ;
 #endif
 #endif
 
