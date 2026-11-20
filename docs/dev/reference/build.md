@@ -57,6 +57,7 @@ Read by the build, not the game, so they are not in `switches.def`.
 | `RX_HOT_OPT=<level>` | The hot pieces' level (`O2`; `O1` for a fast build) |
 | `LONGSHOT_CHUNK_OPT=all` or `<file>` | Lifted chunks at `-O2` (`LONGSHOT_CHUNK_LEVEL`, `LONGSHOT_CHUNK_PART_MB`) |
 | `LONGSHOT_SPLIT_GIANTS=<KB>` | Piece size for giant functions (8; `0` off) |
+| `LONGSHOT_SPLIT_DIRECT=0` | The pieces of a `LONGSHOT_SPLIT_GIANTS` function go through its dispatch loop only, as before this switch: each goto into another piece returns to the loop, which calls the piece that owns the label. On by default, the pieces jump to each other themselves (`musttail`, with clang's `preserve_none` calling convention, the function's guest registers and flags as arguments in registers), and come back to the loop only for a guest return or tail call; a compiler without those attributes builds the loop either way. A function with guest locals (`nx2/guest_locals.py`) is split in both modes: its locals cross a cut as the pieces' arguments, or through a struct of the loop's in this mode. Compile-time; the objects of each mode are kept apart (the flag names it) |
 | `LONGSHOT_LIGHT_PASSES=0` | Compile small chunks with every module pass (light passes need LLVM 22+) |
 | `RX_MARCH=<level>` | CPU level |
 | `RX_VK_ONLY=1` | The renderer alone |

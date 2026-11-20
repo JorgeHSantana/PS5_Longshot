@@ -745,12 +745,14 @@ COMPILER_MB = 1500
 # first build's compile 1,347 -> 1,057 s on a Ryzen 5 5600. "0": off; a number: the pieces' size in KB
 def split_giants_flags():
     """The flag the lifted chunks and the hot pieces carry when their giants are split (split_giants.FLAG: the piece size and
-    the splitter's own hash, so a change of either builds them again); [] when off"""
+    the splitter's own hash, so a change of either builds them again); [] when off. LONGSHOT_SPLIT_DIRECT=0: the pieces go
+    through the dispatch loop only, never straight from one to the next (split_giants.macros)"""
     raw = os.environ.get("LONGSHOT_SPLIT_GIANTS", "").strip()
     if raw == "0":
         return []
     import split_giants
-    return [split_giants.flag(int(raw) if raw.isdigit() else split_giants.PIECE_KB)]
+    return [split_giants.flag(int(raw) if raw.isdigit() else split_giants.PIECE_KB,
+                              os.environ.get("LONGSHOT_SPLIT_DIRECT", "").strip() != "0")]
 
 
 # LONGSHOT_CHUNK_OPT ("", the default: the lifted chunks at OPT as they are): "all" compiles every lifted chunk at -O2, or a
@@ -970,14 +972,15 @@ def rss_mb(proc):
         return 0
 
 
+# (a piece's definition in split_giants.py's copy: `static __attribute__((noinline)) s_<addr>_CC uintptr_t s_<addr>_<n>(...) {`)
+PIECE_HEAD = re.compile(rb"\nstatic __attribute__\(\(noinline\)\) (?:\w+ )?uintptr_t s_[0-9a-f]+_\d+\([^;\n]*\) \{")
+
+
 def largest_function(text):
     """The largest function of a lifted file's text, in bytes: each function from the newline before its definition, as mem_need
     was first measured; a giant's pieces are functions of their own (split_giants.py, the copy compile_one compiles)"""
     starts = [m.start() - 1 for m in lifted_c.definitions(text)]
-    i = text.find(b"\nstatic __attribute__((noinline)) uintptr_t s_")
-    while i >= 0:
-        starts.append(i)
-        i = text.find(b"\nstatic __attribute__((noinline)) uintptr_t s_", i + 1)
+    starts += [m.start() for m in PIECE_HEAD.finditer(text)]
     starts = sorted(starts) + [len(text)]
     return max([b - a for a, b in zip(starts, starts[1:])] or [0])
 
