@@ -70,6 +70,8 @@ int hos_commit(uint64_t addr, uint64_t size);
 void hos_log(const char *fmt, ...);
 void hos_fatal(Ctx *c, const char *fmt, ...);
 int64_t hos_now_ns(void);
+int hos_vcore_away(void);
+void hos_vcore_back(void);
 #define HOS_TRACE_CALL(name) ((void)0)
 '''
 
@@ -143,6 +145,10 @@ void hos_fatal(Ctx *c, const char *fmt, ...) {
     exit(1);
 }
 int64_t hos_now_ns(void) { return 0; }
+/* (the virtual core a region's discard gives up, tests/test_vcore_region_free.py's subject: here only given back) */
+static int cores_away;
+int hos_vcore_away(void) { cores_away++; return 1; }
+void hos_vcore_back(void) { cores_away--; }
 #include "hos_mem.c"
 int main(void) {
     Ctx c = {{0}};
@@ -185,6 +191,7 @@ int main(void) {
     CHECK(marked_in_all() == 32);
     CHECK(!marked_before_write);
     CHECK(discards == 0);                 /* (no hole punched under the import) */
+    CHECK(cores_away == 0);               /* (the core given up for the discard is taken again) */
 
     /* and not imported: discarded, not marked */
     const uint64_t r2 = hos_region_alloc(size, 0x10000);
@@ -197,6 +204,7 @@ int main(void) {
     CHECK(discards == 1);
     CHECK(bytes_are(r2, size, 0xAB));
 #endif
+    CHECK(cores_away == 0);
     printf("PASS: FreeMemoryPages and a freed region zero imported pages in place and mark them written\n");
     return 0;
 }

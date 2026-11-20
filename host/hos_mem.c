@@ -28,8 +28,9 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 uint64_t hos_heap_size, hos_heap_used, hos_total_memory, hos_program_size;
 static uint64_t sys_next = HOS_SYSTEM_BASE;
 
-/* Address regions are handed out top-down from HOS_SPACE_END; the heap grows up from HOS_HEAP_BASE. */
-typedef struct { uint64_t addr, size; } Range;
+/* Address regions are handed out top-down from HOS_SPACE_END; the heap grows up from HOS_HEAP_BASE. A region being freed
+   stays listed, and so taken, until its pages are discarded (freeing: hos_region_free). */
+typedef struct { uint64_t addr, size; int freeing; } Range;
 static Range *regions;
 static int nregions, capregions;
 static uint64_t region_floor = ~0ULL;   /* the lowest region (none yet: the window's end) */
@@ -63,7 +64,9 @@ uint64_t hos_region_floor(void) { return region_floor; }
 
 /* (longshot, the control bridge: host/control.c) Whether [addr, addr + size) is wholly inside memory the runtime has
    mapped for the game: the image, the system region in use (our own objects), the heap, or an address region. A read or
-   write outside it is refused, never faulted. The classes it may fall in (0 none): */
+   write outside it is refused, never faulted. A region being freed (hos_region_free) counts as mapped until its pages are
+   handed back: a bridge read there meanwhile may return zeros, or old and new bytes mixed (harmless: the guest has freed
+   it). The classes it may fall in (0 none): */
 enum { HOS_MEM_IMAGE = 1, HOS_MEM_SYSTEM, HOS_MEM_HEAP, HOS_MEM_REGION };
 int hos_mem_region(uint64_t addr, uint64_t size) {
     uint64_t end;
@@ -133,6 +136,7 @@ uint64_t hos_region_alloc(uint64_t size, uint64_t align) {
         memmove(&regions[at + 1], &regions[at], (nregions - at) * sizeof(Range));
         regions[at].addr = found;
         regions[at].size = size;
+        regions[at].freeing = 0;   /* (the slot still holds the entry moved up from it, which may be being freed) */
         nregions++;
         if (found < region_floor && found >= HOS_HEAP_BASE) region_floor = found;   /* (not the holes below) */
     }
@@ -197,21 +201,43 @@ int hos_regions(uint64_t (*out)[2], int cap) {
     return n;
 }
 
+/* nn::os::FreeAddressRegion's work. The discard hands the pages back to the system, milliseconds for a large region: the
+   thread gives its virtual core up for it, as for a file read, so the threads that share the core (on the console, often
+   of a higher priority than the game's resource memory thread that frees) are not held up for all of it. The region stays
+   listed until its pages are discarded, marked as being freed, so that no hos_region_alloc meanwhile is handed pages the
+   discard would wipe. A second free of the address meanwhile (the guest freeing it twice) finds it marked and does
+   nothing: were it to unlist the region, the address could be handed out again while the first discard still runs, and
+   the first free would then unlist the new region. The region leaves the list before the thread waits for its core
+   again. The renderer's question in discard_pages (rx_guest_imported) gives a core up and takes one back on its own;
+   here the thread holds none by then, so its hos_vcore_away answers 0 (this away has cleared any escape) and only the
+   hos_vcore_back below takes a core back: once for each region freed, as before this function gave its core up */
 void hos_region_free(uint64_t addr) {
-    uint64_t freed = 0, freed_size = 0;
+    uint64_t size = 0;
+    int found = 0;
     LOCK();
     for (int i = 0; i < nregions; i++) {
-        if (regions[i].addr == addr) {
+        if (regions[i].addr == addr && !regions[i].freeing) {
+            regions[i].freeing = 1;
             pages_mark_used_locked(regions[i].addr, regions[i].size);
-            freed = regions[i].addr;
-            freed_size = regions[i].size;
+            size = regions[i].size;
+            found = 1;
+            break;
+        }
+    }
+    UNLOCK();
+    if (!found) return;
+    const int away = hos_vcore_away();
+    discard_pages(addr, size);   /* (nothing for a region of no size) */
+    LOCK();
+    for (int i = 0; i < nregions; i++) {
+        if (regions[i].addr == addr && regions[i].freeing) {
             memmove(&regions[i], &regions[i + 1], (nregions - i - 1) * sizeof(Range));
             nregions--;
             break;
         }
     }
     UNLOCK();
-    if (freed_size) discard_pages(freed, freed_size);
+    if (away) hos_vcore_back();
 }
 
 /* (hookshot) whether [addr, addr + n) is guest memory the game was given: the image, the heap so far, or one address region
