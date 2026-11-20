@@ -319,9 +319,9 @@ struct DevicePolicy {
     // found, so whether Mesa's driver or a GPU without mesh shaders needs it wants a run. RX_VK_SPLIT_BEFORE_DRAW. Read
     // (vk_replay.cpp part_ends_before_draw)
     bool split_before_draw = false;
-    // AMD's Windows driver on the graphics in Ryzen 7000 and 9000 desktop CPUs (0x164E, 0x13C0) and the Radeon 860M
-    // (0x1114): ASTC decoded on the CPU, as the GPU decoder's one long submission has Windows reset the device (Kokiri
-    // Forest's terrain arrays). RX_VK_ASTC_CPU. Read
+    // Off by default: large GPU ASTC uploads split across bounded submissions (RX_VK_ASTC_CHUNK_MPX), avoiding the one
+    // long upload submission that had Windows reset integrated AMD GPUs on Kokiri Forest's terrain arrays.
+    // RX_VK_ASTC_CPU forces CPU decoding to RGBA8 and raises the iGPU texture cap above 16 GB RAM. Read
     // (vk_texture.cpp astc_on_cpu)
     bool astc_on_cpu = false;
     // NVIDIA: the Deku Tree web's vertex code b449bcdb69b36a8a has its global loads inlined, as NVIDIA's compiler
@@ -530,7 +530,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
     p.compute_builds_serial = f.driver_id == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS;
     p.pcache_fetch_lock = f.windows && f.intel();
     p.split_before_draw = f.intel();
-    p.astc_on_cpu = f.windows && f.amd() && (f.device_id == 0x164E || f.device_id == 0x13C0 || f.device_id == 0x1114);
+    p.astc_on_cpu = false;
     p.inline_deku_web_loads = f.nvidia();
     p.networks_left_out = !f.nvidia();
     p.dma_buf_imports = !f.windows && f.driver_id != VK_DRIVER_ID_NVIDIA_PROPRIETARY;
@@ -747,7 +747,7 @@ template <class Line> void device_policy_log(const DevicePolicy& p, const Device
         l.flag("compute_builds_serial", p.compute_builds_serial, p.set(Sw::compute_builds_serial));
         l.flag("pcache_fetch_lock", p.pcache_fetch_lock, p.set(Sw::pcache_fetch_lock), "101.9175");
         l.flag("split_before_draw", p.split_before_draw, p.set(Sw::split_before_draw), "101.9154");
-        l.flag("astc_on_cpu", p.astc_on_cpu, p.set(Sw::astc_on_cpu), "26.10.1");
+        l.flag("astc_on_cpu", p.astc_on_cpu, p.set(Sw::astc_on_cpu));
         l.flag("inline_deku_web_loads", p.inline_deku_web_loads);
         l.flag("networks_left_out", p.networks_left_out);
         l.flag("dma_buf_imports", p.dma_buf_imports);

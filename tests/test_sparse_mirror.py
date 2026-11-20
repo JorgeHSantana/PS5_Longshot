@@ -102,7 +102,7 @@ def check_source():
     # freed once the binds' timeline has passed it)
     replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
     if replay.count("if (memory_sparse_wait(&sparse_wait)) si.waitSemaphoreInfoCount = 1, si.pWaitSemaphoreInfos = &sparse_wait;") != 3:
-        raise SystemExit("vk_replay.cpp: a submission of recordings (the flush, a submit, a parallel segment) does not wait for the sparse binds")
+        raise SystemExit("vk_replay.cpp: a submission of recordings (the flush, an upload chunk, a submit) does not wait for the sparse binds")
     binds = block(mem, "bool sparse_bind_infos(")
     need(binds, ["si.pSignalSemaphores = &sparse_tl;", "vkQueueBindSparse(dev.queue, 1, &si, VK_NULL_HANDLE)"], "sparse_bind_infos()")
     if "vkWaitSemaphores(" in binds:

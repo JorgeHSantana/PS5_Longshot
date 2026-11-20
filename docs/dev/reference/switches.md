@@ -230,6 +230,7 @@ Changing any `RX_VK_MESH*` switch translates every program again.
 | `RX_VK_WB_MAX_KB=<KB>` | Size from which a GPU-written binding is written back only where the CPU reads or writes it (1024; `0`: every written binding written back whole) |
 | `RX_VK_WB_PROBATION=<n>` | Submissions that write such a binding back whole before it may be left out (8) |
 | `RX_VK_ASTC_BC7=1` | Re-encode big ASTC textures as BC7 instead of BC3: the same memory, better gradients and alpha. `RX_VK_ASTC_RGBA8=1` wins over it |
+| `RX_VK_ASTC_CHUNK_MPX=<n>`, `RX_VK_ASTC_CPU=1` | Decoded megatexels per GPU ASTC upload submission before flushing (16; `0`: one submission), or decode ASTC on the CPU to RGBA8 instead |
 | `RX_VK_LOW_VRAM_MIPS=0` | No smaller texture limits on low-VRAM PCs (below) |
 | `RX_VK_TEX_MAX_DIM=<px>` | Width above which a big decoded ASTC texture leaves out top mip levels (2048; 1024 under the low-VRAM rule) |
 | `RX_VK_TEX_SKIP_MB=<MB>` | Size as RGBA8 from which such a texture loses top levels (64; 8 under the low-VRAM rule) |

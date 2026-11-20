@@ -254,16 +254,16 @@ PCS = [
             "amd_cloth_no_optimizer fault_gate_serial allowance_at_count_rule mirrors split_ub_flush warp64 fsr4_tune "
             "astc_bc_all room_in_blocks_rule squeeze_damped threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 0, 4, 4769, 2044, 614, 461, 922, -1, 256, 12, 32, 16, 97, 1, 4, 4, 6, 6, 3)),
-    # (ASTC on the CPU: 70% of 10,232 MB allowed is 7,162 MB, under the 8 GB cap for 32 GB RAM. The process may use 8 of the
-    # PC's 24 threads: the workers go by the 24, Threaded rendering's Auto by the 4 cores of those 8 (the render thread
-    # alone), which the study names as two ways of counting)
+    # (ASTC on the GPU in bounded chunks: 4,096 MB cap for 32 GB RAM; RX_VK_ASTC_CPU=1 raises it to 7,162 MB. The process may
+    # use 8 of the PC's 24 threads: the workers go by the 24, Threaded rendering's Auto by the 4 cores of those 8 (the render
+    # thread alone), which the study names as two ways of counting)
     dict(name="Ryzen 9 7900X's graphics (32 GB), AMD's Windows driver, on 8 of 24 threads",
          facts=(0x1002, 0x164E, "AMD_PROPRIETARY", 0x800161, "INTEGRATED_GPU", "26.10.1 " + AMD_OLD, "AMD Radeon(TM) Graphics", 1, 0,
                 16300, 10232, 32600, 24, 8, 4, 1, 1, 0, 0, 0, 1, 1, 64, 64, 0xFF),
          on="fetch_bounds networks_left_out nan_bits gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
-            "amd_cloth_no_optimizer fault_gate_serial astc_on_cpu allowance_at_count_rule split_ub_flush warp64 fsr4_tune "
+            "amd_cloth_no_optimizer fault_gate_serial allowance_at_count_rule split_ub_flush warp64 fsr4_tune "
             "astc_bc_all threaded_auto_render",
-         num=(0, 0, 0, 2, 0, 16, 7162, 3072, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 6, 4, 8, 6, 4)),
+         num=(0, 0, 0, 2, 0, 16, 4096, 3072, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 6, 4, 8, 6, 4)),
 ]
 
 # The switches (device_policy_env). The fields a switch can set, in the Sw enum's order (its bit in set_by_switch), and what
@@ -295,8 +295,9 @@ ENV = [
     (UHD, {"RX_VK_COMPUTE_SERIAL": "0"}, {"compute_builds_serial": 0}, ["compute_builds_serial"], []),
     (UHD, {"RX_VK_COMPUTE_SERIAL": "off"}, {"compute_builds_serial": 0}, ["compute_builds_serial"], []),
     (UHD, {"RX_VK_COMPUTE_SERIAL": ""}, {}, [], []),                                   # (was off)
-    (RAPHAEL, {"RX_VK_ASTC_CPU": "0"}, {"astc_on_cpu": 0, "texture_budget": 4096}, ["astc_on_cpu"], []),
-    (RAPHAEL, {"RX_VK_ASTC_CPU": ""}, {}, [], []),                                     # (was off)
+    (RAPHAEL, {"RX_VK_ASTC_CPU": "1"}, {"astc_on_cpu": 1, "texture_budget": 7162}, ["astc_on_cpu"], []),
+    (RAPHAEL, {"RX_VK_ASTC_CPU": "0"}, {}, ["astc_on_cpu"], []),
+    (RAPHAEL, {"RX_VK_ASTC_CPU": ""}, {}, [], []),                                     # (empty is the default)
     (UHD, {"RX_VK_ASTC_CPU": "1"}, {"astc_on_cpu": 1}, ["astc_on_cpu"], []),           # (<= 16 GB RAM: budget cap stays 2560 MB)
     (NVIDIA, {"RX_VK_ASTC_CPU": "yes"}, {"astc_on_cpu": 1}, ["astc_on_cpu"], []),
     (NVIDIA, {"RX_VK_PCACHE_FETCH_LOCK": "1", "RX_VK_SPLIT_BEFORE_DRAW": "1", "RX_VK_UB_SNAPSHOT": "1"},

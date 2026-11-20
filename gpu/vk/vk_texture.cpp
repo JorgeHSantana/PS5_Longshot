@@ -455,10 +455,14 @@ size_t pool_trim() {
     return n;
 }
 
+// (each thread's own: the display thread's present records barriers too; declared before upload_astc_gpu resets it)
+thread_local VkCommandBuffer last_barrier_cmd = VK_NULL_HANDLE;   // (the command buffer this thread's last full barrier went into, and the work count then)
+
 // ---- the recording's upload command buffer ----
 thread_local VkCommandBuffer up_cmd = VK_NULL_HANDLE;
 uint64_t rec_value = 0;
 thread_local bool up_used = false;
+thread_local uint64_t up_astc_texels = 0;
 uint32_t epoch = 0;
 int64_t st_uploads, st_astc, st_bytes;
 
@@ -588,19 +592,15 @@ struct AstcPush {
 VkDescriptorSetLayout astc_set = VK_NULL_HANDLE;
 VkPipelineLayout astc_layout = VK_NULL_HANDLE;
 VkPipeline astc_pipe = VK_NULL_HANDLE;
-/// (longshot) ASTC decoded on the CPU, not by the GPU decoder: RX_VK_ASTC_CPU by the switches' rule; unset, on Windows
-/// with the graphics built into AMD's desktop CPUs: Ryzen 7000 (Raphael, PCI 0x164E) and Ryzen 9000 (Granite Ridge,
-/// 0x13C0), the same 2-CU RDNA 2 part, and the Radeon 860M (PCI 0x1114, 8 CU, RDNA 3.5). Not the other APUs' larger
-/// iGPUs (680M, 780M, 890M). Those lose the device as Kokiri Forest loads: the terrain's two 1365 x 1365 x 90 ASTC arrays,
-/// decoded and re-encoded as BC3 in one upload submission (some 2000 dispatches), hold the GPU for 4-6 s before Windows
-/// resets it. Decoded on the CPU, about 6 s an array on the replay thread (a pause as the area loads), they load. The textures
-/// are then RGBA8 (no BC3), in the system memory an integrated GPU draws from anyway; with ASTC decoded on the CPU,
-/// texture_frame raises the iGPU texture cap above 16 GB RAM (6 GB at 24 GB, 8 GB above 24 GB) so the RGBA8 arrays do
-/// not thrash the 4,096 MB cap. Ryzen 9000's was not tried
+/// (longshot) ASTC decoded on the CPU, not by the GPU decoder: RX_VK_ASTC_CPU by the switches' rule (off by default, as
+/// upload_astc_gpu splits large GPU ASTC uploads across bounded submissions via RX_VK_ASTC_CHUNK_MPX so Kokiri Forest's
+/// two 1365 x 1365 x 90 ASTC arrays no longer hold the GPU past Windows' 2 s WDDM timeout). When RX_VK_ASTC_CPU=1 forces CPU
+/// decoding, the textures are kept as RGBA8 (no BC3), and texture_frame raises the iGPU texture cap above 16 GB RAM (6 GB at
+/// 24 GB, 8 GB above 24 GB) so the RGBA8 arrays do not thrash the 4,096 MB cap
 bool astc_on_cpu() {
     static const bool on = [] {
-        const bool v = dev.policy.astc_on_cpu;   // (device_policy.h: the rule above by this PC, then the switch)
-        if (v) logf("vk: ASTC decoded on the CPU (RX_VK_ASTC_CPU=0: by the GPU; on by default for AMD's Ryzen 7000 and 9000 desktop graphics and the Radeon 860M on Windows)");
+        const bool v = dev.policy.astc_on_cpu;   // (device_policy.h: off by default, then RX_VK_ASTC_CPU)
+        if (v) logf("vk: ASTC decoded on the CPU (RX_VK_ASTC_CPU=1; unset: by the GPU)");
         return v;
     }();
     return on;
@@ -1104,6 +1104,22 @@ VkImageView astc_level_view(Texture* tex, uint32_t level, uint32_t layer) {
 /// (longshot) why the last upload_astc_gpu on this thread failed, for the log of a BC3 image left to be tried again
 thread_local const char* astc_fail = nullptr;
 
+/// Decoded texels per GPU ASTC upload submission (RX_VK_ASTC_CHUNK_MPX, in millions of texels; 16 by default, 0: no split)
+uint64_t astc_chunk_texels() {
+    static const uint64_t v = []() -> uint64_t {
+        constexpr uint64_t kDefault = 16ull * 1000000ull;
+        const char* e = getenv("RX_VK_ASTC_CHUNK_MPX");
+        if (!e || !*e) return kDefault;
+        char* end = nullptr;
+        const long long mpx = std::strtoll(e, &end, 10);
+        if (end == e || *end != '\0' || mpx < 0) return kDefault;
+        if (mpx == 0) return 0;
+        const uint64_t u = (uint64_t)mpx;
+        return u > UINT64_MAX / 1000000ull ? UINT64_MAX : u * 1000000ull;
+    }();
+    return v;
+}
+
 bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
 #ifdef TRACY_ENABLE
     HT_SCOPE("texture upload_astc_gpu");
@@ -1148,6 +1164,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
     st_bytes += (int64_t)staged;
     VkCommandBuffer cmd = upload_cmd();
     const uint64_t limit = dev.props.limits.maxStorageBufferRange;
+    const uint64_t chunk_texels = astc_chunk_texels();
     if (tex.bc) {
         if (!bc_scratch_layout(cmd, tex.bc_resized)) {
             astc_fail = "no memory for the BC3 scratch";
@@ -1168,7 +1185,10 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
         }
         const uint64_t max_layers = std::min<uint64_t>(dev.props.limits.maxComputeWorkGroupCount[2],
                                                       1 + (limit - bytes) / stride);
-        const bool all = !tex.bc && layers.size() == tex.layers && layers.size() <= max_layers;
+        // (a level over the chunk bound takes one layer a dispatch, so a flush can fall between its layers: astc_level_view
+        // views one layer, and the cost is a few more dispatches on every GPU, never a longer submission)
+        const bool all = !tex.bc && layers.size() == tex.layers && layers.size() <= max_layers &&
+                         (!chunk_texels || (uint64_t)g.w * g.h * tex.layers <= chunk_texels);
         const bool repack = off % dev.props.limits.minStorageBufferOffsetAlignment != 0 || bytes < g.swizzled;
         AstcPush pc{};
         pc.block_dims[0] = tex.block_w;
@@ -1205,6 +1225,17 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
                 astc_fail = "no view of a level";
                 return false;
             }
+            // Each BC3 slice run also emits 3 full barriers; a 64K-texel floor prevents hundreds of tiny tail mips
+            // from packing 1,500+ dispatches into a single trailing chunk.
+            const uint64_t step_texels = std::max<uint64_t>((uint64_t)g.w * g.h * n, 65536ull);
+            const bool chunk_full = step_texels > chunk_texels || up_astc_texels > chunk_texels - step_texels;
+            if (chunk_texels && up_astc_texels && chunk_full) {
+                if (replay_flush_upload(cmd)) {
+                    last_barrier_cmd = VK_NULL_HANDLE;   // (cmd was reset and re-begun in place with the same handle)
+                    full_barrier(cmd);
+                }
+                up_astc_texels = 0;
+            }
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, astc_pipe);
             VkDescriptorImageInfo ii{VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_GENERAL};
             VkWriteDescriptorSet w[2]{{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
@@ -1220,6 +1251,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
                 if (tex.bc_resized) bc_encode_resized(cmd, g.w, g.h, iw, ih, n, tex, level, layers[k0]);
                 else bc_encode_into(cmd, iw, ih, n, tex, level, layers[k0], 0, 0);
             }
+            up_astc_texels += step_texels;
             k0 = k1;
         }
     }
@@ -2638,8 +2670,6 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
 thread_local uint64_t work_epoch = 0;   // (vk_work.h: the recording thread's own)
 thread_local bool other_work_since_barrier = true;   // (vk_work.h; true at the start: nothing known)
 namespace {
-// (each thread's own: the display thread's present records barriers too)
-thread_local VkCommandBuffer last_barrier_cmd = VK_NULL_HANDLE;   // (the command buffer this thread's last full barrier went into, and the work count then)
 thread_local uint64_t last_barrier_epoch = 0;
 std::atomic<int64_t> st_barriers_made{0}, st_barriers_left_out{0};
 } // namespace
@@ -2718,6 +2748,7 @@ void texture_begin_recording(VkCommandBuffer upload, uint64_t value) {
     if (value != rec_value) epoch++;   // (a submission's parts check a texture's memory once: nothing is collected between)
     rec_value = value;
     up_used = false;
+    up_astc_texels = 0;
     memory_table_begin();
     memory_rb_recording_begun();   // (which readback pages its uploads may refresh: memory_rb_refresh)
 }

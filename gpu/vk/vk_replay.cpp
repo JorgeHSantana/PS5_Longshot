@@ -7130,6 +7130,66 @@ void early_check_cpu_pages(const uint32_t* pages, int64_t n, bool full, uint32_t
 }
 uint32_t early_check_collect_begin() { return early_check_on() ? ++ec_full_begun : 0; }
 
+bool replay_flush_upload(VkCommandBuffer cur) {
+    if (!cur) return false;
+    Recording* r = nullptr;
+    if (rec_cur && rec_cur->upload == cur && !rec_cur->submitted) {
+        r = rec_cur;
+    } else {
+        for (Recording& slot : recordings) {
+            if (slot.upload == cur && !slot.submitted) {
+                r = &slot;
+                break;
+            }
+        }
+    }
+    if (!r) return false;
+    full_barrier(cur, "barrier (upload chunk)");
+    const VkResult end_res = vkEndCommandBuffer(cur);
+    if (end_res != VK_SUCCESS) {
+        static int failures;
+        if (failures++ < 8) logf("vk: upload chunk end failed (%d)", (int)end_res);
+        if (end_res == VK_ERROR_DEVICE_LOST) device_lost();
+    } else {
+        VkCommandBufferSubmitInfo cbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+        cbi.commandBuffer = cur;
+        VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+        si.commandBufferInfoCount = 1;
+        si.pCommandBufferInfos = &cbi;
+        VkResult sub_res = VK_SUCCESS;
+        {
+            std::lock_guard lk(dev.present_mu);
+            queue_flush_locked();
+            PROF(PROF_QSUBMIT);
+            si.pNext = reflex_submit_id(nullptr);
+            VkSemaphoreSubmitInfo sparse_wait;
+            if (memory_sparse_wait(&sparse_wait)) si.waitSemaphoreInfoCount = 1, si.pWaitSemaphoreInfos = &sparse_wait;
+            sub_res = vkQueueSubmit2(dev.queue, 1, &si, r->fence);
+        }
+        if (sub_res != VK_SUCCESS) {
+            static int failures;
+            if (failures++ < 8) logf("vk: upload chunk submit failed (%d)", (int)sub_res);
+            if (sub_res == VK_ERROR_DEVICE_LOST) device_lost();
+        } else {
+            FpsRtWait rt_wait(fps_stats::kRtGpu);
+            const VkResult w = vkWaitForFences(dev.device, 1, &r->fence, VK_TRUE, UINT64_MAX);
+            if (w != VK_SUCCESS) {
+                static int failures;
+                if (failures++ < 8) logf("vk: upload chunk wait failed (%d)", (int)w);
+                if (w == VK_ERROR_DEVICE_LOST) device_lost();
+                std::lock_guard lk(dev.present_mu);
+                vkQueueWaitIdle(dev.queue);
+            }
+            if (vkResetFences(dev.device, 1, &r->fence) == VK_ERROR_DEVICE_LOST) device_lost();
+        }
+    }
+    if (vkResetCommandPool(dev.device, r->upload_pool, 0) == VK_ERROR_DEVICE_LOST) device_lost();
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(r->upload, &bi) == VK_ERROR_DEVICE_LOST) device_lost();
+    return true;
+}
+
 bool replay_start() {
     menu_init();
     if (!memory_init() || !vma_init(instance_proc())) return false;
