@@ -6950,11 +6950,26 @@ void memory_end_submission(VkCommandBuffer cmd, uint64_t part) {
                  (long long)st_sync_gpu_pages, (long long)st_sync_gpu_live, (long long)st_prot_kept.load());
             l_cap = st_sync_cap_pages, l_live = st_sync_live_pages, l_old = st_sync_old_pages;
             msync_pass_report();   // (RX_VK_MSYNC_PASS: how its dispatches went)
-            if (shadow_bytes || st_wbd_runs)
-                logf("vk: write-back diff (600 submits): %lld runs, %.1f MB compared; %lld pages read into the shadows; %llu MB of shadows; "
-                     "pages the shadows knew that the CPU wrote: %lld in captures, %lld only in the collection, %lld only by the replay itself",
+            if (shadow_bytes || st_wbd_runs) {
+                // (longshot) how much of the shadows holds anything: the pages they know, and the 1 MB parts with any page known,
+                // which is what shadows made of parts would take (each is the whole pool now)
+                uint64_t known_pages = 0, parts = 0;
+                for (const auto& [lo, sp] : imported) {
+                    if (!sp.shadow) continue;
+                    uint64_t part_bits = 0;   // (256 pages a 1 MB part: 4 words of the bitmap)
+                    for (size_t w = 0; w < sp.shadow_known.size(); w++) {
+                        known_pages += (uint64_t)__builtin_popcountll(sp.shadow_known[w]);
+                        part_bits |= sp.shadow_known[w];
+                        if ((w & 3) == 3 || w + 1 == sp.shadow_known.size()) parts += part_bits != 0, part_bits = 0;
+                    }
+                }
+                logf("vk: write-back diff (600 submits): %lld runs, %.1f MB compared; %lld pages read into the shadows; %llu MB of shadows "
+                     "(%llu MB of pages known, in %llu MB of 1 MB parts); pages the shadows knew that the CPU wrote: %lld in captures, %lld "
+                     "only in the collection, %lld only by the replay itself",
                      (long long)st_wbd_runs, st_wbd_bytes / 1048576.0, (long long)st_wbd_fill_pages, (unsigned long long)(shadow_bytes >> 20),
+                     (unsigned long long)(known_pages * 4096 >> 20), (unsigned long long)parts,
                      (long long)st_wbd_known_game, (long long)st_wbd_known_collected, (long long)st_wbd_known_replay);
+            }
             st_wbd_runs = st_wbd_bytes = st_wbd_fill_pages = 0;
             st_wbd_known_game = st_wbd_known_collected = st_wbd_known_replay = 0;
             if (wbd_observe_on()) {

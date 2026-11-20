@@ -15,6 +15,12 @@ void fg_latency_swapchain_gone();
 /// past it is kept (another engine runs it), and is shown and run as that top. Off and Auto are as they are
 int framegen_capped(int framegen, int dlss_most);
 int framegen_now();
+/// (longshot) Each present: frame generation off for 120 presents lets its images go (the built-in interpolation's two frames, its
+/// sets of made frames and their lumas and flows: about 150 MB at 2560x1440 2x, 800 MB at 4K 8x; FSR 3.1's frame interpolation's
+/// images too, also while another one is chosen). They were let go only when the window's size changed, so a player who tried it
+/// and turned it off kept them for the run. They are made again when it is turned on. recorded: this present recorded made frames
+/// (counted as on: framegen_idle.h). Called after framegen_queue, so a set this present filled is the display thread's by then
+void framegen_idle(bool recorded);
 /// Records the frame's processing into the present's recording (src: the window texture's view, sw x sh, the crop
 /// x, y, w, h; native_pq: the encoding of that captured present); false when interpolation cannot run
 /// (the present goes to the window as without it)
