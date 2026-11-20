@@ -105,7 +105,7 @@ SW(HOS_MOVIE_PACE, kill, bool, "on: a 60 FPS cap is raised for a movie's picture
 SW(HOS_MUTEX_TRACE, diag, int, "0: off", "Logs mutex waits longer than <ms>, with the thread that held the mutex.")
 SW(HOS_MUTEX_WATCH, diag, string, "off", "Logs every operation on the mutex at that guest address (hex) and its condition variables' signals.")
 SW(HOS_MW_WAKE, kill, enum, "only changes to objects linked into a multi-wait wake WaitAny", "=all: every event, semaphore or queue change wakes every WaitAny, as before.")
-SW(HOS_NATIVE_ZSTD, attempt, enum, "off: the game's own zstd decodes its streams", "1 or 2 decodes the game's zstd streams on the host's libzstd (2, the default, keeps the virtual core meanwhile; 1 gives it up).")
+SW(HOS_NATIVE_ZSTD, hw, enum, "the game's zstd streams decoded on the host's libzstd, the virtual core given up meanwhile (1), kept (2) on an Intel integrated GPU", "1 gives the virtual core up while it decodes, 2 keeps it, 0 decodes with the game's own zstd.")
 SW(HOS_NATIVE_ZSTD_FRAMES, attempt, bool, "off: the game's own zstd decodes whole buffers", "Decodes the resource loaders' whole-buffer zstd on the host's libzstd.")
 SW(HOS_NFP_SEARCH, diag, bool, "off: the reader looks for a tag only once the game's NFC screen starts a search", "=1 (a test's) has the reader look for a tag from the start, without the game's own NFC screen.")
 SW(HOS_NFP_TRACE, diag, bool, "off", "=1 logs the game's NFC application area calls (open, create) and their results.")

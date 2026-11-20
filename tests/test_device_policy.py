@@ -48,7 +48,7 @@ allowance_at_count_rule
 mirrors ub_snapshot split_ub_flush native_float_add warp64 batch_submits mma_unroll_try global_table_loop occ_copy
 intel_side_by_side_auto fsr4_tune gpu_clock_peak readback_late_newest acquire_ahead pcache_small_pc small_vram_textures astc_bc_all
 room_in_blocks_rule squeeze_damped linux_hold_caps_budget dlss_cnn auto_render_third rtx rdna4 threaded_auto_render
-threaded_auto_recorder drop_modules_small_ram""".split()
+threaded_auto_recorder drop_modules_small_ram native_zstd_keep_core""".split()
 # The numbers: the field and how the fixture prints it (sizes in whole MB; -1: no limit)
 NUMS = [
     ("equal_depth_bias", "(long long)p.equal_depth_bias"),
@@ -191,7 +191,7 @@ PCS = [
                 8100, 7402, 16100, 4, 4, 2, 0, 1, 1, 0, 0, 1, 1, 32, 32, 0xFF),
          on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant intel_compile_gate compute_builds_serial pcache_fetch_lock "
             "split_before_draw allowance_at_count_rule ub_snapshot small_vram_textures astc_bc_all squeeze_damped "
-            "auto_render_third",
+            "auto_render_third native_zstd_keep_core",
          num=(64, 0, 0, 2, 0, 16, 2560, 2025, 616, 462, 512, -1, 256, 0, 32, 16, 90, 1, 2, 2, 2, 2, 2)),
     # (Battlemage from 101.9154: side by side, so no gate, and the float add. Compute builds stay one at a time though
     # the gate is open, which the study doubts and a B580 would have to say)
@@ -221,7 +221,7 @@ PCS = [
                 11850, 10000, 15800, 8, 8, 4, 0, 1, 1, 0, 0, 1, 1, 32, 32, 0xFF),
          on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant split_before_draw dma_buf_imports "
             "allowance_at_count_rule ub_snapshot global_table_loop small_vram_textures astc_bc_all linux_hold_caps_budget "
-            "threaded_auto_render drop_modules_small_ram",
+            "threaded_auto_render drop_modules_small_ram native_zstd_keep_core",
          num=(0, 0, 20000, 1, 85, 16, 2560, 2048, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 2, 2, 4, 4, 2)),
     # (neither discrete nor integrated: no mirrors, yet a dedicated card's budgets, blocks at the start and 97% line.
     # The study doubts it: the two tests are not a partition)

@@ -491,6 +491,9 @@ struct DevicePolicy {
     // Linux with 20 GB of RAM or less: the shader modules are let go after the precompile (1.5-1.8 GB); a memory shortfall
     // then does the same on any PC, at the site. RX_VK_DROP_MODULES, RX_VK_KEEP_MODULES. Site (vk_draw.cpp), step 2
     bool drop_modules_small_ram = false;
+    // An unset HOS_NATIVE_ZSTD keeps the zstd decode's virtual core on an Intel integrated GPU (#1632's load freezes) and gives
+    // it up elsewhere. Site (host/hos_zstd.c, through HOS_OPT_NATIVE_ZSTD)
+    bool native_zstd_keep_core = false;
 };
 
 /// The defaults this PC gets, with no switch read
@@ -605,6 +608,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
         p.threaded_auto_render = cpu.render_thread, p.threaded_auto_recorder = cpu.recorder_thread;
     }
     p.drop_modules_small_ram = !f.windows && f.ram > 0 && f.ram <= 20 * kGB;
+    p.native_zstd_keep_core = f.intel() && f.integrated();
     return p;
 }
 
@@ -819,6 +823,7 @@ template <class Line> void device_policy_log(const DevicePolicy& p, const Device
         l.flag("threaded_auto_render", p.threaded_auto_render);
         l.flag("threaded_auto_recorder", p.threaded_auto_recorder);
         l.flag("drop_modules_small_ram", p.drop_modules_small_ram);
+        l.flag("native_zstd_keep_core", p.native_zstd_keep_core);
         line(l.text);
     }
     {

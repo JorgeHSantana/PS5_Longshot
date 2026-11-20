@@ -7719,6 +7719,7 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id >= HOS_OPT_HUD_LAYOUT && id <= HOS_OPT_HUD_MINIMAP) return menu_hud_option(id);
         if (id == HOS_OPT_SKIP_TITLE) return opts.skip_title != 0;
         if (id == HOS_OPT_RENDER_THREAD) return async_on();   // (host/nvn_native.c: the present poll answered at once)
+        if (id == HOS_OPT_NATIVE_ZSTD) return native_zstd_default.load(std::memory_order_acquire);   // (host/hos_zstd.c)
         /* (longshot) Vibration (host/vibration.h), and what plays the controller used last as the host wrote it back */
         if (id == HOS_OPT_VIBRATION) return opts.vibration;
         if (id == HOS_OPT_DS_HD_HAPTICS) return opts.ds_hd_haptics;

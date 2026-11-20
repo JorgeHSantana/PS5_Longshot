@@ -136,6 +136,7 @@ std::string device_name_text() { return std::string(dev.props.deviceName, strnle
 int64_t steady_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
+std::atomic<int> native_zstd_default{0};
 std::atomic<int64_t> last_log_ms{0};   // (when logf last wrote: the preparation's status line comes after a silence)
 static void vlogf(LogLevel level, const char* fmt, std::va_list a) {
     static const char* const tags[] = {"[error] ", "[warn] ", "", "[debug] ", "[trace] "};
@@ -793,6 +794,7 @@ bool create_device() {
         // (longshot) the translation's vendor and driver workarounds (device_policy.h fetch_bounds, nan_bits, gather_offset),
         // each forced by its RX_VK_ switch
         device_policy_fixes_env(dev.policy, [](const char* name) -> const char* { return getenv(name); });
+        native_zstd_default.store(dev.policy.native_zstd_keep_core ? 2 : 1, std::memory_order_release);
         logf("vk: vendor fixes for %s (%s): out-of-bounds texel fetches 0 %d, NaN tests by bits %d, gather offset %d",
              dev.driver.driverName, dev.driver.driverInfo, (int)dev.policy.fetch_bounds, (int)dev.policy.nan_bits,
              (int)dev.policy.gather_offset);
