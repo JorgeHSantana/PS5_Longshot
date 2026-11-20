@@ -782,7 +782,8 @@ static const NameSpec *match_name_spec(const NameSpec *s, int n, const char *nam
    fastest kind (8+ logical processors always have them on a CPU of one kind): a laptop's 2 performance cores and 8
    efficiency ones (i5-1235U) would keep one of the two from the game; then none is kept. The calling thread's
    processor group's cores: the masks the affinity calls take are its group's. On Linux the same choice from
-   /sys/devices/cpu_core/cpus (Intel's hybrid CPUs; last_fastest_core below); without that file, the last core, as before. */
+   /sys/devices/cpu_core/cpus (Intel's hybrid CPUs; last_fastest_core below); without that file, the last core, as before.
+   Every way, only among the cores the process may run on wholly (its affinity mask: process_cpus, #522). */
 /* (longshot) The cores that share the largest L3, on a CPU whose cores do not all share one of the same size: AMD's X3D CPUs
    with two CCDs (7900X3D, 7950X3D, 9900X3D, 9950X3D) have the 3D V-Cache on one CCD only (96 MB against 32 MB). Windows
    moves a game there only when its Game Bar knows the program as a game; this one it does not know, so its threads ran on
@@ -814,12 +815,25 @@ static uint64_t pick_cache_cores(const uint64_t *masks, const uint64_t *sizes, i
     if (physical < 8) return 0;
     return best;
 }
-/* (the choice: the cores' logical processor masks and EfficiencyClass, n of them; 0 for none. tests/test_reserved_core.py) */
-static uint64_t pick_reserved_core(const uint64_t *masks, const unsigned char *classes, int n) {
+/* (longshot) The logical processors this process may run on (its affinity mask: `start /affinity`, a launcher's, Process
+   Lasso's, taskset's), for the reserved core's choice; every one when the mask cannot be read (Windows gives 0 for a process
+   with threads in more than one processor group) */
+static uint64_t process_cpus(void) {
+    DWORD_PTR proc = 0, sys = 0;
+    if (!GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys) || !proc) return ~0ull;
+    return (uint64_t)proc;
+}
+/* (the choice: the cores' logical processor masks and EfficiencyClass, n of them, among the cores whose logical processors
+   are all in allowed (process_cpus); 0 for none. A core outside the process's mask is no candidate and is not counted: the
+   replay thread cannot be pinned there (Windows refuses the mask; Linux lets the thread leave the set it was given), and
+   the game's threads would lose a core of the mask's for nothing. As #522's fallback below, which the enhanced choice
+   skipped: under 0x0FFF of 16 the last core of all, 0xC000, was kept, the replay's pin was refused and the log said it held.
+   tests/test_reserved_core.py, tests/test_reserved_core_mask.py) */
+static uint64_t pick_reserved_core(const uint64_t *masks, const unsigned char *classes, int n, uint64_t allowed) {
     uint64_t last = 0;
     int best = -1, fast = 0, logical = 0;
     for (int i = 0; i < n; i++) {
-        if (!masks[i]) continue;
+        if (!masks[i] || (masks[i] & ~allowed)) continue;
         logical += __builtin_popcountll(masks[i]);
         if ((int)classes[i] > best) {
             best = classes[i], last = masks[i], fast = 1;
@@ -834,8 +848,9 @@ static uint64_t pick_reserved_core(const uint64_t *masks, const unsigned char *c
     static bool logged = false;
     if (!logged) {
         logged = true;
-        hos_log("vk: reserved core selection: %d cores, %d logical, best class=%d, fast cores=%d, selected=%#llx",
-                n, logical, best, fast, (unsigned long long)last);
+        hos_log("vk: reserved core selection: %d cores, %d logical, best class=%d, fast cores=%d, selected=%#llx "
+                "(of the logical processors %#llx)", n, logical, best, fast, (unsigned long long)last,
+                (unsigned long long)allowed);
         for (int i = 0; i < n; i++) {
             if (masks[i]) {
                 hos_log("vk:   core %d: mask=%#llx, class=%d, popcount=%d",
@@ -906,9 +921,10 @@ static uint64_t last_fastest_core_legacy(int *cores) {
     }
 
     int logical = 0;
-    int current_core = 0;
+    int current_core = 0, listed = 0;
     uint64_t masks[256];
     unsigned char classes[256];
+    const uint64_t allowed = process_cpus();   /* (longshot: the cores the process may run on wholly, as pick_reserved_core) */
 
     int pcore_candidates = 0;
     int ecore_candidates = 0;
@@ -916,6 +932,8 @@ static uint64_t last_fastest_core_legacy(int *cores) {
     for (DWORD i = 0; i < len / sizeof info[0] && current_core < 256; i++) {
         if (info[i].Relationship == RelationProcessorCore) {
             uint64_t mask = (uint64_t)info[i].ProcessorMask;
+            listed++;
+            if (mask & ~allowed) continue;
             int popcount = __builtin_popcountll(mask);
             logical += popcount;
 
@@ -933,15 +951,15 @@ static uint64_t last_fastest_core_legacy(int *cores) {
         }
     }
 
-    *cores = current_core;
+    *cores = listed;
 
-    hos_log("vk: legacy API fallback: %d cores, %d logical, P-candidates=%d, E-candidates=%d",
-            current_core, logical, pcore_candidates, ecore_candidates);
+    hos_log("vk: legacy API fallback: %d cores, %d logical, P-candidates=%d, E-candidates=%d (of the logical processors %#llx)",
+            current_core, logical, pcore_candidates, ecore_candidates, (unsigned long long)allowed);
 
     // If mixed core types detected, use enhanced picker
     if (pcore_candidates > 0 && ecore_candidates > 0) {
         hos_log("vk: Intel hybrid CPU detected via legacy API heuristic");
-        return pick_reserved_core(masks, classes, current_core);
+        return pick_reserved_core(masks, classes, current_core, allowed);
     }
 
     // Single CPU type - use original logic (last core)
@@ -995,7 +1013,7 @@ static uint64_t last_fastest_core(int *cores) {
     }
 
     *cores = n;
-    return pick_reserved_core(masks, classes, n);
+    return pick_reserved_core(masks, classes, n, process_cpus());
 }
 #endif
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
@@ -1046,7 +1064,7 @@ static uint64_t last_fastest_core(int *cores) {
             n++;
         }
     *cores = n;
-    return pick_reserved_core(masks, classes, n);
+    return pick_reserved_core(masks, classes, n, process_cpus());
 }
 #endif
 uint64_t hos_reserved_cpus(void) {
@@ -1084,7 +1102,8 @@ uint64_t hos_reserved_cpus(void) {
         const uint64_t fast = last_fastest_core(&cores);
         if (cores) {
             mask = fast;
-            hos_log("vk: reserved core mask (enhanced): %#llx (%d cores)", (unsigned long long)mask, cores);
+            hos_log("vk: reserved core mask (enhanced): %#llx (%d cores; a core the process may run on wholly, of %#llx)",
+                    (unsigned long long)mask, cores, (unsigned long long)process_cpus());
             return mask;
         }
     }
@@ -1094,7 +1113,8 @@ uint64_t hos_reserved_cpus(void) {
         const uint64_t fast = last_fastest_core(&cores);
         if (cores) {
             mask = fast;
-            hos_log("vk: reserved core mask (hybrid, /sys/devices/cpu_core): %#llx (%d cores)", (unsigned long long)mask, cores);
+            hos_log("vk: reserved core mask (hybrid, /sys/devices/cpu_core): %#llx (%d cores; a core the process may run on "
+                    "wholly, of %#llx)", (unsigned long long)mask, cores, (unsigned long long)process_cpus());
             return mask;
         }
     }
@@ -1106,13 +1126,13 @@ uint64_t hos_reserved_cpus(void) {
        affinity) had the PC's last core kept all the same, outside its set, and a thread may leave the set: the replay ran
        there, beside whatever else did. A timed session kept to one CCD of a 7900X (CPUs 0-5,12-17) replayed on CPUs 11 and
        23 of the other, with the builds: frames of 2-8 s whenever one ran, and a 13th core when none did. A core counts
-       when all its logical processors are allowed; with every processor allowed, the last core as before */
-    DWORD_PTR proc = 0, sys = 0;
-    if (!GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys) || !proc) proc = ~(DWORD_PTR)0;
+       when all its logical processors are allowed; with every processor allowed, the last core as before. (The choices
+       above keep the same rule: pick_reserved_core) */
+    const uint64_t proc = process_cpus();
     int logical = 0;
     uint64_t last = 0;
     for (DWORD i = 0; i < len / sizeof info[0]; i++)
-        if (info[i].Relationship == RelationProcessorCore && !((uint64_t)info[i].ProcessorMask & ~(uint64_t)proc)) {
+        if (info[i].Relationship == RelationProcessorCore && !((uint64_t)info[i].ProcessorMask & ~proc)) {
             logical += __builtin_popcountll((uint64_t)info[i].ProcessorMask);
             if ((uint64_t)info[i].ProcessorMask > last) last = (uint64_t)info[i].ProcessorMask;
         }

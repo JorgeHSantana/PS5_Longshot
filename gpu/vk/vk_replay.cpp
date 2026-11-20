@@ -2740,7 +2740,13 @@ struct ReplayPin {
         if (async_on()) return;
         counted = true;
         if (replay_pin_depth++) return;   // (the outermost one: a submit's replay inside its capture's)
-        if (const uint64_t m = replay_pin_mask()) replay_pin_prev = SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)m);
+        if (const uint64_t m = replay_pin_mask()) {
+            replay_pin_prev = SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)m);
+            static std::atomic<bool> told{false};   // (refused: a mask outside the process's. Said once, not every replay)
+            if (!replay_pin_prev && !told.exchange(true, std::memory_order_relaxed))
+                logf("vk: a replay was NOT kept to logical processors %#llx (error %lu): replays run where their threads may",
+                     (unsigned long long)m, (unsigned long)GetLastError());
+        }
     }
     ~ReplayPin() {
         if (!counted || --replay_pin_depth) return;
@@ -7004,13 +7010,20 @@ void replay_thread_main() {
                 use |= fastest_kind_cpus() & (uint64_t)proc;
             }
 #endif
-            SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)use);
+            // (longshot) Windows refuses a mask with a processor outside the process's, and the thread stays where it was:
+            // the log says so, not the placement it did not get (hos_reserved_cpus keeps to the process's cores; a
+            // HOS_RESERVE_CORE_MASK outside them still gets here)
+            if (!SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)use)) {
+                logf("vk: the replay thread was NOT kept to logical processors %#llx (error %lu): it runs where the process "
+                     "may, beside the game's threads", (unsigned long long)use, (unsigned long)GetLastError());
+            } else {
 #ifdef _WIN32
-            if (use != m) SetThreadIdealProcessor(GetCurrentThread(), (DWORD)(63 - __builtin_clzll(m)));
+                if (use != m) SetThreadIdealProcessor(GetCurrentThread(), (DWORD)(63 - __builtin_clzll(m)));
 #endif
-            logf("vk: the replay thread runs on logical processors %#llx, kept from the game's threads%s", (unsigned long long)m,
-                 use != m ? " (its ideal processor there; free to go to the other fastest cores when another program takes it)" : "");
-            if (use != m) logf("vk: the replay thread may run on logical processors %#llx", (unsigned long long)use);
+                logf("vk: the replay thread runs on logical processors %#llx, kept from the game's threads%s", (unsigned long long)m,
+                     use != m ? " (its ideal processor there; free to go to the other fastest cores when another program takes it)" : "");
+                if (use != m) logf("vk: the replay thread may run on logical processors %#llx", (unsigned long long)use);
+            }
         }
     }
     // (longshot, the render thread) A present that comes while a queue is stopped at a wait for an event the CPU signals is
