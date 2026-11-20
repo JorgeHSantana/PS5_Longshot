@@ -114,6 +114,18 @@ def dav1d_prefix():
     return None
 
 
+def bundled_mingw():
+    """(windows) The clone's llvm-mingw folder as LONGSHOT_MINGW for every check, as nx2/make_game.py's bundled_mingw() gives
+    it to the build (CONTRIBUTING.md: the variable, or that folder). Without it a check that builds with
+    toolchain.native_target() asks that folder's clang, found on PATH, for the MSVC target: "'algorithm' file not found".
+    LONGSHOT_MINGW set already wins; LONGSHOT_MSVC=1 (the Visual Studio route) and a folder without its clang leave it unset"""
+    if not WINDOWS or os.environ.get("LONGSHOT_MINGW") or os.environ.get("LONGSHOT_MSVC") == "1":
+        return
+    here = os.path.join(ROOT, "llvm-mingw")
+    if os.path.isfile(os.path.join(here, "bin", "clang.exe")):
+        os.environ["LONGSHOT_MINGW"] = here
+
+
 def find_tools():
     return {
         "dav1d": None if WINDOWS else dav1d_prefix(),
@@ -575,6 +587,7 @@ def main():
     if a.changed is not None and (a.names or a.write_times):
         p.error("--changed picks the checks itself: no names, no --write-times")
     times = load_times()
+    bundled_mingw()
     tools = find_tools()
 
     checks = []
