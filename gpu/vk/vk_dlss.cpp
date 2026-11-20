@@ -1208,6 +1208,9 @@ void dlss_fg_close() {
     // (the swapchain's lock for the queue's idle, waited for a while: a present stuck at the exit leaves NGX to the process's
     // end rather than hanging the exit, as Streamline's shutdown does)
     const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    // (RX_VK_RECORDER_PARTS: the parts handed to the recorder submitted first, within the same 2 s: the tries below do not wait
+    // for them, and the idle wait is to cover them)
+    ::mkwvk::rec::settle_parts(::mkwvk::rec::B_QUEUE_LOCK, 2000000000ull);
     std::unique_lock qk(dev.present_mu, std::defer_lock);
     while (!qk.try_lock() && std::chrono::steady_clock::now() < until) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     // (and the presents' own queues, whose presents let dev.present_mu go while they run: a present stuck there held
@@ -1215,7 +1218,7 @@ void dlss_fg_close() {
     // presenter thread's (on every PC): on the Present queue row's queue it takes present_queue_mu, not present_mu, then
     // presenter_queue_mu, for its present call alone, so a present already handed to it may still take them; the
     // locks device_wait_idle_locked takes wait that one call out)
-    const auto free_by_then = [&](std::mutex& m) {
+    const auto free_by_then = [&](QueueMutex& m) {
         for (;;) {
             if (m.try_lock()) return m.unlock(), true;
             if (std::chrono::steady_clock::now() >= until) return false;

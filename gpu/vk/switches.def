@@ -622,6 +622,7 @@ SW(RX_VK_READBACK_WAIT_MS, tune, int, "250 ms", "Longest a readback waits for it
 SW(RX_VK_RECORDER, player, enum, "the Threaded rendering row: thread for On, and Auto from 6 physical cores where the run is safe; else off", "Chooses the command recorder for the run (sync, defer, thread; anything else off), over the Threaded rendering row.")
 SW(RX_VK_RECORDER_IDLE, attempt, enum, "spin, then a condition variable", "wait: the idle recorder spins 20 us then waits on the ring's address (WaitOnAddress/futex) instead.")
 SW(RX_VK_RECORDER_OWN, attempt, bool, "off", "A recording slot resets its own command and descriptor pools at reuse without waiting for the recorder thread.")
+SW(RX_VK_RECORDER_PARTS, kill, bool, "on with the recorder thread: a part's packets handed over at its end, and its end and submit made by the recorder", "=0: the render thread waits for the recorder at each part's end and submit and at replay_mu's release, as before: an A/B in one build.")
 SW(RX_VK_RECORDER_PIN, attempt, string, "the recorder thread is not pinned", "Pins the recorder thread to a core: next, sibling (the replay thread's core) or a hex CPU mask.")
 SW(RX_VK_RECORDER_POISON, diag, bool, "off", "Poisons the recorder's packet arena after each drain, to catch packets used after they ran.")
 SW(RX_VK_RECORDER_RING_MB, tune, int, "8 MB", "Size of the recorder thread's packet ring in MB (at most 1024).")

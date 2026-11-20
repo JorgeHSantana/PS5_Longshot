@@ -34,8 +34,12 @@ inline void slot_begin(uint64_t) {}
 inline void slot_done() {}
 inline uint64_t produced() { return 0; }
 struct OwnSlot { OwnSlot() {} ~OwnSlot() {} };   // (a scope, as the real one)
+inline bool wait_part(uint64_t) { return true; }   // (RX_VK_RECORDER_PARTS: no recorder thread here, every part submitted by the replay)
+[[noreturn]] inline void recorder_fatal(const char*) { std::abort(); }
+struct Settled { Settled() {} ~Settled() {} };   // (a scope, as the real one)
 }   // namespace rec
 uint64_t rec_end_pos[64];   // (vk_replay.cpp: each slot's end in the recorder's ring)
+uint64_t rec_ticket[64];    // (vk_replay.cpp, RX_VK_RECORDER_PARTS: each slot's last part handed to the recorder: none here)
 void logf(const char*,...) {}
 bool create_buffer(uint64_t size,VkBufferUsageFlags,bool,VkBuffer& buffer,VmaAllocation& allocation,void** mapped,bool=false) {
     if(fail_buffer) return false;

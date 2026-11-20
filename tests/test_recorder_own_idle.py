@@ -187,7 +187,7 @@ def build(cxx, headers, out, recorder_text, name, hooks_text=None):
 
 
 SWITCHES = ("RX_VK_RECORDER", "RX_VK_PARALLEL", "RX_VK_RECORDER_OWN", "RX_VK_RECORDER_IDLE", "RX_VK_RECORDER_SPIN_US",
-            "RX_VK_RECORDER_STATS", "RX_VK_RECORDER_RING_MB", "RX_VK_RECORDER_POISON")
+            "RX_VK_RECORDER_STATS", "RX_VK_RECORDER_RING_MB", "RX_VK_RECORDER_POISON", "RX_VK_RECORDER_PARTS")
 
 
 def run(exe, case, env_add):

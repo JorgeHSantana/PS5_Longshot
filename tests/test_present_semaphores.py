@@ -24,7 +24,7 @@ start = replay.index('void present_image(')
 present = replay[start:replay.index('\n}', start) + 2]
 # (present ahead, #1702: the present itself is present_image's end, present_out, which present_commit also runs; its wait
 # is read from there, the complete function as above)
-out_start = replay.index('static bool present_out(uint32_t index, std::unique_lock<std::mutex>& qk) {')
+out_start = replay.index('static bool present_out(uint32_t index, std::unique_lock<decltype(dev.present_mu)>& qk) {')
 present_out = replay[out_start:replay.index('\n}', out_start) + 2]
 signal = re.search(r'    signal\.semaphore = [^;]+;', present)[0]
 wait = re.search(r'    pi\.pWaitSemaphores = [^;]+;', present_out)[0]

@@ -56,6 +56,40 @@ inline bool is_rdna4(uint32_t vendor_id, const char* device_name) {
            (std::strstr(device_name, "RX 9") || std::strstr(device_name, "GFX12"));
 }
 
+/// (longshot) What a queue's lock tells the recorder thread (vk_recorder.h queue_lock_event, installed by vk_replay.cpp; null:
+/// nothing, as in the checks): 0 before the lock is taken (lock(), not try_lock()), 3 when it is held by another and the thread
+/// blocks for it, 1 once it is taken, 2 before it is let go
+inline void (*queue_lock_hook)(int phase, bool settles) = nullptr;
+/// (longshot) A queue's lock: a std::mutex that says when it is taken and let go (queue_lock_hook). With RX_VK_RECORDER_PARTS the
+/// recorder thread makes a part's submit under dev.present_mu itself: a thread about to take that lock first waits until the parts
+/// handed to the recorder are submitted (settles: the queue's order), and a thread holding any queue lock never waits for a
+/// recorder that waits for it (docs/dev/reference/threads.md, The hand-off by part)
+struct QueueMutex {
+    std::mutex m;
+    const bool settles = true;
+    QueueMutex() = default;
+    explicit QueueMutex(bool s) : settles(s) {}
+    void lock() {
+        if (queue_lock_hook) queue_lock_hook(0, settles);
+        if (!m.try_lock()) {
+            if (queue_lock_hook) queue_lock_hook(3, settles);
+            m.lock();
+        }
+        if (queue_lock_hook) queue_lock_hook(1, settles);
+    }
+    /// (no wait for the parts: a try is not to block. Its caller waits for them itself where the queue's order needs it:
+    /// vk_dlss.cpp dlss_fg_close, before its tries)
+    bool try_lock() {
+        if (!m.try_lock()) return false;
+        if (queue_lock_hook) queue_lock_hook(1, settles);
+        return true;
+    }
+    void unlock() {
+        if (queue_lock_hook) queue_lock_hook(2, settles);
+        m.unlock();
+    }
+};
+
 struct Device {
     VkInstance instance = VK_NULL_HANDLE;
     VkPhysicalDevice physical = VK_NULL_HANDLE;
@@ -128,17 +162,17 @@ struct Device {
     VkFormat swap_view_format = VK_FORMAT_UNDEFINED;   // (their format: the UNORM one of an sRGB swapchain when it can be)
     bool swap_mutable = false;   // (VK_KHR_swapchain_mutable_format: an sRGB swapchain's images viewed as UNORM)
     std::vector<VkSemaphore> swap_rendered;   // present waits belong to acquired images, not frame slots
-    std::mutex present_mu;   // (the swapchain: presents and resizes)
+    QueueMutex present_mu;   // (the swapchain: presents and resizes; the replay's queue's submits)
     std::atomic<uint64_t> swap_resize{0};   // (a new window size, width << 32 | height: the next present makes the swapchain)
     // (longshot) a queue of a compute family for vkQueuePresentKHR alone (vk_main.cpp create_device; RX_VK_PRESENT_QUEUE=0 / 1).
     // VK_NULL_HANDLE: presents go on `queue` under present_mu. Its own lock: taken after present_mu, never before it
     VkQueue present_queue = VK_NULL_HANDLE;
     bool present_queue_supported = false;
-    std::mutex present_queue_mu;
+    QueueMutex present_queue_mu{false};
     uint32_t present_family = 0;   // (present_queue's family, the swapchain's images shared with it)
     // (longshot) the presenter thread's use of the swapchain (vk_replay.cpp presenter_loop): held over its present call, which it
     // makes on the presents' own queue under that queue's lock (present_mu or present_queue_mu), so taken after both, never before
-    std::mutex presenter_queue_mu;
+    QueueMutex presenter_queue_mu{false};
     bool present_wait = false;   // (VK_KHR_present_id + VK_KHR_present_wait enabled: the presenter waits for each present to be shown)
     VkPresentModeKHR swap_mode = VK_PRESENT_MODE_FIFO_KHR;   // (the swapchain's present mode, as made)
 };

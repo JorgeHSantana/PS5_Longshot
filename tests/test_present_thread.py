@@ -35,7 +35,7 @@ def main():
     replay = (vk / "vk_replay.cpp").read_text(encoding="utf-8")
     main_cpp = (vk / "vk_main.cpp").read_text(encoding="utf-8")
 
-    out = block(replay, "static bool present_out(uint32_t index, std::unique_lock<std::mutex>& qk) {")
+    out = block(replay, "static bool present_out(uint32_t index, std::unique_lock<decltype(dev.present_mu)>& qk) {")
     hand = out[: out.index("present_hand_off(")]
     need("if (present_copy_done && present_thread_on()) {" in hand, "a present is handed over from frame generation")
     # (NVIDIA Reflex: its present id goes with the present; the game's thread lets go of the present marker, the presenter

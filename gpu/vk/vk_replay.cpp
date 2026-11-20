@@ -106,6 +106,19 @@ void note_timeline_sent(uint64_t v) {
 // before ----
 VkSemaphore rec_timeline = VK_NULL_HANDLE;
 uint64_t rec_seq = 0;                       // (the recordings submitted so far; replay_mu)
+// (RX_VK_RECORDER_PARTS) the highest number on the recordings' timeline whose submit is made, or held with RX_VK_BATCH: a part's
+// submit is the recorder's, after the render thread has put its recording where the waiters find it (map_recording)
+std::atomic<uint64_t> rec_seq_sent{0};
+void note_seq_sent(uint64_t seq) {
+    uint64_t was = rec_seq_sent.load(std::memory_order_relaxed);
+    while (seq > was && !rec_seq_sent.compare_exchange_weak(was, seq, std::memory_order_release, std::memory_order_relaxed)) {}
+}
+/// (RX_VK_RECORDER_PARTS) Until recording seq's submit is made: before a wait on the recordings' timeline for it, which with
+/// RX_VK_BATCH must find it in the list of held submits that the wait's flush sends; at most timeout_ns, which it leaves at what
+/// is left of it, and whether it is. At once without the hand-off by part
+bool wait_seq_submitted(uint64_t seq, uint64_t& timeout_ns) {
+    return rec::wait_submitted([seq] { return rec_seq_sent.load(std::memory_order_acquire) >= seq; }, timeout_ns);
+}
 std::vector<uint64_t> rec_open_values;      // (the submissions finished in the recording being made; replay_mu)
 std::mutex rec_map_mu;
 std::map<uint64_t, uint64_t> value_rec;     // submission value (or a recording's own) -> the recording that finished it
@@ -141,6 +154,8 @@ const bool rec_thread_hook = (::mkwvk::rec::g_thread_start_hook = [] {
     ::mkwvk::logf("vk: RX_VK_RECORDER_PIN=%s: the recorder %s %#llx (reserved %#llx)", pin, ok ? "pinned to" : "NOT pinned, mask",
                   (unsigned long long)m, (unsigned long long)reserved);
 }, true);
+// (RX_VK_RECORDER_PARTS: the queue locks tell the recorder when they are taken and let go, vk_internal.h QueueMutex)
+const bool rec_queue_hook = (::mkwvk::queue_lock_hook = ::mkwvk::rec::queue_lock_event, true);
 // (RX_VK_RECORDER_IDLE=wait: the recorder's idle waits on its ring counter. Windows: from kernelbase.dll, without linking
 // Synchronization.lib; Linux: host/posix's, a futex)
 const bool rec_wait_hooks = [] {
@@ -225,6 +240,7 @@ constexpr int kRecordings = 48;   // (test: 24 before; with RX_VK_BATCH the ring
 static_assert(kRecordings <= 64, "gtl_submit_ns holds each slot");
 Recording recordings[kRecordings];
 uint64_t rec_end_pos[kRecordings];   // (RX_VK_RECORDER_OWN: the recorder ring's position after each slot's last end, vk_recorder.h)
+uint64_t rec_ticket[kRecordings];    // (RX_VK_RECORDER_PARTS: each slot's last part handed to the recorder, rec::post_part's number)
 int recording_index = 0;
 
 /// (a recording slot's last submit done: before it is used again)
@@ -232,6 +248,11 @@ void recording_wait(Recording& r) {
 #ifdef TRACY_ENABLE
     HT_WAIT(ht_w, "recording_wait");
 #endif
+    // (RX_VK_RECORDER_PARTS: its end and submit made by the recorder, which set r.submitted and r.batch; the waits below are on
+    // that submit's fence or batch, and need no more of the recorder: Settled)
+    if (!rec::wait_part(rec_ticket[r.slot]))   // (unbounded, and never under a queue lock: met, or the replay cannot go on)
+        rec::recorder_fatal("a recording slot reused before its part was submitted");
+    rec::Settled settled;
     if (!r.submitted) return;
     FpsRtWait rt_wait(fps_stats::kRtGpu);   // (the FPS counter's render lane)
     if (r.batch) {
@@ -334,13 +355,28 @@ void device_wait_idle_locked() {   // (dev.present_mu held)
     vkDeviceWaitIdle(dev.device);
 }
 namespace {
-void queue_flush_for(int why) {
-    if (!pend_held.load(std::memory_order_acquire)) return;   // (nothing held: nothing to send, the mutex not taken)
-    std::lock_guard lk(dev.present_mu);
-    if (pend.cbs.empty()) return;
+/// (RX_VK_RECORDER_PARTS: the parts handed over submitted first, at most settle_ns, before the look at what is held: a part
+/// still in the ring when a waiter flushed was held after it, and the wait for it never came back with RX_VK_BATCH. Unmet (a
+/// part's submit behind a present holding the queue's lock), what is held is sent if the lock is free, and the part the waiter
+/// needs sends what is held once submitted (part_submit). The nanoseconds it waited for the parts: the caller's driver wait gets
+/// what is left of its time)
+uint64_t queue_flush_for(int why, uint64_t settle_ns = UINT64_MAX) {
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool met = rec::settle_parts(rec::B_QUEUE_LOCK, settle_ns);
+    const uint64_t spent = met && settle_ns == 0 ? 0 : (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                          std::chrono::steady_clock::now() - t0).count();
+    if (!pend_held.load(std::memory_order_acquire)) return spent;   // (nothing held: nothing to send, the mutex not taken)
+    rec::Settled settled;   // (the parts waited for above: the lock waits for none)
+    std::unique_lock lk(dev.present_mu, std::defer_lock);
+    if (met) lk.lock();
+    else if (!lk.try_lock()) return spent;
+    if (pend.cbs.empty()) return spent;
     flush_reason = why;
     queue_flush_locked();
+    return spent;
 }
+/// (what is left of a wait's time once spent of it is gone)
+uint64_t time_left(uint64_t timeout_ns, uint64_t spent) { return timeout_ns == UINT64_MAX ? timeout_ns : spent < timeout_ns ? timeout_ns - spent : 0; }
 // (RX_VK_BATCH_POLL_US=<us>: a progress poll sends held submits only once the oldest has waited that long; 0: always.
 // Default 2000: the game polls many times a frame, and each poll that flushed was a whole command submission, the cost
 // batching is there to avoid. RX 7800 XT, RADV, Kokiri: 525 -> 67 poll flushes per 120 presents, 38 -> 42.5 fps; issues
@@ -348,6 +384,7 @@ void queue_flush_for(int why) {
 void queue_flush_poll() {
     static const int64_t us = getenv("RX_VK_BATCH_POLL_US") ? atoll(getenv("RX_VK_BATCH_POLL_US")) : 2000;
     if (!pend_held.load(std::memory_order_acquire)) return;   // (nothing held: nothing to send, the mutex not taken)
+    rec::Settled settled;   // (RX_VK_RECORDER_PARTS: a poll sends what is held, and waits for no part the recorder has yet to hold)
     std::lock_guard lk(dev.present_mu);
     if (pend.cbs.empty()) return;
     if (us > 0 && std::chrono::steady_clock::now() - pend_since < std::chrono::microseconds(us)) return;
@@ -358,6 +395,7 @@ void queue_flush_poll() {
 namespace {
 void wait_value(uint64_t v) {
     queue_flush_for(FR_VALUE);
+    rec::Settled settled;   // (RX_VK_RECORDER_PARTS: the flush waited for the parts)
     VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
     wi.semaphoreCount = 1;
     wi.pSemaphores = &timeline;
@@ -396,12 +434,14 @@ void vk_timeline_wait(uint64_t v) {   // (at most 250 ms: a submission held back
         }
         return;
     }
-    queue_flush_for(FR_VALUE);
+    // (RX_VK_RECORDER_PARTS: the parts waited for within the wait's 250 ms, the driver's wait given what is left)
+    const uint64_t spent = queue_flush_for(FR_VALUE, 250000000ull);
+    rec::Settled settled;
     VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
     wi.semaphoreCount = 1;
     wi.pSemaphores = &timeline;
     wi.pValues = &v;
-    const VkResult res = vkWaitSemaphores(dev.device, &wi, 250000000ull);
+    const VkResult res = vkWaitSemaphores(dev.device, &wi, spent < 250000000ull ? 250000000ull - spent : 0);
     if (res == VK_TIMEOUT) {
         static std::atomic<int> logged{0};
         if (logged++ < 8) logf("vk: a capture's wait for write-back %llu timed out (done %llu)", (unsigned long long)v, (unsigned long long)completed());
@@ -914,6 +954,15 @@ void host_read_barrier(VkCommandBuffer cmd) {
     d.memoryBarrierCount = 1, d.pMemoryBarriers = &b;
     vkCmdPipelineBarrier2(cmd, &d);
 }
+/// (RX_VK_RECORDER_PARTS) A part's end and submit as submit_recording decides them, for the recorder thread to make
+struct PartSubmit {
+    Recording* r;
+    uint64_t value;    // (the timeline value it signals, when signal_value)
+    uint64_t seq;      // (its number on the recordings' timeline; 0: none)
+    uint64_t reflex;   // (NVIDIA Reflex: the game frame its work belongs to, reflex_frame() as it was recorded; 0: none)
+    bool uploads, signal_value;
+};
+void post_part_submit(const PartSubmit& s);   // (below)
 void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at = 0) {
 #ifdef TRACY_ENABLE
     HT_SCOPE("submit_recording");
@@ -924,9 +973,11 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
     gprof_submitted(r.slot, uploads);
     gpu_time_end(r);
     host_read_barrier(r.cmd);
-    vkEndCommandBuffer(r.upload);
-    vkEndCommandBuffer(r.cmd);
-    rec_end_pos[r.slot] = rec::produced();   // (the ends waited for the recorder: it is past this)
+    if (!rec::parts_wanted()) {   // (RX_VK_RECORDER_PARTS: the recorder ends it instead, part_submit)
+        vkEndCommandBuffer(r.upload);
+        vkEndCommandBuffer(r.cmd);
+        rec_end_pos[r.slot] = rec::produced();   // (the ends waited for the recorder: it is past this)
+    }
     VkSemaphoreSubmitInfo signal{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
     signal.semaphore = timeline;
     signal.value = signal_at ? signal_at : r.value;
@@ -976,6 +1027,13 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
     }
     si.signalSemaphoreInfoCount = nsig;
     si.pSignalSemaphoreInfos = nsig ? signals : nullptr;
+    // (RX_VK_RECORDER_PARTS: its two ends and its submit go to the recorder thread after the part's packets, and the replay goes on
+    // into the next part at once. It is found by the waiters here, held or not: a waiter waits for its submit first, wait_rec_seq)
+    // doc: docs/dev/reference/threads.md#the-hand-off-by-part
+    if (rec::parts_wanted()) {
+        if (seq && batch_on()) map_recording();
+        return post_part_submit({&r, signal.value, seq, reflex_frame(), uploads, signal_value});
+    }
     std::lock_guard lk(dev.present_mu);   // (one queue: submits and presents take turns)
     if (batch_on()) {
         // (NVIDIA Reflex: the batch is tagged with the game frame its first command buffer belongs to, read here. A batch that
@@ -1005,6 +1063,75 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
     if (res != VK_SUCCESS && failures++ < 8) logf("vk: submit %llu failed (%d)", (unsigned long long)r.value, (int)res);
     if (res == VK_ERROR_DEVICE_LOST) device_lost();
     if (res == VK_SUCCESS && signal_value) note_timeline_sent(signal.value);
+}
+/// (RX_VK_RECORDER_PARTS) A part's end and submit: on the recorder thread, in the ring's order after the part's packets
+/// (post_part), or on the replay's own thread when the recorder did not take it (its ends then wait for the ring, as before). Its
+/// two command buffers ended, then submitted with what submit_recording chose (the timeline value, the recording's number, the
+/// Reflex frame), or held with RX_VK_BATCH under the queue's lock. On the recorder its ends and submit wait for nothing
+/// (boundary()), and the queue's lock says the recorder waits for it (QueueMutex)
+void part_submit(const PartSubmit& s) {
+    Recording& r = *s.r;
+    if (vkEndCommandBuffer(r.upload) == VK_ERROR_DEVICE_LOST) device_lost();
+    if (vkEndCommandBuffer(r.cmd) == VK_ERROR_DEVICE_LOST) device_lost();
+    if (gtl_on()) gtl_submit_ns[r.slot] = gtl_now();   // (RX_VK_GPU_TIMELINE: the submit's own time, here, not the part's end)
+    VkSemaphoreSubmitInfo signals[2] = {{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO}, {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO}};
+    uint32_t nsig = 0;
+    if (s.signal_value) {
+        signals[nsig].semaphore = timeline, signals[nsig].value = s.value, signals[nsig].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        nsig++;
+    }
+    if (s.seq) {
+        signals[nsig].semaphore = rec_timeline, signals[nsig].value = s.seq, signals[nsig].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        nsig++;
+    }
+    VkCommandBufferSubmitInfo cb[2]{{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}, {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}};
+    uint32_t n = 0;
+    if (s.uploads) cb[n++].commandBuffer = r.upload;
+    cb[n++].commandBuffer = r.cmd;
+    VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+    si.commandBufferInfoCount = n;
+    si.pCommandBufferInfos = cb;
+    si.signalSemaphoreInfoCount = nsig;
+    si.pSignalSemaphoreInfos = nsig ? signals : nullptr;
+    {
+        std::lock_guard lk(dev.present_mu);   // (one queue: submits and presents take turns)
+        if (batch_on()) {   // (as submit_recording holds one; it was put where the waiters find it before it was handed over)
+            if (pend.cbs.empty()) batch_next++, pend_since = std::chrono::steady_clock::now(), pend.reflex = s.reflex;
+            for (uint32_t i = 0; i < n; i++) pend.cbs.push_back(cb[i]);
+            pend_held.store(true, std::memory_order_release);
+            if (s.signal_value) pend.signal = std::max(pend.signal, s.value), pend.any_signal = true;
+            if (s.seq) pend.rec = std::max(pend.rec, s.seq);
+            r.batch = batch_next;
+            r.submitted = true;
+            static const size_t cap = getenv("RX_VK_BATCH_MAX") ? (size_t)std::max(1, atoi(getenv("RX_VK_BATCH_MAX"))) : 32;
+            if (pend.cbs.size() >= cap) flush_reason = FR_CAP, queue_flush_locked();
+            if (!pend.cbs.empty() && batch_gpu_idle()) flush_reason = FR_OTHER, queue_flush_locked();   // (the GPU idle: batch_gpu_idle)
+            // (a wait that gave up on the parts before this one was held: its flush may have found nothing, and it waits for this)
+            if (!pend.cbs.empty() && rec::take_flush_owed()) flush_reason = FR_WAIT, queue_flush_locked();
+        } else {   // (not PROF_QSUBMIT: the replay's phases are the render thread's time, and this is the recorder's)
+            si.pNext = reflex_submit_id(nullptr, s.reflex);   // (NVIDIA Reflex: the frame it was recorded in)
+            VkSemaphoreSubmitInfo sparse_wait;   // (longshot: after the sparse mirrors' binds, RX_VK_MIRROR_SPARSE)
+            if (memory_sparse_wait(&sparse_wait)) si.waitSemaphoreInfoCount = 1, si.pWaitSemaphoreInfos = &sparse_wait;
+            const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, r.fence);
+            r.submitted = res == VK_SUCCESS;
+            static std::atomic<int> failures{0};
+            if (res != VK_SUCCESS && failures++ < 8) logf("vk: submit %llu failed (%d)", (unsigned long long)r.value, (int)res);
+            if (res == VK_ERROR_DEVICE_LOST) device_lost();   // (the recorder's too: the report, then the process ends)
+            if (res == VK_SUCCESS && s.signal_value) note_timeline_sent(s.value);
+        }
+    }
+    if (s.seq) note_seq_sent(s.seq);
+}
+/// (RX_VK_RECORDER_PARTS) The part's end and submit to the recorder thread (rec::post_part), its number kept for the slot's reuse;
+/// not taken (no ring, the queue's lock held here): made here at once
+[[noreturn]] void replay_fatal(const char* why);   // (below)
+void post_part_submit(const PartSubmit& s) {
+    // (never under a queue lock: part_submit takes dev.present_mu, and a part handed over from under it could not be submitted)
+    if (rec::t_queue_held) replay_fatal("a part's submit asked for under the queue's lock (RX_VK_RECORDER_PARTS)");
+    Recording& r = *s.r;
+    rec_ticket[r.slot] = rec::post_part([s] { part_submit(s); });
+    if (!rec_ticket[r.slot]) part_submit(s), rec::part_made_here();
+    rec_end_pos[r.slot] = rec::produced();   // (the ring's position after its end and submit: R is past it once they are made)
 }
 
 // ---- NVN state (the draw path's, vk_state.h) ----
@@ -2996,6 +3123,14 @@ static void wait_rec_seq(uint64_t seq, uint64_t timeout_ns, int* ok) {
         wait_rec_result = VK_SUCCESS;
         return;
     }
+    // (RX_VK_RECORDER_PARTS: its submit made by the recorder first, so that a batched one is in the list the flush sends; the
+    // flush and the wait then need nothing more of the recorder: Settled)
+    if (!wait_seq_submitted(seq, timeout_ns)) {   // (not submitted within the wait's time: as a wait that timed out)
+        *ok = 0;
+        wait_rec_result = VK_TIMEOUT;
+        return;
+    }
+    rec::Settled settled;
     // (a batched submit holds its recordings' signal until the batch goes out: the readback wait in invalidate came here
     // without a flush, and the job that waited held up the main thread, so nothing flushed it: the load hang on RADV)
     queue_flush_for(FR_WAIT);
@@ -3059,7 +3194,8 @@ int wait_inner(uint64_t f, uint64_t timeout_ns) {
     FpsFenceWait fence_kind(recorded);
     if (timeout_ns) gate_need_value(f);   // (the render thread's whole frames: this one's submit goes on without its present)
     FpsRender fr;   // (the FPS counter's Breakdown: the replay of stopped work in here is the renderer's, the waits the GPU's)
-    queue_flush_for(FR_WAIT);
+    // (RX_VK_RECORDER_PARTS: the parts waited for within the wait's time, the rest of it left to the waits below; a poll: not)
+    timeout_ns = time_left(timeout_ns, queue_flush_for(FR_WAIT, timeout_ns));
     // (longshot) a fence of one queue whose work up to it is recorded whole (none of it stopped): that work, not the other
     // queues' stopped work the timeline above waits for (which a wait for it forced past its waits after RX_VK_WAIT_HOLD_US)
     if (!async_on() && sync_waits_on() && !per_queue_fences_off()) {
@@ -3085,7 +3221,7 @@ int wait_inner(uint64_t f, uint64_t timeout_ns) {
         static const int64_t hold_ns = (getenv("RX_VK_WAIT_HOLD_US") ? atoll(getenv("RX_VK_WAIT_HOLD_US")) : 3000) * 1000;
         const auto t0 = std::chrono::steady_clock::now();
         for (;;) {
-            queue_flush_for(FR_WAIT);
+            queue_flush_for(FR_WAIT, 0);
             if (completed() >= f) return 1;
             bool needs;
             {
@@ -3106,7 +3242,8 @@ int wait_inner(uint64_t f, uint64_t timeout_ns) {
     wi.semaphoreCount = 1;
     wi.pSemaphores = &timeline;
     wi.pValues = &f;
-    queue_flush_for(FR_WAIT);
+    timeout_ns = time_left(timeout_ns, queue_flush_for(FR_WAIT, timeout_ns));
+    rec::Settled settled;   // (RX_VK_RECORDER_PARTS: the flush waited for the parts, as long as the wait may; the rest to the driver)
     VkResult res;
     {
         FpsWait fw(fps_gpu_wait_kind());
@@ -3435,12 +3572,14 @@ bool readback_wait_value(uint64_t v) {
         wait_value(v);
         return true;
     }
-    queue_flush_for(FR_VALUE);
+    // (RX_VK_RECORDER_PARTS: the parts waited for within the limit, the driver's wait given what is left of it)
+    const uint64_t limit_ns = (uint64_t)limit_ms * 1000000ull, spent = queue_flush_for(FR_VALUE, limit_ns);
+    rec::Settled settled;
     VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
     wi.semaphoreCount = 1;
     wi.pSemaphores = &timeline;
     wi.pValues = &v;
-    if (vkWaitSemaphores(dev.device, &wi, (uint64_t)limit_ms * 1000000ull) != VK_TIMEOUT) return true;
+    if (vkWaitSemaphores(dev.device, &wi, spent < limit_ns ? limit_ns - spent : 0) != VK_TIMEOUT) return true;
     static std::atomic<int> logged{0};
     if (logged++ < 8)
         logf("vk: a readback's wait for write-back %llu timed out after %lld ms (done %llu, submitted %llu, handed out %llu)",
@@ -5034,6 +5173,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         full_barrier(r.cmd);
         presents++;
         presents_now = presents;
+        rec::note_frame();   // (RX_VK_RECORDER_PARTS: the recorder's stats line, a frame)
         new_refuse_test(presents);
         if (ab_running()) st_mc_frames[std::clamp(mesh_conv_mode(), 0, 2)]++;   // (RX_VK_MESH_CONV's A/B: the frame's side)
         wide_sides_tick();
@@ -5556,7 +5696,7 @@ std::atomic<uint32_t> present_kind{0};   // (vk_framegen.cpp: 1 while a made fra
 // for the submit and the present. Held over vkAcquireNextImageKHR and the fence, it stopped the replay's submits for as long as
 // the swapchain had no image free, twice a frame with frame interpolation.
 std::mutex present_image_mu;
-static bool present_out(uint32_t index, std::unique_lock<std::mutex>& qk);   // (present_image's end, below)
+static bool present_out(uint32_t index, std::unique_lock<decltype(dev.present_mu)>& qk);   // (present_image's end, below)
 thread_local PendingPresent* present_defer_into = nullptr;
 static VkFence present_copy_done = VK_NULL_HANDLE;   // (present_image's copy, while it presents: the presenter thread may take it)
 namespace {
@@ -5908,6 +6048,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
 
 bool present_commit(const PendingPresent& p) {
     if (!p.used) return false;
+    rec::Settled settled;   // (RX_VK_RECORDER_PARTS: its copy was submitted after the parts before it; the present needs none)
     std::lock_guard lk(present_image_mu);
     std::unique_lock qk(dev.present_mu);
     if (p.swapchain != dev.swapchain || p.swapchain_generation != dev.swapchain_generation) return false;   // (made again since the copy)
@@ -5920,7 +6061,7 @@ bool present_commit(const PendingPresent& p) {
 }
 
 // The present of a swapchain image whose copy is submitted, as present_image ended before; qk holds dev.present_mu
-static bool present_out(uint32_t index, std::unique_lock<std::mutex>& qk) {
+static bool present_out(uint32_t index, std::unique_lock<decltype(dev.present_mu)>& qk) {
 #ifdef TRACY_ENABLE
     HT_SCOPE("present_out");
 #endif
@@ -6052,6 +6193,9 @@ bool presenter_wait_copy(VkFence done) {
 }
 void presenter_loop() {
     SetThreadDescription(GetCurrentThread(), L"mkw_vk presenter");
+    // (RX_VK_RECORDER_PARTS: its fence is the copy's, submitted before the hand-off, and its present needs no part: it never waits
+    // for the parts handed to the recorder, at its waits or the queue's lock)
+    rec::Settled settled;
 #ifdef TRACY_ENABLE
     HT_THREAD_NAME("mkw_vk presenter");
 #endif

@@ -77,7 +77,8 @@ at the build, the AppImage's Play), so the shaders are prepared in the store the
   through Eden's recompiler to SPIR-V, and mesh and task programs use `VK_EXT_mesh_shader` or a compute fallback
   (`RX_VK_MESH_SHADERS`).
 - Its threads: the game's own, one render thread that replays every command buffer, from 6 cores a recorder thread that
-  makes the driver's calls for it, and a presenter thread ([threads.md](threads.md)).
+  makes the driver's calls for it and ends and submits each part the render thread hands it, and a presenter thread
+  ([threads.md](threads.md)).
 - `gpu/vk` is the only renderer. Without a usable Vulkan nothing is drawn, and the log says "no renderer".
 - The interface between the host and the renderer is `MkwVkHost` / `MkwVkRenderer` in
   [`gpu/vk/vk_api.h`](../../../gpu/vk/vk_api.h). Any change to it bumps `MKWVK_API_VERSION`, and both binaries are rebuilt

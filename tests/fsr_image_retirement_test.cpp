@@ -112,10 +112,14 @@ inline void slot_begin(uint64_t) {}
 inline void slot_done() {}
 inline uint64_t produced() { return 0; }
 struct OwnSlot { OwnSlot() {} ~OwnSlot() {} };   // (a scope, as the real one)
+inline bool parts_wanted() { return false; }   // (RX_VK_RECORDER_PARTS: no recorder thread here, its parts made as before)
 }   // namespace rec
 uint64_t rec_end_pos[64];   // (vk_replay.cpp: each slot's end in the recorder's ring)
 uint64_t occ_part_lo = UINT64_MAX, occ_part_hi = 0;   // (vk_replay.cpp, RX_VK_OCC_COPY: no occlusion queries here)
 void occ_copy_part(VkCommandBuffer) {}
+// (vk_replay.cpp, RX_VK_RECORDER_PARTS: a part's end and submit for the recorder thread, never asked for here: rec::parts_wanted)
+struct PartSubmit { Recording* r; uint64_t value, seq, reflex; bool uploads, signal_value; };
+void post_part_submit(const PartSubmit&) { need(false, "a part handed to a recorder thread"); }
 // PRODUCTION
 void retire(uintptr_t id, uint64_t required) {
     bundles[id].required = required;
