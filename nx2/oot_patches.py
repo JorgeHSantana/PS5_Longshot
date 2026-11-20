@@ -31,6 +31,11 @@ Each is a runtime switch where it can be, so the game's own path stays reachable
   round moved is made again; hos_oot_tex_compact_due says whether it may ask now (HOS_TEX_COMPACT_MS: once a second as
   shipped, 0 at every frame, the game's own). The round itself is untouched.
 - Ocarina note controls: the note-wait action's start (f_828a9190) and tick (f_828a9280) report the wait to the host (hos_oc_wait, hos_oc_beat), which swaps the five notes for its own controls (host/nn_hid.c); a tick whose gates refuse reports no wait, so a dialogue keeps its buttons.
+- The neighbouring map the OptimizeChangeBank thread preloads, kept while the game's choice only flickers
+  (host/oot_ocb_hold.h): the preload manager's update (f_832b9880) picks one of the map's neighbours each frame and a
+  change cancels the one loading or loaded; a choice flickering between two (or in and out of a radius) reloaded them over
+  and over with Link on one spot. Its choice goes through hos_oot_ocb_pick, which takes another neighbour only once it
+  stays the choice HOS_OCB_HOLD_MS (0: the game's own at every frame).
 - The game's job barriers waiting for their work (host/oot_barrier.h): three parallel-for jobs (f_800998a0, f_800738e0,
   f_8007e200) sleep 20 us and look again while the masks they poll are not full; the sleep is hos_oot_barrier_wait, which
   ends when a polled word moves, and each OR into such a word wakes the waiters (hos_oot_barrier_wake). On by default;
@@ -859,6 +864,46 @@ def patch_tex_compact(s):
     return s, 1
 
 
+# The neighbouring map the OptimizeChangeBank thread preloads, kept while the game's choice only flickers (host/oot_ocb_hold.h
+# has why). f_832b9880 is the preload manager's update: at 0x832b9dc8 the unit it chose is in w21 (bit 31: none) and the
+# manager in x19; from there it asks for that unit and lets the others go. The choice goes through the host first.
+OCBH_HEAD = "void f_832b9880(Ctx *__restrict A64_NOESC c) {\n"
+OCBH_LABEL = "L_832b9dc8:;\n"
+OCBH_RE = re.compile(r"L_832b9dc8:;\nif \(\(\((x21_|c->x\[21\]) >> 31\) & 1\)\) \{ goto L_832b9e0c; \}\n")
+OCBH_MARK = "/* (nx2/oot_patches.py: HOS_OCB_HOLD_MS, the preloaded neighbour kept while the choice flickers) */"
+OCBH_DECL = "extern uint64_t hos_oot_ocb_pick(Ctx *c, uint64_t mgr, uint64_t chosen);\n"
+
+
+def patch_ocb_hold(s):
+    """The preload manager's choice of a neighbouring map through the host: (s, 1) when its update is in s with it (made now
+    or before), (s, 0) when it is not here or its code differs (another game version: left as it is)"""
+    at = _function(s, OCBH_HEAD)
+    if at is None:
+        return s, 0
+    head, end = at
+    body = s[head:end]
+    if body.count(OCBH_MARK) == 1:
+        return s, 1
+    found = OCBH_RE.findall(body)
+    if len(found) != 1 or OCBH_MARK in body:
+        return s, 0
+    w21 = found[0]
+    x19 = "c->x[19]"
+    if w21 == "x21_":
+        # (the registers as locals: the manager is x19's local, which the function keeps up to date and c->x[19] need not be.
+        # A function without that local on its first line is not the code this patch knows: left as it is, and the report's
+        # warning says so)
+        if not re.search(r"\bx19_ = c->x\[19\]", body[:body.find("\n", len(OCBH_HEAD)) + 1]):
+            return s, 0
+        x19 = "x19_"
+    call = "    %s = hos_oot_ocb_pick(c, %s, %s);   %s\n" % (w21, x19, w21, OCBH_MARK)
+    body = OCBH_RE.sub(lambda m: OCBH_LABEL + call + m.group(0)[len(OCBH_LABEL):], body, count=1)
+    s = s[:head] + body + s[end:]
+    if OCBH_DECL not in s:
+        s = s.replace('#include "a64.h"\n', '#include "a64.h"\n' + OCBH_DECL, 1)
+    return s, 1
+
+
 def patch_bgm_flags(s):
     """The music manager's change flags with the ones the gate held back: (s, 1) when its update is in s with them (made now
     or before), (s, 0) when it is not here or its code differs (another game version: left as it is)"""
@@ -1644,6 +1689,11 @@ def patch_file(s, name, protect_hearts=False):
     if texc != out:
         lines.append("oot_patches: the texture heap's compaction asked for through the host in " + name)
     out = texc
+    ocbh, found = patch_ocb_hold(out)
+    counts["preload choice"] += found
+    if ocbh != out:
+        lines.append("oot_patches: the preload manager's choice of a neighbouring map through the host in " + name)
+    out = ocbh
     flags, found = patch_bgm_flags(out)
     counts["music manager flags"] += found
     if flags != out:
@@ -1738,6 +1788,8 @@ def report(paths, counts, protect_hearts=False):
         print("oot_patches: WARNING: the music manager's time was found %d times, not once" % total["music manager time"])
     if total["texture compaction"] != 1:   # (without it HOS_TEX_COMPACT_MS does nothing: the game compacts at every frame)
         print("oot_patches: WARNING: the texture heap's compaction request was found %d times, not once" % total["texture compaction"])
+    if total["preload choice"] != 1:   # (without it HOS_OCB_HOLD_MS does nothing: a flickering choice reloads the neighbours)
+        print("oot_patches: WARNING: the preload manager's choice was found %d times, not once" % total["preload choice"])
     if total["music manager flags"] != 1:   # (without it, above 60 fps the battle music can play on after a fight)
         print("oot_patches: WARNING: the music manager's change flags were found %d times, not once" % total["music manager flags"])
     if total["job barrier waits"] != len(BARRIER_SITES):   # (without them the job barriers sleep 20 us there, as before)

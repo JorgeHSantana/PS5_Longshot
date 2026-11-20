@@ -131,6 +131,7 @@ SW(HOS_NVN_WATCH_DRAW, diag, string, "off", "Logs who records indexed draws of t
 SW(HOS_NVN_WATCH_DRAW_THREAD, diag, string, "every thread", "Narrows HOS_NVN_WATCH_DRAW to draws recorded on threads whose name contains the value.")
 SW(HOS_NVN_WATCH_RT, diag, string, "off", "Logs who sets the render target at that guest address (hex), as guest call chains.")
 SW(HOS_NVN_WATCH_TEX, diag, string, "off", "Logs who binds that texture handle (hex), as guest call chains, each once.")
+SW(HOS_OCB_HOLD_MS, tune, string, "2000: a new neighbouring map to preload is taken once it stays the choice 2 s", "OoT's OptimizeChangeBank preloads one neighbouring map; where Link stands inside two maps' radii its choice flipped as he turned, each flip a cancel and a full reload. The choice is held until a new one stays chosen this many ms; 0 or off: the game's own choice (host/oot_ocb_hold.h).")
 SW(HOS_OCB_NORMAL, kill, bool, "OoT's OptimizeChange background thread runs at lowered host priority", "=1 leaves the OptimizeChange thread at normal priority, as before.")
 SW(HOS_OOT_BARRIER_WAIT, kill, bool, "on: three of OoT's parallel-for jobs (f_800998a0, f_800738e0, f_8007e200) wait until a mask word their barrier polls moves, woken by the thread that ORs it (at most 1 ms)", "=0: the game's job barriers sleep 20 us and look again, as before; HOS_AB may flip it.")
 SW(HOS_OOT_CHEATS, player, bool, "the Debug tab's tools row (off)", "=1 turns the Debug tab's tools (flight, free camera, teleport, inventory) on whatever the menu's row says.")
