@@ -97,6 +97,11 @@ enum { HOS_OPT_VIBRATION_STATUS = 64 };
    screen fitted to its width, as the menus). HOS_WIDE_UI, when set, stands over it. The existing option callback: no new
    member. 62 to 70, 80, 88 and 90 are taken by open pull requests.) */
 enum { HOS_OPT_HUD_LAYOUT = 71 };
+/* (longshot) Controls' DualSense HD Haptics, 1 on (the default): a DualSense that RenHDrum plays (host/rumble_renhdrum.c)
+   taps its speaker and kicks back its held L2/R2 from the game's vibration, the motors' heavy hits a little deeper; 0
+   its voice coils only, as before. host/pad_sdl.c reads it by its number each poll. The existing option callback: no new
+   member. 93: 62 to 70, 80, 88 and 90 are taken by open pull requests */
+enum { HOS_OPT_DS_HD_HAPTICS = 93 };
 
 /* (longshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of longshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:

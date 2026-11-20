@@ -135,11 +135,12 @@ int main() {
     Row test = {TAB_CONTROLS, "Test vibration", nullptr, 0, 0, 0, nullptr, nullptr, hn_vibration_test};
     static const char* cells[] = {"No controller", "Off", "Motors", "HD rumble", "Fine haptics (cable)",
                                   "Fine haptics (Bluetooth)", "Four motors", "HD rumble (RenHDrum)", "Motors: no sound card",
-                                  "Motors: no RenHDrum", "Motors (Bluetooth)"};
+                                  "Motors: no RenHDrum", "Motors (Bluetooth)", "Grips (RenHDrum)"};
     static const int says[] = {VIB_SAY_NO_PAD, VIB_SAY_OFF, VIB_SAY_MOTORS, VIB_SAY_HD, VIB_SAY_FINE_USB, VIB_SAY_FINE_BT,
-                               VIB_SAY_FOUR, VIB_SAY_HD_RH, VIB_SAY_WAITING, VIB_SAY_NO_LIB, VIB_SAY_BLUETOOTH};
-    for (int i = 0; i < 11; i++)
-        for (int kind = VIB_PAD_OTHER; kind <= VIB_PAD_SWITCH; kind++) {
+                               VIB_SAY_FOUR, VIB_SAY_HD_RH, VIB_SAY_WAITING, VIB_SAY_NO_LIB, VIB_SAY_BLUETOOTH,
+                               VIB_SAY_GRIPS};
+    for (int i = 0; i < 12; i++)
+        for (int kind = VIB_PAD_OTHER; kind <= VIB_PAD_STEAM; kind++) {
             vibration_status_cache.store(vibration_status(kind, says[i]));
             CHECK(!std::strcmp(vibration_cell(), cells[i]));
             CHECK(test.hint(0, -1) != nullptr && test.hint(0, -1) == vibration_why(says[i]));
@@ -147,7 +148,7 @@ int main() {
     /* every line the help can show, for its height (measure_help), and no more */
     int lines = 0;
     while (test.hint(0, lines)) lines++;
-    CHECK(lines == 11);
+    CHECK(lines == 12);
     vibration_status_cache.store(0);
     CHECK(!std::strcmp(vibration_cell(), "No controller"));
     return 0;
@@ -240,7 +241,8 @@ def host():
     poll = definition(pads, "static void pads_poll")
     for need, why in (("rx_option(HOS_OPT_VIBRATION, VIB_MODE_AUTO)", "the Vibration row does not reach the pads"),
                       ("if (strength <= 0) mode = VIB_MODE_OFF", "an options file's Rumble strength Off is not Off"),
-                      ("rh_tick(now, testing, strength);", "RenHDrum's backends do not get the test and the strength"),
+                      ("rh_tick(now, testing, strength, rx_option(HOS_OPT_DS_HD_HAPTICS, 1) != 0);",
+                       "RenHDrum's backends do not get the test, the strength and DualSense HD Haptics"),
                       ("vib_choose(i, mode, now);", "the pads' backends are not chosen each poll"),
                       ("if (pads[i].vib == VIB_NONE) continue;", "Off still plays"),
                       ("rx_option_set(HOS_OPT_VIBRATION_STATUS, st);", "what plays the pad is not reported")):

@@ -28,6 +28,7 @@ static struct {
     void *PadType, *PadEffect;   /* (optional: HD rumble, host/pad_sdl.c) */
     void *PadHasSensor, *PadSensorEnable, *PadSensorData;   /* (motion: optional, NULL in an SDL without them) */
     void *PadVendor, *PadSteamHandle, *SetHintPriority;   /* (Steam's stand-in pads: optional, host/steam_pads.h) */
+    void *PadProduct;   /* (a pad's USB product id: optional, host/vibration.h's Steam Controller (2026)) */
     void *JoystickGUID, *PadMapping;   /* (optional connection diagnostics: no serial number or device path) */
     void *PadWireless;   /* (optional: a pad's transport, SDL_GetJoystickConnectionState) */
     /* (optional, host/pad_sdl.c's vibration: an Xbox pad's trigger motors; a pad's HID device, written beside SDL for a
@@ -90,6 +91,7 @@ static int get_all(HMODULE m, int three) {
     /* (Steam's stand-in pads told apart from the real ones: SDL 2.30 on and SDL3 3.2 on; without them Steam's
        controller ignore list stays as Steam set it) */
     *(FARPROC *)&f.PadVendor = GetProcAddress(m, three ? "SDL_GetGamepadVendor" : "SDL_GameControllerGetVendor");
+    *(FARPROC *)&f.PadProduct = GetProcAddress(m, three ? "SDL_GetGamepadProduct" : "SDL_GameControllerGetProduct");
     *(FARPROC *)&f.PadSteamHandle = GetProcAddress(m, three ? "SDL_GetGamepadSteamHandle" : "SDL_GameControllerGetSteamHandle");
     *(FARPROC *)&f.SetHintPriority = GetProcAddress(m, "SDL_SetHintWithPriority");
     *(FARPROC *)&f.JoystickGUID = GetProcAddress(m, three ? "SDL_GetJoystickGUID" : "SDL_JoystickGetGUID");
@@ -1051,6 +1053,7 @@ int hos_sdl_pad_sensor(void *pad, int type, float *data, int n) {
    Steam Input handle, not 0 for a Steam stand-in pad */
 int hos_sdl_knows_steam_pads(void) { return f.PadVendor && f.PadSteamHandle && f.SetHintPriority; }
 uint16_t hos_sdl_pad_vendor(void *pad) { return f.PadVendor ? CALL(uint16_t (*)(void *), PadVendor)(pad) : 0; }
+uint16_t hos_sdl_pad_product(void *pad) { return f.PadProduct ? CALL(uint16_t (*)(void *), PadProduct)(pad) : 0; }
 uint64_t hos_sdl_pad_steam_handle(void *pad) {
     return f.PadSteamHandle ? CALL(uint64_t (*)(void *), PadSteamHandle)(pad) : 0;
 }

@@ -261,7 +261,8 @@ Finish with `tools.py check --require`. The next release uses the new line; inst
 profiles are not tools: they are committed in `assets/profiles/`.
 
 RenHDrum isn't a tool either. The release builds `renhdrum.dll` and `renhdrum.so` from `third_party/renhdrum`
-(`scripts/renhdrum.py build` in `build-windows.yml` and `build-linux.yml`, with a pinned Rust) and ships them in the
+(`scripts/renhdrum.py build` in `build-windows.yml` and `build-linux.yml`, with a pinned Rust, its build crate by its
+`Cargo.lock` SHA-256 and libopus from `third_party/opus`) and ships them in the
 builders, where a player's build finds them. A newer RenHDrum: its `PROVENANCE.md` says how. A newer Rust:
 `RUST_VERSION` and the parts' SHA-256 in `scripts/renhdrum.py`.
 

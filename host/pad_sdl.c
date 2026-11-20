@@ -64,6 +64,7 @@ static struct {
     float bias[3], bias_t;
     int has_bias;
     uint16_t vendor;      /* (longshot) its USB vendor, and its Steam Input handle: not 0 for a Steam stand-in pad */
+    uint16_t product;     /* (longshot) its USB product id (host/vibration.h: a Steam Controller (2026)) */
     uint64_t steam;
     int motion_only;      /* (host/steam_pads.h) a real Valve pad while a Steam stand-in pad is open: motion, no input */
 } pads[MAX_PADS];
@@ -341,8 +342,7 @@ static int usb_found;        /* a DualSense's four-channel sound card was there 
 static int64_t usb_next_look;
 /* RenHDrum for a pad of this kind: loaded (once) only for a pad it would play */
 static int vib_rh_for(int kind) {
-    if (vib_force == VIB_FORCE_HD || vib_force == VIB_FORCE_MOTORS) return 0;
-    if (kind != VIB_PAD_DUALSENSE && !(vib_force == VIB_FORCE_RENHDRUM && kind != VIB_PAD_OTHER)) return 0;
+    if (vib_force == VIB_FORCE_HD || vib_force == VIB_FORCE_MOTORS || kind == VIB_PAD_OTHER) return 0;
     return rh_load();
 }
 /* what played pad i lets go of it, and its motors are stopped (whatever plays next sends what is playing) */
@@ -357,6 +357,7 @@ static void vib_leave(int i, int64_t now) {
         hos_sdl_pad_rumble_triggers(gc, 0, 0, 0);
         break;
     case VIB_RH_SWITCH: rh_pad_close(gc); break;
+    case VIB_RH_STEAM: rh_steam_close(); break;
     default: break;
     }
     if (pads[i].vib >= 0) hos_sdl_pad_rumble(gc, 0, 0, 0);
@@ -376,6 +377,9 @@ static void vib_choose(int i, int mode, int64_t now) {
     } else if (pads[i].vib == VIB_RH_DS_BT && !rh_bt_alive()) {
         vib_leave(i, now);
         pads[i].vib_failed = VIB_RH_DS_BT, pads[i].vib_retry_ns = now + 30000000000LL;
+    } else if (pads[i].vib == VIB_RH_STEAM && !rh_steam_alive()) {
+        vib_leave(i, now);
+        pads[i].vib_failed = VIB_RH_STEAM, pads[i].vib_retry_ns = now + 30000000000LL;
     }
     const int rh = vib_rh_for(kind);
     int ds_usb = 0, ds_hid = 0;
@@ -388,15 +392,23 @@ static void vib_choose(int i, int mode, int64_t now) {
         }
         owner = rh_bt_owner();
         ds_hid = owner == gc || (!owner && hos_sdl_hid_can() && *hos_sdl_pad_path(gc));
+    } else if (rh && kind == VIB_PAD_STEAM && mode == VIB_MODE_AUTO) {   /* (its grips: its HID device, one pad at a time) */
+        void *owner = rh_steam_owner();
+        ds_hid = owner == gc || (!owner && hos_sdl_hid_can() && *hos_sdl_pad_path(gc));
     }
     const int hd = pads[i].hd_kind != HD_RUMBLE_NONE && pads[i].hd != HD_RUMBLE_OFF;
     int want = vibration_pick(mode, vib_force, kind, pads[i].wireless, hd, rh, ds_usb, ds_hid);
+    /* (a Joy-Con alone: our HD rumble merges both sides into it, RenHDrum's engine plays its own side's only. Testers'
+       =renhdrum still gets RenHDrum's) */
+    const int single = pads[i].hd_kind == HD_RUMBLE_JOYCON_LEFT || pads[i].hd_kind == HD_RUMBLE_JOYCON_RIGHT;
+    if (want == VIB_RH_SWITCH && single && vib_force != VIB_FORCE_RENHDRUM) want = hd ? VIB_HD : VIB_MOTORS;
     if (want == pads[i].vib_failed && now < pads[i].vib_retry_ns) want = VIB_MOTORS;   /* (it would not open: not yet) */
     if (want == pads[i].vib) return;
     vib_leave(i, now);
     int ok = 1;
     if (want == VIB_RH_DS_USB) ok = rh_usb_open(gc);
     else if (want == VIB_RH_DS_BT) ok = rh_bt_open(gc, hos_sdl_pad_path(gc));
+    else if (want == VIB_RH_STEAM) ok = rh_steam_open(gc, hos_sdl_pad_path(gc), pads[i].product == VIB_STEAM_CABLE);
     else if (want == VIB_RH_XBOX || want == VIB_RH_SWITCH)
         ok = rh_pad_open(gc, want, pads[i].wireless == 1, pads[i].hd_kind == HD_RUMBLE_PRO);
     if (!ok) {
@@ -408,7 +420,8 @@ static void vib_choose(int i, int mode, int64_t now) {
                 want == VIB_NONE ? "off" : want == VIB_MOTORS ? "its motors" : want == VIB_HD ? "its own HD rumble" :
                 want == VIB_RH_DS_USB ? "fine haptics on its cable (RenHDrum)" :
                 want == VIB_RH_DS_BT ? "fine haptics over Bluetooth (RenHDrum)" :
-                want == VIB_RH_XBOX ? "four motors (RenHDrum)" : "HD rumble (RenHDrum)");
+                want == VIB_RH_XBOX ? "four motors (RenHDrum)" :
+                want == VIB_RH_STEAM ? "its grips (RenHDrum, experimental)" : "HD rumble (RenHDrum)");
     pads[i].vib = (int8_t)want;
 }
 /* an Xbox pad's four motors (RenHDrum): sent when RenHDrum says, and again every half second while they turn, as the
@@ -465,7 +478,9 @@ static void pads_poll(void) {
                 hd_open(slot, gc);
                 /* (longshot) what plays its vibration is chosen by the poll below (host/vibration.h) */
                 pads[slot].vib = -1, pads[slot].vib_failed = -1, pads[slot].vib_retry_ns = 0;
-                pads[slot].vib_kind = (int8_t)vibration_pad_kind(hos_sdl_load(), hos_sdl_pad_type(gc), hos_sdl_pad_name(gc));
+                pads[slot].product = hos_sdl_pad_product(gc);
+                pads[slot].vib_kind = (int8_t)vibration_pad_kind(hos_sdl_load(), hos_sdl_pad_type(gc), hos_sdl_pad_name(gc),
+                                                                 hos_sdl_pad_vendor(gc), pads[slot].product);
                 pads[slot].wireless = (int8_t)hos_sdl_pad_wireless(gc);
                 pads[slot].motion = hos_sdl_pad_has_sensor(gc, HOS_SDL_SENSOR_GYRO) && hos_sdl_pad_has_sensor(gc, HOS_SDL_SENSOR_ACCEL);
                 pads[slot].motion_on = 0;
@@ -494,7 +509,8 @@ static void pads_poll(void) {
         uint16_t motors[2];
         /* (Test vibration, or a strength just changed: three quarters of the motors, as the game's is scaled) */
         const int testing = now < __atomic_load_n(&rumble_test_until, __ATOMIC_RELAXED);
-        rh_tick(now, testing, strength);   /* (RenHDrum's backends: the test, a side gone quiet, the strength) */
+        /* (RenHDrum's backends: the test, a side gone quiet, the strength, and the Controls page's DualSense HD Haptics) */
+        rh_tick(now, testing, strength, rx_option(HOS_OPT_DS_HD_HAPTICS, 1) != 0);
         rumble_strength(testing ? 0xC000 : (uint16_t)rumble_low, testing ? 0xC000 : (uint16_t)rumble_high, strength, motors);
         const uint16_t lo = motors[0], hi = motors[1];
         uint8_t side[3][4];   /* (the HD rumble pads': each side's bytes, then both merged for a single Joy-Con) */
@@ -524,6 +540,8 @@ static void pads_poll(void) {
             const int motion_only = steam_pads_motion_only(pads[i].vendor, pads[i].steam, stand_in);
             if (motion_only != pads[i].motion_only) {
                 pads[i].motion_only = motion_only;
+                /* (its rumble goes through Steam's stand-in now: what played it here lets go, or it would play twice) */
+                if (motion_only && pads[i].vib >= 0) vib_leave(i, now);
                 /* (a real Valve pad this SDL opens with no gyroscope: an SDL with no driver for it, so the loosened
                    list gives no motion, said once so the player sees why) */
                 if (motion_only && !pads[i].motion)
@@ -593,7 +611,14 @@ static void pads_poll(void) {
             if (pads[i].used_ns >= status_used) status_used = pads[i].used_ns, status_pad = i;
             if (pads[i].vib == VIB_NONE) continue;
             if (pads[i].vib == VIB_HD && hd_poll(i, side, now)) continue;   /* (refused: its motors, and chosen again) */
-            if (pads[i].vib == VIB_RH_DS_USB || pads[i].vib == VIB_RH_DS_BT) continue;   /* (their own threads play) */
+            if (pads[i].vib == VIB_RH_DS_USB || pads[i].vib == VIB_RH_DS_BT) {   /* (their own threads play) */
+                /* (HD Haptics' triggers: how far each is pulled, 0 to 255, and whether another button is held) */
+                const int lt = hos_sdl_pad_axis(gc, AX_LT), rt = hos_sdl_pad_axis(gc, AX_RT);
+                rh_ds_triggers(gc, now, lt > 0 ? lt * 255 / 32767 : 0, rt > 0 ? rt * 255 / 32767 : 0,
+                               (sig & 0xFFFFFFFFULL) != 0);
+                continue;
+            }
+            if (pads[i].vib == VIB_RH_STEAM) continue;   /* (its own thread plays) */
             if (pads[i].vib == VIB_RH_XBOX) {
                 four_poll(i, now);
                 continue;

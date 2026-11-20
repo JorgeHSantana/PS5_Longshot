@@ -130,6 +130,7 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | Vibration | Auto, Basic, Off | Auto |
 | | Vibration strength | 25% to 200%, in steps of 25 | 100% |
 | | Test vibration | an action: Confirm buzzes the controller used last; the value says what plays it | Motors |
+| | DualSense HD Haptics | On, Off | On |
 | | Layout preset | Nintendo (Def), Xbox / PC, Swap Face, Switch 2 Pro; Custom once you bind a button yourself (on the Controls page) | Nintendo (Def) |
 | | Button prompts | Auto, Switch, Xbox, PlayStation 4, PlayStation 5, Steam Deck, Keyboard (on the Controls page; changes at once where the game allows it, else after a restart) | Auto |
 | | Motion | Opens the Motion page: Motion controls (Off, On; On), Motion sensitivity X (10% to 600%) and Y (10% to 300%, in steps of 10; 100%), Invert motion X and Y (Off, On; Off), Motion deadzone (Low, Standard, High; Standard) | |
@@ -231,9 +232,11 @@ helper asks you to.
 - **Camera speed** is how fast the right stick and the camera keys turn the camera, in percent of the game's own.
 - **Stick dead zone:** how far a stick moves before it counts. Lower it for a precise stick, raise it for one that
   drifts.
-- **Vibration:** Auto plays the best each controller can (a DualSense on a cable its voice coils, a Switch Pro
-  Controller its HD rumble, any other its two motors); Basic plays the two motors on every controller.
-  **Test vibration** says what plays the controller you used last.
+- **Vibration:** Auto plays the best each controller can (a DualSense its voice coils, on a cable or over Bluetooth;
+  an Xbox One or Series controller all four motors; a Switch Pro Controller its HD rumble; a Steam Controller (2026) its
+  grips, still experimental; any other its two motors); Basic plays the two motors on every controller.
+  **Test vibration** says what plays the controller you used last. **DualSense HD Haptics** (on) adds the DualSense's
+  speaker and its L2/R2 to that: soft taps from the speaker, and a kick in a trigger you hold when something hits.
 - **Motion** (a page on the Controls tab): the gyroscope aims where the game uses motion, with Switch Pro controllers,
   pads in Switch mode, DualSense and DualShock 4. Set the pad down for a second if the aim creeps.
 - **Walk mode** and **Walk speed:** while the Walk key is held (<kbd>Caps Lock</kbd> unless you change it), the movement
@@ -280,7 +283,8 @@ udev rules, the `steam-devices` package on most distributions). A third-party pa
 weak rumble or none gets the plain motor rumble with `HOS_HD_RUMBLE=0` in `longshot_env.txt`.
 
 **DualSense haptics:** a DualSense on a USB cable plays the game's own fine vibration on its voice coils, through
-RenHDrum, which the Longshot Builder puts beside the game. Without it, the pad gets its motors.
+RenHDrum, which the Longshot Builder puts beside the game. Without it, the pad gets its motors. With **DualSense HD
+Haptics** on (the default) its speaker taps and its triggers kick back too; turn it off for the voice coils alone.
 
 **The supported console's Pro Controller over USB (Windows):** the game reads it itself, with its motion sensor and
 rumble. Choose its own Layout preset for its buttons and icons; its Home button opens this menu (**Controller menu

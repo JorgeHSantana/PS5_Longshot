@@ -23,9 +23,15 @@ The game sends a value per side: a low and a high band, an amplitude and a frequ
 
 | Vibration row | Plays |
 |---|---|
-| Auto (default) | A DualSense on a cable: its voice coils through RenHDrum and its own sound card. A Switch Pro Controller or Joy-Con: its own HD rumble. Every other pad: its two motors (`rumble_map` in `nn_hid.c`) |
+| Auto (default) | Through RenHDrum, every pad it plays: a DualSense's voice coils (on a cable its own sound card, over Bluetooth HID report `0x36`), an Xbox One or Series pad's four motors, a Switch Pro Controller's or Joy-Con pair's HD rumble, a Steam Controller (2026)'s grips (HID report `0x88`, experimental in RenHDrum). Without RenHDrum, or what it needs: a Switch pad (and a Joy-Con alone, always) its own HD rumble, every other pad its two motors (`rumble_map` in `nn_hid.c`) |
 | Basic | Every pad's motors |
 | Off | Nothing |
+
+DualSense HD Haptics (`dualsense_hd_haptics=`, on by default, `HOS_OPT_DS_HD_HAPTICS`) is RenHDrum's for a DualSense
+it plays: its speaker taps (channel 1 of the cable's sound card, or Opus inside Bluetooth report `0x36`) and a held L2 or
+R2 kicks back (`rh_ds_triggers`, effects blocks through SDL's `SendGamepadEffect` on the cable, inside `0x36` over
+Bluetooth), the motors' heavy hits a little deeper. Off: the speaker at 0, the triggers released and Bluetooth's plain
+`0x32`, as RenHDrum 0.4 played.
 
 Vibration strength (`rumble_strength=`, 25 to 200 %) applies to every backend. RenHDrum
 ([`host/rumble_renhdrum.c`](../../../host/rumble_renhdrum.c), source in
@@ -71,7 +77,7 @@ The Insert menu works in swapchain coordinates, independent of the game's letter
 | `HOS_XINPUT=1` | Poll XInput as well as SDL |
 | `HOS_SWITCH2=0` | Leave a Switch 2 Pro Controller to a bridge program |
 | `HOS_INPUT_BACKGROUND` | Controllers count in the background (1) or never (0), over the menu |
-| `HOS_RUMBLE_BACKEND` | `renhdrum`: RenHDrum for every pad it can play (a DualSense over Bluetooth, an Xbox One or Series pad's four motors, a Switch pad's packets), for testers; `motors`: every pad's motors; `hd`: no RenHDrum |
+| `HOS_RUMBLE_BACKEND` | `renhdrum`: also a Joy-Con alone, and a DualSense whose connection SDL can't tell, through RenHDrum; `motors`: every pad's motors; `hd`: no RenHDrum (a Switch pad its own HD rumble) |
 | `HOS_MOUSE_NATIVE`, `HOS_MOUSE_SENS`, `HOS_MOUSE_INVERT_X`, `HOS_MOUSE_INVERT_Y` | Mouse camera settings over the menu |
 
 Scripted input for test runs (`HOS_INPUT_SCRIPT`, `HOS_INPUT_LIVE`) is in [developing](../developing.md#scripted-input). The full list is in

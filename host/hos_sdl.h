@@ -113,6 +113,7 @@ int hos_sdl_pad_sensor(void *pad, int type, float *data, int n);   /* 1 when rea
    calls); a pad's USB vendor (0 unknown); its Steam Input handle (0 for a real pad) */
 int hos_sdl_knows_steam_pads(void);
 uint16_t hos_sdl_pad_vendor(void *pad);
+uint16_t hos_sdl_pad_product(void *pad);   /* (its USB product id, 0 unknown) */
 uint64_t hos_sdl_pad_steam_handle(void *pad);
 /* (longshot) vibration (host/pad_sdl.c, host/rumble_renhdrum.c): a pad's transport (1 wireless, 0 wired, -1 when SDL
    cannot say); an Xbox pad's trigger motors (1 sent); a pad's device path ("" unknown) and a second handle on it */

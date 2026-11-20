@@ -44,6 +44,7 @@ FROZEN = {   # (a key: the value its row saves, as players' files hold them)
     "dlss_pre_bloom": "&opts.dlss_pre_bloom",
     "draws_line": "&opts.fps_dev_show[2]",
     "draws_skipped_line": "&opts.fps_dev_show[5]",
+    "dualsense_hd_haptics": "&opts.ds_hd_haptics",
     "field_of_view": "&opts.fov",
     "fps_counter": "&opts.show_fps",
     "fps_counter_position": "&opts.fps_corner",

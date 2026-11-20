@@ -68,6 +68,7 @@ if [ -n "${RENHDRUM_SO:-}" ]; then
     cp "$RENHDRUM_SO" "$T/third_party/renhdrum/renhdrum.so"
     cp third_party/renhdrum/LICENSE-MIT third_party/renhdrum/LICENSE-APACHE third_party/renhdrum/NOTICE \
        third_party/renhdrum/PROVENANCE.md "$T/licenses/renhdrum/"
+    cp third_party/opus/COPYING "$T/licenses/renhdrum/opus-COPYING"   # (libopus, built into it since RenHDrum 0.5)
 fi
 cp -a third_party/kenney_input "$T/third_party/"
 cp -a third_party/kenney_input_keyboard "$T/third_party/"
