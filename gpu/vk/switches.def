@@ -192,6 +192,7 @@ SW(HOS_SWITCH2_RUMBLE_TEST, diag, bool, "Windows: off", "=1 (a test's) logs how 
 SW(HOS_SYNC_TABLE_LOCK, kill, bool, "off: lock-free table reads", "Sync object lookups take the table's shared lock, as before.")
 SW(HOS_SYNC_TRACE, diag, bool, "off", "Logs nvdrv fences and sync point waits.")
 SW(HOS_TEST_ALLOC_REFUSE, diag, string, "off", "Refuses every allocation whose label contains the text (or one huge C++ allocation at the 600th present).")
+SW(HOS_TEXELS_KEEP_CORE, kill, bool, "off: a CPU read or write of texels gives its thread's virtual core up while it waits for the GPU", "=1 keeps the core through the wait, as before (a worker on that core can wait ~1 s behind it).")
 SW(HOS_TEXTS, kill, bool, "on: reworded texts served from the game folder's texts", "=0: the game's own texts, not the ones reworded for a PC.")
 SW(HOS_TEXT_SIZE, player, int, "the menu's Text size row", "The dialogue text size choice, over the Insert menu's Text size option.")
 SW(HOS_TEXT_SPEED, player, int, "the menu's Text speed row (0: the game's)", "Text speed 0-3 (the game's, 2x, 4x, instant) over the options file.")
