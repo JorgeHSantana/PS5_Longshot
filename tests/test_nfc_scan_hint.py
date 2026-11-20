@@ -6,6 +6,7 @@ with a text while the host's scan state was not "none" (0), and on a host with n
 non-Windows build): the count never ended, the render thread spun at the menu's first open and the game stopped presenting.
 This check compiles the function from the source with a stub host, for every scan state the host can report, and runs the menu's
 loop with a bound: it must end within the two lines the function documents (0 the longest, 1 the one now).
+Also cover a host with no scan callback and check that measuring hints preserves live status for states 0 through 7.
 
     python -I -B tests/test_nfc_scan_hint.py [--cxx g++]
 """
@@ -46,9 +47,15 @@ static bool ends() {
 int main() {
     host = nullptr;   // (no host at all)
     if (!ends()) return std::puts("FAIL: the Scan row's help lines do not end with no host"), 1;
+    Host missing{};
+    host = &missing;
+    if (!ends()) return std::puts("FAIL: help lines do not end without a scan callback"), 1;
     host = &real;
-    for (state = 0; state <= 7; state++)
+    for (state = 0; state <= 7; state++) {
         if (!ends()) return std::printf("FAIL: the Scan row's help lines do not end in scan state %d\n", state), 1;
+        if ((nfc_scan_says(-1) != nullptr) != (state >= 1 && state <= 6))
+            return std::printf("FAIL: live scan status changed in state %d\n", state), 1;
+    }
     std::puts("ok");
     return 0;
 }
