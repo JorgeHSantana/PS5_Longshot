@@ -222,6 +222,10 @@ B-series (PCI device `0xE2xx`) with driver 101.9154 or newer, one at a time on e
 
 Changing any `RX_VK_MESH*` switch translates every program again.
 
+Whether the driver offers mesh shaders is a separate question from whether this run uses them (`RX_VK_MESH_SHADERS`
+above): the device line (`vk: <GPU>, Vulkan ...; mesh shaders ...`) says `used`, `offered by the driver but not used`
+(a Steam Deck by default, with the reason) or `not offered by the driver`.
+
 ### Memory
 
 | Switch | What it does |

@@ -206,6 +206,8 @@ void new_refuse_test(int64_t presents) {   // (the replay's present, its count)
 
 namespace {
 
+const char* mesh_note = "not offered by the driver";   // (the device line's: mesh_rule::device_note, set by create_device)
+
 bool has_extension(const std::vector<VkExtensionProperties>& all, const char* name) {
     for (const auto& e : all)
         if (!std::strcmp(e.extensionName, name)) return true;
@@ -400,10 +402,11 @@ bool create_device() {
     // (longshot) RADV's native task/mesh path deadlocks the GPU: the gfx ring and RADV's gang compute ring
     // end up waiting on each other, and a mesh-only draw hangs with the compute queue empty (devcoredumps on an
     // RX 6800: no VM fault; waves stuck on gfx in the second). Task + mesh draws alone on the fallback still crash, so
-    // only full Compute is stable there, and the reports span Navi 2x (RX 6800, RX 6600 XT) and the RDNA3 APUs (Steam
-    // Deck OLED, Rog Xbox Ally X). With RADV, Automatic picks Compute; Native stays a choice (RX_VK_MESH_SHADERS=native).
-    // RDNA1 and older have no mesh shaders on RADV: for them a no-op. (By the driver, device_policy.h mesh_mode: AMDVLK,
-    // which does not show the deadlock, keeps native as its Automatic)
+    // only full Compute is stable there, and the reports span Navi 2x (RX 6800, RX 6600 XT) and the APUs (the Steam Deck
+    // OLED's Van Gogh, RDNA2; the ROG Xbox Ally X, RDNA3.5). With RADV, Automatic picks Compute; Native stays a choice
+    // (RX_VK_MESH_SHADERS=native). RDNA1 and older have no mesh shaders on RADV: for them a no-op. The log says the driver
+    // offers them all the same (mesh_rule::device_note). (By the driver, device_policy.h mesh_mode: AMDVLK, which does
+    // not show the deadlock, keeps native as its Automatic)
     // (the card's own, before the mode below: whether it has task and mesh shaders, for the Quality preset Auto (this PC), which
     // must not put a card that has them on Minimum because this run uses Compute)
     if (has_extension(exts, VK_EXT_MESH_SHADER_EXTENSION_NAME)) {
@@ -414,6 +417,7 @@ bool create_device() {
     }
     int mesh_mode_used = mesh_mode;
     if (mesh_mode_used == 0 && fadd_driver.driverID == VK_DRIVER_ID_MESA_RADV) mesh_mode_used = 2;
+    const bool radv_compute = mesh_mode == 0 && mesh_mode_used == 2;
     if (mesh_mode_used == 2) dev.mesh_shader = false;
     else optional(VK_EXT_MESH_SHADER_EXTENSION_NAME, dev.mesh_shader);
     optional(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME, dev.external_memory_host);
@@ -697,7 +701,9 @@ bool create_device() {
     // (longshot) RDNA1 and older GPUs: no mesh shaders, but task and mesh programs run as compute shaders
     // that write their vertices to buffers, drawn through an ordinary graphics pipeline. It needs buffer device addresses.
     dev.mesh_fallback = !dev.mesh_shader && f12.bufferDeviceAddress && !env_on("RX_VK_NO_MESH_FALLBACK");
-    if (dev.mesh_fallback) logf("vk: no mesh shaders: task and mesh programs run as compute shaders (issue 640 fallback)");
+    if (dev.mesh_fallback)
+        logf("vk: mesh shaders %s: task and mesh programs run as compute shaders (issue 640 fallback)",
+             dev.mesh_capable ? "offered by the driver but not used" : "not offered by the driver");
     bool task_mesh_fallback = false;
 #ifdef _WIN32
     // AMD's Windows driver can time out on Navi 21 to 23 on task + mesh draws and on mesh-only draws: mesh_mode.h
@@ -714,7 +720,10 @@ bool create_device() {
     logf("vk: mesh shaders: %s, from %s: %s", mesh_mode == 2 ? "Compute" : mesh_mode == 1 ? "Native" : "Automatic",
          mesh_choice.why, dev.mesh_shader ? (dev.mesh_only_fallback ? "mesh-only and task + mesh draws on the compute path"
                             : dev.task_mesh_fallback ? "native, task + mesh draws on the compute path" : "native")
-                         : dev.mesh_fallback ? "the compute path" : "none");
+                         : dev.mesh_fallback ? (radv_compute ? "the compute path (RADV's own can hang the GPU, issue 2245)"
+                                                            : "the compute path")
+                                             : "none");
+    mesh_note = mesh_rule::device_note(dev.mesh_capable, dev.mesh_shader, mesh_mode, radv_compute);
     if (robust) logf("vk: robust buffer access %s", robust_ok ? "on" : "not supported");
     f.features.robustBufferAccess = robust_ok ? VK_TRUE : VK_FALSE;   // (off by default: the game's accesses stay in their buffers)
     dev.features = f.features;
@@ -1969,7 +1978,7 @@ const MkwVkRenderer* mkwvk_init(const MkwVkHost* h) {
     }
     logf("vk: %s, Vulkan %u.%u, driver %#x; mesh shaders %s, host memory import %s, pipeline libraries %s",
          dev.props.deviceName, VK_VERSION_MAJOR(dev.props.apiVersion), VK_VERSION_MINOR(dev.props.apiVersion),
-         dev.props.driverVersion, dev.mesh_shader ? "yes" : "no", dev.external_memory_host ? "yes" : "no",
+         dev.props.driverVersion, mesh_note, dev.external_memory_host ? "yes" : "no",
          dev.graphics_pipeline_library ? "yes" : "no");
     logf("vk: driver: %s", driver_text().c_str());   // (the builders' Save my pipeline list reads it: nx2/pipeline_share.py)
     // (what this PC is, what it gets for it, and which of those a switch set: device_policy.h)

@@ -196,7 +196,7 @@ def main():
         (Path(t) / "game.log").write_text(
             "[hos host] vk: device 0: Integrated GPU, Vulkan 1.3, driver 0x1, type 1\n"
             "[hos host] vk: device 1: Discrete GPU, Vulkan 1.4, driver 0x2, type 2\n"
-            "[hos host] vk: Discrete GPU, Vulkan 1.4, driver 0x2; mesh shaders yes, host memory import yes, pipeline libraries yes\n",
+            "[hos host] vk: Discrete GPU, Vulkan 1.4, driver 0x2; mesh shaders used, host memory import yes, pipeline libraries yes\n",
             encoding="utf-8")
         gpu = rep.machine(t).get("gpu", "")
         if not gpu.startswith("Discrete GPU"):
