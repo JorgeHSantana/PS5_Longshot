@@ -48,10 +48,12 @@ const char* hn_nfc(int, int variant) {
     if (st & 1) return "The game is not asking for an NFC tag now. Open its NFC screen first, or tap one ahead.";
     return "The game has not started its NFC reader yet.";
 }
-/* The Scan row: what the scan is doing, or did (variant 0: the longest) */
+/* The Scan row: what the scan is doing, or did (variant 0: the longest; 1: the one now, when the scan has said something; no
+   more: the menu asks for the next line until nullptr, measure_help) */
 const char* nfc_scan_says(int variant) {
     static char b[200];
     static const char* const looking = "Hold the tag to the controller: on the logo in the middle of a Switch 2 Pro Controller, for up to ten seconds.";
+    if (variant > 1) return nullptr;
     if (variant == 0 || !host || !host->nfc_scan) return looking;
     switch (host->nfc_scan(0)) {
     case 1: return looking;
