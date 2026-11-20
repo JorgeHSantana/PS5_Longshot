@@ -242,6 +242,7 @@ SW(LONGSHOT_DRIVER_ENV_SET, diag, string, "not set", "Set by the game itself bef
 SW(LONGSHOT_NFC_DIR, player, string, "Windows: %LOCALAPPDATA%\\Longshot\\nfc; Linux: $XDG_DATA_HOME/longshot/nfc (~/.local/share/longshot/nfc)", "The folder of NFC tag files the Insert menu's NFC tab lists, instead of the user's own.")
 SW(LONGSHOT_NO_AV1_NOTICE, kill, bool, "the notice window is shown once (Windows, no AV1 decoder)", "No pop-up asking to install the AV1 Video Extension; the log line is still written.")
 SW(LONGSHOT_PREPARE_ONLY, player, bool, "off: a normal game run", "Marks a --prepare-shaders run: the renderer only compiles and saves shaders, skipping work a played run does.")
+SW(LONGSHOT_SHADER_STORE, player, string, "Windows: %LOCALAPPDATA%\\Longshot\\shaders; Linux: $XDG_CACHE_HOME/longshot/shaders (~/.cache/longshot/shaders)", "The shader store's folder, the SPIR-V every game folder's program cache shares (gpu/vk/spirv_pack.h), instead of the user's own; 0: none, each record keeps its SPIR-V. The builders keep it for the game they start, so set it where the build runs too.")
 SW(RX_NVN_TEXELS_LOG, diag, bool, "no logging", "Logs each WriteTexels/ReadTexels call with its data address, nonzero byte count and guest caller chain.")
 SW(RX_NVN_WATCH_AFTER, diag, int, "0 s: writes are reported from the start", "Reports watched WriteTexels-source writes only after that many seconds.")
 SW(RX_NVN_WATCH_ALL, diag, bool, "off: the Resource Memory thread's writes are not reported", "Reports watched writes from the Resource Memory thread too.")

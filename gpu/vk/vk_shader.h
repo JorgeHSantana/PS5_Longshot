@@ -33,6 +33,8 @@ struct Stage {
     // file if play ever builds a new pipeline state variant for this program
     int64_t code_at = 0;
     uint64_t code_words = 0;
+    // (longshot) its SPIR-V's hash in the shader store (spirv_pack.h), when code_at is a place there: read only with it
+    uint64_t code_hash_a = 0, code_hash_b = 0;
     // (longshot) the record it was read from (its payload's position and stored size): its head is checked before code_at is read
     // again (program_cache_complete_graphics). Here and not in Program, whose size is part of the translator's stamp
     int64_t record_at = 0;

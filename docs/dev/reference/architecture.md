@@ -47,6 +47,17 @@ writes at run time goes in two subfolders, which the host creates (`host/game_la
   deleting the state list loses the pipelines this PC's play recorded.
 - `logs/`: logs and traces.
 
+The programs' SPIR-V is not in `longshot_programs.bin` but in the player's **shader store** (`gpu/vk/spirv_pack.h`):
+`%LOCALAPPDATA%\Longshot\shaders` on Windows, `$XDG_CACHE_HOME/longshot/shaders` (else `~/.cache/longshot/shaders`) on
+Linux. Each program's SPIR-V is kept there once, by its content, for every game folder, and a record names its place
+and hash: a read gives those words or nothing, whatever is at that place now. Builds with different translators share
+nearly all of it (99.6% of programs between a stable and a nightly), so a further build adds about 0.15 GB of records
+instead of about 8 GB. The cache file's head names the store, and a cache of a store that is gone starts over. Deleting
+the store while no game runs is safe: each game folder prepares again. A store made again is new files put in the old
+ones' place, never the old ones cut short, so a game still reading them keeps them (Linux), and while one has them open
+they are not replaced (Windows). The builders keep `LONGSHOT_SHADER_STORE` for the game they start (the shaders' preparation
+at the build, the AppImage's Play), so the shaders are prepared in the store the game plays with.
+
 ### The host
 
 - **The SDK is replaced at the `nn::` boundary.** `HLE(<mangled name>)` functions in `host/` stand in for the SDK's

@@ -195,6 +195,7 @@ These override a menu row for the run only (kind `player`).
 | `RX_VK_TRANSLATE_WAIT_MS=<ms>` | Bound the wait for translating shaders, then leave their draws out (off by default) |
 | `RX_VK_DRIVER_FAULTS=0/2` | Ask the driver again for programs it faulted on (`0`), or build one at a time on every driver (`2`) |
 | `RX_VK_PROGRAM_CACHE_ZSTD=1` | Keep translated programs zstd-compressed in `longshot_programs.zst.bin`, a file of its own: `longshot_programs.bin` is left alone, and the first run translates every program again. Its records are only read whole, so programs load before the title (`RX_VK_LOAD=start`'s way, `load_default.h`) |
+| `LONGSHOT_SHADER_STORE=<folder>\|0` | Where the shader store keeps the programs' SPIR-V once for every game folder (`spirv.pack`, `spirv.idx`, `spirv.lock`; [architecture](architecture.md)). Unset: `%LOCALAPPDATA%\Longshot\shaders`, on Linux `$XDG_CACHE_HOME/longshot/shaders` (else `~/.cache/longshot/shaders`). `0`: none, each record keeps its SPIR-V as before. A cache written for another store starts over at the next start; one whose store did not open this run (a file held by another program) is kept for the next. Kept for the game the builders start (`make_game.GAME_ENV_KEEP`: the preparation at the build, the AppImage's Play), so it is set where the build runs too. Not with `RX_VK_PROGRAM_CACHE_ZSTD` |
 
 #### Intel's compiler on Windows
 

@@ -12,6 +12,7 @@ already built. Checked here without a GPU or game:
   real program cache file with tests/linux_pressure_test.cpp's stand-ins: a graphics program's two modules go and are remade
   with the same SPIR-V (and counted); a mesh fallback program, a compute program, a stage that cannot be remade and a second
   program of the same key and variant keep theirs;
+- the same with the shader store (gpu/vk/spirv_pack.h): the stages' code a place in it, remade from there;
 - the switch: on unset, off for 0/off/false/no.
 
 python -I -B tests/test_loaded_modules_drop.py [--cxx clang++]
@@ -92,6 +93,9 @@ def main():
         subprocess.run([args.cxx, *flags, "-I" + str(folder), "-I" + str(ROOT / "tests"),
                         str(ROOT / "tests/loaded_modules_drop_test.cpp"), "-o", str(exe)], check=True, cwd=folder)
         subprocess.run([str(exe), str(folder)], check=True, timeout=30)
+        # (and with the shader store: the stages remade from their places in it)
+        (folder / "with-store").mkdir()
+        subprocess.run([str(exe), str(folder / "with-store"), str(folder / "store")], check=True, timeout=30)
         keep = {k: v for k, v in os.environ.items() if k in ("PATH", "SYSTEMROOT", "TMP", "TEMP")}
         failed = []
         for value, want in ((None, "1"), ("1", "1"), ("0", "0"), ("off", "0"), ("false", "0"), ("no", "0")):

@@ -205,7 +205,7 @@ void load_work(LoadJob& job) {
                 bool whole = recs.size() == 1;
                 if (!whole && learned != index_compute_variants.end())
                     whole = std::find(learned->second.begin(), learned->second.end(), p->variant) != learned->second.end();
-                bytes += (int64_t)(d.size - p->code_words * 4);
+                bytes += (int64_t)(d.size - program_cache_code_in_record(p->code_at, p->code_words));   // (the record without its code)
                 // (by its module's identifier where a run before learned it: the pipeline from the caches with no code read
                 // and no module made. The dispatch needs no module of a program whose pipeline is there; where no cache
                 // has the pipeline, the code is read as before)

@@ -40,6 +40,7 @@
 #include "fallback_size_policy.h"
 #include "fallback_lanes.h"
 #include "vk_paths.h"
+#include "spirv_pack.h"
 #include "vk_internal.h"
 #include "vk_progcache.h"
 #include "prepare_workers.h"
@@ -48,8 +49,10 @@
 
 namespace mkwvk {
 
-/// (longshot) The cache's own format: raise it with any change to what a record holds or how the file or its index is laid out
-constexpr uint32_t kProgramCacheFormat = 1;
+/// (longshot) The cache's own format: raise it with any change to what a record holds or how the file or its index is laid out.
+/// 2: a stage's SPIR-V may be a reference into the shader store (spirv_pack.h), and the file's head names the store
+/// 3: the reference keeps the words' hash too, which a read of them checks
+constexpr uint32_t kProgramCacheFormat = 3;
 // (what a record holds as it lies in memory, as format 1 has it: a build that changes one stops here. Raise kProgramCacheFormat, then
 // change these to the new layout)
 static_assert(sizeof(Program::Answer) == 6 && offsetof(Program::Answer, stage) == 0 && offsetof(Program::Answer, desc) == 2 &&
@@ -96,6 +99,17 @@ FILE* disk_idx = nullptr;
 bool disk_listing = false;
 bool disk_on = false;
 bool disk_zstd = false;   // (longshot) RX_VK_PROGRAM_CACHE_ZSTD=1: records compressed with zstd, longshot_programs.zst.bin
+// (longshot) The shader store (spirv_pack.h): each stage's SPIR-V kept once for all the player's game folders, the record naming
+// its place. A stage's code in a record is [u64 words][the words], as format 1 had it, or [u64 words | kStoreWords][i64 place]
+// [u64 hash a][u64 hash b] for words in the store (spirv_pack::hash_words: the store gives only those words for it). The file's head names the store its records name (its second word, 0: none), and a file of another
+// store starts over. Not with RX_VK_PROGRAM_CACHE_ZSTD, whose records are compressed whole
+// (never destroyed, as the other globals here: its files closed at a DLL's detach after ExitProcess could wait on a stream lock
+// a compile thread ended holding)
+spirv_pack::Store& store = *new spirv_pack::Store;
+bool store_on = false;
+constexpr uint64_t kStoreWords = 1ull << 63;
+/// (on a stage's or a program's code_at: the words are at this place in the store, not in longshot_programs.bin)
+constexpr int64_t kInStore = 1ll << 62;
 std::atomic<int64_t> st_cache_hits{0};
 constexpr uint32_t kDiskMagic = 0x31505348;
 constexpr uint32_t kDiskMagicZstd = 0x32505348;   // ("HSP2": a 20-byte record head, key, stored size, kind)
@@ -157,6 +171,10 @@ void disk_init() {
                 return;
             }
         }
+        // (the shader store: one for every game folder of the player; none for the compressed cache)
+        if (!disk_zstd) store_on = store.open(spirv_pack::default_dir());
+        const uint32_t store_id = store_on ? store.id() : 0;
+        uint32_t file_store = 0;   // (the store the file's records name: 0 none)
         const uint64_t stamp = program_cache_stamp();
         const size_t head_size = disk_zstd ? kZstdHead : 16;   // (the zstd cache's head has the record's kind too)
         const uint32_t magic = disk_zstd ? kDiskMagicZstd : kDiskMagic;
@@ -176,8 +194,23 @@ void disk_init() {
             _fseeki64(f, 0, SEEK_SET);
             uint32_t head[2]{};
             uint64_t kept = 0;
-            if (whole >= 16 && fread(head, 4, 2, f) == 2 && fread(&kept, 8, 1, f) == 1 && head[0] == magic && kept == stamp) {
+            const bool read_head = whole >= 16 && fread(head, 4, 2, f) == 2 && fread(&kept, 8, 1, f) == 1 && head[0] == magic && kept == stamp;
+            // (records naming a store that did not open this run (a file of it held by another program, the disk full): kept
+            // for the next run, which finds the store again, and this one goes without the cache rather than prepare it all)
+            if (read_head && head[1] && !store_on && !disk_zstd && !spirv_pack::default_dir().empty()) {
+                fclose(f);
+                logf("vk: program cache %s: the shader store it names (%08x) did not open: this run without the cache, kept for "
+                     "the next", path.c_str(), head[1]);
+                return;
+            }
+            // (records naming a store that is gone, or another: their SPIR-V is not there to read. The whole file starts over,
+            // as for another stamp, rather than leave out each program it names)
+            if (read_head && head[1] && head[1] != store_id)
+                logf("vk: program cache %s: its programs are in another shader store (%08x, this one %08x): prepared again", path.c_str(),
+                     head[1], store_id);
+            if (read_head && (!head[1] || head[1] == store_id)) {
                 good = 16;
+                file_store = head[1];
                 size_t idx_n = 0;
                 bool idx_short = false;   // (it named records the file does not have whole)
                 if (FILE* x = fopen(idx_path.c_str(), "rb")) {
@@ -250,11 +283,18 @@ void disk_init() {
             if (good != whole) {   // (a record cut short: without it)
                 if (FILE* f = fopen(path.c_str(), "r+b")) _chsize_s(_fileno(f), good), fclose(f);
             }
+            // (a file of no store, which this run's records may now name: the head says so before the first of them)
+            if (!file_store && store_id) {
+                FILE* f = fopen(path.c_str(), "r+b");
+                // (not written: this run keeps each record's SPIR-V in it)
+                if (!f || _fseeki64(f, 4, SEEK_SET) || fwrite(&store_id, 4, 1, f) != 1 || fflush(f)) store_on = false;
+                if (f) fclose(f);
+            }
             disk_out = fopen(path.c_str(), "ab");
         } else {
             disk_out = fopen(path.c_str(), "wb");
             if (disk_out) {
-                const uint32_t h[2] = {magic, 0};
+                const uint32_t h[2] = {magic, store_id};
                 fwrite(h, 4, 2, disk_out);
                 fwrite(&stamp, 8, 1, disk_out);
                 fflush(disk_out);
@@ -269,6 +309,8 @@ void disk_init() {
         disk_path = path;
         disk_on = disk_out != nullptr && disk_in != nullptr;
         logf("vk: program cache %s: %zu program keys kept, %lld KB", path.c_str(), disk_records.size(), (long long)(good >> 10));
+        if (store_on) logf("vk: shader store %s: %zu SPIR-V blobs, for every game folder", store.folder().c_str(), store.blob_count());
+        else if (!disk_zstd) logf("vk: shader store: none (%s): each record keeps its SPIR-V", spirv_pack::default_dir().empty() ? "LONGSHOT_SHADER_STORE=0" : "not opened");
     });
 }
 
@@ -368,6 +410,50 @@ void get_info(Reader& r, Shader::Info& i) {
     if (!descriptor_counts_fit(i)) r.bad = true;   // (left out, and translated again)
 }
 
+/// A stage's code at r: its words into spirv, from the record or from the store. *store_at: the words' place in the store
+/// with kInStore, or 0 when they are in the record; *hash, given, their hash there. false: not read (a record not whole sets
+/// r.bad; a store that has not the words leaves r as it is, the record whole but its program left out and translated again)
+bool get_code(Reader& r, std::vector<uint32_t>& spirv, int64_t* store_at, spirv_pack::Hash* hash = nullptr) {
+    *store_at = 0;
+    if (!r.has(8)) return false;
+    uint64_t n;
+    std::memcpy(&n, r.p, 8);
+    if (!(n & kStoreWords)) {
+        r.list(spirv);
+        return !r.bad;
+    }
+    r.p += 8;
+    n &= ~kStoreWords;
+    const int64_t at = r.get<int64_t>();
+    spirv_pack::Hash h;
+    h.a = r.get<uint64_t>(), h.b = r.get<uint64_t>();
+    if (r.bad || !n || n >= spirv_pack::kMostWords || at <= 0) {
+        r.bad = true;
+        return false;
+    }
+    spirv.resize((size_t)n);
+    if (!store.read(at, n, h, spirv.data())) {
+        static std::atomic<int> logged{0};
+        if (logged++ < 20) logf("vk: program cache: the shader store has no SPIR-V at %lld (%llu words)", (long long)at, (unsigned long long)n);
+        spirv.clear();
+        return false;
+    }
+    *store_at = at | kInStore;
+    if (hash) *hash = h;
+    return true;
+}
+/// code_at's words (a place in longshot_programs.bin, read with in, under mu when given; or one in the store, kInStore, with
+/// st's hash of them) into spirv, sized already
+bool read_code(FILE* in, std::mutex* mu, int64_t code_at, const Stage& st, std::vector<uint32_t>& spirv) {
+    if (code_at & kInStore) return store.read(code_at & ~kInStore, spirv.size(), {st.code_hash_a, st.code_hash_b}, spirv.data());
+    if (!in) return false;
+    std::unique_lock<std::mutex> lk;
+    if (mu) lk = std::unique_lock<std::mutex>(*mu);
+    return _fseeki64(in, code_at, SEEK_SET) == 0 && fread(spirv.data(), 4, spirv.size(), in) == spirv.size();
+}
+/// The bytes of a stage's code the record itself holds: none when they are in the store
+uint64_t program_cache_code_in_record(int64_t code_at, uint64_t words) { return (code_at & kInStore) ? 0 : words * 4; }
+
 void program_cache_save(const Program& p, const std::vector<std::vector<uint32_t>>& spirv) {
     // (each stage's phis, for fallback_compute_pipelines: the SPIR-V is not kept after this. Before the program is published)
     if (spirv.size() == p.stages.size())
@@ -387,7 +473,11 @@ void program_cache_save(const Program& p, const std::vector<std::vector<uint32_t
         const Stage& st = p.stages[k];
         put(o, st.nvn_stage);
         put(o, st.vk_stage);
-        put_list(o, spirv[k]);
+        // (in the store, once for every game folder; where it can't be written, in the record as before)
+        const spirv_pack::Hash h = store_on && !spirv[k].empty() ? spirv_pack::hash_words(spirv[k].data(), spirv[k].size()) : spirv_pack::Hash{};
+        const int64_t at = store_on && !spirv[k].empty() ? store.put(spirv[k].data(), spirv[k].size(), h) : -1;
+        if (at > 0) put(o, (uint64_t)spirv[k].size() | kStoreWords), put(o, at), put(o, h.a), put(o, h.b);
+        else put_list(o, spirv[k]);
         put_list(o, st.c1);
         put_info(o, st.info);
     }
@@ -502,15 +592,18 @@ void program_cache_read(FILE* in, std::mutex* mu, uint64_t key, const std::vecto
             st.vk_stage = r.get<VkShaderStageFlagBits>();
             const uint8_t* const code_p = r.p;
             std::vector<uint32_t> spirv;
-            r.list(spirv);
-            if (!(d.kind & kCompressedKind) && !spirv.empty()) {
-                st.code_at = d.at + (int64_t)(code_p + 8 - payload);
+            int64_t store_at = 0;
+            spirv_pack::Hash hash;
+            const bool code_ok = get_code(r, spirv, &store_at, &hash);
+            if (code_ok && !spirv.empty() && (store_at || !(d.kind & kCompressedKind))) {
+                st.code_at = store_at ? store_at : d.at + (int64_t)(code_p + 8 - payload);
+                st.code_hash_a = hash.a, st.code_hash_b = hash.b;
                 st.code_words = spirv.size();
                 st.record_at = d.at, st.record_size = d.size;
             }
             r.list(st.c1);
             get_info(r, st.info);
-            if (r.bad || spirv.empty()) {
+            if (r.bad || !code_ok || spirv.empty()) {
                 ok = false;
                 break;
             }
@@ -590,11 +683,16 @@ std::unique_ptr<Program> program_cache_read_light(FILE* in, std::mutex* mu, uint
     Stage& st = p->stages.back();
     st.nvn_stage = r.get<int>();
     st.vk_stage = r.get<VkShaderStageFlagBits>();
-    const uint64_t words = r.get<uint64_t>();
-    if (r.bad) return nullptr;
+    uint64_t words = r.get<uint64_t>();
+    // (its SPIR-V in the store: the record has only its place and hash, and the tail follows them)
+    const bool in_store = (words & kStoreWords) != 0;
+    words &= ~kStoreWords;
+    const int64_t store_at = in_store ? r.get<int64_t>() : 0;
+    if (in_store) st.code_hash_a = r.get<uint64_t>(), st.code_hash_b = r.get<uint64_t>();
+    if (r.bad || (in_store && (store_at <= 0 || words >= spirv_pack::kMostWords))) return nullptr;
     const size_t code_at = (size_t)(r.p - (front.data() + 16));
-    if (!words || words > (d.size - code_at) / 4) return nullptr;
-    const size_t tail_at = code_at + (size_t)words * 4;
+    if (!words || (!in_store && words > (d.size - code_at) / 4)) return nullptr;
+    const size_t tail_at = in_store ? code_at : code_at + (size_t)words * 4;
     if (d.size - tail_at > kTailMost) return nullptr;
     std::vector<uint8_t> tail(d.size - tail_at);
     if (!tail.empty()) {
@@ -607,7 +705,7 @@ std::unique_ptr<Program> program_cache_read_light(FILE* in, std::mutex* mu, uint
     t.list(st.c1);
     get_info(t, st.info);
     if (t.bad || !answers_fit(*p, p->answers)) return nullptr;
-    p->code_at = d.at + (int64_t)code_at, p->code_words = words;
+    p->code_at = in_store ? (store_at | kInStore) : d.at + (int64_t)code_at, p->code_words = words;
     descriptor_arrays_note(*p);
     p->ready.store(true, std::memory_order_release);
     return p;
@@ -621,14 +719,8 @@ bool complete_from(Program& p, FILE* in, std::mutex* mu, bool* busy = nullptr) {
     const uint64_t words = p.code_words;
     std::vector<uint32_t> spirv((size_t)words);
     p.code_words = 0;
-    bool ok = in != nullptr;
-    if (ok) {
-        std::unique_lock<std::mutex> dk;
-        if (mu) dk = std::unique_lock<std::mutex>(*mu);
-        _fseeki64(in, code_at, SEEK_SET);
-        ok = fread(spirv.data(), 4, spirv.size(), in) == spirv.size();
-    }
     Stage& st = p.stages[0];
+    const bool ok = read_code(in, mu, code_at, st, spirv);   // (from the file, or the shader store)
     if (ok) st.module = make_module(spirv, p.key, busy);
     if (ok && !st.module && busy && *busy) {   // (not made yet, not failed: a worker completes it, behind the gate)
         p.code_at = code_at, p.code_words = words;
@@ -967,7 +1059,8 @@ bool program_cache_complete_graphics(const Program& prog) {
             checked_at = st.record_at;
         }
         std::vector<uint32_t> spirv((size_t)st.code_words);
-        ok = ok && read_at(st.code_at, spirv.data(), spirv.size() * 4);
+        ok = ok && ((st.code_at & kInStore) ? read_code(nullptr, nullptr, st.code_at, st, spirv)   // (the shader store's)
+                                            : read_at(st.code_at, spirv.data(), spirv.size() * 4));
         if (ok) made[i] = make_module(spirv, prog.key, nullptr);
         if (!made[i]) {
             ok = false;
@@ -1166,7 +1259,8 @@ void program_cache_each(const std::function<void(const KeptProgram&)>& fn) {
                 for (auto& [stage, spirv] : k.stages) {
                     r.get<int>();
                     stage = r.get<VkShaderStageFlagBits>();
-                    r.list(spirv);
+                    int64_t store_at = 0;
+                    if (!get_code(r, spirv, &store_at)) r.bad = true;   // (in the record, or the shader store)
                     std::vector<uint8_t> c1;
                     r.list(c1);
                     Shader::Info info;

@@ -118,7 +118,8 @@ def test_stamp_matches_build(d):
     src = (ROOT / "nx2" / "build.py").read_text(encoding="utf-8")
     check("nx2/build.py makes LONGSHOT_SHADER_STAMP with translator_files.stamp",
           'shader_stamp = "-DLONGSHOT_SHADER_STAMP=0x%sull" % translator_files.stamp(vk)' in src)
-    check("cmd_pack prepares by translator_changed", "prepare = translator_changed(tree, changed) or SEED in extra" in
+    check("cmd_pack prepares by translator_changed and cache_format_changed",
+          'prepare = translator_changed(tree, changed) or cache_format_changed(tree, b["commit"], changed) or SEED in extra' in
           PACKS_SOURCE.read_text(encoding="utf-8"))
     tree, old = d / "tree", d / "old"
     write(tree / "nx2" / "translator_files.py", (ROOT / "nx2" / "translator_files.py").read_bytes())
@@ -133,6 +134,30 @@ def test_stamp_matches_build(d):
     check("nothing changed: no prepare", not packs.translator_changed(str(tree), []))
     check("a checkout without nx2/translator_files.py prepares by the files it stamped (vk_api.h among them)",
           packs.translator_changed(str(old), ["gpu/vk/vk_api.h"]) and not packs.translator_changed(str(old), ["gpu/vk/vk_draw.cpp"]))
+
+
+def test_cache_format(d):
+    """A new kProgramCacheFormat drops every cache the base prepared (program_cache_stamp holds it), so a runtime prepares
+    again, though the translator's stamp is the same: found in the renderer's source as the game reads it"""
+    src = (ROOT / packs.PROGRAM_CACHE).read_text(encoding="utf-8")
+    check("kProgramCacheFormat found in %s" % packs.PROGRAM_CACHE, packs.CACHE_FORMAT.search(src))
+    check("program_cache_stamp holds kProgramCacheFormat", "const uint32_t format = kProgramCacheFormat;" in src)
+    import subprocess
+    repo = d / "fmt"
+    path = repo / "gpu" / "vk" / "vk_progcache.cpp"
+    def run(*args):
+        subprocess.run(["git", "-C", str(repo)] + list(args), check=True, capture_output=True)
+    write(path, b"// a\nconstexpr uint32_t kProgramCacheFormat = 1;\n")
+    run("init", "-q")
+    run("add", "-A")
+    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
+    base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    changed = [packs.PROGRAM_CACHE]
+    write(path, b"// b\nconstexpr uint32_t kProgramCacheFormat = 1;\n")
+    check("an edit that keeps the format does not prepare", not packs.cache_format_changed(str(repo), base, changed))
+    write(path, b"// b\nconstexpr uint32_t kProgramCacheFormat = 2;\n")
+    check("a new format prepares", packs.cache_format_changed(str(repo), base, changed))
+    check("the file not changed: no prepare", not packs.cache_format_changed(str(repo), base, ["gpu/vk/vk_draw.cpp"]))
 
 
 def test_renderer_files_the_game_reads():
@@ -846,7 +871,7 @@ def main():
         d = Path(d)
         for name, t in (("mc", test_module_changed), ("pf", test_pack_folders), ("rt", test_generated_and_runtime),
                         ("guard", test_guards), ("inside", test_resolves_inside), ("outputs", test_outputs_before_prepare), ("prepare", test_prepare_outcomes), ("seed", test_seed), ("warm", test_warm), ("busy", test_busy), ("hidden", test_busy_folders_above_hidden),
-                        ("stamp", test_stamp_matches_build), ("clone", test_clone),
+                        ("stamp", test_stamp_matches_build), ("format", test_cache_format), ("clone", test_clone),
                         ("refresh", test_rt_refresh), ("in-place", test_romfs_in_place)):
             (d / name).mkdir()
             t(d / name)

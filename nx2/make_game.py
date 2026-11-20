@@ -1600,6 +1600,9 @@ NOT_PREPARED = "the shaders were not prepared now"
 # step near the end can sit at 99% for minutes)
 PREPARE_SILENCE = 15 * 60
 GAME_ENV_DROP = ("LONGSHOT_", "PYTHON", "APPDIR", "APPIMAGE", "ARGV0", "OWD")
+# (the game's own switches among the LONGSHOT_ ones: kept, so the shaders are prepared where the game plays them. The shader
+# store, gpu/vk/spirv_pack.h: prepared in one store and played with another, the game folder's cache would start over)
+GAME_ENV_KEEP = ("LONGSHOT_SHADER_STORE",)
 
 
 def span(seconds):
@@ -1610,7 +1613,8 @@ def game_env(environ=None):
     """The environment the game runs in when the tools start it: without what the AppImage runtime and the tools put there (their
     libraries first on the search path, Python's settings, the LONGSHOT_ build switches), so it loads its own SDL and the system's
     Vulkan, as when the player starts it. The Linux builder's Play button uses it too; builder/linux/longshot-launch drops the same"""
-    env = {k: v for k, v in (os.environ if environ is None else environ).items() if not k.startswith(GAME_ENV_DROP)}
+    env = {k: v for k, v in (os.environ if environ is None else environ).items()
+           if k in GAME_ENV_KEEP or not k.startswith(GAME_ENV_DROP)}
     env.pop("LD_LIBRARY_PATH", None)
     return env
 
