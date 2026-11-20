@@ -461,9 +461,24 @@ bool has_stencil(VkFormat f);
 
 // device memory (vk_vma.cpp, Vulkan Memory Allocator)
 bool vma_init(PFN_vkGetInstanceProcAddr gipa);
-/// (textures: from the textures' own pool, the one image_compact_* moves allocations in: vk_texture.cpp's compaction)
+/// What an image of this create info needs (size, alignment, memory types), without making one; false where the driver
+/// cannot say (vkGetDeviceImageMemoryRequirements, Vulkan 1.3) or the image must have memory of its own
+bool image_requirements(const VkImageCreateInfo& ci, VkMemoryRequirements* mr);
+/// An image's requirements, asked of the driver once however often they are read (create: the take by size, the size class and
+/// create_image's check of the targets' pool's memory type)
+struct ImageNeed {
+    const VkImageCreateInfo* ci;
+    VkMemoryRequirements mr{};
+    int8_t asked = -1;
+    const VkMemoryRequirements* get() {
+        if (asked < 0) asked = image_requirements(*ci, &mr) ? 1 : 0;
+        return asked > 0 ? &mr : nullptr;
+    }
+};
+/// (textures: from the textures' own pool, the one image_compact_* moves allocations in: vk_texture.cpp's compaction; need: the
+/// image's requirements where the caller asked already, read for the targets' pool's memory type)
 bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& allocation, bool dedicated = false, bool target = false,
-                  bool textures = false);
+                  bool textures = false, ImageNeed* need = nullptr);
 // (longshot) the textures' pool compacted: VMA's defragmentation, a pass at a time (vk_texture.cpp's compact_step)
 struct ImageMove {
     VmaAllocation src;   // (the allocation to move: it stays the texture's, and points at the new place once the pass ends)
@@ -513,6 +528,20 @@ uint64_t buffers_made_bytes(bool in_vram);
 void memory_account_sample(uint64_t known[2]);
 bool allocation_in_vram(VmaAllocation allocation);
 bool system_heap_exists();
+// (longshot, RX_VK_TARGET_REUSE_MEMORY) a render target's image on the memory of a pooled one: vk_texture.cpp's pool_take_memory
+/// What target_pool::fits reads of an allocation: its size, its offset in its memory object, its memory type, and whether it
+/// is to be taken as memory of its own (anything but a share of the render targets' blocks, which create_image tags); false for none
+bool allocation_fit_info(VmaAllocation allocation, uint64_t* bytes, uint64_t* offset, uint32_t* memory_type, bool* dedicated);
+/// The size of the render targets' pool's blocks: an image larger has memory of its own (target_images_pool)
+uint64_t target_block_bytes();
+/// The memory types in VRAM (DEVICE_LOCAL), as a mask
+uint32_t device_local_types();
+/// A render target's image of the pooled kind on an allocation of its size class (target_pool::class_bytes) in the targets'
+/// blocks, so a later image of the class fits it; false where it cannot be (no pool, over a block, refused: create_image then)
+bool create_image_in_class(ImageNeed& need, VkImage& image, VmaAllocation& allocation);
+/// A new image bound at the start of an allocation another image held (vmaCreateAliasingImage); that one must be past its last
+/// use. The allocation stays the caller's: destroy_image frees it with the new image
+bool create_aliasing_image(const VkImageCreateInfo& ci, VmaAllocation allocation, VkImage& image);
 /// (dedicated: its own memory object, not a share of a 64 MB block: for the 16 to 32 MB ones that fit two to a block and leave
 /// the rest of it free)
 bool create_buffer(uint64_t size, VkBufferUsageFlags usage, bool host_visible, VkBuffer& buffer,

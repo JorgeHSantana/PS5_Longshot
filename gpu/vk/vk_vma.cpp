@@ -22,6 +22,7 @@
 #endif
 #include "vram_compact.h"
 #include "memory_priority.h"
+#include "target_pool.h"
 #include "vk_work.h"   // (last: RX_VK_RECORDER=defer drains before the destructions and the invalidate below)
 
 namespace mkwvk {
@@ -86,6 +87,7 @@ const uint64_t kImageBlock = (getenv("RX_VK_IMAGE_BLOCK_MB") ? (uint64_t)std::ma
 // image made there then took 30-70 ms (RTX 5070)
 VmaPool target_image_pool = VK_NULL_HANDLE;
 bool target_pool_tried = false;
+uint32_t target_image_pool_type = UINT32_MAX;   // (its memory type: VMA does not check an image's memoryTypeBits against a pool's)
 VmaPool images_pool();
 VmaPool target_images_pool() {
     if (target_pool_tried) return target_image_pool;
@@ -103,6 +105,7 @@ VmaPool target_images_pool() {
     ai.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     uint32_t type = 0;
     if (vmaFindMemoryTypeIndexForImageInfo(vma, &rep, &ai, &type) != VK_SUCCESS) return VK_NULL_HANDLE;
+    target_image_pool_type = type;
     const uint64_t block_size =
         device_local_heap_bytes() <= vram_compact::GLOBAL_MIN_GRAPHICS_REQ ? std::min<uint64_t>(kImageBlock, 16ull << 20) : kImageBlock;
     VmaPoolCreateInfo pi{};
@@ -270,7 +273,18 @@ bool image_compact_pass_end(uint64_t* freed_bytes, uint32_t* freed_blocks) {
 // scratch ones. vk_texture.cpp takes the ones it knows off it, and the rest is the budget line's "other images". Counted apart
 // by where the memory is, [0] a device-local heap and [1] system memory: the last resort below puts an image there when VRAM is full
 static std::atomic<uint64_t> image_bytes[2]{};
-bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& allocation, bool dedicated, bool target, bool textures) {
+// (longshot) the user data of the allocations made in the render targets' blocks: allocation_fit_info tells them by it. VMA never
+// makes memory of their own there (their pool's block size is set), so another target may be bound to one (pool_take_memory)
+char target_blocks_tag;
+/// Whether an image may be in the targets' blocks: their memory type among those it can use, which VMA does not check for a pool
+/// (not known: as before, yes). From the requirements create asked for already, where it did (need)
+bool target_pool_takes(const VkImageCreateInfo& ci, ImageNeed* need) {
+    VkMemoryRequirements asked{};
+    const VkMemoryRequirements* mr = need ? need->get() : image_requirements(ci, &asked) ? &asked : nullptr;
+    return !mr || (mr->memoryTypeBits >> target_image_pool_type & 1);
+}
+bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& allocation, bool dedicated, bool target, bool textures,
+                  ImageNeed* need) {
     const auto made = [&] {
         return image_bytes[allocation_in_vram(allocation) ? 0 : 1].fetch_add(allocation_size(allocation), std::memory_order_relaxed), true;
     };
@@ -291,7 +305,10 @@ bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& al
         VmaAllocationCreateInfo pai = ai;
         pai.pool = pool;
         pai.usage = VMA_MEMORY_USAGE_UNKNOWN;
-        if (vmaCreateImage(vma, &ci, &pai, &image, &allocation, nullptr) == VK_SUCCESS) return made();
+        if (pool == target_image_pool) pai.pUserData = &target_blocks_tag;
+        if ((pool != target_image_pool || target_pool_takes(ci, need)) && vmaCreateImage(vma, &ci, &pai, &image, &allocation,
+                                                                                     nullptr) == VK_SUCCESS)
+            return made();
     }
     if (vmaCreateImage(vma, &ci, &ai, &image, &allocation, nullptr) == VK_SUCCESS) return made();
     if (ai.flags & VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT) {
@@ -518,6 +535,65 @@ static void buffer_count(VmaAllocation allocation, bool made) {
     else n.fetch_sub(allocation_size(allocation), std::memory_order_relaxed);
 }
 uint64_t buffers_made_bytes(bool in_vram) { return buffer_bytes[in_vram ? 0 : 1].load(std::memory_order_relaxed); }
+bool allocation_fit_info(VmaAllocation allocation, uint64_t* bytes, uint64_t* offset, uint32_t* memory_type, bool* dedicated) {
+    if (!allocation) return false;
+    VmaAllocationInfo info{};
+    vmaGetAllocationInfo(vma, allocation, &info);
+    *bytes = info.size, *offset = info.offset, *memory_type = info.memoryType;
+    *dedicated = info.pUserData != &target_blocks_tag;   // (not known to be a share of the targets' blocks: taken as its own)
+    return true;
+}
+bool image_requirements(const VkImageCreateInfo& ci, VkMemoryRequirements* mr) {
+    if (!vkGetDeviceImageMemoryRequirements) return false;
+    VkDeviceImageMemoryRequirements in{VK_STRUCTURE_TYPE_DEVICE_IMAGE_MEMORY_REQUIREMENTS};
+    in.pCreateInfo = &ci;
+    VkMemoryDedicatedRequirements own{VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS};
+    VkMemoryRequirements2 out{VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2, &own};
+    vkGetDeviceImageMemoryRequirements(dev.device, &in, &out);
+    *mr = out.memoryRequirements;
+    return mr->size != 0 && !own.requiresDedicatedAllocation;   // (an image that must have memory of its own: never on another's)
+}
+uint64_t target_block_bytes() {
+    static const uint64_t v =
+        device_local_heap_bytes() <= vram_compact::GLOBAL_MIN_GRAPHICS_REQ ? std::min<uint64_t>(kImageBlock, 16ull << 20) : kImageBlock;
+    return v;
+}
+uint32_t device_local_types() {
+    uint32_t mask = 0;
+    for (uint32_t i = 0; i < dev.memory.memoryTypeCount && i < 32; i++)
+        if (dev.memory.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) mask |= 1u << i;
+    return mask;
+}
+bool create_image_in_class(ImageNeed& need, VkImage& image, VmaAllocation& allocation) {
+    image = VK_NULL_HANDLE, allocation = nullptr;
+    const VmaPool pool = target_images_pool();
+    const VkMemoryRequirements* mr = need.get();
+    // (VMA allocates in the pool's memory type whatever the requirements say: one the image cannot use, made as before)
+    if (!pool || !mr || !(mr->memoryTypeBits >> target_image_pool_type & 1)) return false;
+    const uint64_t cls = target_pool::class_bytes(mr->size, target_block_bytes());
+    if (!cls) return false;
+    // (the class's size, and an alignment any image of it may ask: what the next image on this allocation will need)
+    VkMemoryRequirements cr = *mr;
+    cr.size = cls, cr.alignment = std::max<VkDeviceSize>(mr->alignment, target_pool::kClassAlign);
+    VmaAllocationCreateInfo ai{};
+    ai.pool = pool;
+    ai.pUserData = &target_blocks_tag;
+    // (a render target's, as create_image gives one: VMA takes the pool's own for a pool's block, this one stands where it does not)
+    ai.priority = memory_priority::image(memory_tiers(), true, false);
+    if (dev.memory_budget) ai.flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
+    if (vmaAllocateMemory(vma, &cr, &ai, &allocation, nullptr) != VK_SUCCESS) return allocation = nullptr, false;
+    if (vmaCreateAliasingImage(vma, allocation, need.ci, &image) != VK_SUCCESS) {
+        vmaFreeMemory(vma, allocation);
+        image = VK_NULL_HANDLE, allocation = nullptr;
+        return false;
+    }
+    image_bytes[allocation_in_vram(allocation) ? 0 : 1].fetch_add(allocation_size(allocation), std::memory_order_relaxed);
+    return true;
+}
+bool create_aliasing_image(const VkImageCreateInfo& ci, VmaAllocation allocation, VkImage& image) {
+    image = VK_NULL_HANDLE;
+    return vmaCreateAliasingImage(vma, allocation, &ci, &image) == VK_SUCCESS;
+}
 bool create_buffer(uint64_t size, VkBufferUsageFlags usage, bool host_visible, VkBuffer& buffer,
                    VmaAllocation& allocation, void** mapped, bool dedicated) {
     VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};

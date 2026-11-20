@@ -300,18 +300,35 @@ std::deque<Dead> dead;
 // of the same create info takes it; it is put into GENERAL from UNDEFINED and cleared as a new one is (create), so nothing it held
 // shows. Only images made for a target (texture_get's !for_sampling) are pooled. The pool is bounded (RX_VK_TARGET_POOL_MB, default
 // 256; 0: none, every image destroyed as before; and none while VRAM is near what the driver allows), and an image unused in it for
-// 120 presents is destroyed, at most 16 a present ----
+// RX_VK_POOL_IDLE presents (target_pool::idle_presents: 8, or 64 on an integrated GPU while the take by size is on) is destroyed, at
+// most 16 a present. A target of a create info not in the pool takes the memory of a pooled image it fits in instead
+// (pool_take_memory, RX_VK_TARGET_REUSE_MEMORY) ----
 struct Pooled {
     VkImage image;
     VmaAllocation allocation;
     std::unordered_map<uint64_t, VkImageView> views;
     uint64_t bytes, since, key;
+    // (its allocation, for pool_take_memory: read once when it comes in)
+    uint64_t alloc_bytes = 0, alloc_offset = 0;
+    uint32_t memory_type = UINT32_MAX;
+    bool dedicated = true;
+    bool classed = false;   // (an allocation of a size class: in by_class)
 };
 std::mutex pool_mu;
 // Global insertion order makes the oldest eligible victim available in constant time.
 std::list<Pooled> pool_by_age;
 std::unordered_map<uint64_t, std::deque<std::list<Pooled>::iterator>> target_pool;
-uint64_t pool_bytes, pool_n, st_pool_reused, st_pool_made, st_pool_destroyed;
+// (the pooled allocations of a size class, by memory type and class (target_pool::class_key), oldest first: pool_take_memory's
+// look-up, before its scan)
+std::unordered_map<uint64_t, std::deque<std::list<Pooled>::iterator>> by_class;
+uint64_t pool_bytes, pool_n, st_pool_reused, st_pool_made, st_pool_destroyed, st_pool_resized, st_pool_stolen;
+// (the keys whose image pool_take_memory gave to another shape, and when: a miss of one of them is counted (st_pool_stolen),
+// what the wait in target_pool::kSizeTakeIdle is meant to keep at 0. Forgotten when an image of the shape comes back or is taken
+// exactly, or after RX_VK_POOL_IDLE presents (pool_trim))
+std::unordered_map<uint64_t, uint64_t> taken_by_size;
+// (why the misses pool_take_memory did not answer were not: target_pool::Miss; and the smaller ones' shortfall in percent, summed)
+uint64_t st_miss[(int)target_pool::Miss::count], st_small_gap_pct, st_pool_trim_cap, st_pool_trim_idle;
+std::atomic<uint64_t> dead_pooled_n{0};   // (render targets' images in the dead queue on their way to the pool)
 uint8_t pool_pressure = 0;   // 0: normal, 1: pressed (>90%, halve pool), 2: critical (>97%, flush pool)
 bool compact_on() {   // (longshot: the textures in a pool of their own, compacted: compact_step. On unless RX_VK_COMPACT=0)
     static const bool v = vram_compact::enabled(getenv("RX_VK_COMPACT"));
@@ -403,12 +420,25 @@ uint64_t pool_key_of(const VkImageCreateInfo& ci) {
     k = mix(k, (uint64_t)ci.usage << 8 | (uint64_t)ci.tiling);
     return k | 1;   // (0: not pooled)
 }
+/// An image leaving the pool leaves the class index
+void pool_unindex(std::list<Pooled>::iterator it) {
+    if (!it->classed) return;
+    auto c = by_class.find(target_pool::class_key(it->memory_type, it->alloc_bytes));
+    if (c == by_class.end()) return;
+    if (auto at = std::find(c->second.begin(), c->second.end(), it); at != c->second.end()) c->second.erase(at);
+    if (c->second.empty()) by_class.erase(c);
+}
 bool pool_take(uint64_t key, VkImage& image, VmaAllocation& allocation, std::unordered_map<uint64_t, VkImageView>& views) {
     std::lock_guard lk(pool_mu);
     auto it = target_pool.find(key);
-    if (it == target_pool.end() || it->second.empty()) return false;
+    if (it == target_pool.end() || it->second.empty()) {
+        if (auto t = taken_by_size.find(key); t != taken_by_size.end()) st_pool_stolen++, taken_by_size.erase(t);
+        return false;
+    }
     const auto node = it->second.back();
+    pool_unindex(node);
     Pooled& p = *node;
+    taken_by_size.erase(key);   // (its shape found its own: a later miss of it is not one a take by size caused)
     image = p.image, allocation = p.allocation, views = std::move(p.views);
     pool_bytes -= std::min(pool_bytes, p.bytes), pool_n--;
     it->second.pop_back();
@@ -426,17 +456,111 @@ void pool_destroy(Pooled& p) {
 }
 /// (texture_frame) a dead render target's image the GPU is done with, into the pool
 void pool_put(Dead& d) {
+    struct { uint64_t bytes = 0, offset = 0; uint32_t memory_type = UINT32_MAX; bool dedicated = true; } fit;
+    allocation_fit_info(d.allocation, &fit.bytes, &fit.offset, &fit.memory_type, &fit.dedicated);
     std::lock_guard lk(pool_mu);
-    pool_by_age.push_back({d.image, d.allocation, std::move(d.view_map), d.bytes, frame_no, d.pool_key});
-    target_pool[d.pool_key].push_back(std::prev(pool_by_age.end()));
+    pool_by_age.push_back({d.image, d.allocation, std::move(d.view_map), d.bytes, frame_no, d.pool_key, fit.bytes, fit.offset,
+                           fit.memory_type, fit.dedicated});
+    const auto node = std::prev(pool_by_age.end());
+    target_pool[d.pool_key].push_back(node);
+    taken_by_size.erase(d.pool_key);   // (an image of its shape is back: a later miss of it is the pool's idle rule's, not a take's)
+    if (!fit.dedicated && fit.bytes == target_pool::class_bytes(fit.bytes, target_block_bytes())) {
+        node->classed = true;
+        by_class[target_pool::class_key(fit.memory_type, fit.bytes)].push_back(node);
+    }
     pool_bytes += d.bytes, pool_n++;
 }
-/// (texture_frame, each present) the pool over its bound, or all of it while VRAM is short, and what waits in it unused for 120
-/// presents: destroyed, at most 16 a present (64 while VRAM is short). Returns how many
+// (longshot) RX_VK_TARGET_REUSE_MEMORY: 0 off, 1 a pooled image's memory taken by size, 2 also the size classes; unset, 2 on an
+// integrated GPU and 1 elsewhere (target_pool::reuse_level)
+int reuse_memory_level() {
+    static const int v =
+        target_pool::reuse_level(getenv("RX_VK_TARGET_REUSE_MEMORY"), dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+    return v;
+}
+bool reuse_memory_on() { return reuse_memory_level() >= 1; }
+/// (create, after pool_take missed) a render target's new image on the memory of a pooled one it fits in (target_pool::fits), the
+/// smallest that does and has waited a present (target_pool::takeable_by_size): OoT's shadow maps get a side of their own every frame,
+/// so their create info never comes back, and each was a new allocation (on a Steam Deck a block's kernel call) while one of nearly
+/// the same size waited here. Only the pool's images: the dead queue's may still be in the GPU's work. The new image is bound
+/// first; then the pooled image and its views are destroyed, at once as pool_destroy does: pool_put takes only what the GPU is done
+/// with. Its allocation becomes the new image's, which create counts at the allocation's size (x.pad) and which goes back to the
+/// pool, or is freed, with it
+bool pool_take_memory(ImageNeed& need, VkImage& image, VmaAllocation& allocation) {
+    using target_pool::Miss;
+    if (!reuse_memory_on()) return false;
+    std::lock_guard lk(pool_mu);
+    if (pool_by_age.empty()) {
+        st_miss[(int)(dead_pooled_n.load(std::memory_order_relaxed) ? Miss::empty_dead_waiting : Miss::empty)]++;
+        return false;
+    }
+    const VkMemoryRequirements* asked = need.get();
+    if (!asked) {   // (also when the image must have memory of its own)
+        st_miss[(int)Miss::requirements]++;
+        return false;
+    }
+    const VkMemoryRequirements& mr = *asked;
+    if (mr.size > target_block_bytes()) {   // (memory of its own: no share of the targets' blocks holds it)
+        st_miss[(int)Miss::over_block]++;
+        return false;
+    }
+    const uint32_t types = mr.memoryTypeBits & device_local_types();   // (in VRAM: not one a full VRAM put in system memory)
+    auto best = pool_by_age.end();
+    // (first the oldest of its size class, of a memory type it can use: one look-up)
+    if (const uint64_t cls = target_pool::class_bytes(mr.size, target_block_bytes()))
+        for (uint32_t t = 0; t < 32 && best == pool_by_age.end(); t++) {
+            if (!(types >> t & 1)) continue;
+            auto c = by_class.find(target_pool::class_key(t, cls));
+            if (c == by_class.end()) continue;
+            const auto it = c->second.front();
+            if (target_pool::takeable_by_size(frame_no, it->since, target_pool::kSizeTakeIdle) &&
+                target_pool::fits(it->alloc_bytes, it->alloc_offset, it->memory_type, it->dedicated, mr.size, mr.alignment, types))
+                best = it;
+        }
+    const bool from_class = best != pool_by_age.end();
+    target_pool::Tally seen;
+    for (auto it = pool_by_age.begin(); !from_class && it != pool_by_age.end(); ++it) {
+        const bool takeable = target_pool::takeable_by_size(frame_no, it->since, target_pool::kSizeTakeIdle);
+        const target_pool::Fit f = takeable ? target_pool::verdict(it->alloc_bytes, it->alloc_offset, it->memory_type, it->dedicated,
+                                                                   mr.size, mr.alignment, types)
+                                            : target_pool::Fit::fits;
+        target_pool::add(seen, takeable, f, it->alloc_bytes);
+        if (takeable && f == target_pool::Fit::fits && (best == pool_by_age.end() || it->alloc_bytes < best->alloc_bytes)) best = it;
+    }
+    if (best == pool_by_age.end()) {   // (none: the scan saw them all)
+        const Miss why = target_pool::miss_reason(seen);
+        st_miss[(int)why]++;
+        if (why == Miss::too_small) st_small_gap_pct += (mr.size - seen.largest_small) * 100 / mr.size;
+        return false;
+    }
+    VkImage made = VK_NULL_HANDLE;
+    if (!create_aliasing_image(*need.ci, best->allocation, made)) {
+        st_miss[(int)Miss::not_bound]++;
+        return false;
+    }
+    for (auto& kv : best->views)
+        if (kv.second) vkDestroyImageView(dev.device, kv.second, nullptr);
+    vkDestroyImage(dev.device, best->image, nullptr);
+    auto bucket = target_pool.find(best->key);
+    if (bucket != target_pool.end()) {
+        auto& q = bucket->second;
+        if (auto at = std::find(q.begin(), q.end(), best); at != q.end()) q.erase(at);
+        if (q.empty()) target_pool.erase(bucket);
+    }
+    image = made, allocation = best->allocation;
+    taken_by_size[best->key] = frame_no;
+    pool_unindex(best);
+    pool_bytes -= std::min(pool_bytes, best->bytes), pool_n--;
+    pool_by_age.erase(best);
+    st_pool_resized++;
+    return true;
+}
+/// (texture_frame, each present) the pool over its bound, or all of it while VRAM is short, and what waits in it unused for
+/// RX_VK_POOL_IDLE presents: destroyed, at most 16 a present (64 while VRAM is short). Returns how many
 size_t pool_trim() {
-    // (longshot) RX_VK_POOL_IDLE=<presents>, 8 (120 before): target_pool.h
-    static const uint64_t idle =
-        getenv("RX_VK_POOL_IDLE") ? (uint64_t)std::max(1, atoi(getenv("RX_VK_POOL_IDLE"))) : target_pool::kIdlePresents;
+    // (longshot) RX_VK_POOL_IDLE=<presents>; 64 on an integrated GPU while a pooled image's memory can be taken by size, else 8
+    // (120 before): target_pool::idle_presents
+    static const uint64_t idle = target_pool::idle_presents(getenv("RX_VK_POOL_IDLE"), reuse_memory_level(),
+                                                            dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
     std::lock_guard lk(pool_mu);
     const uint64_t full_cap = pool_cap();
     const uint64_t cap = (pool_pressure >= 2) ? 0 : (pool_pressure == 1) ? (full_cap / 2) : full_cap;
@@ -445,6 +569,8 @@ size_t pool_trim() {
     while (!pool_by_age.empty() && n < most) {
         Pooled& oldest = pool_by_age.front();
         if (pool_bytes <= cap && !target_pool::idle_out(frame_no, oldest.since, idle)) break;
+        ++(pool_bytes > cap ? st_pool_trim_cap : st_pool_trim_idle);
+        pool_unindex(pool_by_age.begin());
         auto bucket = target_pool.find(oldest.key);
         bucket->second.pop_front();
         if (bucket->second.empty()) target_pool.erase(bucket);
@@ -454,6 +580,8 @@ size_t pool_trim() {
         pool_by_age.pop_front();
         ++n;
     }
+    for (auto t = taken_by_size.begin(); t != taken_by_size.end();)
+        t = target_pool::idle_out(frame_no, t->second, idle) ? taken_by_size.erase(t) : std::next(t);
     return n;
 }
 
@@ -2258,7 +2386,7 @@ void destroy_later(Texture& tex, uint64_t completed) {
     }
     d.memory = tex.sparse_chunks;
     if (d.pool_key && d.value <= completed) pool_put(d);
-    else dead.push_back(std::move(d));
+    else dead_pooled_n.fetch_add(d.pool_key ? 1 : 0, std::memory_order_relaxed), dead.push_back(std::move(d));
     for (const auto& attachment : tex.block_attachments)
         dead.push_back(Dead{tex.last_value, attachment.image, attachment.allocation, {}, {}});
     total_bytes -= std::min(total_bytes, tex.bytes + tex.pad);
@@ -2573,6 +2701,7 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
                                   : 0;
     x.pool_key = pool_key;
     x.create_flags = ci.flags;
+    ImageNeed need{&ci};   // (a render target's requirements, asked once: the take by size and the size class read them)
     // (longshot, RX_VK_COMPACT) an image that is not a render target's: from the textures' own pool, the one compacted
     const bool in_textures = compact_on() && !x.sparse && !(as_target && !is_bc(x.format) && !is_astc(x.format));
     if (x.sparse) {
@@ -2628,8 +2757,13 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
              x.sparse_req.formatProperties.flags & VK_SPARSE_IMAGE_FORMAT_SINGLE_MIPTAIL_BIT ? ", one for all layers" : " a layer");
     } else if (in_textures && create_image(ci, x.image, x.allocation, false, false, true)) {
         // (made in the textures' pool; one refused there is made as any other, below)
-    } else if (!(pool_key && pool_take(pool_key, x.image, x.allocation, x.views)) && (st_pool_made += pool_key != 0, true) &&
-               !create_image(ci, x.image, x.allocation, false, as_target && !is_bc(x.format) && !is_astc(x.format)) &&
+    } else if (!(pool_key && (pool_take(pool_key, x.image, x.allocation, x.views) || pool_take_memory(need, x.image, x.allocation))) &&
+               (st_pool_made += pool_key != 0, true) &&
+               // (longshot, RX_VK_TARGET_REUSE_MEMORY) one of the pooled kind on an allocation of its size class, so the next of
+               // a slightly different size takes it: not while the pool is pressed (halved or given back), where its room costs most)
+               !(pool_key && reuse_memory_level() >= 2 && pool_pressure == 0 &&
+                 create_image_in_class(need, x.image, x.allocation)) &&
+               !create_image(ci, x.image, x.allocation, false, as_target && !is_bc(x.format) && !is_astc(x.format), false, &need) &&
                // (a compressed image refused: made again without its raw attachment usage, then without its raw storage
                // usage; its raw views are then not made)
                !((ci.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) && is_bc(x.format) &&
@@ -5202,6 +5336,7 @@ void texture_frame(uint64_t completed) {
             continue;
         }
         if (it->pool_key) {   // (a render target's image: kept for the next of its shape, above)
+            dead_pooled_n.fetch_sub(1, std::memory_order_relaxed);
             pool_put(*it);
             it = dead.erase(it);
             continue;
@@ -5496,10 +5631,25 @@ void texture_frame(uint64_t completed) {
         vma_log_image_blocks();
         {
             std::lock_guard lk(pool_mu);
-            logf("vk: render target images: %llu reused from the pool, %llu made new, %llu destroyed from it; it holds %llu "
-                 "(%llu MB)%s", (unsigned long long)st_pool_reused, (unsigned long long)st_pool_made,
-                 (unsigned long long)st_pool_destroyed, (unsigned long long)pool_n, (unsigned long long)(pool_bytes >> 20),
+            logf("vk: render target images: %llu reused from the pool, %llu made new, %llu destroyed from it, %llu reused by size "
+                 "(on a pooled one's memory, RX_VK_TARGET_REUSE_MEMORY=%d), %llu missed after their image was taken by size; it "
+                 "holds %llu (%llu MB)%s",
+                 (unsigned long long)st_pool_reused, (unsigned long long)st_pool_made, (unsigned long long)st_pool_destroyed,
+                 (unsigned long long)st_pool_resized, reuse_memory_level(),
+                 (unsigned long long)st_pool_stolen, (unsigned long long)pool_n, (unsigned long long)(pool_bytes >> 20),
                  pool_cap() ? (pool_pressure >= 2 ? ", VRAM critical: given back" : pool_pressure == 1 ? ", VRAM short: halved" : "") : " (RX_VK_TARGET_POOL_MB=0)");
+            if (reuse_memory_on()) {
+                using target_pool::Miss;
+                const auto n = [](Miss m) { return (unsigned long long)st_miss[(int)m]; };
+                logf("vk: render targets not reused by size: %llu with the pool empty (%llu of them with targets still in the "
+                     "dead queue), %llu with none in it a present yet, %llu with none of a kind they can use, %llu with all smaller "
+                     "(the largest %llu%% short on average), %llu with all bigger (over 1.5 times), %llu with some of each, %llu over "
+                     "a block, %llu refused by the driver, %llu not bound; the pool let go of %llu over its bound and %llu idle",
+                     n(Miss::empty) + n(Miss::empty_dead_waiting), n(Miss::empty_dead_waiting), n(Miss::too_new), n(Miss::unusable),
+                     n(Miss::too_small), n(Miss::too_small) ? (unsigned long long)(st_small_gap_pct / st_miss[(int)Miss::too_small]) : 0ull,
+                     n(Miss::too_big), n(Miss::between), n(Miss::over_block), n(Miss::requirements), n(Miss::not_bound),
+                     (unsigned long long)st_pool_trim_cap, (unsigned long long)st_pool_trim_idle);
+            }
         }
         logf("vk: VRAM: %llu MB used of %llu MB allowed (%llu MB of it free in the blocks); textures %llu MB (budget %llu "
              "MB), %zu textures%s", (unsigned long long)(used >> 20), (unsigned long long)(allowed >> 20),

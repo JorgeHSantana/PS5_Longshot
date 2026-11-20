@@ -71,7 +71,8 @@ int main() {
     CHECK("nine: given back", target_pool::idle_out(109, 100, target_pool::kIdlePresents));
     CHECK("RX_VK_POOL_IDLE=120 keeps it for 120", !target_pool::idle_out(220, 100, 120) && target_pool::idle_out(221, 100, 120));
 
-    if (!fails) std::puts("PASS: the dead targets are looked for at every present; the pool's idle images go after 8");
+    if (!fails) std::puts("PASS: the dead targets are looked for at every present; the pool's idle images go after 8 presents by default "
+                          "(64 on an integrated GPU while the take by size is on: test_target_reuse_memory)");
     return fails ? 1 : 0;
 }
 '''
@@ -119,7 +120,8 @@ def wiring():
     every = block(tex, "uint64_t dead_every_presents()")
     need('getenv("RX_VK_DEAD_EVERY")' in every and ": 1;" in every, "RX_VK_DEAD_EVERY defaults to 1")
     trim = block(tex, "size_t pool_trim()")
-    need('getenv("RX_VK_POOL_IDLE")' in trim and "target_pool::kIdlePresents" in trim, "RX_VK_POOL_IDLE defaults to target_pool.h's")
+    need('target_pool::idle_presents(getenv("RX_VK_POOL_IDLE"), reuse_memory_level(),' in trim,
+         "RX_VK_POOL_IDLE defaults to target_pool.h's (idle_presents: kIdlePresents, or kIdlePresentsReuse with the take by size)")
     need("!target_pool::idle_out(frame_no, oldest.since, idle)" in trim, "the trim uses target_pool::idle_out")
     return fails
 
