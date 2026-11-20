@@ -43,6 +43,7 @@ FIXTURE = r"""
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <optional>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -520,6 +521,13 @@ def build_fixture(cxx, temp):
     ]
 
     prod = []
+    if "uint32_t bc_small_layers() {" in tex:   # (#1843's small scratch: not made here, every level through the first)
+        prod.append("static VkImage bc_small = VK_NULL_HANDLE;\nstatic VkImageView bc_small_view = VK_NULL_HANDLE;\n"
+                    "constexpr uint32_t kBcSmallDim = 1024;\nstatic uint32_t bc_small_layers() { return 8; }")
+    if "bool upload_never_put_off(const Texture& tex) {" in tex:
+        prod.append(block(tex, "bool upload_never_put_off(const Texture& tex) {"))
+    if "GprofSpan" in tex:   # (RX_VK_PASS_TIMING's spans: off here)
+        prod.append("struct GprofSpan {\n    uint64_t bytes = 0;\n    GprofSpan(VkCommandBuffer, const char*) {}\n};")
     if "uint64_t astc_chunk_texels(" in tex:
         prod.append(block(tex, "uint64_t astc_chunk_texels("))
     prod.extend([

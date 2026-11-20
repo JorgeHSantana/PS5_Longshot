@@ -121,7 +121,7 @@ Switches that name a file (`HOS_SAMPLE_FILE`, `HOS_SAMPLE_ALL`, `HOS_SLOW_FRAMES
 | `HOS_HLE_STATS=1` | Calls of each HLE function and host call, about every 5 s (`hle:` lines). Take performance numbers from a run without it |
 | `HOS_PROFILE_EVERY=<s>`, `HOS_THREAD_TIMES=<s>` | Busiest threads; threads over 5 % of a core |
 | `HOS_FPS_LOG=1`, `HOS_PRESENT_TRACE=<csv>` | Frame limiter and game clock speed (1.000 is real time); one CSV line per present with host-clock (CPU, not scanout) times |
-| `RX_VK_PASS_TIMING=1` or `2` | GPU time per pass (`2`: per program too), logged every 600 presents |
+| `RX_VK_PASS_TIMING=1` or `2` | GPU time per pass (`2`: per program too), logged every 600 presents. The GPU's ASTC decode is a span a texture, kind `astc`, in four rows: decoded only or re-encoded to BC too, and whether the upload budget can put it off (`RX_VK_UPLOAD_BUDGET_MS`) or never does (a layer array, or over 1024x1024) |
 | `RX_VK_SLOW_LOG=<ms>` | The replay's times for each frame over `<ms>` |
 
 ## Draw statistics

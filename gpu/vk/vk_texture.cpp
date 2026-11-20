@@ -27,6 +27,7 @@
 #include <exception>
 #include <list>
 #include <map>
+#include <optional>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -726,6 +727,20 @@ uint32_t bc_layers() {
 }
 /// (longshot) RX_VK_ASTC_BC7=1: big ASTC textures as BC7 instead of BC3. Both are 8 bits a texel; BC7's mode 6 keeps
 /// the colours' gradients and alpha much better (the encoder is host_shaders/bc7_encoder.comp).
+/// (longshot) The small scratch: levels no larger than kBcSmallDim (the terrain's material arrays from their second level
+/// down) decode and encode bc_small_layers() layers a run through it, not one. A run is a decode, an encode, a copy and
+/// three full barriers: an array of 90 layers and 11 levels made ~990 of them, and the GPU spent most of the time between
+/// them (Hyrule Field's entry on an RX 9070 XT: 51 ms an array at one layer a run, 15 ms at 8; #1720). 36 MB (32 for the
+/// image, 4 more of the output buffer), beside the 2048 x 2048 scratch's 20; not made on a card of small VRAM
+/// (low_vram_texture_mips) or where it would land in system memory. RX_VK_BC_SMALL_LAYERS=<n>: its layers (8; 1: no
+/// small scratch, every run one layer). One layer a run (ec89f92e) was for grid lines on the far ground, layers after a
+/// run's first wrong at the small levels on an RX 6600; no cause was found. Runs still never hold a repacked level
+/// (upload_astc_gpu); multi-layer runs showed no grid lines on RDNA4 RADV, other GPUs are still to be seen
+constexpr uint32_t kBcSmallDim = 1024;
+uint32_t bc_small_layers() {
+    static const uint32_t n = getenv("RX_VK_BC_SMALL_LAYERS") ? std::clamp<uint32_t>((uint32_t)atoi(getenv("RX_VK_BC_SMALL_LAYERS")), 1u, kBcLayers) : kBcLayers;
+    return n;
+}
 bool bc7_enabled() {
     static const bool on = [] {
         const char* e = getenv("RX_VK_ASTC_BC7");
@@ -738,6 +753,9 @@ VmaAllocation bc_scratch_alloc = nullptr;
 VkImageView bc_scratch_view = VK_NULL_HANDLE;
 VkBuffer bc_out = VK_NULL_HANDLE;
 VmaAllocation bc_out_alloc = nullptr;
+VkImage bc_small = VK_NULL_HANDLE;   // (the small scratch, made and given back with the first; none at RX_VK_BC_SMALL_LAYERS=1)
+VmaAllocation bc_small_alloc = nullptr;
+VkImageView bc_small_view = VK_NULL_HANDLE;
 bool bc_scratch_fresh = false;   // (its layout still to be set, in the next upload command buffer)
 // (longshot-amd) a second scratch for textures re-encoded at another size (uneven block levels on AMD): the decoded level
 // is blitted into it, filtered, at the image's size, and encoded from there. Made when an upload of such a texture first
@@ -762,6 +780,7 @@ uint32_t bc_idle_s() {
     static const uint32_t v = getenv("RX_VK_BC_IDLE_S") ? (uint32_t)atoi(getenv("RX_VK_BC_IDLE_S")) : 0;
     return v;
 }
+bool low_vram_texture_mips();   // (below: a card of small VRAM makes no small scratch)
 bool bc_scratch_make() {   // (bc_mu held)
     VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     ii.imageType = VK_IMAGE_TYPE_2D;
@@ -778,7 +797,29 @@ bool bc_scratch_make() {   // (bc_mu held)
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     vi.format = VK_FORMAT_R8G8B8A8_UNORM;
     vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, bc_layers()};
-    const uint64_t out = (uint64_t)(kBcDim / 4) * (kBcDim / 4) * bc_layers() * 16;
+    if (bc_small_layers() > 1 && !low_vram_texture_mips()) {   // (not made: its levels go through the first scratch, one layer a run)
+        VkImageCreateInfo si = ii;
+        si.extent = {kBcSmallDim, kBcSmallDim, 1};
+        si.arrayLayers = bc_small_layers();
+        const char* why = nullptr;
+        if (!create_image(si, bc_small, bc_small_alloc, !pool)) why = "could not be made";
+        else if (!allocation_in_vram(bc_small_alloc)) why = "would be in system memory";
+        else {
+            VkImageViewCreateInfo sv = vi;
+            sv.image = bc_small;
+            sv.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, bc_small_layers()};
+            if (vkCreateImageView(dev.device, &sv, nullptr, &bc_small_view) != VK_SUCCESS) why = "has no view";
+        }
+        if (why) {
+            if (bc_small) destroy_image(bc_small, bc_small_alloc);
+            bc_small = VK_NULL_HANDLE, bc_small_alloc = nullptr, bc_small_view = VK_NULL_HANDLE;
+            static std::atomic<int> told{0};
+            if (told++ < 2) logf("vk: the small BC3 scratch %s: its levels go one layer a run", why);
+        }
+    }
+    const uint64_t big_out = (uint64_t)(kBcDim / 4) * (kBcDim / 4) * bc_layers() * 16;
+    const uint64_t small_out = bc_small ? (uint64_t)(kBcSmallDim / 4) * (kBcSmallDim / 4) * bc_small_layers() * 16 : 0;
+    const uint64_t out = std::max(big_out, small_out);   // (one output buffer: a run of either scratch)
     const VkBufferUsageFlags out_usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     const auto make_out = [&] {
         if (create_device_buffer(out, out_usage, bc_out, bc_out_alloc, !pool)) return true;
@@ -794,6 +835,9 @@ bool bc_scratch_make() {   // (bc_mu held)
         if (bc_scratch_view) vkDestroyImageView(dev.device, bc_scratch_view, nullptr);
         destroy_image(bc_scratch, bc_scratch_alloc);
         bc_scratch = VK_NULL_HANDLE, bc_scratch_view = VK_NULL_HANDLE;
+        if (bc_small_view) vkDestroyImageView(dev.device, bc_small_view, nullptr);
+        if (bc_small) destroy_image(bc_small, bc_small_alloc);
+        bc_small = VK_NULL_HANDLE, bc_small_alloc = nullptr, bc_small_view = VK_NULL_HANDLE;
         return false;
     }
     bc_scratch_fresh = true;
@@ -964,9 +1008,13 @@ bool bc_scratch_layout(VkCommandBuffer cmd, bool resized = false) {
     b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     b.image = bc_scratch;
     b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, bc_layers()};
+    VkImageMemoryBarrier2 bs = b;   // (the small scratch, made with it)
+    bs.image = bc_small;
+    bs.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, bc_small_layers()};
+    const VkImageMemoryBarrier2 both[2] = {b, bs};
     VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-    di.imageMemoryBarrierCount = 1;
-    di.pImageMemoryBarriers = &b;
+    di.imageMemoryBarrierCount = bc_small ? 2 : 1;
+    di.pImageMemoryBarriers = both;
     vkCmdPipelineBarrier2(cmd, &di);
     return true;
 }
@@ -975,18 +1023,24 @@ void bc_scratch_idle() {
     if (!bc_have.load(std::memory_order_relaxed) || !bc_idle_s()) return;
     std::lock_guard lk(bc_mu);
     if (!bc_have || std::chrono::steady_clock::now() - bc_used_at < std::chrono::seconds(bc_idle_s())) return;
+    uint64_t freed = allocation_size(bc_scratch_alloc) + allocation_size(bc_out_alloc);
     Dead d{bc_last_value, bc_scratch, bc_scratch_alloc, {bc_scratch_view}, {}};
     d.buffer = bc_out, d.buffer_alloc = bc_out_alloc;
     dead.push_back(std::move(d));
     bc_scratch = VK_NULL_HANDLE, bc_scratch_alloc = nullptr, bc_scratch_view = VK_NULL_HANDLE, bc_out = VK_NULL_HANDLE, bc_out_alloc = nullptr;
     bc_have = false, bc_scratch_fresh = false;
+    if (bc_small) {
+        freed += allocation_size(bc_small_alloc);
+        dead.push_back(Dead{bc_last_value, bc_small, bc_small_alloc, {bc_small_view}, {}});
+        bc_small = VK_NULL_HANDLE, bc_small_alloc = nullptr, bc_small_view = VK_NULL_HANDLE;
+    }
     const bool second = bc_scratch2 != VK_NULL_HANDLE;
     if (second) {   // (longshot-amd: the second scratch, 16 MB a layer, with it)
+        freed += allocation_size(bc_scratch2_alloc);
         dead.push_back(Dead{bc_last_value, bc_scratch2, bc_scratch2_alloc, {bc_scratch2_view}, {}});
         bc_scratch2 = VK_NULL_HANDLE, bc_scratch2_alloc = nullptr, bc_scratch2_view = VK_NULL_HANDLE, bc_scratch2_fresh = false;
     }
-    logf("vk: the BC3 scratch (%u MB%s) unused for %u s: given back", (second ? 36 : 20) * bc_layers(), second ? ", both" : "",
-         bc_idle_s());
+    logf("vk: the BC3 scratch (%u MB%s) unused for %u s: given back", (unsigned)(freed >> 20), second ? ", both" : "", bc_idle_s());
 }
 
 /// The storage view of one level (every layer) the ASTC decoder writes
@@ -1103,6 +1157,11 @@ VkImageView astc_level_view(Texture* tex, uint32_t level, uint32_t layer) {
 /// every layer's chain: Eden's AssembleInto does the same)
 /// (longshot) why the last upload_astc_gpu on this thread failed, for the log of a BC3 image left to be tried again
 thread_local const char* astc_fail = nullptr;
+/// (longshot) A texture the upload budget never puts off (upload_defer): a terrain material, a layer array or over 1024 x
+/// 1024 both ways, which must be there in the frame that first draws it (the ground flickered when one waited a frame)
+bool upload_never_put_off(const Texture& tex) {
+    return tex.layers > 1 || (tex.width > 1024 && tex.height > 1024);
+}
 
 /// Decoded texels per GPU ASTC upload submission (RX_VK_ASTC_CHUNK_MPX, in millions of texels; 16 by default, 0: no split)
 uint64_t astc_chunk_texels() {
@@ -1165,6 +1224,17 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
     VkCommandBuffer cmd = upload_cmd();
     const uint64_t limit = dev.props.limits.maxStorageBufferRange;
     const uint64_t chunk_texels = astc_chunk_texels();
+    // (RX_VK_PASS_TIMING=1: the GPU's decode, and its re-encode, one span a texture, named by whether the upload budget could
+    // put the texture off. An area's entry decodes dozens in one frame, which the GPU time line doesn't show, #1720)
+    static const char* const kSpans[2][2] = {
+        {"astc decode (the upload budget can put it off)", "astc decode (never put off: a layer array, or over 1024x1024)"},
+        {"astc decode + BC re-encode (the upload budget can put it off)",
+         "astc decode + BC re-encode (never put off: a layer array, or over 1024x1024)"}};
+    // (closed and opened again around an upload chunk's flush: a span across it would count the CPU's wait as GPU time)
+    const char* const span_label = kSpans[tex.bc ? 1 : 0][upload_never_put_off(tex) ? 1 : 0];
+    std::optional<GprofSpan> span;
+    span.emplace(cmd, span_label);
+    span->bytes = staged;
     if (tex.bc) {
         if (!bc_scratch_layout(cmd, tex.bc_resized)) {
             astc_fail = "no memory for the BC3 scratch";
@@ -1190,6 +1260,12 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
         const bool all = !tex.bc && layers.size() == tex.layers && layers.size() <= max_layers &&
                          (!chunk_texels || (uint64_t)g.w * g.h * tex.layers <= chunk_texels);
         const bool repack = off % dev.props.limits.minStorageBufferOffsetAlignment != 0 || bytes < g.swizzled;
+        // (a level the small scratch holds: bc_small_layers() layers a run through it; a resized one has its own scratch)
+        const bool small = tex.bc && bc_small && !tex.bc_resized && g.w <= kBcSmallDim && g.h <= kBcSmallDim;
+        // (and no longer than the upload chunk holds: RX_VK_ASTC_CHUNK_MPX set low keeps a run inside one submission)
+        const uint64_t level_texels = std::max<uint64_t>(1, (uint64_t)g.w * g.h);
+        const uint32_t bc_run = (uint32_t)std::min<uint64_t>(small ? bc_small_layers() : bc_layers(),
+                                                             chunk_texels ? std::max<uint64_t>(1, chunk_texels / level_texels) : ~0ull);
         AstcPush pc{};
         pc.block_dims[0] = tex.block_w;
         pc.block_dims[1] = tex.block_h;
@@ -1202,7 +1278,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
         pc.block_height_mask = (1u << g.tile_h) - 1;
         pc.native_tiling = 1;
         for (size_t k0 = 0; k0 < layers.size();) {
-            const uint32_t run = tex.bc ? bc_layers() : all ? tex.layers : 1;
+            const uint32_t run = tex.bc ? bc_run : all ? tex.layers : 1;
             size_t k1 = k0 + 1;
             while (!repack && k1 < layers.size() && k1 - k0 < run && k1 - k0 < max_layers &&
                    layers[k1] == layers[k1 - 1] + 1) ++k1;
@@ -1219,7 +1295,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
                 flush_mapped_range(mip.allocation, mip.offset, bytes);
                 bi = {mip.buffer, mip.offset, bytes};
             }
-            const VkImageView view = tex.bc ? bc_scratch_view :
+            const VkImageView view = tex.bc ? (small ? bc_small_view : bc_scratch_view) :
                 astc_level_view(&tex, level, n == tex.layers ? ~0u : layers[k0]);
             if (!view) {
                 astc_fail = "no view of a level";
@@ -1230,10 +1306,12 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
             const uint64_t step_texels = std::max<uint64_t>((uint64_t)g.w * g.h * n, 65536ull);
             const bool chunk_full = step_texels > chunk_texels || up_astc_texels > chunk_texels - step_texels;
             if (chunk_texels && up_astc_texels && chunk_full) {
+                span.reset();
                 if (replay_flush_upload(cmd)) {
                     last_barrier_cmd = VK_NULL_HANDLE;   // (cmd was reset and re-begun in place with the same handle)
                     full_barrier(cmd);
                 }
+                span.emplace(cmd, span_label);
                 up_astc_texels = 0;
             }
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, astc_pipe);
@@ -1249,7 +1327,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
             if (tex.bc) {
                 const uint32_t iw = std::max(1u, tex.width >> level), ih = std::max(1u, tex.height >> level);
                 if (tex.bc_resized) bc_encode_resized(cmd, g.w, g.h, iw, ih, n, tex, level, layers[k0]);
-                else bc_encode_into(cmd, iw, ih, n, tex, level, layers[k0], 0, 0);
+                else bc_encode_into(cmd, iw, ih, n, tex, level, layers[k0], 0, 0, small ? bc_small_view : VK_NULL_HANDLE);
             }
             up_astc_texels += step_texels;
             k0 = k1;
@@ -2851,8 +2929,7 @@ namespace {
 bool upload_defer(const Texture& tex) {
     // Terrain materials (layer arrays > 1 or very large surfaces) must always upload synchronously
     // to prevent ground flickering. Only defer smaller single-layer NPC/character/prop textures.
-    const bool is_terrain = (tex.layers > 1) || (tex.width > 1024 && tex.height > 1024);
-    if (is_terrain) return false;
+    if (upload_never_put_off(tex)) return false;
 
     // Limit NPC/prop ASTC upload stalls to 12 ms per frame to protect 60 fps frame pacing (16.6 ms target)
     static const int64_t budget_ns = (int64_t)(getenv("RX_VK_UPLOAD_BUDGET_MS") ? atof(getenv("RX_VK_UPLOAD_BUDGET_MS")) : 12.0) * 1000000;
