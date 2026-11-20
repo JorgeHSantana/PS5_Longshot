@@ -144,9 +144,12 @@ struct Frame {
     float frame_ms = 16.667f;
     bool reset = false;
 };
-bool take(Frame& f) { f = Frame{}; f.frame = frame_no; return true; }
+bool take_ok = true;   // (false: no inputs this present)
+bool take(Frame& f) { f = Frame{}; f.frame = frame_no; return take_ok; }
 uint64_t motions_taken() { return 0; }
 }
+// (vk_framegen.cpp's: this present gave FSR 3.1 a frame, set by fsr3fi_frames before its generate call; framegen_idle's)
+bool fsr_given = false;
 namespace fsr3fi {
 bool wanted = true;
 uint32_t frames_wanted() { return wanted ? 1u : 0u; }
@@ -314,6 +317,15 @@ int main() {
         CHECK(fsr3fi::given.present == fg.frames[0].view && fsr3fi::given.color != fg.frames[0].view);
         CHECK(overs.size() == o);
     }
+    // (FSR's use marked for framegen_idle: by a present whose inputs were taken, its history alone (no frame to make) too, and
+    // not by one without inputs, which leaves FSR's images unused)
+    fsr_given = false;
+    fsr3_inputs::take_ok = false;
+    CHECK(fsr3fi_frames(cmd, set, 0, 1920, 1080, ++sequence, false, t, slot, 1) == 0 && !fsr_given);
+    fsr3_inputs::take_ok = true;
+    CHECK(fsr3fi_frames(cmd, set, 0, 1920, 1080, ++sequence, false, t, slot, 0) == 0 && fsr_given);
+    fsr_given = false;
+    CHECK(fsr3fi_frames(cmd, set, 0, 1920, 1080, ++sequence, false, t, slot, 1) == 1 && fsr_given);
     std::puts("fsr3fi hud mask: ok");
     return 0;
 }

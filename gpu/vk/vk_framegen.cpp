@@ -16,6 +16,7 @@
 #include <deque>
 #include <mutex>
 #include <thread>
+#include <utility>   // (std::exchange: framegen_idle)
 
 #include <cmath>
 
@@ -1023,6 +1024,11 @@ void note_maker(FgMaker m) {
     maker_at.store(now_ns(), std::memory_order_relaxed);
 }
 
+// (longshot) This present gave FSR 3.1 a frame (fsr3fi_frames, right before fsr3fi::generate): its own images were in use, whatever
+// came of it and whichever made frames were shown. framegen_idle takes it, and clears it for the next present: both on the replay
+// thread, framegen_record before framegen_idle in every present
+bool fsr_given = false;
+
 } // namespace
 
 int framegen_capped(int framegen, int dlss_most) {
@@ -1056,12 +1062,13 @@ bool framegen_on() {
 
 void framegen_idle(bool recorded) {
     using namespace framegen_idle_rule;
-    static uint32_t off = 0, fsr_off = 0;
+    static Counts counts;
     const bool on = framegen_on();
-    fsr_off = next_off(fsr_off, on && fsr3fi::frames_wanted(), recorded);
-    if (fsr_off >= kIdlePresents) fsr3fi::release();
-    off = next_off(off, on, recorded);
-    if (!release_due(off, fg.w != 0)) return;
+    // (FSR's own images by this present's own use of them, not by `recorded`: a set the built-in or DLSS-G made leaves them unused)
+    const bool fsr_used = std::exchange(fsr_given, false);
+    const Release due = step(counts, {on, on && fsr3fi::frames_wanted(), recorded, fsr_used, fg.w != 0});
+    if (due.fsr) fsr3fi::release();
+    if (!due.shared) return;
     {   // (as ensure_size: the display thread done with the sets, then every queue idle)
         std::unique_lock lk(fg.mu);
         fg.cv.wait(lk, [] { return fg.jobs.empty() && !fg.sets[0].busy && !fg.sets[1].busy && !fg.sets[2].busy; });
@@ -1562,6 +1569,8 @@ int fsr3fi_frames(VkCommandBuffer cmd, OutSet& set, int cur, uint32_t uw, uint32
     in.frame_time_ms = f.frame_ms;
     in.reset = f.reset;
     in.sequence = sequence;
+    // (its images in use this present from here, whatever generate makes of it: a reset, its history alone, none made)
+    fsr_given = true;
     if (count <= 0) return (void)fsr3fi::generate(cmd, in, t, 0), 0;   // (its history alone)
     if ((int)fsr3fi::generate(cmd, in, t, (uint32_t)count) != count) return 0;
     const VkImageCopy c{{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0},
