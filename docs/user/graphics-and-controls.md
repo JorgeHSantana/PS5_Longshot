@@ -104,7 +104,7 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's; with HDR set to Native). Compatible DLSS/DLAA, FSR 4/native AA and shared-chain FSR 3.1 upscaling run automatically; `RX_VK_PSYCHOV35_DLSS=0` disables that compatibility route. Off and the spatial/FXAA TAAU replacement support PsychoV35 directly. FSR 3.1 FG remains separately opt-in and 2x only; legacy own-input FSR upscaling remains unsupported | Vanilla |
 | | Colour vision correction | Off, Protan (red-green), Deutan (red-green), Tritan (blue-yellow). Changes apply immediately. | Off |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
-| | Shadow resolution | Auto (for the card's memory), Game's (1600), High (2200), Highest (3072): the sun's shadow maps, applies at once | Auto |
+| | Shadow resolution | Auto (for the card's memory), Game's (1600), High (2200), Highest (3072): the sun's shadow maps, applies at once; Highest also keeps the nearest shadows from shimmering as much | Auto |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
 | | Mute in background | Off, On | Off |
@@ -220,7 +220,9 @@ helper asks you to.
   virtual line count. Native HDR leaves it out.
 - **Anisotropic filtering** keeps the ground sharp at a slant; 16x costs little on most cards, and Game's is the
   console's own. **Shadow resolution** sets the sun's shadow maps: Auto picks by the card's memory (the game's 1600 up
-  to 6 GB, High at 8 GB, Highest from 12 GB).
+  to 6 GB, High at 8 GB, Highest from 12 GB). On Highest the nearest shadows shimmer less while the camera turns or
+  Link walks: the map near Link stays put in the world instead of following the view. The steady fit is a little coarser
+  than the game's own fit standing still, so below Highest the game's fit is kept ([developer switches](../dev/reference/switches.md)).
 - **GPU device** matters on a PC with more than one graphics card: Auto prefers a dedicated one. The card you choose is
   remembered as that card, not its place in the list.
 - **Threaded rendering:** On draws the picture on threads of its own (a render thread and a recorder thread) while the

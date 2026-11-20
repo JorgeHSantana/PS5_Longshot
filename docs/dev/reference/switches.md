@@ -261,6 +261,12 @@ once: change them before a start.
 
 The memory budget and its `vk: budget:` lines are in [architecture](architecture.md).
 
+### Sun shadows
+
+| Switch | What it does |
+|---|---|
+| `HOS_SHADOW_STABLE=0` | Fit the sun's nearest shadow cascade as shipped at every Shadow resolution, following the view each frame. `HOS_SHADOW_STABLE=1` uses the steady fit at every resolution. By default the steady fit runs only on Highest (3072 texels); below it the game's fit is kept because the steady square is coarser standing still. The steady fit (`host/oot_shadow_fit.c`, `nx2/oot_shadow_fit.py`) keeps its basis independent of the camera, following the sun by the smallest turn from a point moving in whole texels, and fits a steady square around the slice's bounding sphere on whole texels. The log says `shadow: the sun's nearest cascade is <n> m a side` when the size changes. |
+
 ### Threads and cores
 
 | Switch | What it does |

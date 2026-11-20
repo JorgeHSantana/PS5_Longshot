@@ -23,7 +23,8 @@ MODULE_HINTS(hn_shadow_res, 0,
              "more.",
              "1600 pixels a side, the console's. About 31 MB of video memory.",
              "2200 pixels a side. About 58 MB of video memory.",
-             "3072 pixels a side, the game's own highest. About 113 MB of video memory.")
+             "3072 pixels a side, the game's own highest, and the shadows near you shimmer less while the camera moves. "
+             "About 113 MB of video memory.")
 } // namespace
 
 MENU_MODULE(detail) {
@@ -40,7 +41,8 @@ MENU_MODULE(detail) {
         .row({.key = "shadow_resolution",
               .label = "Shadow resolution",
               .help = "The size of the sun's shadow maps: higher keeps the shadows of thin things near you, such as chains, fences and "
-                      "leaves, smooth instead of stair-stepped, for more video memory and a little GPU time. Applies at once.",
+                      "leaves, smooth instead of stair-stepped, for more video memory and a little GPU time. Highest also makes them "
+                      "shimmer less while the camera moves. Applies at once.",
               .value = &opts.shadow_res,
               .lo = 0, .hi = 3,
               .text = [](int v) { return std::string(tx_shadow_res(v)); },

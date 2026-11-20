@@ -195,6 +195,8 @@ def main():
         oot_fov.install(L, img, next((m["build_id"] for m in meta["modules"] if m["name"] == "main"), ""))
         import oot_shadow   # (the sun's shadow resolution, after the game sizes its cascades)
         oot_shadow.install(L, img, next((m["build_id"] for m in meta["modules"] if m["name"] == "main"), ""))
+        import oot_shadow_fit   # (the sun's nearest cascade kept steady: a world-fixed basis, a square on whole texels)
+        oot_shadow_fit.install(L, img, next((m["build_id"] for m in meta["modules"] if m["name"] == "main"), ""))
         import oot_jitter   # (the temporal upscalers' camera jitter, DLSS's and FSR 3.1's: none unless one runs, host/rx_backend.c)
         oot_jitter.install(L, img)
     discover.discover(L, img_dir, chunks.file_jobs(), max_insns=a.max_func)
