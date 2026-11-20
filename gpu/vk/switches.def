@@ -327,6 +327,7 @@ SW(RX_VK_DMABUF_PIECE_MB, tune, int, "udmabuf's size limit from /sys (64 MB unle
 SW(RX_VK_DRAW_STATS, diag, string, "unset: no statistics", "Names a folder: one measured frame's per-draw statistics and the wanted programs' descriptors and buffers are written there.")
 SW(RX_VK_DRAW_STATS_PROGS, diag, string, "no programs dumped", "A list of hex program keys whose uniform and storage buffers are dumped in hex with the frame statistics.")
 SW(RX_VK_DRIVER_FAULTS, kill, enum, "1: programs the driver faulted on are left out, this run and later ones", "0 asks the driver again for programs it faulted on; 2 builds one program at a time on every driver (unset, only with AMD's Windows driver).")
+SW(RX_VK_DROP_LOADED_MODULES, kill, bool, "on: a program the load at create read lets its shader modules go once every noted pipeline of it is built", "0 keeps the shader modules of programs loaded at their create calls for the session, as before.")
 SW(RX_VK_DROP_MODULES, hw, bool, "Linux: on with 20 GB of RAM or less or a memory shortfall at start, off otherwise", "Forces the shader modules to be let go (1) or kept (0) after the precompile.")
 SW(RX_VK_DUMP, diag, string, "no dump", "Dumps every step of the frame after the given present(s) as PNGs: <present>[+<count>][,...].")
 SW(RX_VK_DUMP_9E5, diag, bool, "off", "Frame dumps read B10G11R11 targets back raw through the depth route instead of as colour.")
