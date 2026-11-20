@@ -86,7 +86,17 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | CRT filter | Off, Lottes aperture grille, Lottes consumer TV, Hyllian Fast, zfast CRT (changes at once; Native HDR bypasses it) | Off |
 | | CRT lines | 240, 480, 720 virtual lines (shown with a CRT filter on; changes at once; capped at half the destination height) | 240 |
 | | Ultrawide menus | Full width; Centred, blurred sides; Centred, black bars (with the Aspect ratio at the monitor's shape) | Centred, blurred sides |
-| | HUD layout | Screen's edges; Middle 16:9 (on a screen that is not 16:9; `HOS_WIDE_UI`, when set, decides) | Screen's edges |
+| | HUD layout | Screen's edges, Middle 16:9 or Custom. `HOS_WIDE_UI`, when set, overrides the choice | Screen's edges |
+| | Hearts and magic horizontal | From −15% to +15% of the picture's width (Custom) | 0% |
+| | Hearts and magic vertical | From −15% to +15% of the picture's height (Custom) | 0% |
+| | Hearts and magic size | From 75% to 125% (Custom) | 100% |
+| | Action and item buttons horizontal | From −15% to +15% of the picture's width (Custom) | 0% |
+| | Action and item buttons vertical | From −15% to +15% of the picture's height (Custom) | 0% |
+| | Action and item buttons size | From 75% to 125% (Custom) | 100% |
+| | Minimap horizontal | From −15% to +15% of the picture's width (Custom) | 0% |
+| | Minimap vertical | From −15% to +15% of the picture's height (Custom) | 0% |
+| | Minimap size | From 75% to 125% (Custom) | 100% |
+| | Reset HUD placement | Restores the three groups to their usual positions and sizes (Custom) | — |
 | | HDR | Off, Expanded, Native (the game's) | Off |
 | | HDR paper white | 80 to 400 nits, in steps of 10 (while HDR is on) | 200 nits |
 | | HDR peak brightness | 400 to 4000 nits, in steps of 100 (while HDR is on) | 1000 nits |
@@ -159,6 +169,8 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | Developer: Intel shader compiles | Auto, Side by side, One at a time (after a restart; Intel graphics on Windows only) | Auto |
 | | Developer: Intel quick compute builds | Off, On (changes at once; Intel graphics on Windows only) | On |
 | | Developer: Set up for a weak laptop | Sets the rows for integrated graphics with 4 CPU threads or fewer (shown on integrated graphics only) | |
+
+For a live preview while adjusting Custom HUD placement, use the compact menu. Right Shift switches to it by default.
 
 The **Debug** tab is for testing. Its **Debug tools** (or `HOS_OOT_CHEATS=1` in `longshot_env.txt`) add flight, a free
 camera, teleport, the inventory and the other tools below the row. Its **Developer** rows are workarounds to try when a
@@ -273,6 +285,11 @@ picture and the time.
 Use a controller, or the keyboard and mouse. On the keyboard, <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> move
 (hold <kbd>Caps Lock</kbd> to walk), the arrow keys (or <kbd>I</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd>) turn the
 camera, and <kbd>E</kbd> is A (it selects **New Game** on the title screen).
+
+**Toggle HUD** starts unbound. Assign a key or controller input on the **Controls** page to hide or show the gameplay HUD
+during the current session. The dungeon's small-key count follows the minimap's placement and visibility. The full map
+stays available with its own small-key count and the Boss Key icon when owned. While assigned, the shortcut takes priority
+over any gameplay action on the same key or button.
 
 **Change a binding** on the Controls tab's **Controls** page: choose a row and a column (Gamepad or Keyboard), press
 <kbd>Enter</kbd> (or the bottom face button), then the new button or key. <kbd>Esc</kbd> cancels, <kbd>Delete</kbd>

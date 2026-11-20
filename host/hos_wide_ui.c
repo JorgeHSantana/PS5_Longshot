@@ -28,10 +28,12 @@
    a narrower screen fitted to its width, as the menus); HOS_WIDE_UI=0 or 1, when set, stands over the row;
    HOS_WIDE_UI_LOG=<n> logs the first n changes of the plan, each root layout, and the plan's time. */
 #include "hos.h"
+#include "../gpu/vk/vk_api.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
 #include <math.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -55,7 +57,47 @@ static const float CROSS = 0.25f;           /* (a pane with less than this share
 static const float SIZE_CAP = 960.0f;       /* (wider panes count by their origin only: glows, hit boxes, backdrops) */
 
 volatile uint32_t hos_wide_ui_force;   /* (read by nx2/oot_wide.py's site in f_8154caa0) */
-static volatile int ui_on;
+static volatile int ui_on, ui_custom;
+uint32_t hos_gameplay_hud_hidden;
+static int hud_minimap_placement = HOS_HUD_DEFAULT_PLACEMENT;
+
+void hos_gameplay_hud_toggle(void) {
+    const uint32_t was = __atomic_fetch_xor(&hos_gameplay_hud_hidden, 1u, __ATOMIC_RELAXED);
+    hos_log("hud: gameplay HUD %s", was ? "visible" : "hidden");
+}
+
+enum { HUD_HEALTH, HUD_ITEMS, HUD_ACTION, HUD_GROUPS };
+typedef struct { float scale, x, y; } HudTransform;
+static const HudTransform identity = {1.0f, 0.0f, 0.0f};
+static _Thread_local HudTransform minimap_transform;
+static uint32_t minimap_placing;
+static HudTransform group_plan[HUD_GROUPS];
+static atomic_flag group_plan_lock = ATOMIC_FLAG_INIT;
+
+static void lock_group_plan(void) {
+    while (atomic_flag_test_and_set_explicit(&group_plan_lock, memory_order_acquire)) {}
+}
+
+static void unlock_group_plan(void) { atomic_flag_clear_explicit(&group_plan_lock, memory_order_release); }
+static int group_placement[HUD_GROUPS];
+static float viewport_x = 1920.0f, viewport_y = 1080.0f;
+
+/* Negative offsets move left or down. Clamp the scaled group to the usable picture whenever it fits. */
+static float place_axis(float offset, float scale, float lo, float hi, float half) {
+    const float center = (lo + hi) * 0.5f;
+    const float half_group = (hi - lo) * 0.5f * scale;
+    const float limit = fmaxf(0.0f, half * 0.99f - half_group);
+    return fminf(limit, fmaxf(-limit, center + 2.0f * half * offset)) - scale * center;
+}
+
+static HudTransform hud_transform(int packed, float x0, float x1, float y0, float y1, float half_x, float half_y) {
+    if (packed == HOS_HUD_DEFAULT_PLACEMENT || !isfinite(x0) || !isfinite(x1) || !isfinite(y0) || !isfinite(y1)) return identity;
+    const float x = (float)((packed & 63) - 16) / 100.0f;
+    const float y = (float)(((packed >> 6) & 63) - 16) / 100.0f;
+    const float scale = (float)(packed >> 12) / 100.0f;
+    if (fabsf(x) > 0.15f || fabsf(y) > 0.15f || scale < 0.75f || scale > 1.25f) return identity;
+    return (HudTransform){scale, place_axis(x, scale, x0, x1, half_x), place_axis(y, scale, y0, y1, half_y)};
+}
 
 /* Every 2D screen not kept whole (nx2/oot_wide.py HUD) draws with the UI projection's across and up rows times hos_ui_qx,
    hos_ui_qy (0 before the first present: hos_wide_squeeze across then). The HUD's layouts, by their root layout's name
@@ -88,7 +130,9 @@ typedef struct {
     float wide;            /* (its drawn width times this: 0 or 1, as the game draws it) */
     float tall;            /* (its drawn height times this, the same) */
     float from;            /* (its parent's ox when it was placed, NAN if its parent was not noted: its place in it) */
+    HudTransform placed;   /* (the custom affine transform already inherited by this pane's children) */
     uint32_t type;
+    uint8_t custom_group, action_layout, minimap_group;  /* group is zero or HUD_* + 1 */
     uint16_t lkind, rule;  /* (its layout's kind and its own rule, by name: LK_ and RULE_ below) */
     uint32_t in_hud;       /* (its root layout is the HUD's, by name: as the plan last saw it) */
     uint8_t hud, whole;    /* (its own layout is one of HUD_LAYOUTS; one drawn over the whole picture, never made smaller) */
@@ -245,6 +289,15 @@ static void classify(Node *n, uint64_t pane, uint64_t layout) {
     n->hud = (uint8_t)guest_in(lname, HUD_LAYOUTS, COUNT(HUD_LAYOUTS));
     n->whole = (uint8_t)(n->lkind == LK_WHOLE || guest_in(lname, FULL_LAYOUTS, COUNT(FULL_LAYOUTS)));
     n->fade = (uint8_t)guest_is(lname, "LoadingFade_00");
+    n->custom_group = 0;
+    n->action_layout = (uint8_t)guest_is(lname, "DoCommand_00");
+    /* (the visible map, markers and frame, including the visible map's scissor. The capture roots are its siblings.) */
+    n->minimap_group = (uint8_t)(guest_is(lname, "MapMenu_00") &&
+                                 (guest_is(pname, "N_InOut_00") || guest_is(pname, "Pa_KeySmall_00")));
+    if (guest_is(lname, "PlayerStatus_00")) {
+        if (guest_is(pname, "Pa_HeartGauge_00") || guest_is(pname, "Pa_MpGauge_00")) n->custom_group = HUD_HEALTH + 1;
+        else if (guest_is(pname, "Pa_SelectItem_00")) n->custom_group = HUD_ITEMS + 1;
+    } else if (n->action_layout && guest_is(pname, "N_PosType_00")) n->custom_group = HUD_ACTION + 1;
     for (int i = 0; i < COUNT(RULES) && pname; i++)
         if (guest_is(lname, RULES[i].layout) && guest_is(pname, RULES[i].pane)) n->rule = RULES[i].rule;
 #undef COUNT
@@ -455,7 +508,47 @@ static void visit_y(int p, int depth) {
     }
 }
 
-static void plan(void) {
+static int custom_groups(void) {
+    HudTransform next[HUD_GROUPS];
+    float left[HUD_GROUPS], right[HUD_GROUPS], bottom[HUD_GROUPS], top[HUD_GROUPS];
+    for (int g = 0; g < HUD_GROUPS; g++) {
+        left[g] = bottom[g] = INFINITY;
+        right[g] = top[g] = -INFINITY;
+    }
+    FOR_USED(i) {
+        const Node *n = &nodes[i];
+        if (!n->key || !n->layout || !n->custom_group) continue;
+        const int g = n->custom_group - 1;
+        if (group_placement[g] == HOS_HUD_DEFAULT_PLACEMENT) continue;
+        extents(i, 0);
+        extents_y(i, 0);
+        float dx = 0.0f, dy = 0.0f;
+        for (int a = i, d = 0; a >= 0 && d < 64; a = parent_of[a], d++) {
+            if (plan_new[a] != 0.0f) dx = plan_new[a];
+            if (plany_new[a] != 0.0f) dy = plany_new[a];
+        }
+        left[g] = fminf(left[g], ext_lo[i] + dx);
+        right[g] = fmaxf(right[g], ext_hi[i] + dx);
+        bottom[g] = fminf(bottom[g], ext_ylo[i] + dy);
+        top[g] = fmaxf(top[g], ext_yhi[i] + dy);
+    }
+    for (int g = 0; g < HUD_GROUPS; g++)
+        next[g] = hud_transform(group_placement[g], left[g], right[g], bottom[g], top[g], viewport_x, viewport_y);
+    int changed = 0;
+    lock_group_plan();
+    for (int g = 0; g < HUD_GROUPS; g++) {
+        /* (sub-pixel animation in the bounds needn't dirty every layout on every present) */
+        HudTransform *old = &group_plan[g];
+        if (next[g].scale != old->scale || fabsf(next[g].x - old->x) >= 0.5f || fabsf(next[g].y - old->y) >= 0.5f) {
+            *old = next[g];
+            changed = 1;
+        }
+    }
+    unlock_group_plan();
+    return changed;
+}
+
+static void plan(int custom) {
     const int on = ui_on;
     /* (the slots in use, once: every step walks only them, and only their entries are reset; walking the whole table
        took about 0.7 ms a present on the presenting thread) */
@@ -523,7 +616,7 @@ static void plan(void) {
                 wide_new[i] = ui_fill_x, tall_new[i] = ui_fill_y;
         }
     }
-    int changed = 0;
+    int changed = custom && custom_groups();
     FOR_USED(i) {
         Node *n = &nodes[i];
         if (!n->key || (n->plan == plan_new[i] && n->wide == wide_new[i] && n->tall == tall_new[i] && n->plany == plany_new[i] &&
@@ -570,19 +663,22 @@ float hos_hud_scale(float r, float full) { return r > 0.0f && full > 0.0f && r <
 void hos_wide_ui_tick(void) {
     static const char *env;
     static int looked;
-    static float hud_max, hud_full, last[8];
+    static float hud_max, hud_full, last[10];
+    static int last_map_placement = HOS_HUD_DEFAULT_PLACEMENT;
     if (!looked) {
         looked = 1, env = getenv("HOS_WIDE_UI");
         const char *e = getenv("HOS_WIDE_UI_LOG");
         log_each = e ? atoi(e) : 0;
         hud_max = env_ratio("HOS_HUD_MAX_RATIO", HUD_MAX), hud_full = env_ratio("HOS_HUD_FULL_RATIO", HUD_FULL);
-        for (int i = 0; i < 8; i++) last[i] = NAN;
+        for (int i = 0; i < 10; i++) last[i] = NAN;
     }
     const float r = hos_wide_ratio;
     /* (the HUD's moves: HOS_WIDE_UI when set, else the Insert menu's HUD layout, read at each present so a change shows at
        once: 0 Screen's edges, 1 Middle 16:9, HOS_OPT_HUD_LAYOUT) */
     int rx_option(int id, int otherwise);
-    const int hud = env && *env ? !env_value_off(env) : rx_option(71, 0) == 0;
+    const int layout = env && *env ? (env_value_off(env) ? 1 : 0) : rx_option(HOS_OPT_HUD_LAYOUT, 0);
+    const int custom = layout == 2;
+    const int hud = layout != 1;
     float qx = 0.0f, qy = 0.0f, fit = 1.0f, ex = 0.0f, ey = 0.0f;
     if (r > GAME * 1.001f) {   /* (wider: the middle 16:9 at the height's scale, as before) */
         qx = GAME / r, qy = 1.0f;
@@ -596,11 +692,26 @@ void hos_wide_ui_tick(void) {
     const float fill_x = qx > 0.0f && qx < 1.0f ? 1.0f / qx : 1.0f, fill_y = qy > 0.0f && qy < 1.0f ? 1.0f / qy : 1.0f;
     extern volatile uint32_t hos_wide_keep_mask;   /* (bit 3: the loading fade's screen kept whole, the Full width row) */
     const int fade_free = !(hos_wide_keep_mask & 8u);
-    const int on = ex != 0.0f || ey != 0.0f || fit != 1.0f || fill_x != 1.0f || fill_y != 1.0f;
-    const float now[8] = {ex, ey, fit, (float)on, r, fill_x, fill_y, (float)fade_free};
+    if (custom) {
+        viewport_x = qx > 0.0f ? CANVAS_HALF / qx : CANVAS_HALF;
+        viewport_y = qy > 0.0f ? CANVAS_HALF_Y / qy : CANVAS_HALF_Y;
+        group_placement[HUD_HEALTH] = rx_option(HOS_OPT_HUD_HEALTH, HOS_HUD_DEFAULT_PLACEMENT);
+        group_placement[HUD_ITEMS] = group_placement[HUD_ACTION] = rx_option(HOS_OPT_HUD_BUTTONS, HOS_HUD_DEFAULT_PLACEMENT);
+    }
+    const int map_placement = custom ? rx_option(HOS_OPT_HUD_MINIMAP, HOS_HUD_DEFAULT_PLACEMENT) : HOS_HUD_DEFAULT_PLACEMENT;
+    __atomic_store_n(&hud_minimap_placement, map_placement, __ATOMIC_RELAXED);
+    const int place_groups = custom && (group_placement[HUD_HEALTH] != HOS_HUD_DEFAULT_PLACEMENT ||
+                                        group_placement[HUD_ITEMS] != HOS_HUD_DEFAULT_PLACEMENT);
+    const int transform = place_groups || map_placement != HOS_HUD_DEFAULT_PLACEMENT;
+    const int on = transform || ex != 0.0f || ey != 0.0f || fit != 1.0f || fill_x != 1.0f || fill_y != 1.0f;
+    const float now[10] = {ex, ey, fit, (float)on, r, fill_x, fill_y, (float)fade_free, (float)transform, (float)place_groups};
     if (memcmp(now, last, sizeof now)) {
         ui_ex = ex, ui_ey = ey, ui_wx = 1.0f + ex / CANVAS_HALF, ui_fit = fit, ui_fill_x = fill_x, ui_fill_y = fill_y, ui_on = on;
         fade_planned = fade_free, fade_icon_planned = fade_free && r > 0.0f && r < GAME * 0.999f;   /* (narrower only) */
+        lock_group_plan();
+        for (int g = 0; g < HUD_GROUPS; g++) group_plan[g] = identity;
+        unlock_group_plan();
+        ui_custom = transform;
         nodes_clear();   /* (every pane placed again, noted afresh) */
         hos_wide_ui_force = 3;   /* (a few frames: the layouts not drawn this frame catch up when they are) */
         log_left = log_each;
@@ -611,9 +722,13 @@ void hos_wide_ui_tick(void) {
     } else if (hos_wide_ui_force) {
         hos_wide_ui_force--;
     }
+    if (map_placement != last_map_placement) {
+        last_map_placement = map_placement;
+        hos_wide_ui_force = 3;
+    }
     if (!on) return;
     const int64_t t0 = log_each > 0 ? hos_now_ns() : 0;
-    plan();
+    plan(place_groups);
     if (log_each > 0) {   /* (the plan's time a present, every 600 presents) */
         static int64_t spent;
         static int count;
@@ -660,24 +775,48 @@ void hos_wide_ui_placed(Ctx *c, uint64_t pane) {
     const float inherited = pn ? pn->moved : 0.0f, pushed = pn ? pn->pushed : 0.0f;
     const float inherited_y = pn ? pn->movedy : 0.0f, pushed_y = pn ? pn->pushedy : 0.0f;
     const uint32_t flags = (uint32_t)recomp_load32(c, pane + PANE_FLAGS);
-    const float x = load_f(c, pane + PANE_X) - inherited, y = load_f(c, pane + PANE_Y) - inherited_y;
-    const float w = load_f(c, pane + PANE_W) * fabsf(load_f(c, pane + PANE_XX));
-    const float h = load_f(c, pane + PANE_H) * fabsf(load_f(c, pane + PANE_YY));
+    const int custom = ui_custom;
+    const HudTransform placed = custom && pn && pn->placed.scale > 0.0f ? pn->placed : identity;
+    const float stored_x = load_f(c, pane + PANE_X), stored_y = load_f(c, pane + PANE_Y);
+    const float inverse_scale = placed.scale != 1.0f ? 1.0f / placed.scale : 1.0f;
+    const float x = (stored_x - placed.x) * inverse_scale - inherited;
+    const float y = (stored_y - placed.y) * inverse_scale - inherited_y;
+    const float w = load_f(c, pane + PANE_W) * fabsf(load_f(c, pane + PANE_XX)) * inverse_scale;
+    const float h = load_f(c, pane + PANE_H) * fabsf(load_f(c, pane + PANE_YY)) * inverse_scale;
     const uint32_t ox = ((flags >> 11) & 0x7f) % 3;   /* (0 left, 1 centre, 2 right: f_8154a820) */
     const uint32_t oy = ((flags >> 11) & 0x7f) / 3 % 3;   /* (0 top, 1 centre, 2 bottom) */
     const uint64_t layout = recomp_load64(c, pane + PANE_LAYOUT);
     if (n->layout != layout) classify(n, pane, layout);
     /* (a held layout's panes too, for its groups moved by name; the plan walks none of them) */
-    n->tree = (uint8_t)((n->lkind == LK_PLAIN && (parent || n->hud || n->fade)) || n->lkind == LK_HELD);
+    n->tree = (uint8_t)((n->lkind == LK_PLAIN && (parent || n->hud || n->fade || (custom && n->action_layout))) || n->lkind == LK_HELD);
     n->parent = parent, n->layout = layout, n->type = (flags >> 22) & 0xf, n->ox = x, n->from = pn ? pn->ox : NAN;
     n->x0 = x - (ox == 1 ? w * 0.5f : ox == 2 ? w : 0.0f), n->x1 = n->x0 + w;
     n->oy = y, n->y1 = y + (oy == 1 ? h * 0.5f : oy == 2 ? h : 0.0f), n->y0 = n->y1 - h;
     const float side = pushed != 0.0f ? 0.0f : n->plan;   /* (made from a parent moved out: already moved with it) */
     n->moved = inherited + side, n->pushed = pushed + side;
-    if (side != 0.0f) store_f(c, pane + PANE_X, x + inherited + side);
+    if (side != 0.0f) store_f(c, pane + PANE_X, stored_x + side * placed.scale);
     const float up = pushed_y != 0.0f ? 0.0f : n->plany;
     n->movedy = inherited_y + up, n->pushedy = pushed_y + up;
-    if (up != 0.0f) store_f(c, pane + PANE_Y, y + inherited_y + up);
+    if (up != 0.0f) store_f(c, pane + PANE_Y, stored_y + up * placed.scale);
+    n->placed = placed;
+    if (custom && (n->custom_group || n->minimap_group)) {
+        HudTransform adjust = minimap_transform;
+        if (n->custom_group) {
+            lock_group_plan();
+            adjust = group_plan[n->custom_group - 1];
+            unlock_group_plan();
+        }
+        if (adjust.scale > 0.0f && (adjust.scale != 1.0f || adjust.x != 0.0f || adjust.y != 0.0f)) {
+            for (int k = 0; k < 9; k++) {
+                const uint64_t at = pane + PANE_XX + 4 * (uint64_t)k;
+                store_f(c, at, load_f(c, at) * adjust.scale);
+            }
+            store_f(c, pane + PANE_X, load_f(c, pane + PANE_X) * adjust.scale + adjust.x);
+            store_f(c, pane + PANE_Y, load_f(c, pane + PANE_Y) * adjust.scale + adjust.y);
+            n->placed = (HudTransform){placed.scale * adjust.scale,
+                                      placed.x * adjust.scale + adjust.x, placed.y * adjust.scale + adjust.y};
+        }
+    }
     if (!parent && (!n->hud || n->as_menu) && !n->whole && n->lkind != LK_HELD && ui_fit != 1.0f) {
         /* (a menu's root on a narrower screen: smaller to fit its width, about the canvas's middle; what is in it is made
            from it) */
@@ -701,6 +840,76 @@ void hos_wide_ui_placed(Ctx *c, uint64_t pane) {
                                                                                across axis, wider or narrower) */
         for (int k = 0; k < 3; k++) store_f(c, pane + PANE_XX + 4 * (uint64_t)k, load_f(c, pane + PANE_XX + 4 * (uint64_t)k) * n->wide);
     }
+}
+
+/* The update also draws. Collapse the two canvas projections for this draw. The second matrix flips Y.
+   Restore the game's values after the update so animation and input keep working and the next draw can show the HUD. */
+static void draw_hidden_hud(Ctx *c, A64Fn update, uint64_t screen) {
+    const uint64_t projection = screen + 0x1b8 + 8;
+    const float mx = load_f(c, projection), my = load_f(c, projection + 20);
+    if (!(mx > 0.0f && isfinite(mx) && my > 0.0f && isfinite(my) &&
+          mx == load_f(c, projection + 64) && my == -load_f(c, projection + 84))) {
+        update(c);
+        return;
+    }
+    static const unsigned indices[] = {0, 5, 16, 21};
+    uint32_t saved[4];
+    for (unsigned i = 0; i < 4; i++) {
+        const uint64_t at = projection + 4 * indices[i];
+        saved[i] = (uint32_t)recomp_load32(c, at);
+        recomp_store32(c, at, 0);
+    }
+    update(c);
+    for (unsigned i = 0; i < 4; i++) recomp_store32(c, projection + 4 * indices[i], saved[i]);
+}
+
+static int gameplay_hud_screen(uint64_t vtable) {
+    switch (vtable) {
+    case 0x84c0b710ULL:   /* UIPlayerStatusScreen: hearts, magic, and items */
+    case 0x84c0afe0ULL:   /* PlayerStatus3D_00: dive gauge */
+    case 0x84c05a50ULL:   /* UIDoCommandScreen: action prompts */
+    case 0x84c02d48ULL:   /* UIActionGuideScreen */
+    case 0x84c05318ULL:   /* UICtrlGuideScreen */
+    case 0x84c07400ULL:   /* UIHorseGaugeScreen */
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* UIMapMenuScreen runs both maps. IsMiniMap scopes the live minimap's clip, contents and small-key counter to their
+   shared transform. The full map's Boss Key and small-key badges stay in its equipment strip. */
+void hos_gameplay_hud_screen(Ctx *c, A64Fn update) {
+    const int hidden = __atomic_load_n(&hos_gameplay_hud_hidden, __ATOMIC_RELAXED) != 0;
+    const int packed = __atomic_load_n(&hud_minimap_placement, __ATOMIC_RELAXED);
+    const uint64_t screen = c->x[0];
+    if ((!hidden && packed == HOS_HUD_DEFAULT_PLACEMENT) || !screen) {
+        update(c);
+        return;
+    }
+    const uint64_t vtable = recomp_load64(c, screen);
+    if (vtable != 0x84c08300ULL) {
+        if (hidden && gameplay_hud_screen(vtable)) draw_hidden_hud(c, update, screen);
+        else update(c);
+        return;
+    }
+    const int mini = recomp_load8(c, screen + 0x2350) == 1;
+    const int place = mini && packed != HOS_HUD_DEFAULT_PLACEMENT;
+    if (__atomic_exchange_n(&minimap_placing, (uint32_t)place, __ATOMIC_RELAXED) != (uint32_t)place)
+        hos_wide_ui_force = 3;   /* the same layout may still hold the other map's transform */
+    const HudTransform previous = minimap_transform;
+    if (place) {
+        /* (the map's frame is centred at (1536, -690) at 16:9, with its labels and direction marker just outside it) */
+        const float ex = ui_ex, ey = ui_ey;
+        const float qx = hos_ui_qx, qy = hos_ui_qy;
+        minimap_transform = hud_transform(packed, 1200.0f + ex, 1860.0f + ex, -1040.0f - ey, -360.0f - ey,
+                                          CANVAS_HALF / (qx > 0.0f ? qx : 1.0f), CANVAS_HALF_Y / (qy > 0.0f ? qy : 1.0f));
+    } else {
+        minimap_transform = identity;
+    }
+    if (mini && hidden) draw_hidden_hud(c, update, screen);
+    else update(c);
+    minimap_transform = previous;
 }
 
 /* The drawn size of a pane, its width in the low lane of v0 and its height in v1's (f_8154ac30: ldp s0, s1) */

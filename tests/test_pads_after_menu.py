@@ -50,7 +50,8 @@ typedef struct { WORD wButtons; uint8_t bLeftTrigger, bRightTrigger; int16_t sTh
 typedef struct { DWORD dwPacketNumber; XINPUT_GAMEPAD Gamepad; } XINPUT_STATE;
 typedef DWORD(WINAPI *XInputGetStateFn)(DWORD, XINPUT_STATE *);
 static XInputGetStateFn xinput_get;   /* (no XInput: SDL has the pads) */
-static HMODULE LoadLibraryA(const char *name) { (void)name; return NULL; }
+#define LOAD_LIBRARY_SEARCH_SYSTEM32 0x800
+static HMODULE LoadLibraryExA(const char *name, void *file, unsigned flags) { (void)name; (void)file; (void)flags; return NULL; }
 static void *GetProcAddress(HMODULE m, const char *name) { (void)m; (void)name; return NULL; }
 static LONG InterlockedExchange(volatile LONG *p, LONG v) { LONG o = *p; *p = v; return o; }
 typedef int SRWLOCK;
@@ -68,7 +69,8 @@ int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]) { *buttons |= pads_down; m
 static void player_used(void) {}
 static void binds_load(void) {}
 static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
-static int pad_bind[HOS_SW_N][2];
+static int pad_bind[HOS_KEY_N][2] = {[HOS_KEY_TOGGLE_HUD] = {-1, -1}};
+static LONG hud_bind_generation;
 static uint64_t oc_consumed_pads;
 """
 
@@ -136,10 +138,12 @@ def main():
     state = hid[hid.index("static volatile LONG pad_raw_now;"):hid.index("uint32_t hos_pad_raw(")]
     code = "\n".join((
         block(api, "enum { HOS_SW_A") + ";", block(api, "enum { HOS_PAD_SOUTH") + ";",
+        block(api, "enum { HOS_KEY_MOVE_UP") + ";",
         re.search(r"^enum \{ HOS_PAD_TOUCHPAD = \d+ \};", api, re.M).group(0),
         PRELUDE,
         block(hid, "static const signed char pad_default[HOS_SW_N] =") + ";",
-        block(hid, "static void stick_max("), block(hid, "static uint64_t bound_pad_buttons("), state,
+        block(hid, "static void stick_max("), block(hid, "static uint64_t hud_pad_mask("),
+        block(hid, "static uint64_t bound_pad_buttons("), state,
         block(hid, "void hos_filter_stick("),
         re.search(r"^static volatile int xinput_pads_now;.*$", hid, re.M).group(0),
         block(hid, "static void pads_read("),

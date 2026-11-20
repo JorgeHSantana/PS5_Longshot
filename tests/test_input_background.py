@@ -83,6 +83,7 @@ volatile int hos_oot_live_action;
 int hos_oot_flight_shortcut_ready(void) { CHECK(!"unexpected cheat readiness query"); return 0; }
 void rx_option_set(int id, int value) { (void)id; (void)value; CHECK(!"unexpected cheat option change"); }
 void hos_oot_autoload_input(void) {}
+void hos_gameplay_hud_toggle(void) { CHECK(!"unexpected HUD toggle with the shortcut unbound"); }
 """
     # (the host's own stick, for the game's menus' mouse (host/oot_menu.c): none here; the player's input time it hides
     # the mouse by: not looked at. Its presses, hos_hid_tap and host_taps, are production's, below)
@@ -99,6 +100,7 @@ static void player_used(void) {}
         # (the bound keys' helpers read_input calls: a mouse button counts only while the mouse is captured)
         block(hid, "static int mouse_vk_slot("), re.search(r"^static int mouse_armed\[5\];", hid, re.M).group(0),
         block(hid, "static void mouse_buttons_arm("), block(hid, "static int bound_down("),
+        block(hid, "static uint64_t hud_pad_mask("), block(hid, "static void hud_shortcut("),
         block(hid, "static void oc_notes("), block(hid, "static uint64_t oc_pad_word("),
         # (walking on the keyboard: the movement keys' tilt, read_input asks for it)
         block(hid, "static int walk_held("), block(hid, "enum { WALK_SPEED_DEFAULT") + ";",

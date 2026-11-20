@@ -100,6 +100,9 @@ static const char *hos_options_file(void) {   /* (host/options_path.c: here, bes
     return p;
 }
 static int held[256];
+static uint64_t pad_raw_game;
+static int hud_toggles;
+void hos_gameplay_hud_toggle(void) { hud_toggles++; }
 static int key(int vk) { return held[vk & 255]; }
 """
 
@@ -193,6 +196,32 @@ int main(int argc, char **argv) {
     CHECK(hos_binding(HOS_BIND_KEY, HOS_KEY_MOVE_UP, 0) == 'W' && hos_binding(HOS_BIND_KEY, HOS_SW_A, 0) == 'E');
     CHECK(hos_binding(HOS_BIND_PAD, HOS_SW_A, 1) == -1 && bound_pad_buttons(face) == a);
     CHECK(toggle_reset);
+    /* A live shortcut may overlap the original key and both gamepad slots. It owns each physical press. */
+    CHECK(hos_binding(HOS_BIND_KEY, HOS_KEY_TOGGLE_HUD, 0) == 0);
+    CHECK(hos_binding(HOS_BIND_PAD, HOS_KEY_TOGGLE_HUD, 0) == -1);
+    release(), hud_shortcut(1, 0);
+    held['E'] = 1;
+    hos_bind(HOS_BIND_KEY, HOS_KEY_TOGGLE_HUD, 0, 'E');
+    CHECK(hos_binding(HOS_BIND_KEY, HOS_SW_A, 0) == 'E' && !bound_down(HOS_SW_A, 0));
+    hud_shortcut(0, 0);  /* the Insert menu owns the key while capturing */
+    hud_shortcut(1, 0);  /* still held after rebinding */
+    CHECK(hud_toggles == 0);
+    release(), hud_shortcut(1, 0);
+    held['E'] = 1;
+    hud_shortcut(1, 0), hud_shortcut(1, 0);
+    CHECK(hud_toggles == 1);
+    release();
+    hos_bind(HOS_BIND_PAD, HOS_KEY_TOGGLE_HUD, 1, HOS_PAD_EAST);
+    hud_shortcut(1, 0);
+    pad_raw_game = face;
+    hud_shortcut(1, 0), hud_shortcut(1, 0);
+    CHECK(hud_toggles == 2 && bound_pad_buttons(face) == 0);
+    CHECK(hos_binding(HOS_BIND_PAD, HOS_SW_A, 0) == HOS_PAD_EAST);
+    hos_bind(HOS_BIND_PAD, HOS_KEY_TOGGLE_HUD, 1, -1);
+    CHECK(bound_pad_buttons(face) == a);
+    hos_bind(HOS_BIND_KEY, HOS_KEY_TOGGLE_HUD, 0, 0);
+    held['E'] = 1;
+    CHECK(bound_down(HOS_SW_A, 0));
     if (!fails) printf("PASS\n");
     return fails != 0;
 }
@@ -207,8 +236,8 @@ class BoundKeysTests(unittest.TestCase):
         hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
         code = [block(hid, "static int kmap_down("),
                 between(hid, "static const char *const bind_names[HOS_KEY_N]", "\nvoid hos_bind("),   # (its definition)
-                block(hid, "static uint64_t bound_pad_buttons("),
-                between(hid, "static int mouse_vk_slot(", "static int bound_down(")]
+                block(hid, "static uint64_t hud_pad_mask("), block(hid, "static uint64_t bound_pad_buttons("),
+                between(hid, "static int mouse_vk_slot(", "static int bound_down("), block(hid, "static void hud_shortcut(")]
         code = "\n".join(code).replace("GetModuleFileNameA(NULL,", "GetModuleFileNameA(0,")
         read = block(hid, "static void read_input(")
         for needle in ("bound_down(HOS_KEY_MOVE_UP,", "bound_down(HOS_KEY_CAM_RIGHT,", "mouse_buttons_arm(", "bound_down(i, 1)"):

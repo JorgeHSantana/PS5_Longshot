@@ -25,8 +25,9 @@ ENV_ON_H = str(ROOT / "gpu" / "vk" / "compat" / "longshot_env.h")
 sys.path.insert(0, str(ROOT / "nx2"))
 import oot_wide  # noqa: E402
 
-FIXTURE_HEAD = r'''#include <math.h>
+FIXTURE_HEAD = '#include "%s"\n' % (ROOT / "gpu/vk/vk_api.h").as_posix() + r'''#include <math.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,7 +47,14 @@ static void hos_log(const char *f, ...) { (void)f; }
 static int64_t hos_now_ns(void) { return 0; }
 /* (the Insert menu's rows, host/rx_backend.c rx_option: the Graphics tab's HUD layout, 71, as fixture_hud_layout says) */
 int fixture_hud_layout;
-int rx_option(int id, int otherwise) { return id == 71 ? fixture_hud_layout : otherwise; }
+int fixture_hud_health = HOS_HUD_DEFAULT_PLACEMENT;
+int fixture_hud_map = HOS_HUD_DEFAULT_PLACEMENT;
+int rx_option(int id, int otherwise) {
+    if (id == HOS_OPT_HUD_LAYOUT) return fixture_hud_layout;
+    if (id == HOS_OPT_HUD_HEALTH) return fixture_hud_health;
+    if (id == HOS_OPT_HUD_MINIMAP) return fixture_hud_map;
+    return otherwise;
+}
 '''
 
 FIXTURE_MAIN = r'''
@@ -262,7 +270,7 @@ def main():
     src = FIXTURE_HEAD + body + FIXTURE_MAIN.replace("FORCE_SITE", oot_wide.UI_FORCE)
     with tempfile.TemporaryDirectory(prefix="wide-ui-") as tmp:
         c = Path(tmp) / "fixture.c"
-        exe = Path(tmp) / "fixture"
+        exe = Path(tmp) / ("fixture.exe" if sys.platform == "win32" else "fixture")
         c.write_text(src, encoding="utf-8")
         cc = subprocess.run([a.cc, "-std=c11", "-O1", "-include", ENV_ON_H, "-Wall", "-Wno-unused-function", "-o", str(exe), str(c), "-lm"],
                             capture_output=True, text=True)

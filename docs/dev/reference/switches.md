@@ -107,7 +107,9 @@ Keys whose numbers are not obvious from the row:
 
 | Key | Values |
 |---|---|
-| `hud_layout` | The HUD layout row, on a screen that is not 16:9: 0 the HUD at the screen's edges (default), 1 in the middle 16:9. Read at each present (`host/hos_wide_ui.c`); `HOS_WIDE_UI` stands over it |
+| `hud_layout` | HUD layout. 0 Screen's edges (default), 1 Middle 16:9, 2 Custom. Read at each present (`host/hos_wide_ui.c`). `HOS_WIDE_UI` overrides it |
+| `hud_health_x/y/scale`, `hud_buttons_x/y/scale`, `hud_minimap_x/y/scale` | Custom HUD placement, with horizontal and vertical offsets in percent of the picture and scale in percent of the usual size |
+| `key_toggle_hud`, `pad_toggle_hud` | Session HUD shortcut, unbound by default. Uses the Controls page's normal binding format |
 | `walk_mode` | 0 Hold, 1 Toggle |
 | `threaded_rendering` | The Debug tab's Threaded rendering row (`gpu/vk/threaded_rendering.h`): 0 Auto (default), 1 On (`RX_VK_ASYNC=1` and `RX_VK_RECORDER=thread`), 2 Off. Auto goes by the physical cores the process may run on (`usable_cores` in `gpu/vk/vk_progcache.cpp`): 6 or more cores, the render thread and the recorder thread, as On; 4 or 5, the render thread alone; fewer, Off. Auto is also Off, whatever the cores, where the mode is not safe on the run (the capture off, pools without mirrors, `RX_VK_LOW_SPEC`, a frame dump). `threaded::kAutoEnabled` turned off makes Auto Off on every PC |
 

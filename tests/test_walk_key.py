@@ -124,13 +124,14 @@ static int64_t hos_now_ns(void) { return 0; }
 static int npresses;
 static int64_t script_end_ms;
 static int64_t script_elapsed_ms(int64_t now) { (void)now; return 0; }
-static void scripted_input(uint64_t *b, int32_t s[4]) { (void)b; (void)s; }
+static void scripted_input(uint64_t *b, uint64_t *taps, int32_t s[4]) { (void)b; (void)taps; (void)s; }
 void hos_oot_autoload_input(void) {}   /* (host/oot_autoload.c: Skip title screen off) */
 int hos_control_input(uint64_t *buttons, int32_t stick[4]) { (void)buttons; (void)stick; return 0; }   /* (host/control.c: off) */
 static int game_in_front(void) { return front; }
 static volatile LONG pad_raw_now;
-static int pad_after_menu;   /* (main shares this state with the ocarina note word) */
+static uint64_t pad_after_menu, pad_raw_game;   /* (main shares this state with the ocarina note word) */
 static void player_used(void) {}
+void hos_gameplay_hud_toggle(void) {}
 """
 
 STUBS = r"""
@@ -139,6 +140,7 @@ static int32_t pad_stick[4], mouse_right[2];
 static int mouse_captured;
 static void pads_read(uint64_t *b, int32_t s[4]) { (void)b; stick_max(s, pad_stick); }
 int hos_mouse_native(void) { return -1; }
+int hos_mouse_in_game_menu(void) { return 0; }
 void hos_mouse_native_free(int free) { (void)free; }
 void hos_mouse_native_stick(int held) { (void)held; }
 static void mouse_setup(void) {}
@@ -157,7 +159,8 @@ static int fails;
 static uint64_t buttons;
 static int32_t st[4];
 static void poll(void) {
-    read_input(&buttons, st);
+    uint64_t taps = 0;
+    read_input(&buttons, &taps, st);
     CHECK(oc_consumed_pads == 0);   /* the inactive note layer must not consume the controller while walking */
 }
 static void release(void) { memset(held, 0, sizeof held); }
@@ -331,7 +334,8 @@ class WalkKeyTests(unittest.TestCase):
         code = [block(hid, "enum { B_A"), block(hid, "static int key("), block(hid, "static int kmap_down("),
                 between(hid, "static const char *const bind_names[HOS_KEY_N]", "void hos_bind("),
                 between(hid, "static int mouse_vk_slot(", "static int bound_down("), block(hid, "static void stick_max("),
-                block(hid, "static void oc_notes("),
+                block(hid, "static uint64_t hud_pad_mask("), block(hid, "static uint64_t bound_pad_buttons("),
+                block(hid, "static void hud_shortcut("), block(hid, "static void oc_notes("),
                 block(hid, "static int pads_in_background("), block(hid, "static int walk_held("),
                 block(hid, "enum { WALK_SPEED_DEFAULT"), block(hid, "static int walk_percent("),
                 block(hid, "static void move_keys_stick(")]
@@ -357,10 +361,10 @@ class WalkKeyTests(unittest.TestCase):
         api, hid, menu = read("gpu", "vk", "vk_api.h"), read("host", "nn_hid.c"), menu_text(ROOT)   # (with the modules' rows: gpu/vk/menu/walk.cpp)
         header, replay = read("gpu", "vk", "vk_menu.h"), read("gpu", "vk", "vk_replay.cpp")
         self.assertIn("enum { HOS_OPT_WALK_MODE = 49, HOS_OPT_WALK_SPEED };", api)
-        self.assertRegex(api, r"HOS_KEY_OC_NOTE_X, HOS_KEY_WALK, HOS_KEY_N \};")
+        self.assertRegex(api, r"HOS_KEY_OC_NOTE_X, HOS_KEY_WALK, HOS_KEY_TOGGLE_HUD, HOS_KEY_N \};")
         # (the host's two copies of the names: the ini's key_walk)
         self.assertEqual(names(hid), names(menu))
-        self.assertEqual(names(hid)[-1], "walk")
+        self.assertEqual(names(hid)[-2:], ["walk", "toggle_hud"])
         self.assertIn('{HOS_KEY_WALK, "Walk"}', menu, "the Controls page has no Walk row")
         option = replay[replay.index("t.option = "):]
         option = option[:option.index("};")]

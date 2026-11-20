@@ -44,7 +44,8 @@ static void AcquireSRWLockShared(SRWLOCK *p) { (void)p; }
 static void ReleaseSRWLockShared(SRWLOCK *p) { (void)p; }
 static void AcquireSRWLockExclusive(SRWLOCK *p) { (void)p; }   /* (hos_hid_tap's) */
 static void ReleaseSRWLockExclusive(SRWLOCK *p) { (void)p; }
-static int pad_bind[HOS_KEY_N][2];   /* (the ocarina note layer reads it; hos_oc_wait stays 0, so nothing is consumed) */
+static int pad_bind[HOS_KEY_N][2] = { [HOS_KEY_TOGGLE_HUD] = {-1, -1} };
+static LONG hud_bind_generation;
 static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
 static uint64_t pad_after_menu, pad_raw_game;   /* (pad_raw_now stays 0 here: no pad input waits after the menu) */
 static uint64_t bound_pad_buttons(uint64_t raw) { (void)raw; CHECK(!"a pad input waited after the menu"); return 0; }

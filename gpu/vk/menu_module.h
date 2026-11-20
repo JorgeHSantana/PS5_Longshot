@@ -40,6 +40,7 @@ void bug_report_save();   // (the Bug report: gathered from the whole menu, writ
 void menu_restart_game();   // (the game started again: its window closes, host/hos_relaunch.c starts it; the menu saved first)
 void menu_quit_game();      // (the game's window closed, as the player would; the menu saved first)
 const char* menu_version();   // (this build's version: nx2/build.py gives it to gpu/vk/vk_version.cpp alone)
+void menu_save_options();
 void menu_redraw();   // (the menu drawn again at its next frame: a list it shows changed)
 bool menu_on_tab(const char* tab);   // (the menu is open on this tab (its id), not on a page of it)
 void menu_rumble_test();   // (Test vibration: a short buzz on the controller used last, the host's rumble_test)

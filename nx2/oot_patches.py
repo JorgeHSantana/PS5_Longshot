@@ -305,6 +305,26 @@ def patch_menu_tick(source):
         '#include "a64.h"\n', '#include "a64.h"\nextern void hos_oot_menu_tick(Ctx *c, uint64_t screen);\n', 1)
 
 
+def patch_gameplay_hud_screen(source):
+    """Wrap f_802f1380's body so the shared map's projection is scoped to its update, including all exits."""
+    start = source.find(MENU_TICK_HEAD)
+    if start < 0:
+        return None
+    if "hos_gameplay_hud_screen(c," in source:
+        return source
+    end = source.find("\n}", start)
+    if end < 0:
+        return None
+    end += 2
+    # Keep the game's body beside its original entry for the generated-code splitter and guest local checks.
+    body = source[start:end].replace(MENU_TICK_HEAD, "void gameplay_hud_update_game(Ctx *__restrict A64_NOESC c) {\n", 1)
+    wrapper = (MENU_TICK_HEAD +
+               "    void gameplay_hud_update_game(Ctx *__restrict A64_NOESC c);\n"
+               "    hos_gameplay_hud_screen(c, gameplay_hud_update_game);\n}\n\n")
+    return (source[:start] + wrapper + body + source[end:]).replace(
+        '#include "a64.h"\n', '#include "a64.h"\nextern void hos_gameplay_hud_screen(Ctx *c, A64Fn update);\n', 1)
+
+
 TEXT_DRAW_HEAD = "void f_8152b670(Ctx *__restrict A64_NOESC c) {\n"
 TEXT_LAYOUT_HEAD = "void f_8152aec0(Ctx *__restrict A64_NOESC c) {\n"
 GLYPH_HEAD = "void f_81680c60(Ctx *__restrict A64_NOESC c) {\n"
@@ -1543,6 +1563,11 @@ def patch_file(s, name, protect_hearts=False):
         out = tick
         counts["menu tick hook"] += 1
         lines.append("oot_patches: the menus' update hook in " + name)
+    hud = patch_gameplay_hud_screen(out) if protect_hearts else None
+    if hud is not None:
+        out = hud
+        counts["gameplay HUD map hook"] += 1
+        lines.append("oot_patches: the shared map's scoped gameplay HUD placement in " + name)
     draw = patch_text_draw(out) if protect_hearts else None
     if draw is not None:
         out = draw
@@ -1755,6 +1780,7 @@ def report(paths, counts, protect_hearts=False):
     if protect_hearts:   # (the supported build's: these places are its functions)
         done["menu focus hook"] = 0
         done["menu tick hook"] = 0
+        done["gameplay HUD map hook"] = 0
         done["text draw hook"] = 0
         done["glyph hook"] = 0
         done["text layout hook"] = 0

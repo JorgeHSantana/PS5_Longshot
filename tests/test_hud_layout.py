@@ -68,7 +68,42 @@ static void place(uint64_t p, uint64_t parent, float x, float y) {
     px = getf(p + 0x4c), py = getf(p + 0x50);
 }
 static uint64_t sroot, hearts, rupees, buttons, minimap, banner, mroot, mleft, froot, fpane, ficon;
-static uint64_t maproot, mapicons, mapframe, droot, dchoice, dcol, dbox, lroot, lguide;
+static uint64_t mapicons, mapframe, droot, dchoice, dcol, dbox, lroot, lguide;
+static int update_count;
+static float drawn_minimap_scale, map_group_scale, live_key_scale, boss_key_scale, pause_key_scale;
+static float map_group_x, live_key_x;
+static uint64_t maproot, map_group, live_key, boss_key, pause_key;
+#define MAP_SCREEN (BASE + 0x11000)
+#define MAP_PROJECTION (MAP_SCREEN + 0x1b8 + 8)
+static void draw_map(Ctx *ctx) {
+    CHECK(ctx->x[0] == MAP_SCREEN);
+    update_count++;
+    drawn_minimap_scale = getf(MAP_PROJECTION);
+    putf(map_group + 0x28, 1.0f), putf(map_group + 0x38, 1.0f);
+    putf(live_key + 0x28, 1.0f), putf(live_key + 0x38, 1.0f);
+    putf(boss_key + 0x28, 1.0f), putf(boss_key + 0x38, 1.0f);
+    putf(pause_key + 0x28, 1.0f), putf(pause_key + 0x38, 1.0f);
+    place(maproot, 0, 0, 0);
+    place(map_group, maproot, 100.0f, 100.0f);
+    map_group_scale = getf(map_group + 0x28);
+    map_group_x = px;
+    place(live_key, maproot, 140.0f, 100.0f);
+    live_key_scale = getf(live_key + 0x28);
+    live_key_x = px;
+    place(boss_key, mapicons, 160.0f, 100.0f);
+    boss_key_scale = getf(boss_key + 0x28);
+    place(pause_key, mapicons, 200.0f, 100.0f);
+    pause_key_scale = getf(pause_key + 0x28);
+}
+static float drawn_hud_projection[4];
+static void draw_screen(Ctx *ctx) {
+    CHECK(ctx->x[0] == MAP_SCREEN);
+    update_count++;
+    drawn_hud_projection[0] = getf(MAP_PROJECTION);
+    drawn_hud_projection[1] = getf(MAP_PROJECTION + 20);
+    drawn_hud_projection[2] = getf(MAP_PROJECTION + 64);
+    drawn_hud_projection[3] = getf(MAP_PROJECTION + 84);
+}
 static float hx, hy, rx_, ry, bx, mx, my, nx, menux, mrx, mry, mrs, ix, iy;
 static float map_ix, maps, mapfx, ds, dcx, dcy, dbtn, dbx, dby, lgx, lgy;   /* (map_ix: the map's icons' group, at the origin on the map page) */
 /* the pane's size as drawn (f_8154ac30: its width in v0, its height in v1) */
@@ -238,6 +273,69 @@ int main(void) {
     CHECK(dcx == 1460 && dbtn == 1460 && dbx == 0);
     drawn_size(fpane, &fw, &fh);
     CHECK(fw == 3840.0f && fh == 2160.0f);
+    /* A real health group moves live, keeps the rest of the layout, and resets at 16:9. */
+    put64(NAMES + 8, text("Pa_HeartGauge_00"));
+    fixture_hud_layout = 2;
+    fixture_hud_health = (10 + 16) | ((-10 + 16) << 6) | (100 << 12);
+    at(0.0f);
+    CHECK(near(hx, -1116.0f) && near(hy, 664.0f));
+    CHECK(rx_ == -1600.0f && dbox && near(dcy, -500.0f));
+    fixture_hud_health = HOS_HUD_DEFAULT_PLACEMENT;
+    at(0.0f);
+    CHECK(hx == -1500.0f && hy == 880.0f);
+
+    /* The shared screen's gameplay bit gates both the custom transform and the live shortcut. */
+    put64(MAP_SCREEN, 0x84c08300ULL);
+    putf(MAP_PROJECTION, 0.001f), putf(MAP_PROJECTION + 64, 0.001f);
+    putf(MAP_PROJECTION + 20, 0.002f), putf(MAP_PROJECTION + 84, -0.002f);
+    put32(MAP_SCREEN + 0x2350, 1);
+    c.x[0] = MAP_SCREEN;
+    map_group = pane_at(MAP, 20, "N_InOut_00", 60, 80, 0);
+    live_key = pane_at(MAP, 21, "Pa_KeySmall_00", 60, 80, 0);
+    boss_key = pane_at(MAP, 22, "Pa_BossKey_00", 60, 80, 0);
+    pause_key = pane_at(MAP, 23, "Pa_KeySmallBtn_00", 60, 80, 0);
+    fixture_hud_map = (16 | (16 << 6) | (120 << 12));
+    hos_wide_ui_tick();
+    hos_gameplay_hud_screen(&c, draw_map);
+    CHECK(update_count == 1 && drawn_minimap_scale == 0.001f && near(map_group_scale, 1.2f));
+    CHECK(near(live_key_scale, 1.2f) && near(live_key_x - map_group_x, 48.0f));
+    CHECK(boss_key_scale == 1.0f && pause_key_scale == 1.0f);
+    hos_gameplay_hud_toggle();
+    hos_gameplay_hud_screen(&c, draw_map);
+    CHECK(update_count == 2 && drawn_minimap_scale == 0.0f && getf(MAP_PROJECTION) == 0.001f);
+    put32(MAP_SCREEN + 0x2350, 0);
+    hos_gameplay_hud_screen(&c, draw_map);
+    CHECK(update_count == 3 && drawn_minimap_scale == 0.001f && map_group_scale == 1.0f);
+    CHECK(live_key_scale == 1.0f && boss_key_scale == 1.0f && pause_key_scale == 1.0f);
+    hos_gameplay_hud_toggle();
+
+    /* Health, items, action prompts, control guides, horse and dive gauges retain their updates. */
+    const uint64_t gameplay[] = {0x84c0b710ULL, 0x84c05a50ULL, 0x84c02d48ULL,
+                                 0x84c05318ULL, 0x84c07400ULL, 0x84c0afe0ULL};
+    for (unsigned i = 0; i < sizeof gameplay / sizeof gameplay[0]; i++) {
+        put64(MAP_SCREEN, gameplay[i]);
+        const int before = update_count;
+        hos_gameplay_hud_screen(&c, draw_screen);
+        CHECK(drawn_hud_projection[0] == 0.001f && drawn_hud_projection[3] == -0.002f);
+        hos_gameplay_hud_toggle();
+        hos_gameplay_hud_screen(&c, draw_screen);
+        for (unsigned row = 0; row < 4; row++) CHECK(drawn_hud_projection[row] == 0.0f);
+        CHECK(getf(MAP_PROJECTION) == 0.001f && getf(MAP_PROJECTION + 20) == 0.002f &&
+              getf(MAP_PROJECTION + 64) == 0.001f && getf(MAP_PROJECTION + 84) == -0.002f);
+        hos_gameplay_hud_toggle();
+        hos_gameplay_hud_screen(&c, draw_screen);
+        CHECK(update_count == before + 3 && drawn_hud_projection[0] == 0.001f && drawn_hud_projection[3] == -0.002f);
+    }
+    hos_gameplay_hud_toggle();
+    put64(MAP_SCREEN, 0x84c042e8ULL);  /* BalloonMessage */
+    hos_gameplay_hud_screen(&c, draw_screen);
+    CHECK(drawn_hud_projection[0] == 0.001f && drawn_hud_projection[3] == -0.002f);
+    put64(MAP_SCREEN, gameplay[0]);
+    putf(MAP_PROJECTION + 84, 1.0f);  /* an unrecognised pair */
+    hos_gameplay_hud_screen(&c, draw_screen);
+    CHECK(drawn_hud_projection[0] == 0.001f && drawn_hud_projection[3] == 1.0f);
+    hos_gameplay_hud_toggle();
+
     printf("PASS: the HUD keeps its 16:9 size at each shape, at the screen's edges; the menus keep 16:9\n");
     return 0;
 }
@@ -275,7 +373,6 @@ int main(void) {
     hos_wide_keep_mask = 0xf;   /* (Full width: kept whole, the game's) */
     run(LOADING, a, b);
     CHECK(a[0] == m00 && b[1] == m11);
-    hos_wide_keep_mask = 0x5;
     printf("PASS: the UI projection's site scales every screen not kept whole across and up, and 16:9 not at all\n");
     return 0;
 }
@@ -294,7 +391,7 @@ ENV_ON_H = str(ROOT / "gpu" / "vk" / "compat" / "longshot_env.h")
 def build_run(cc, src, tag):
     with tempfile.TemporaryDirectory(prefix="hud-layout-") as tmp:
         c = Path(tmp) / (tag + ".c")
-        exe = Path(tmp) / tag
+        exe = Path(tmp) / (tag + (".exe" if sys.platform == "win32" else ""))
         c.write_text(src, encoding="utf-8")
         built = subprocess.run([cc, "-std=c11", "-O1", "-include", ENV_ON_H, "-Wall", "-Wno-unused-function", "-o", str(exe), str(c),
                                 "-lm"],
