@@ -9,6 +9,8 @@
     python -I nx2/make_game.py --game <.nup or folder> --prepare   (RecompLauncher: --out defaults to ~/Games/Longshot; no window,
                                                                     "progress <0..1> <text>" lines and an "error <text>" line on stdout,
                                                                     exit 0 when the game is built; with --check, its "check ok|bad" line)
+    python -I nx2/make_game.py --prepare --out <folder>            (RecompLauncher with the player's copy gone, prepare.keeps_copy:
+                                                                    built again from the game files the folder keeps, as --update)
 
 The folder holds the executable and all it needs, started with a double click: nothing goes back into the repository, and no game
 data ever comes with the tools. Lines the app reads, each on its own line of stdout:
@@ -2805,6 +2807,10 @@ def parse_args():
             a.nup = a.game
         else:
             fail("Your copy of the game was not found: %s" % a.game)
+    # (RecompLauncher's prepare.keeps_copy: with the player's copy gone, it runs the step again with no --game. The game folder
+    # keeps the game files it was built from, so it is built again from those, as the game's update offer does)
+    if a.prepare and not (a.game or a.nup or a.romfs or a.exefs or a.update):
+        a.update = a.out
     if a.romfs_in_place and (a.nup or a.update or not a.romfs):
         fail("--romfs-in-place reads a romfs folder where it is: give it with --romfs and --exefs, not a .nup or --update.")
     if a.romfs_in_place is None:   # (scripts/dev_packs.py sets it for the builds it runs; a tree from before ignores it and links)
@@ -3061,6 +3067,8 @@ def main(a=None):
     kept = os.path.join(out, ".longshot_exefs")   # (the game's code as read, kept in the folder: what an update builds from again)
     if a.update:
         if not os.path.isdir(kept) or not os.path.isdir(romfs):
+            if PREPARE:   # (RecompLauncher's run with no copy: the launcher asks the player for theirs when this stops)
+                fail("This game folder has no copy of the game files to build from.")
             fail("This game folder has no copy of the game files to update from: it was built before updates came in. Choose your game files "
                  "in Longshot Builder and build into the same folder once; updates after that work by themselves.")
         check_cache_paths(out, (kept, romfs))
