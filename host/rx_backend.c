@@ -235,7 +235,7 @@ extern volatile int hos_fps_timing;
 static void host_fps_timing(int on) { __atomic_store_n(&hos_fps_timing, on != 0, __ATOMIC_RELAXED); }
 int hos_thread_times_of(const char *name, int64_t out[3]);   /* (hos_thread.c) */
 static int host_main_thread_times(int64_t out[3]) { return hos_thread_times_of("sead::MainThread", out); }
-/* (version 28, issue 1280) the renderer's C++ allocations that its new_handler gave up on: the size is not known there */
+/* (version 28) the renderer's C++ allocations that its new_handler gave up on: the size is not known there */
 static void host_out_of_memory(const char *what) { hos_alloc_gave_up(0, what); }
 static void host_slept_ns(int64_t out[2]) {
     out[0] = __atomic_load_n(&hos_poll_slept_ns, __ATOMIC_RELAXED);

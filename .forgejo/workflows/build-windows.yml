@@ -1,4 +1,4 @@
-# The Windows Longshot Builder (docs/releases.md): LongshotBuilder-<version>-windows-x64.zip, made without game data. It holds
+# The Windows Longshot Builder (docs/dev/reference/releases.md): LongshotBuilder-<version>-windows-x64.zip, made without game data. It holds
 # the setup (builder/setup/setup.c, built with llvm-mingw) as LongshotBuilder.exe, the builder (dotnet publish) with Longshot's
 # sources under LongshotBuilder\tools\, tools.lock, VERSION and recomplauncher.json (scripts/builder_package.py). The build
 # tools are not in it: tools.lock names them, and the setup or the launcher downloads them on the player's PC. The Windows
@@ -8,11 +8,11 @@
 # version), so it is always made again. It is a workflow artifact; called by release.yml with the version's name, it is
 # the release's. dav1d for the AV1 movies is not built here: it is in tools.lock's CPM cache (the cpm package), and the
 # zip's job checks that package's dav1d under Wine.
-# Every job runs on a Linux runner (label release): there is no Windows one (docs/forgejo-runners.md). The setup and the
+# Every job runs on a Linux runner (label release): there is no Windows one (docs/dev/reference/ci.md). The setup and the
 # Vulkan back end are cross-compiled with llvm-mingw's Linux build of tools.lock's release (scripts/builder_package.py,
 # LINUX_LLVM_MINGW), the builder (command-line only) is published for win-x64 with EnableWindowsTargeting, and the files are checked as
 # Windows files (their PE headers, resources and runtime) and started under Wine. What only a Windows PC can check is in
-# RELEASING.md, "Needs a Windows tester".
+# docs/dev/reference/releases.md, "Windows tester".
 name: Windows builder
 
 on:
@@ -56,7 +56,7 @@ defaults:
 jobs:
   package:
     name: Longshot Builder zip
-    runs-on: release  # (a release's build: only the runners kept for them take it, docs/forgejo-runners.md)
+    runs-on: release  # (a release's build: only the runners kept for them take it, docs/dev/reference/ci.md)
     timeout-minutes: 30
     steps:
       - name: Check out source
@@ -206,7 +206,7 @@ jobs:
 
       # dav1d for the AV1 movies (issue 2316: the CPM cache's FFmpeg has none) is in tools.lock's CPM cache, the cpm package
       # the setup installs on the player's PC; a maintainer makes it with scripts/windows/dav1d.sh and tools.py assemble cpm
-      # --add (RELEASING.md, "Bump a tool"). That package's dav1d, checked by its SHA-256, under the test of host/dav1d_av1.c,
+      # --add (docs/dev/reference/releases.md, "Bumping a tool"). That package's dav1d, checked by its SHA-256, under the test of host/dav1d_av1.c,
       # compiled with the llvm-mingw above and run under Wine
       - name: tools.lock's dav1d
         run: |
@@ -239,7 +239,7 @@ jobs:
 
   vulkan:
     name: Windows Vulkan back end (llvm-mingw)
-    runs-on: release  # (a release's build: only the runners kept for them take it, docs/forgejo-runners.md)
+    runs-on: release  # (a release's build: only the runners kept for them take it, docs/dev/reference/ci.md)
     timeout-minutes: 45
     steps:
       - name: Check out source

@@ -156,8 +156,9 @@ def source_checks():
     # (its line in longshot_options.ini: the row's own key, camera_speed, and no other row that key)
     ini_key = block(menu, "const char* ini_key(const Row& r) {")
     check('"camera_speed"' not in ini_key and menu.count('.key = "camera_speed"') == 1, "the row is not saved as camera_speed")
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    check("| | Camera speed | 50% to 400%, in steps of 25 | 100% |" in readme, "README.md's option table has no Camera speed row")
+    settings = (ROOT / "docs" / "user" / "graphics-and-controls.md").read_text(encoding="utf-8")
+    check("| | Camera speed | 50% to 400%, in steps of 25 | 100% |" in settings,
+          "docs/user/graphics-and-controls.md's settings table has no Camera speed row")
 
 
 def fixture_checks(cc):

@@ -277,7 +277,7 @@ class Build(unittest.TestCase):
 
             def __exit__(self, *a):
                 return False
-        with mock.patch.object(rh.urllib.request, "urlopen", lambda req, timeout=0: Body(b"not rust")), \
+        with mock.patch.object(rh.helpers.urllib.request, "urlopen", lambda req, timeout=0: Body(b"not rust")), \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
                 self.assertRaises(SystemExit):
             rh.fetch("rustc-x", "0" * 64, self.cache)

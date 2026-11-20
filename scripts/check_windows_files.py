@@ -10,7 +10,7 @@ involved. Python's standard library, and llvm-mingw's llvm-objdump and llvm-read
     python -I scripts/check_windows_files.py --wine <wine> <zip>
         each started under Wine, nothing downloaded: the setup's --play of an empty folder ("error No built game to start"),
         the builder's --cli with no Python ("error The build tools could not start"). A sign that they load and their
-        imports and .NET resolve, not a test of what they do (RELEASING.md, "Needs a Windows tester")
+        imports and .NET resolve, not a test of what they do (docs/dev/reference/releases.md, "Windows tester")
 
 Prints what is wrong, and exits 1, when anything is.
 """
@@ -29,7 +29,8 @@ TOP = ("LongshotBuilder.exe", "VERSION", "recomplauncher.json", "tools.lock")
 BUILDER = ("LongshotBuilder.exe", "LongshotBuilder.dll", "LongshotBuilder.deps.json", "LongshotBuilder.runtimeconfig.json",
            "LongshotBuilder-Setup.exe", "LICENSE",
            "hostfxr.dll", "hostpolicy.dll", "coreclr.dll", "clrjit.dll", "System.Private.CoreLib.dll",
-           "tools/nx2/make_game.py", "tools/scripts/tools.py", "tools/version.txt",
+           "tools/nx2/make_game.py", "tools/scripts/tools.py", "tools/scripts/fetch.py", "tools/scripts/helpers.py",
+           "tools/version.txt",
            "tools/third_party/renhdrum/renhdrum.dll")   # (RenHDrum, some controllers' vibration: scripts/renhdrum.py build)
 # (the libraries the setup may import: Windows' own, and the UCRT's api-ms-win-crt-*; never llvm-mingw's libc++ or winpthread)
 SETUP_IMPORTS = re.compile(r"^(kernel32|user32|gdi32|advapi32|shell32|ole32|comctl32|winhttp|bcrypt|shlwapi|oleaut32)\.dll$"

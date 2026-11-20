@@ -37,7 +37,7 @@ void framegen_hud_before(VkCommandBuffer cmd, Texture* picture, uint32_t level);
 void framegen_queue(uint64_t value);
 /// The window's present of an image (GENERAL, w x h; crop as above or null), vk_replay.cpp: the display thread's
 void present_image(VkImage src, uint32_t w, uint32_t h, const int crop[4], VkImageView view = VK_NULL_HANDLE);
-/// (longshot) Present ahead (vk_framegen.cpp display_main, #1702): while present_defer_into is set on a thread, present_image
+/// (longshot) Present ahead (vk_framegen.cpp display_main): while present_defer_into is set on a thread, present_image
 /// submits the frame's copy into its swapchain image and stops there, with what present_commit needs to show it later. The
 /// copy is then on the queue before the game's next frame, so its present at its time does not wait for that frame's rendering
 struct PendingPresent {

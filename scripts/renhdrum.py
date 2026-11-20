@@ -30,11 +30,12 @@ import shutil
 import struct
 import subprocess
 import sys
-import tarfile
 import tempfile
-import urllib.request
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # (python -I leaves the script's folder off the path)
+import helpers  # noqa: E402
+from helpers import ROOT  # noqa: E402
+
 SRC = os.path.join(ROOT, "third_party", "renhdrum")
 TARGETS = {"windows": "x86_64-pc-windows-gnullvm", "linux": "x86_64-unknown-linux-gnu"}
 BUILT = {"windows": "renhdrum.dll", "linux": "librenhdrum.so"}   # (cargo's names)
@@ -83,14 +84,6 @@ def shown(path):
 def fail(message):
     print("renhdrum: " + message, file=sys.stderr)
     raise SystemExit(1)
-
-
-def sha256_of(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
 
 
 # ---- the file's own headers: no tool, and nothing loaded ----
@@ -229,19 +222,12 @@ def host():
 def fetch(name, want, cache):
     """<cache>/<name>.tar.xz, downloaded when missing or not the pinned bytes; SystemExit when the download is not them"""
     path = os.path.join(cache, name + ".tar.xz")
-    if os.path.isfile(path) and sha256_of(path) == want:
-        return path
-    os.makedirs(cache, exist_ok=True)
-    tmp = path + ".part"
-    print("renhdrum: downloading %s.tar.xz" % name, flush=True)
-    req = urllib.request.Request(DIST + name + ".tar.xz", headers={"User-Agent": "longshot-renhdrum"})
-    with urllib.request.urlopen(req, timeout=300) as r, open(tmp, "wb") as f:
-        shutil.copyfileobj(r, f)
-    got = sha256_of(tmp)
-    if got != want:
-        os.remove(tmp)
-        fail("%s.tar.xz is not the pinned one (sha256 %s, want %s)" % (name, got, want))
-    os.replace(tmp, path)
+    if not (os.path.isfile(path) and helpers.sha256_file(path) == want):
+        print("renhdrum: downloading %s.tar.xz" % name, flush=True)
+        try:
+            helpers.download(DIST + name + ".tar.xz", path, want, timeout=300)
+        except (OSError, ValueError) as e:
+            fail(str(e))
     return path
 
 
@@ -249,11 +235,7 @@ def unpack_component(archive, name, prefix):
     """A Rust dist part's files into prefix: each component folder inside it (rustc/, cargo/, rust-std-<target>/) holds a
     tree laid out as the installed one (bin/, lib/), which install.sh would copy; merged here without running it"""
     with tempfile.TemporaryDirectory(dir=os.path.dirname(prefix)) as tmp:
-        with tarfile.open(archive) as t:
-            if hasattr(tarfile, "data_filter"):
-                t.extractall(tmp, filter="data")
-            else:
-                t.extractall(tmp)
+        helpers.extract(archive, tmp)
         top = os.path.join(tmp, name)
         with open(os.path.join(top, "components"), encoding="utf-8") as f:
             components = f.read().split()

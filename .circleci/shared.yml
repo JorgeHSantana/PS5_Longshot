@@ -1,4 +1,4 @@
-# Shared jobs and executors (merged with events/*.yml). magicbeandev/ci orb. Docs: docs/ci.md.
+# Shared jobs and executors (merged with events/*.yml). magicbeandev/ci orb. Docs: docs/dev/reference/ci.md.
 version: 2.1
 
 orbs:
@@ -227,13 +227,15 @@ commands:
   main-release-py:
     steps:
       - run:
-          name: Pin release.py from origin/main
+          name: Tooling's release.py, at the commit main's .tooling-rev names
           command: |
             set -euo pipefail
             git fetch -q origin main
-            mkdir -p .mb-main
-            git show origin/main:scripts/release.py > .mb-main/release.py
-            echo 'export MAIN_RELEASE_PY="$PWD/.mb-main/release.py"' >> "$BASH_ENV"
+            # (main's pin, so a branch cannot change the release for itself; the branch's own until main has one)
+            rev=$(git show origin/main:.tooling-rev 2>/dev/null || cat .tooling-rev)
+            git clone -q https://git.magicbean.dev/MagicBeanDev/Tooling.git .mb-tooling
+            git -C .mb-tooling checkout -q --detach "$rev"
+            echo 'export MAIN_RELEASE_PY="$PWD/.mb-tooling/scripts/release.py"' >> "$BASH_ENV"
   website-pr-sources:
     steps:
       - run:
@@ -721,7 +723,7 @@ jobs:
             echo "export RX_TARGET=windows LONGSHOT_MINGW=$LLVM_MINGW" >> "$BASH_ENV"
       - run:
           name: NVIDIA DLSS SDK (this run only)
-          command: python3 -I scripts/ngx_sdk.py --platform windows --build-only --accept-nvidia-license /tmp/ngx-sdk
+          command: python3 -I scripts/fetch.py dlss --platform windows --build-only --accept-nvidia-license /tmp/ngx-sdk
       - run:
           name: longshot_vk.dll with NVIDIA DLSS and AMD FSR 4
           no_output_timeout: 45m
@@ -777,7 +779,7 @@ jobs:
             set -euo pipefail
             npm ci --no-audit --no-fund
             npm run build
-            # dry-run until cutover: Forgejo's website.yml is still the live deployer (docs/ci.md)
+            # dry-run until cutover: Forgejo's website.yml is still the live deployer (docs/dev/reference/ci.md)
             if [ "<< pipeline.parameters.release_dry_run >>" = true ]; then
               npx wrangler deploy --dry-run --message "main @ ${CIRCLE_SHA1:0:12}"
               exit 0
@@ -787,7 +789,7 @@ jobs:
       - run:
           name: Record deploy marker (advisory)
           when: always
-          command: echo "Mark deploy in CircleCI Releases UI when CLI deploy tracking is verified (docs/ci.md)."
+          command: echo "Mark deploy in CircleCI Releases UI when CLI deploy tracking is verified (docs/dev/reference/ci.md)."
 
   website-preview-build:
     executor: node22

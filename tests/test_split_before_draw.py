@@ -38,7 +38,8 @@ def order(where, text, needles):
 
 def main():
     replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
-    docs = (ROOT / "docs/development.md").read_text(encoding="utf-8")
+    row = next((l for l in (ROOT / "gpu/vk/switches.def").read_text(encoding="utf-8").splitlines()
+                if l.startswith("SW(RX_VK_SPLIT_BEFORE_DRAW,")), "")
 
     # the switch: on by default on Intel, RX_VK_SPLIT_BEFORE_DRAW either way elsewhere
     on = block(replay, "bool part_ends_before_draw() {")
@@ -76,7 +77,8 @@ def main():
     if replay.count("rec_parts = 0, part_work = 0, part_end_wanted = false;") != 2:
         raise SystemExit("a submission's start no longer takes back the part's end asked for in the one before")
 
-    need("docs/development.md", docs, ["`RX_VK_SPLIT_BEFORE_DRAW=0` or `1`"])
+    need("gpu/vk/switches.def: RX_VK_SPLIT_BEFORE_DRAW's row", row,
+         ["1 ends a submission's part only right before a plain draw", "0 after its 120th draw or dispatch"])
     print("ok: a part ends right before a plain draw (RX_VK_SPLIT_BEFORE_DRAW), never before a mesh draw or a dispatch")
 
 

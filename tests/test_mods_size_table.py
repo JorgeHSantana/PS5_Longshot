@@ -13,7 +13,7 @@ with the prompts' entries merged into it. On made-up tables, no game data:
   merged table), and, with the zstandard package, a table compressed as Clawshot writes it and one whose frame does not give
   its size.
 
-The documented, authored file-mod example in docs/mods.md also goes through the same Linux filesystem fixture:
+The documented, authored file-mod example in docs/dev/reference/mods.md also goes through the same Linux filesystem fixture:
 discovery, whole-path order, disabling and restart, default/HOS_MODS roots, case/slash lookup and an ExeFS folder
 that is listed and never served as RomFS.
 
@@ -191,9 +191,9 @@ POSIX_PIECES = ["static DWORD error_of(int e) {", "static void slashes(char *dst
 
 def documented_example_checks(exe, tmp):
     """Use the documentation's actual files, not a second loader or a separately maintained example."""
-    doc = (ROOT / "docs/mods.md").read_text(encoding="utf-8")
+    doc = (ROOT / "docs/dev/reference/mods.md").read_text(encoding="utf-8")
     blocks = re.findall(r"<!-- romfs-example -->\s*```json\n(.*?)\n```\s*<!-- /romfs-example -->", doc, re.S)
-    check(len(blocks) == 1, "docs/mods.md must contain one runnable RomFS example")
+    check(len(blocks) == 1, "docs/dev/reference/mods.md must contain one runnable RomFS example")
     files = json.loads(blocks[0])
     tmp.mkdir()
     for rel, text in files.items():

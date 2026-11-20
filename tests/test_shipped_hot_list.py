@@ -1,6 +1,6 @@
 """The hot list every build uses (assets/profiles/hot_funcs.txt, nx2/make_game.py hot_list_for), game-free.
 
-  - the committed list: one f_<8 hex digits> a line, none twice, at most scripts/hotlist.py's cap, its note in
+  - the committed list: one f_<8 hex digits> a line, none twice, at most scripts/perf.py hotlist's cap, its note in
     assets/profiles/README.md; and no listed function is one whose text edit in nx2/oot_patches.py finds its place by a
     float helper call (a64_fpx_<op>(c, : a hot function's are rewritten to their inline copies, a64_lift.hot_text, so that
     edit would be lost with a WARNING line only: the step divides' hook, which keeps the game's speed above 60 fps, is one);
@@ -61,7 +61,7 @@ class TheCommittedList(unittest.TestCase):
         bad = [n for n in names if not re.fullmatch(r"f_[0-9a-f]{8}", n)]
         self.assertEqual(bad, [], "every line is f_<8 hex digits>")
         self.assertEqual(len(names), len(set(names)), "no function twice")
-        self.assertTrue(0 < len(names) <= 1500, "1 to 1,500 functions (scripts/hotlist.py's cap): %d" % len(names))
+        self.assertTrue(0 < len(names) <= 1500, "1 to 1,500 functions (scripts/perf.py hotlist's cap): %d" % len(names))
         # (what the lift reads of it: the first word of each line that starts with f_, a64_lift.hot_functions)
         self.assertEqual({w for line in data.decode().splitlines() for w in line.split()[:1] if w.startswith("f_")}, set(names))
 

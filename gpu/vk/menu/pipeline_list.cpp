@@ -342,7 +342,7 @@ bool share_write(const std::string& path, const std::string& data) {
 /// frame generation and HDR as the menu has them now, and the mods
 std::vector<std::string> share_values(long long pipelines, bool v2, long long computes) {
     std::vector<std::string> v(ps::kFieldCount);
-    v[0] = menu_version();   // (LONGSHOT_VERSION: nx2/build.py gives it to vk_menu.cpp alone)
+    v[0] = menu_version();   // (nx2/build.py gives the version to gpu/vk/vk_version.cpp alone)
     v[1] = share_os() + "; " + dev.props.deviceName + ", driver " + driver_text();
     const Out o = shown_output();
     v[2] = ps::output_text(o.w, o.h, opts.handheld != 0, output_choice(opts.output_res) == 0, aspect_follows_host(opts.ultrawide));

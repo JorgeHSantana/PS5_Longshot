@@ -23,7 +23,7 @@ Checked:
  - the source: the gate is the only one and on; the row is Auto by default and takes a restart; the menu resolves the row
    once, from usable_cores, asks the pools' mirrors in both Auto tiers and logs describe's line; RX_VK_ASYNC is read in one
    place; the host's present poll asks the renderer (HOS_OPT_RENDER_THREAD); the device policy and the facts count cores;
-   the row's help, the readme, the development guide and the switch table say the tiers;
+   the row's help, the settings page, the developer docs and the switch table say the tiers;
  - and the checks have teeth: broken copies (the recorder thread on at 4 cores, SMT siblings counted as cores, the 4-core
    tier missing, the logical count back, the recorder hooked to the render thread's half, the mirrors asked in one tier
    only, and others) must each fail.
@@ -332,8 +332,9 @@ def read_sources():
     paths = dict(rule=VK / "threaded_rendering.h", menu=VK / "vk_menu.cpp", menu_h=VK / "vk_menu.h", replay=VK / "vk_replay.cpp",
                  recorder=VK / "vk_recorder.h", api=VK / "vk_api.h", progcache=VK / "vk_progcache.cpp",
                  internal=VK / "vk_internal.h", policy=VK / "device_policy.h", main=VK / "vk_main.cpp",
-                 switches=VK / "switches.def", native=ROOT / "host" / "nvn_native.c", readme=ROOT / "README.md",
-                 docs=ROOT / "docs" / "development.md")
+                 switches=VK / "switches.def", native=ROOT / "host" / "nvn_native.c",
+                 settings=ROOT / "docs" / "user" / "graphics-and-controls.md",
+                 docs=ROOT / "docs" / "dev" / "reference" / "switches.md")
     s = {k: p.read_text(encoding="utf-8") for k, p in paths.items()}
     s["menu"] = menu_text(ROOT)   # (vk_menu.cpp and its modules, their rows as table lines, #1633: threads.cpp's row)
     return s
@@ -445,22 +446,22 @@ def check_sources(s):
             bad.append("%s still names menu_threaded_rendering or Why::AutoCpus: the row has two halves now" % key)
 
     # (said where the settings and the switches are)
-    readme, docs = s["readme"], s["docs"]
-    table = [line for line in readme.splitlines() if line.startswith("| | Developer: Threaded rendering | Auto, On, Off")]
-    start = readme.find("- **Threaded rendering:**")
-    para = readme[start:start + 900].replace("\n  ", " ") if start >= 0 else ""
+    settings, docs = s["settings"], s["docs"]
+    table = [line for line in settings.splitlines() if line.startswith("| | Developer: Threaded rendering | Auto, On, Off")]
+    start = settings.find("- **Threaded rendering:**")
+    para = settings[start:start + 900].replace("\n  ", " ") if start >= 0 else ""
     if len(table) != 1 or not para:
-        bad.append("README.md: no Threaded rendering line in the option table, or no paragraph on it")
+        bad.append("docs/user/graphics-and-controls.md: no Threaded rendering line in the settings table, or no paragraph on it")
     else:
         for where, text in (("the option table", table[0]), ("the paragraph", para)):
             if "%d or more" % tiers[0] not in text or "%d or %d" % tiers[1:] not in text or "12 or more" in text:
-                bad.append("README.md: %s does not say Auto's tiers (%d or more cores, %d or %d)" % ((where,) + tiers))
-    rows = [line for line in docs.splitlines() if line.startswith("| Threaded rendering (the Insert menu's row")]
+                bad.append("docs/user/graphics-and-controls.md: %s does not say Auto's tiers (%d or more cores, %d or %d)" % ((where,) + tiers))
+    rows = [line for line in docs.splitlines() if line.startswith("| `threaded_rendering` |")]
     if len(rows) != 1 or "threaded::kAutoEnabled" not in rows[0]:
-        bad.append("docs/development.md: no row for Threaded rendering, or it does not name the gate")
+        bad.append("docs/dev/reference/switches.md: no threaded_rendering row in the options file's keys, or it does not name the gate")
     elif "%d or more cores, the render thread and the recorder thread" % tiers[0] not in rows[0] or \
             "%d or %d, the render thread alone" % tiers[1:] not in rows[0] or "usable_cores" not in rows[0]:
-        bad.append("docs/development.md: the Threaded rendering row does not say Auto's tiers by cores (usable_cores)")
+        bad.append("docs/dev/reference/switches.md: the threaded_rendering row does not say Auto's tiers by cores (usable_cores)")
     for name, need in (("RX_VK_ASYNC", "on from %d physical cores" % render_cores),
                        ("RX_VK_RECORDER", "Auto from %d physical cores" % recorder_cores)):
         m = re.search(r'^SW\(%s, \w+, \w+, "([^"]*)"' % name, s["switches"], re.M)

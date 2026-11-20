@@ -1,5 +1,5 @@
 """Real occlusion counts on Vulkan (RX_VK_OCC_QUERIES, gpu/vk/vk_replay.cpp): Ocarina of Time reads its samples-passed
-reports back on the CPU and leaves out of its draw lists the objects whose count was 0 (docs/development.md). The rule
+reports back on the CPU and leaves out of its draw lists the objects whose count was 0 (RX_VK_OCC_QUERIES in gpu/vk/switches.def). The rule
 under test: a count that is not known for sure stays "visible" (4096); a wrong 0 hides an object that may be in view.
 
 The real code is cut out of the sources and compiled against a fake query pool, command buffer and guest memory:

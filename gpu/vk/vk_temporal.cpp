@@ -1,7 +1,7 @@
 // (longshot) A temporal upscaler in place of OoT's gameplay upscale network: the frame chain (vk_temporal.h), shared by the
 // engines that draw with it, NVIDIA DLSS (vk_dlss.cpp), AMD FSR 4 (vk_fsr4.cpp) and Intel XeSS (vk_xess.cpp).
-// The chain is hckrman101's, from their NVIDIA DLSS (#841): the camera, the inputs pass, the actor motion and the jitter's
-// state, moved here from vk_dlss.cpp unchanged in what they do, so that DLSS and FSR share them.
+// The chain was NVIDIA DLSS's: the camera, the inputs pass, the actor motion and the jitter's state, here so that DLSS and
+// FSR share them.
 //
 // OoT has no temporal upscaler of its own: its scene is drawn at a lower size and a network of its own (the program
 // fd029a317a9a4b94 at 3/4, another for each other share; one dispatch, cooperative matrices) scales it up, from the
@@ -21,7 +21,7 @@
 //    copied on the GPU from where the game has them into two buffers that take turns; a pixel is the draw's where its depth is
 //    the scene's (within RX_VK_DLSS_ACTOR_TOL steps, default 64). What moves without bones (particles, water, foliage moved in
 //    its vertex shader, mesh-shader draws) keeps the camera's motion.
-//  - hidden meshes (vk_draw.cpp hidden_depth_draw, hidden_mesh.h; #1370): the game goes on drawing a skinned mesh into the
+//  - hidden meshes (vk_draw.cpp hidden_depth_draw, hidden_mesh.h): the game goes on drawing a skinned mesh into the
 //    scene's depth after it stops showing it (Link, with the camera pushed into him), so those depth draws are left out:
 //    the depth and the actor motion then have no invisible body in front of the room. RX_VK_DLSS_FADED=0: drawn.
 //  - the engine scales them to the output's size; shaders/dlss_out.comp squares that back to linear colour into the
@@ -1067,8 +1067,8 @@ void temporal_idle() {
     const uint64_t now = texture_frame_no();
     if (now - s.asked <= 120) return;   // (in use, or off for under 120 frames (2 s): kept, a row stepped through comes back at once)
     // (longshot, a stutter: kept too while DLSS or FSR 4 is still the Upscaler's choice. Each area change's loading screen has no
-    // gameplay upscale for 2 s and more, and DLSS's feature let go then was made again at the next area's first frame: 44-78 ms
-    // of the replay thread at every area entry (12 times in a 15-minute walk, 2026-11-10, #1520). Let go once the row leaves them)
+    // gameplay upscale for 2 s and more, and DLSS's feature let go then would be made again at the next area's first frame:
+    // 44-78 ms of the replay thread at every area entry. Let go once the row leaves them)
     if (temporal_wanted()) return;
     if (s.drawing) {
         logf("vk: %s: not used for 120 frames (the last at frame %llu, now %llu): what it made and its images let go; "
@@ -1082,7 +1082,7 @@ void temporal_idle() {
     s.holding = !s.dead.empty();
 }
 
-// ---- (longshot, #1370) the depth draws of hidden meshes (vk_draw.cpp hidden_depth_draw has the why) ----
+// ---- (longshot) the depth draws of hidden meshes (vk_draw.cpp hidden_depth_draw has the why) ----
 int temporal_hidden_mesh_mode() {
     static const int mode = [] {
         const bool rule = env_switch("RX_VK_DLSS_FADED") != 0;          // (unset: on)
@@ -1410,8 +1410,8 @@ bool draw_engine(VkCommandBuffer cmd, State& s, int mode, const Camera& cam, uin
     // Some games keep a smaller scene even at full scale: then use native AA at that size.
     // Creating DLAA for that queued scene would replace the feature twice in successive frames.
     // (longshot) The same for FSR 4's and XeSS's native AA entered from their scaled mode: the queued frames are drawn by the
-    // scaled engine. Made at a queued size, FSR 4's native context failed on an RX 6600 at the VRAM limit (its upscaler was not
-    // made (3) for 1429x804, #744), and the engine then stayed off until the player changed the upscaler
+    // scaled engine. Made at a queued size, FSR 4's native context can fail at the VRAM limit, and the engine then stays off
+    // until the player changes the upscaler
     const bool entering_native =
         ur::full_scale(mode) && s.drawing == engine.e && s.drawn_mode == ur::engine(mode) && ur::engine(mode) != mode;
     const bool queued_native = entering_native && (rw != ow || rh != oh);

@@ -37,7 +37,7 @@ void logf(const char* fmt, ...);
 // (longshot) A line at another level than info, as host/hos.h's hos_log_at: "[trace] " leads its text, after the host's thread tag
 enum LogLevel : int { log_error, log_warn, log_info, log_debug, log_trace };
 void logf_at(LogLevel level, const char* fmt, ...);
-void new_refused();                       // (vk_main.cpp, issue 1280: the renderer's new_handler)
+void new_refused();                       // (vk_main.cpp: the renderer's new_handler)
 void new_refuse_test(int64_t presents);   // (vk_main.cpp: HOS_TEST_ALLOC_REFUSE's allocation, at the replay's present)
 void queue_flush_locked();   // (vk_replay.cpp, RX_VK_BATCH: held submits out; dev.present_mu held)
 void queue_flush();          // (the same, taking dev.present_mu)
@@ -46,7 +46,7 @@ void queue_flush();          // (the same, taking dev.present_mu)
 void device_wait_idle_locked();
 // (longshot) why the swapchain is SDR though the Insert menu's HDR is on (Device::hdr_sdr_why): no VK_EXT_swapchain_colorspace;
 // HDR off in Windows' display settings; HDR on there but the driver lists no HDR10 surface
-// (docs/common-issues.md); the display lists none and the system's setting is not known (Linux, or a Windows that doesn't say).
+// (docs/user/common-issues.md); the display lists none and the system's setting is not known (Linux, or a Windows that doesn't say).
 // hdr_sdr_count: how many, for the log's and the menu's line for each
 enum HdrSdrWhy : int { hdr_sdr_none, hdr_sdr_no_extension, hdr_sdr_os_off, hdr_sdr_driver, hdr_sdr_unknown, hdr_sdr_count };
 
@@ -148,13 +148,12 @@ struct Device {
 };
 extern Device dev;
 
-/// (longshot) Windows Intel's compiler (igvk64, UHD and Arc) faults when two threads hand it shaders at once. An Arc
-/// A750 froze the PC on four compute pipelines (issue 496). An Intel UHD on Windows read address 0x170 inside igvk64
-/// during the first scene's compiles (two frames in longshot_vk.dll, and no "driver faulted compiling" line, so the
-/// call was not inside guarded_graphics). One thread enters vkCreateShaderModule and vkCreate*Pipelines.
+/// (longshot) Windows Intel's compiler (igvk64, UHD and Arc) faults when two threads hand it shaders at once (four compute
+/// pipelines can freeze the PC; on a UHD, a read of address 0x170 inside igvk64 during the first scene's compiles, outside
+/// guarded_graphics). One thread enters vkCreateShaderModule and vkCreate*Pipelines.
 /// Other vendors, and Intel on other systems, are not held. The Intel shader compiles row's Side by side, its Auto on
 /// the Arc B-series (intel_compiles.h: where side by side was measured), or RX_VK_NO_INTEL_SERIAL=1 over it: side by
-/// side, as before.
+/// side.
 /// ask: a create that compiles nothing (VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT), on the replay thread so a
 /// draw or dispatch never waits for a compile. It never waits here either: while a worker holds the gate, busy is set and
 /// the caller answers VK_PIPELINE_COMPILE_REQUIRED (cold) without asking the driver.
@@ -365,7 +364,7 @@ void memory_drop_shadow(uint64_t guest, uint64_t size);   // (a write the captur
 /// when any write-back ever did
 uint64_t memory_writeback_value(uint64_t guest, uint64_t size, bool* ever, uint64_t* part = nullptr, uint64_t* whole = nullptr);
 bool memory_writeback_ever(uint64_t guest, uint64_t size);   // (longshot) its *ever without a lock: invalidate_quick
-void memory_note_readback(uint64_t guest, uint64_t size);   // (PR 430) a CPU read of GPU results: see memory_rb_refresh
+void memory_note_readback(uint64_t guest, uint64_t size);   // a CPU read of GPU results: see memory_rb_refresh
 bool texture_storage_any(uint64_t gpu, uint64_t size);   // (vk_replay.cpp) a texture the game made has its storage there
 bool replay_render_thread_on();   // (vk_replay.cpp) the replay runs on the render thread (RX_VK_ASYNC, Threaded rendering)
 // (longshot, diagnostics) RX_VK_LOG_RB_WRITERS=1: what wrote the pages a readback waits for. The replay says what it is recording

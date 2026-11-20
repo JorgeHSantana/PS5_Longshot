@@ -773,8 +773,8 @@ static void au_opened(HWAVEOUT w) {
 /* (longshot) The channels of a mix format that are 5.1 speakers: its channel count when its mask names a centre and a
    pair behind or beside the player (5.1 back or side, 7.1), else 2. A device with more channels than speakers (an
    audio interface's outputs, a Scarlett's 8 with mask 0; quad without a centre; no mask at all) was counted by its
-   channels: the game mixed 5.1, and what it puts in the centre (voices, the ocarina, Link's own sounds) and behind went
-   to outputs nothing listens to, silent (issue 2182). As stereo, the game's own mix down keeps every sound. */
+   channels would have the game mix 5.1, and what it puts in the centre (voices, the ocarina, Link's own sounds) and behind
+   go to outputs nothing listens to, silent. As stereo, the game's own mix down keeps every sound. */
 static int au_layout_channels(int channels, int extensible, unsigned long mask) {
     if (channels <= 2 || !extensible) return 2;
     const unsigned long front = 0x7, back = 0x30, side = 0x600;   /* FL FR FC; BL BR; SL SR (ksmedia.h SPEAKER_) */

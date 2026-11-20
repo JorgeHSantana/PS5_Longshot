@@ -1,7 +1,7 @@
 """(hookshot) The mods' ExeFS patches, applied to the game's code when it is built: IPS, IPS32 and IPSwitch (.pchtxt) files
 for the game's main.
 
-Hookshot compiles the game's code ahead of time, so a patch to its instructions cannot be applied when the game runs: here
+Longshot compiles the game's code ahead of time, so a patch to its instructions cannot be applied when the game runs: here
 the patch files of the mods that are on are read when the game is built (nx2/make_game.py), and the lift (nx2/image.py)
 writes them into main's image before it relocates and translates it, as emulators and Atmosphere apply a patch file to the
 module before its dynamic linker runs. The code is then translated from the patched instructions, and image.bin holds the

@@ -207,7 +207,7 @@ void fixed_dues(int64_t last, int64_t now, int made, int64_t delay, int64_t* due
 /// one), and its game frame that much later, where the next set's first one follows
 int64_t pace_lead(int64_t frame, int made) { return made > 0 ? frame * made / (made + 1) : 0; }
 
-// doc: docs/design.md#13-frame-generations-presents-as-rules (rule 3: the GPU's delay from sets taken as they came)
+// doc: docs/dev/reference/architecture.md#frame-generations-presents (rule 3: the GPU's delay from sets taken as they came)
 /// (longshot) The GPU's delay that a fixed multiplier's sets are shown at past their lead (fg.late_ns), from what the last
 /// set needed: its own delay (extra_ns) and how late (negative: early) its first frame could be shown against its time,
 /// and a millisecond to spare. The set's frames are done with the game frame's GPU work, so shown at times that did not
@@ -220,7 +220,7 @@ int64_t pace_delay(int64_t extra, int64_t need, int64_t frame) {
     return std::clamp<int64_t>(extra, 0, frame);
 }
 
-// doc: docs/design.md#13-frame-generations-presents-as-rules (rule 2: sets on the game's timeline, any mode)
+// doc: docs/dev/reference/architecture.md#frame-generations-presents (rule 2: sets on the game's timeline, any mode)
 /// (longshot) Whether display_main shows a fixed multiplier's set at its times on the game's timeline (by_time): whatever
 /// Frame pacing says and whatever the swapchain's mode. Where it does not wait for a refresh (immediate: V-Sync Off;
 /// mailbox), shown as they came, a set's frames went out within a millisecond, the made frames hardly on the screen, and
@@ -253,7 +253,7 @@ int fifo_pick(int frames, int shown, int k) {
     return ((k + 1) * frames * 2 + shown) / (2 * shown) - 1;
 }
 
-// doc: docs/design.md#13-frame-generations-presents-as-rules (rule 6: under FIFO the made frames do not queue)
+// doc: docs/dev/reference/architecture.md#frame-generations-presents (rule 6: under FIFO the made frames do not queue)
 /// (longshot) FIFO's catch-up (display_main's take): how many made frames a fixed multiplier's set on the game's timeline
 /// leaves out, spread over it (fifo_pick). The frames shown go a refresh apart at the least (fifo_slot), the first a
 /// refresh after each of the set before's frames still to show (left, the first of them at slot; 0: all shown, slot the
@@ -723,7 +723,7 @@ void fg_latency_note(int64_t at, int64_t called, bool game, uint64_t present_id,
     }
 }
 
-// doc: docs/design.md#13-frame-generations-presents-as-rules (rule 4: the spare images a set presented ahead holds)
+// doc: docs/dev/reference/architecture.md#frame-generations-presents (rule 4: the spare images a set presented ahead holds)
 /// Present ahead (display_main): a set's copies go to the GPU together, ahead of their presents, which holds as many
 /// swapchain images acquired at once as the set has frames, so only where the swapchain has that many to spare (an acquire
 /// past them has to time out, the Vulkan spec); a set it cannot hold is shown one frame at a time. pace: Frame pacing On,
@@ -784,9 +784,9 @@ void display_main() {
         present_image(j.set->frame[f].image, fg.w, fg.h, nullptr, j.set->frame[f].view);
         present_defer_into = nullptr;
         // (as it came: taken within 3 ms of its coming, and its first copy not held in present_image over 3 ms, waiting for a
-        // frame slot, a swapchain image or a new swapchain: the review, 2026-11-17. A wait there grows with the delay; the
+        // frame slot, a swapchain image or a new swapchain. A wait there grows with the delay; the
         // copy's own time to submit (the game's held submits, the queue's lock) is the pipeline's and counts in the delay:
-        // timed from after it, a CPU that takes 3 ms to submit left every set out, and the delay stayed at 0)
+        // timed from after it, a CPU that takes 3 ms to submit would leave every set out, and the delay would stay at 0)
         if (k == 0) s.as_came = t0 - j.queued <= 3000000 && now_ns() - t0 <= 3000000;
     };
     // The copies of a set presented ahead still to go to the GPU, in order, for as many of its frames as `room` (the spare
@@ -833,21 +833,21 @@ void display_main() {
         s.auto_timed = j.set->shown >= 0;   // (Auto: each frame at its own refresh's time)
         s.shown = s.auto_timed ? j.set->shown : j.set->made + 1;
         // (longshot) FIFO's catch-up: a set whose game frame would come over a refresh late leaves made frames out, spread
-        // over it, and their copies (fifo_catch_up, fifo_pick). 3x at 165 Hz and 60 a second without it: the game frame 82
-        // ms from its hand-over to the screen, against 51 before #1442 (its latency A/B); 6x: 138 ms. left: the set
-        // before's frames still to show. Only a set on the timeline, which the swapchain holds whole (present_ahead_wanted):
-        // one shown a frame at a time (7x and 8x under FIFO on an NVIDIA surface by the renderer's own or FSR 3.1: DLSS
-        // FG runs them at 6x, #1486) goes out as before, all its frames
+        // over it, and their copies (fifo_catch_up, fifo_pick). Without it, 3x at 165 Hz and 60 a second puts the game frame
+        // ~80 ms from its hand-over to the screen (~50 with it); 6x: 138 ms. left: the set before's frames still to show.
+        // Only a set on the timeline, which the swapchain holds whole (present_ahead_wanted): one shown a frame at a time
+        // (7x and 8x under FIFO on an NVIDIA surface by the renderer's own or FSR 3.1: DLSS FG runs them at 6x) goes out
+        // whole, all its frames
         if (!s.auto_timed && dev.swap_mode == VK_PRESENT_MODE_FIFO_KHR && on_line(j.set) &&
             present_ahead_wanted(true, j.set->made + 1, dev.swap_spare.load(std::memory_order_relaxed)) &&
             (s.first = fifo_catch_up(j.set->made, j.set->due, slot, left, fifo_refresh, now_ns())))
             s.shown -= s.first, stat.caught += s.first;
         s.step = interval / std::max(s.shown, 1);
         if (s.auto_timed) menu_note_frame(true, 0);   // (the overlay's game rate: Auto counts each game frame, given a refresh or not)
-        // (longshot) Present ahead (#1702). Each frame's copy into the window was submitted at its
-        // time, behind the game's next frame on the same queue, and shown only once that frame's rendering was done: at 2x the
-        // game's own frames reached the screen ~3 ms after the made ones, 5.7 and 11 ms apart instead of 8.3 (PresentMon, RTX
-        // 5080, 60 fps), and a VRR display's refresh changed every frame (flicker on OLED). Now a set's copies go to the GPU
+        // (longshot) Present ahead. A frame's copy into the window submitted at its time sits behind the game's next frame on
+        // the same queue, and is shown only once that frame's rendering is done: at 2x the game's own frames reach the screen
+        // ~3 ms after the made ones, unevenly apart, and a VRR display's refresh changes every frame (flicker on OLED).
+        // So a set's copies go to the GPU
         // together, the first one's end is waited for, and only the presents keep their times on the line.
         const bool line = on_line(j.set);
         s.ahead = present_ahead_wanted(pace || line, s.shown, dev.swap_spare.load(std::memory_order_relaxed));
@@ -937,7 +937,7 @@ void display_main() {
             int64_t due = timed ? j.set->due[f] : pace ? next_show : 0;
             // (a frame on the game's timeline is late against its own time, below; under FIFO against its refresh slot, a
             // refresh after the slot before, also where fifo_slot starts again from now: so a set late from the GPU or a
-            // held thread is counted, the review, 2026-11-17)
+            // held thread is counted)
             int64_t own = due;
             int64_t now = now_ns();
             if (s.refresh && dev.swap_mode == VK_PRESENT_MODE_FIFO_KHR) {   // (one a refresh at most)
@@ -1175,7 +1175,7 @@ VkImage framegen_scale(VkCommandBuffer cmd, VkImageView src, VkImage image, uint
     }
     struct { int mode; float sharp; float x0, x1; int side; } pc{opts.upscale, opts.sharpness / 100.0f, wide.x0, 1.0f - wide.x0, wide.side};
     if (wide.side == 1) {   // (the blurred sides: first the picture at 1/8, each pixel the mean of its 8 x 8, which they blur)
-        // (from #1448's checked source rectangle, as the crop above: the picture src now holds)
+        // (the checked source rectangle, as the crop above: the picture src now holds)
         const uint32_t smw = std::max(1u, source.w / 8), smh = std::max(1u, source.h / 8);
         if (scale.small_w != smw || scale.small_h != smh) {
             {
@@ -1271,28 +1271,28 @@ VkImage framegen_made_image(uint32_t* w, uint32_t* h, int* index) {
     return fg.recorded->frame[k].image;
 }
 
-// (longshot) The HUD for AMD FSR 3.1's frame interpolation (#1310, #1420). The game draws its HUD (hearts, minimap, button
-// prompts) into the same picture as the scene, after its gameplay upscale, and has no HUD-less colour. The patched
-// interpolation used to guess the HUD as the pixels the same in both frames while the scene moved: the see-through parts
-// (the minimap, the prompts' backing), the soft edges and anything animated failed the guess and were moved with the
-// scene, a HUD that smeared and shook with every turn of the camera. So the picture is copied just after the upscale wrote
+// (longshot) The HUD for AMD FSR 3.1's frame interpolation. The game draws its HUD (hearts, minimap, button
+// prompts) into the same picture as the scene, after its gameplay upscale, and has no HUD-less colour. Guessing the HUD
+// as the pixels the same in both frames while the scene moves fails for the see-through parts (the minimap, the prompts'
+// backing), the soft edges and anything animated, which are moved with the scene: a HUD that smears and shakes with every
+// turn of the camera. So the picture is copied just after the upscale wrote
 // it (framegen_hud_before, from vk_draw.cpp's dispatch of the upscale, whoever drew it); at the present what differs from
 // that copy is the HUD, marked in the interpolation source's alpha (shaders/fg_hud.comp), and the interpolation keeps
 // those pixels where they are (vk_fsr3fi.h Inputs::hud_mask). A frame without the copy (no gameplay upscale: a menu, a
-// movie) keeps the old guess.
-// The mark alone still let the HUD smear (#1310 after #1464): the frame before's HUD stayed in the interpolation's previous
-// source and was dragged with the scene, and the inpainting spread the HUD's colours into the holes a turn opens beside it.
+// movie) keeps the guess.
+// The mark alone still lets the HUD smear: the frame before's HUD stays in the interpolation's previous
+// source and is dragged with the scene, and the inpainting spreads the HUD's colours into the holes a turn opens beside it.
 // So the copy itself, cropped as the frame (hud.hudless), is what FSR 3.1 interpolates: its own HUD-less colour, the HUD in
 // neither frame, and this frame's HUD laid over the made frame after, where the presented frame differs from it
-// (vk_fsr3fi.h Inputs::present; RX_VK_FSR_FG_HUDLESS=0: the mark as before). The copy only where the HUD is: elsewhere the
+// (vk_fsr3fi.h Inputs::present; RX_VK_FSR_FG_HUDLESS=0: the mark alone). The copy only where the HUD is: elsewhere the
 // presented frame's own pixels, or FSR 3.1 finds the two different everywhere (the copy is from before the game's last
 // pass) and every made frame is the presented one (shaders/fg_hud.comp).
-// Laid over whole, the presented pixel still brought this frame's scene with it wherever the HUD lets the scene through
+// Laid over whole, the presented pixel still brings this frame's scene with it wherever the HUD lets the scene through
 // (the hearts' glow, the item box's shadow, the faint icons, the minimap): a halo of the real frame's background around
-// every HUD element of every made frame (#1565). So how see-through each HUD pixel is (T) is learned from frame to frame,
+// every HUD element of every made frame. So how see-through each HUD pixel is (T) is learned from frame to frame,
 // the HUD staying where it is while the scene behind it moves (shaders/fg_hud_layer.comp: hud.layer, the HUD's own colour
 // and T); FSR 3.1 is given the HUD-less colour as its present too, so it lays nothing over its made frames, and the HUD goes
-// over each made frame's own scene (shaders/fg_hud_composite.comp); where T is not known, the presented pixel as before
+// over each made frame's own scene (shaders/fg_hud_composite.comp); where T is not known, the presented pixel
 // (RX_VK_FSR_FG_HUD_LAYER=0: everywhere, for an A/B).
 namespace {
 struct HudState {

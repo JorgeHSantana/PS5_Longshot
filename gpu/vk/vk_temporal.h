@@ -64,11 +64,11 @@ struct SkinnedDraw {
 };
 void temporal_note_skinned_draw(const SkinnedDraw& k);
 
-/// (longshot, #1370) The hidden-mesh rule's switches (vk_draw.cpp hidden_depth_draw, gpu/vk/hidden_mesh.h). Bit 0: the depth
+/// (longshot) The hidden-mesh rule's switches (vk_draw.cpp hidden_depth_draw, gpu/vk/hidden_mesh.h). Bit 0: the depth
 /// draws of hidden meshes are left out (unless RX_VK_DLSS_FADED=0); bit 1: the detailed log (RX_VK_DLSS_FADED_LOG=1). 0:
 /// nothing runs, as with the parallel replay (RX_VK_PARALLEL=2 and more). Read once; the first call logs what it is
 int temporal_hidden_mesh_mode();
-/// (longshot, #1370) Whether `depth` is the depth target of the scene the chain has taken in this frame (its camera's)
+/// (longshot) Whether `depth` is the depth target of the scene the chain has taken in this frame (its camera's)
 bool temporal_scene_depth_is(const Texture* depth);
 
 /// (longshot) NVIDIA DLAA before the game's bloom and tone map (pre_bloom.h has where and why): with DLAA and the

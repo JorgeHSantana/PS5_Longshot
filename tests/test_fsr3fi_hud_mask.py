@@ -5,7 +5,7 @@ as the pixels the same in both frames, and the minimap, the button prompts' see-
 animated failed the guess: they were moved with the scene, smeared and shaking at every turn of the camera. Now the picture is
 copied right after the upscale (vk_framegen.cpp framegen_hud_before), and at the present what the game drew over it since is
 marked in the interpolation source's alpha (hud_source, shaders/fg_hud.comp), which the patched interpolation reads
-(Inputs::hud_mask; scripts/fsr3_shaders.py FI_PATCHES 3). By default the mask pass also writes the copy itself, cropped as
+(Inputs::hud_mask; scripts/shaders.py FI_PATCHES 3). By default the mask pass also writes the copy itself, cropped as
 the frame, and FSR 3.1 is given that as its HUD-less colour with the frame as presented over it (Inputs::present: AMD's
 HUD-less mode, #1310 after #1464); RX_VK_FSR_FG_HUDLESS=0 gives the marked source instead (not run here: read once).
 Laid over whole, the presented frame brought the real frame's scene through the HUD's see-through parts, a halo around

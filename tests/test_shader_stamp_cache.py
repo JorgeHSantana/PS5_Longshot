@@ -53,6 +53,7 @@ class ShaderStampCacheTests(unittest.TestCase):
             "gpu/vk/vk_bank.cpp": "int bank;\n",
             "gpu/vk/vk_draw.cpp": "int draw;\n",
             "gpu/vk/vk_menu.cpp": "int menu;\n",
+            "gpu/vk/vk_version.cpp": "int version;\n",
             "gpu/vk/menu/audio.cpp": "int menu_audio;\n",   # (#1633: the Audio tab's module, a user of the playback header)
             "gpu/vk/menu/hdr.cpp": "int menu_hdr;\n",       # (a module that is not)
             "gpu/vk/vk_state.h": "struct State {};\n",
@@ -223,13 +224,13 @@ class ShaderStampCacheTests(unittest.TestCase):
                     shader = [f for f in job["flags"] if f.startswith("-DLONGSHOT_SHADER_STAMP=")]
                     version = [f for f in job["flags"] if f.startswith("-DLONGSHOT_VERSION=")]
                     self.assertEqual(len(shader), int(name == "gpu/vk/vk_shader.cpp"))
-                    self.assertEqual(len(version), int(name == "gpu/vk/vk_menu.cpp"))
+                    self.assertEqual(len(version), int(name == "gpu/vk/vk_version.cpp"))
                     if name.startswith(THIRD_PARTY):   # (none of them reads it: a set made for players fits any build)
                         self.assertNotIn("-DLONGSHOT_RELEASE", job["flags"])
                     elif not name.startswith(("host/posix/", "third_party/zstd/", "third_party/zbic/", "gen/")):   # (plain C libraries, the fonts' bytes)
                         self.assertIn("-DLONGSHOT_RELEASE", job["flags"])
                 self.assertEqual(self.changed(before, self.jobs(linux, version="new", release=True)),
-                                 {"gpu/vk/vk_menu.cpp"})
+                                 {"gpu/vk/vk_version.cpp"})
 
     def test_third_party_parts_are_built_for_x86_64_v3_with_the_stamp(self):
         """(nx2/third_party_objects.py) Eden's recompiler, sirit, Dear ImGui and zbic's zstd at THIRD_PARTY_CPU, with the stamp at

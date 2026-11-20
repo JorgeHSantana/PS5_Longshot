@@ -14,7 +14,7 @@
 // less than 7 GB of video memory), M, L, or NVIDIA's default (0). RX_VK_DLSS_PRESET=<letter> (or 0) over it.
 // RX_VK_DLSS_LOG=1: NGX's own log in ours.
 //
-// NVIDIA's NGX SDK is not part of Longshot (NVIDIA's license): a local build fetches it (scripts/ngx_sdk.py) and builds with
+// NVIDIA's NGX SDK is not part of Longshot (NVIDIA's license): a local build fetches it (scripts/fetch.py dlss) and builds with
 // LONGSHOT_NGX_SDK, which compiles this file with LONGSHOT_NGX. Without it only the stubs at the end are here.
 // NGX's core is the driver's (Windows: _nvngx.dll, which NVIDIA's loader finds in the driver's own folder; Linux:
 // libnvidia-ngx.so). It is never put beside the game: a copy there would be loaded in place of the driver's.
@@ -174,14 +174,14 @@ std::wstring wide(const fs::path& p) {
 #endif
 
 #ifdef _WIN32
-constexpr const char* kRuntime = "nvngx_dlss.dll";   // (DLSS's runtime, as scripts/ngx_sdk.py fetches it)
+constexpr const char* kRuntime = "nvngx_dlss.dll";   // (DLSS's runtime, as scripts/fetch.py dlss fetches it)
 constexpr const fs::path::value_type* kRuntimeName = L"nvngx_dlss.dll";
 #else
 constexpr const char* kRuntime = "libnvidia-ngx-dlss.so";
 constexpr const fs::path::value_type* kRuntimeName = "libnvidia-ngx-dlss.so";
 #endif
 #ifdef _WIN32
-constexpr const char* kFgRuntime = "nvngx_dlssg.dll";   // (DLSS Frame Generation's runtime, as scripts/ngx_sdk.py fetches it)
+constexpr const char* kFgRuntime = "nvngx_dlssg.dll";   // (DLSS Frame Generation's runtime, as scripts/fetch.py dlss fetches it)
 constexpr const fs::path::value_type* kFgRuntimeName = L"nvngx_dlssg.dll";
 #else
 constexpr const char* kFgRuntime = "libnvidia-ngx-dlssg.so";
@@ -286,7 +286,7 @@ bool ngx_init() {
 #endif
                 }
         if (needs_driver) logf("vk: NVIDIA DLSS: needs NVIDIA's driver %u.%u or newer", major, minor);
-        else if (!runtime) logf("vk: NVIDIA DLSS: not available: no %s in %s (scripts/ngx_sdk.py fetches it)", kRuntime, where.c_str());
+        else if (!runtime) logf("vk: NVIDIA DLSS: not available: no %s in %s (scripts/fetch.py dlss fetches it)", kRuntime, where.c_str());
         else if (!loadable)
             logf("vk: NVIDIA DLSS: not available: %s is only in folders whose path is not all ASCII (%s), and NVIDIA's NGX on "
                  "Linux loads it only from one that is: put it in $XDG_DATA_HOME/longshot/ngx, or RX_VK_DLSS_DIR=<an ASCII folder>",
@@ -716,7 +716,7 @@ bool fg_start(Fg& g) {
     if (const char* cap = getenv("RX_VK_DLSS_FG_MOST"); cap && atoi(cap) >= 1 && (unsigned)atoi(cap) < g.most)
         g.most = (unsigned)atoi(cap);
     // (its runtime: NGX takes the newest nvngx_dlssg in the runtime folders, else the driver's own copy, which may be older
-    // and make 1 frame at most, or refuse every set. scripts/ngx_sdk.py puts the SDK's beside DLSS's runtime)
+    // and make 1 frame at most, or refuse every set. scripts/fetch.py dlss puts the SDK's beside DLSS's runtime)
     // (Linux: NGX loads it by its real path, ASCII only, as DLSS's runtime: one only in folders named otherwise is not used)
     std::string where;
     bool here = false, loadable = false;
@@ -739,7 +739,7 @@ bool fg_start(Fg& g) {
         : here   ? std::string(kFgRuntime) + " only in folders whose path is not all ASCII (" + where +
                      "), which NGX on Linux does not load from: the driver's own, which may be older"
                  : "no " + std::string(kFgRuntime) + " in " + where +
-                     ": the driver's own, which may be older (scripts/ngx_sdk.py fetches it)";
+                     ": the driver's own, which may be older (scripts/fetch.py dlss fetches it)";
     logf("vk: DLSS Frame Gen (NGX): available, up to %u made frames between two of the game's (%s)", g.most, runtime.c_str());
     g.ok = true;
     g.most_known = g.most;
@@ -1091,9 +1091,8 @@ int dlss_fg_frames(VkCommandBuffer cmd, VkImage color, VkImageView color_view, u
     fg_put(o.prevClipToClip, g.from_prev);
     o.jitterOffset[0] = g.jitter[0], o.jitterOffset[1] = g.jitter[1];
     // (the motion as it is, render pixels: scale 1, as DLSS's own evaluation takes it. nvsdk_ngx_defs_dlssg.h says the scale
-    // normalizes to [-1, 1], which is Streamline's convention: with 1 / render size here DLSS-G saw no motion and every made
-    // frame was a cross-fade of the two game frames (captured 2026-11-10: t = 1/3 and 2/3, 0.2 of 255 off a pure blend); with
-    // scale 1 the same scenes came out as moved pictures between them. RX_VK_DLSS_FG_MV_SCALE=<x> multiplies it, for checks)
+    // normalizes to [-1, 1], which is Streamline's convention: with 1 / render size here DLSS-G sees no motion and every made
+    // frame is a cross-fade of the two game frames; with scale 1 they are moved pictures between them. RX_VK_DLSS_FG_MV_SCALE=<x> multiplies it, for checks)
     static const float mv_scale = getenv("RX_VK_DLSS_FG_MV_SCALE") ? (float)atof(getenv("RX_VK_DLSS_FG_MV_SCALE")) : 1.0f;
     o.mvecScale[0] = o.mvecScale[1] = mv_scale;
     o.cameraPinholeOffset[0] = o.cameraPinholeOffset[1] = 0.0f;
@@ -1114,7 +1113,7 @@ int dlss_fg_frames(VkCommandBuffer cmd, VkImage color, VkImageView color_view, u
     o.automodeOverrideReset = false;
     o.notRenderingGameFrames = false;
     o.orthoProjection = false;
-    // (no value stands for "no motion here": RX_VK_DLSS_FG_INVALID=0 makes zero motion that, as PR 1944's Streamline path has it)
+    // (no value stands for "no motion here": RX_VK_DLSS_FG_INVALID=0 makes zero motion that, as Streamline has it)
     static const bool zero_invalid = env_switch("RX_VK_DLSS_FG_INVALID") == 0;
     o.motionVectorsInvalidValue = zero_invalid ? 0.0f : FLT_MAX;
     o.motionVectorsDilated = false;
@@ -1192,7 +1191,7 @@ void dlss_fg_close() {
     g.closed = true;
     if (!g.feature && !g.params) return;
     // (the swapchain's lock for the queue's idle, waited for a while: a present stuck at the exit leaves NGX to the process's
-    // end rather than hanging the exit, as PR 1944's Streamline shutdown found)
+    // end rather than hanging the exit, as Streamline's shutdown does)
     const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     std::unique_lock qk(dev.present_mu, std::defer_lock);
     while (!qk.try_lock() && std::chrono::steady_clock::now() < until) std::this_thread::sleep_for(std::chrono::milliseconds(1));

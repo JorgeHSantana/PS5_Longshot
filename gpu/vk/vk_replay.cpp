@@ -65,7 +65,7 @@
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
-extern std::atomic<bool> movie_networks_slow;   // (vk_draw.cpp: the movie networks left out, issue 109)
+extern std::atomic<bool> movie_networks_slow;   // (vk_draw.cpp: the movie networks left out)
 int64_t presents_now;   // (the presents so far, for SlowWatch)
 /// (longshot) The last present confirmed *shown* by VK_KHR_present_wait, in microseconds from vkQueuePresentKHR to the
 /// frame reaching the screen: written by the presenter thread, taken by the frame trace. -1 when no present was waited
@@ -237,13 +237,12 @@ uint64_t completed() {
 // On amdgpu every command submission pays for all imported host memory (userptr) again; the replay made ~6 a frame.
 // Held submits go out at the next point that needs the GPU's results or the queue's order: a wait, a readback, a
 // present, a sparse bind, another submit (queue_flush_locked under dev.present_mu).
-// (longshot) on by default with Mesa's RADV, where it was measured (issue 413: a Radeon 8060S on Bazzite, ~10 -> 30-50 fps, the
-// replay's queue submit ~70 -> ~6 ms a frame); elsewhere as before. RX_VK_BATCH=0 / 1: off / on on any driver
-/// (longshot, #1993 by mrdev023) The GPU has done every batch sent so far: the batch being held goes out at once. A held
-/// batch waited for the next wait or present while the GPU sat idle, and with serial replay the game waits for it mid-frame
-/// (take_capture's late pages), so the GPU started cold just as it was waited for. RX 9070 XT, RADV, Kokiri Forest: 33-41
-/// fps -> 46-61, no flashes in 5230 frames; ~10 flushes a frame of ~3.7 command buffers each, so batching still groups the
-/// submits while the GPU is busy
+// (longshot) on by default with Mesa's RADV, where it was measured (a Radeon 8060S: ~10 -> 30-50 fps, the replay's queue
+// submit ~70 -> ~6 ms a frame); off elsewhere. RX_VK_BATCH=0 / 1: off / on on any driver
+/// (longshot) The GPU has done every batch sent so far: the batch being held goes out at once. A held batch would wait for the
+/// next wait or present while the GPU sat idle, and with serial replay the game waits for it mid-frame (take_capture's late
+/// pages), so the GPU would start cold just as it was waited for. ~10 flushes a frame of ~3.7 command buffers each: batching
+/// still groups the submits while the GPU is busy
 bool batch_gpu_idle() {
     uint64_t done = 0;
     return vkGetSemaphoreCounterValue(dev.device, batch_tl, &done) == VK_SUCCESS && done >= batch_flushed;
@@ -437,7 +436,7 @@ void gpu_time_end(Recording& r) {
 
 // (longshot) Real occlusion counts (on unless RX_VK_OCC_QUERIES=0; from Hookshot's draft by jordanella). Ocarina of Time
 // reads its z-prepass samples-passed reports back on the CPU a frame or two later and leaves out of its draw lists the
-// objects whose count was 0 (docs/development.md); with every report reading 4096 nothing was ever left out. Each draw from
+// objects whose count was 0 (RX_VK_OCC_QUERIES's row in switches.def); with every report reading 4096 nothing was ever left out. Each draw from
 // a samples-passed reset to its report gets an occlusion query, numbered from one counter for all the game's queues
 // (occ_next_all; each command buffer's replay works on its state's copy, NvnState::occ_next, so a parallel replay's dry pass
 // and its workers agree on them). The report is still written at replay as before ("visible"); once its queries have all
@@ -914,10 +913,9 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
         std::lock_guard mk(rec_map_mu);
         // (a submission is recorded in parts (maybe_split, a parallel replay's segments), each part's recording with the
         // submission's value: the value's recording is its last part's, the latest seq. emplace kept the first part's,
-        // and a wait for the submission's fence (wait, the readback wait) came back once its first ~120 draws were done:
-        // the game wrote the next frame's uniforms, vertices and its exposure meter over memory the later parts still
-        // read (with no VRAM mirror, an iGPU: guest memory read in place). A frame of the HUD stretched across the
-        // screen, grass and objects glowing white, whole-screen flashes: issue 997)
+        // and a wait for the submission's fence (wait, the readback wait) would come back once its first part was done:
+        // the game would write the next frame's uniforms, vertices and its exposure meter over memory the later parts still
+        // read (with no VRAM mirror, an iGPU: guest memory read in place): flashes and garbage)
         const auto finished_in = [&](uint64_t v) {
             auto it = value_rec.find(v);
             if (it == value_rec.end()) value_rec.emplace(v, seq);
@@ -957,7 +955,7 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
         // (RX_VK_BATCH_MAX=<command buffers>: held at most this many, default 32)
         static const size_t cap = getenv("RX_VK_BATCH_MAX") ? (size_t)std::max(1, atoi(getenv("RX_VK_BATCH_MAX"))) : 32;
         if (pend.cbs.size() >= cap) flush_reason = FR_CAP, queue_flush_locked();
-        if (!pend.cbs.empty() && batch_gpu_idle()) flush_reason = FR_OTHER, queue_flush_locked();   // (#1993)
+        if (!pend.cbs.empty() && batch_gpu_idle()) flush_reason = FR_OTHER, queue_flush_locked();   // (the GPU idle: batch_gpu_idle)
         return;
     }
     PROF(PROF_QSUBMIT);
@@ -1072,10 +1070,9 @@ thread_local const uint8_t* suspend_at = nullptr;   // (the wait it stopped at)
 // ---- (longshot) a wait for an event the CPU signals that is met already when the replay reaches it ----
 // The game writes part of a frame's data after it has submitted the frame's work, then signals the event that work waits
 // for (OoT: the scene buffer's light grid, among others). The console's GPU reads memory after its wait. Here a queue that
-// stopped at the wait gets a capture when it goes on (resume_queue). One that found the wait met went on with its submit's
-// capture, and when the signal had come after that capture was begun, the frame was drawn with that data as it was before
-// the game wrote it: the lit scene and Link dark for a frame (issue 366; 0 to 8 frames in 15,000 at Castle Town's gate,
-// the frames where the signal came within ~60 us of the submit). Such a wait now stops there too, once, and schedule()
+// stopped at the wait gets a capture when it goes on (resume_queue). One that found the wait met would go on with its submit's
+// capture, and when the signal came after that capture was begun, the frame would be drawn with that data as it was before
+// the game wrote it: the lit scene and Link dark for a frame. Such a wait stops there too, once, and schedule()
 // lets it on at once through resume_queue and its capture. A signal made before the newest capture was begun needs
 // none: what the game wrote up to it is in that capture. On the submitting thread only: the render thread's capture is
 // taken at the signal itself (event_signal_queued).
@@ -1575,7 +1572,7 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
             const bool samples = (uint32_t)c.type == NVN_COUNTER_TYPE_SAMPLES_PASSED;
             // (timestamps on the guest tick clock in counter ticks (19.2 MHz, nvnDeviceGetTimestampInNanoseconds
             // converts), the replay's time; occlusion counts grow with every draw, as in the WebGPU renderer)
-            // doc: docs/design.md#4-the-lessons-from-mkw-as-rules-here (rule 4: GPU timestamps drive dynamic resolution)
+            // doc: docs/dev/reference/architecture.md#rules-from-mkw (rule 4: GPU timestamps drive dynamic resolution)
             // (the GPU's time as the game measures it: from the frame's present on, at RX_VK_TS_SCALE (default 0.1)
             // times the real clock. The reports are written as the replay records them, so the real clock gave the
             // replay's time and its lag, not the GPU's: MKW's dynamic resolution moved every frame (each new size a
@@ -2772,9 +2769,9 @@ uint64_t oldest_unfinished() {
         if (q.blocked()) m = std::min(m, q.oldest());
     return m;
 }
-// ---- (from PR 430, YunaraDebugs) Releases while queues are stopped: kept until the stopped work has gone on, instead of making it
-// go at once (drain 1). Made to go early, a queue's work ran before the work it waits for, and about every 13th frame in Kokiri a
-// pass read what was not there yet: the ground fog thinner for that frame, the light dimmed. The stopped work runs as before, at
+// ---- Releases while queues are stopped: kept until the stopped work has gone on, instead of making it
+// go at once (drain 1). Made to go early, a queue's work runs before the work it waits for, and a pass reads what is not
+// there yet: the ground fog thinner for a frame, the light dimmed. The stopped work runs as before, at
 // its wait, a present or hold_ms; the release follows it. ----
 void do_texture_released(const nvn_tex* t);
 void do_program_released(const nvn_prog* p);
@@ -3167,7 +3164,7 @@ void sync_watch() {
     }
 }
 
-// doc: docs/design.md#4-the-lessons-from-mkw-as-rules-here (rule 1: cross-queue event waits are honoured)
+// doc: docs/dev/reference/architecture.md#rules-from-mkw (rule 1: cross-queue event waits are honoured)
 /// A submit on the replay thread: replayed as far as its waits allow, or (its queue stopped) after its queue's
 void submit_job(std::vector<uint64_t>& handles, uint64_t value, uint64_t queue) {
 #ifdef TRACY_ENABLE
@@ -4079,7 +4076,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
     if (size) {
         bool ever = false;
         if ((memory_writeback_value(host->gpu_guest(gpu), size, &ever), ever)) {
-            memory_note_readback(host->gpu_guest(gpu), size);   // (PR 430: the CPU may write it back: memory_rb_refresh)
+            memory_note_readback(host->gpu_guest(gpu), size);   // (the CPU may write it back: memory_rb_refresh)
             static std::atomic<int64_t> calls{0}, waited{0}, ns{0};
             const auto w0 = std::chrono::steady_clock::now();
             bool w = false;
@@ -4129,9 +4126,8 @@ void invalidate(uint64_t gpu, uint64_t size) {
             // (longshot) what is waited for is the part of the submission that writes the range back, when its pages come
             // from a mirror (memory_end_submission, at each part's end), not the submission's last part: the range is in
             // guest memory once that part's copy is done, and the later parts read their mirrors and the submit's capture,
-            // not guest memory. Since a value's recording is its last part's (issue 997) every readback waited for the GPU's
-            // whole submission: in Hyrule Field one job a frame for 5.5 ms (0.1 ms before), the game's other job threads
-            // polling meanwhile: 79 -> 64-71 fps and 39 -> 64-73 ms of CPU a frame on an RTX 3090. A page written in place (no
+            // not guest memory. A value's recording is its last part's, so waiting for it would wait for the GPU's whole
+            // submission: one job a frame for ~5 ms, the game's other job threads polling meanwhile. A page written in place (no
             // mirror: `whole`) keeps the wait for all of its submission, whose later parts read and write guest memory
             // itself.
             uint64_t part = 0, whole = 0;
@@ -4151,12 +4147,12 @@ void invalidate(uint64_t gpu, uint64_t size) {
             if (rb_writers_on() && pending && !late && !rb_probe_only())
                 rb_diag_wait(gpu, size, rbd, whole, part, unforced && whole > completed());
             // (longshot) RX_VK_READBACK_EARLY (on where no pool has a mirror): pages written in place (the Steam Deck's every page) wait for
-            // up to the part their last writer was recorded in, not their whole submission. There the game's job polled ~18 ms a frame
-            // for its camera block's read while the GPU finished the rest of a 22-26 ms submission after the writer. The parts after
+            // up to the part their last writer was recorded in, not their whole submission: otherwise the game's job polls ~18 ms a
+            // frame for its camera block's read while the GPU finishes the rest of the submission after the writer. The parts after
             // it may still read guest memory in place, which the game, let go, may write: as on the console, whose GPU reaches the
-            // writer before the rest of its command buffer too, but the replay's GPU runs later than the console's (issue 997 was
-            // reads let go before their writer: value_rec). Pages whose reads waited end their writer's part right after it
-            // (memory_split_wanted). Not known (0: written before it was on, or its part not mapped): the whole submission, as before. A
+            // writer before the rest of its command buffer too, but the replay's GPU runs later than the console's (reads must not
+            // be let go before their writer: value_rec). Pages whose reads waited end their writer's part right after it
+            // (memory_split_wanted). Not known (0: written before it was on, or its part not mapped): the whole submission. A
             // range RX_VK_READBACK_LATE reads late is not waited for at all, here either
             bool early_done = false;
             // (only a read with a page written in place pending: with VRAM mirrors (a dGPU) a page is written back by part already,
@@ -4576,10 +4572,10 @@ uint64_t vk_retirement_value() {
     return timeline && signaled != UINT64_MAX ? signaled + 1 : 0;
 }
 
-/// A submission or a wait came back VK_ERROR_DEVICE_LOST. Nothing sent from here on runs, and the replay kept going: no
-/// submission completed again, so no capture or staging arena was let go, and system memory filled until the window was
-/// closed (issue 1275: captures kept 25 -> 6527, staging 256 -> 1408 MB). Now the report once (a thread that sees the loss
-/// too waits for it, instead of ending the process before it is written), then the process ends as replay_fatal does
+/// A submission or a wait came back VK_ERROR_DEVICE_LOST. Nothing sent from here on runs: a replay that kept going would
+/// complete no submission again, let go of no capture or staging arena, and fill system memory. So the report once (a thread
+/// that sees the loss too waits for it, instead of ending the process before it is written), then the process ends as
+/// replay_fatal does
 [[noreturn]] void device_lost(const char* why) {
     static std::once_flag once;
     std::call_once(once, [] {
@@ -4886,7 +4882,7 @@ void log_frame_stats() {
         static uint64_t l_made;
         logf("vk: GPU time %.1f ms a frame (the longest submission %.1f ms); %.1f textures made a frame",
              (st_gpu_ns - l_gpu) / 120.0 / 1e6, st_gpu_max_ns / 1e6, (texture_made() - l_made) / 120.0);
-        {   // (issue 109: the movie networks too slow on this card: left out from now on, vk_draw.cpp movie_networks_slow)
+        {   // (the movie networks too slow on this card: left out from now on, vk_draw.cpp movie_networks_slow)
             static const bool keep_all = getenv("RX_VK_NETWORK_KEEP") && !strcmp(getenv("RX_VK_NETWORK_KEEP"), "all");
             const double gpu_ms = (st_gpu_ns - l_gpu) / 120.0 / 1e6, draws = (d - l_d) / 120.0;
             menu_auto_tune(gpu_ms, draws, 120.0 / secs);   // (the Quality preset Auto (this PC): measured in play)
@@ -4977,7 +4973,7 @@ void status_tick() {
         if (host->main_thread_times) host->main_thread_times(mt);
         // (at_ns: this present on the host's clock, hos_now_ns: the clock of the profile's samples, presents.csv and events.txt,
         // so a frame is found in them. ab_side (longshot): the frame's side in an A/B within the run, HOS_AB (host/hos_ab.c):
-        // -1 none, 0 or 1, 2 or 3 in a transition; scripts/ab_summary.py)
+        // -1 none, 0 or 1, 2 or 3 in a transition; scripts/perf.py ab)
         static int64_t l_at;
         const int64_t at = host->now_ns ? host->now_ns() : 0;
         const int ab_side = host->version >= 34 && host->ab_frame ? host->ab_frame(l_at, at) : -1;
@@ -5048,7 +5044,7 @@ void frame_log_present() {
     if (++frames % 60 == 0) std::fflush(fl);
 }
 
-// ---- (longshot) the control bridge's shots (host/control.c, docs/control.md): a PNG of the first present after a given one,
+// ---- (longshot) the control bridge's shots (host/control.c, docs/dev/reference/control-bridge.md): a PNG of the first present after a given one,
 // asked for from another thread. Read back as RX_VK_SHOTS' are (at a later present, once the GPU reached it, and written on a
 // thread of its own), with an image and a buffer of their own: the two kinds never share a readback. Never waited for: a
 // present looks at the readback once its value is completed() and moves on otherwise ----
@@ -5211,8 +5207,8 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         // (the Insert menu's HDR set to Native: the game, told its display is HDR10, presents PQ codes in RGB10A2 (vk
         // A2B10G10R10); that picture goes to the HDR10 swapchain as PQ, not through the SDR-to-HDR expansion. Told by the format
         // the game presents, the one its view is made in (direct_view below), not by the cached image's: images are shared by
-        // format class (vk_texture.cpp format_class), and while RGBA8 and RGB10A2 shared one (#2038) the window's RGB10A2 picture
-        // was a view of an RGBA8 image and took the SDR expansion, a flat, grey picture. The image's format is not asked as well:
+        // format class (vk_texture.cpp format_class), and were RGBA8 and RGB10A2 to share one the window's RGB10A2 picture
+        // would be a view of an RGBA8 image and take the SDR expansion, a flat, grey picture. The image's format is not asked as well:
         // an image first made as RGB10A2 under an RGBA8 picture would take an SDR picture for PQ)
         const VkFormat shown_format = t ? vk_format(t->d.format).format : VK_FORMAT_UNDEFINED;
         present_native_pq.store(tex && dev.hdr && opts.hdr == 2 && shown_format == VK_FORMAT_A2B10G10R10_UNORM_PACK32,
@@ -5579,7 +5575,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
 int shot_ask_next(const char* path, void (*done)(void* ctx, int64_t present, int ok), void* ctx) { return shot_ask(path, -1, done, ctx); }
 
 // (longshot) RX_VK_FRAMELOG=<file>: every frame shown, the game's and the made ones, as they go to the screen, 320x180, while
-// <file>.go exists (scripts/framelog.py finds the flashes). Taken at the last step and written on a thread of its own, so
+// <file>.go exists (scripts/flash.py framelog finds the flashes). Taken at the last step and written on a thread of its own, so
 // that the game keeps its speed: a shot of every frame at 1280x720 held it at 30 fps, where the flashes may not show.
 // A record: u64 time (ns), u32 sequence, u32 kind (0 the game's, 1 made), 320x180 RGBA.
 void exposure_log_dump(const char* why);   // (vk_draw.cpp)
@@ -5778,26 +5774,25 @@ void present_hand_off(uint32_t index, VkFence done);
 void present_finish(VkResult res, bool on_presenter);
 std::atomic<bool> presenter_surface_lost{false};   // (the presenter thread's present: VK_ERROR_SURFACE_LOST_KHR, for present_image)
 }  // namespace
-// doc: docs/design.md#13-frame-generations-presents-as-rules (rule 4: a frame slot per frame of both sets)
+// doc: docs/dev/reference/architecture.md#frame-generations-presents (rule 4: a frame slot per frame of both sets)
 /// (longshot) The frame slots present_image uses while frame generation runs, for the sets a swapchain is made for
 /// (vk_main.cpp create_swapchain: framegen is swapchain_framegen's multiplier, 0 none; two_sets while RX_VK_FG_TIMELINE is
 /// on, in every present mode, but for a set too big for the chain under FIFO). Each present waits for the copy last made in its slot, so the slots are
 /// also how many presents can be on the GPU at once: 3, and a slot per frame of two sets where the next set is taken while
 /// one is shown (2 x the multiplier, at most kPresentSlotsMax). A set presented ahead (vk_framegen.cpp display_main) submits
-/// its copies at once: with fewer slots than its frames its 4th copy waited in its own first copy's slot, and with a slot per
-/// frame of one set the next set's copy k waited in the slot of the shown set's copy k (the review, 2026-11-17), each until
-/// the GPU had done that copy and so the game's work queued before it, which held the frames of the set still being shown.
-/// One set's (RX_VK_FG_TIMELINE=0; under FIFO a set too big for the chain) keeps 3, as before
+/// its copies at once: with fewer slots than its frames its 4th copy would wait in its own first copy's slot, and with a slot
+/// per frame of one set the next set's copy k would wait in the slot of the shown set's copy k, each until the GPU had done
+/// that copy and so the game's work queued before it, holding the frames of the set still being shown.
+/// One set's (RX_VK_FG_TIMELINE=0; under FIFO a set too big for the chain) keeps 3
 int present_slots_for(int framegen, bool two_sets) {
     return two_sets && framegen >= 2 ? std::min(2 * framegen, kPresentSlotsMax) : 3;
 }
 
-// (longshot, #1376) The swapchain's image is waited for on the CPU, never on the replay's queue. The copy into it waited on the
-// GPU for the acquire's semaphore, on the queue every submission of the game's work goes to, so whatever held the image held
-// the replay. AMD's driver on Windows hands an image back from vkAcquireNextImageKHR at once and leaves the wait to the
-// semaphore; with the game's fullscreen window behind another one (a browser, OBS: RX 9070 XT, issues 316, 1355, 1376) the
-// system gave the image back late or never, the queue finished nothing, and the GPU hang watch ended the game 30 s later
-// ("no submission finished in 30 s, and the driver never reported the device lost", no TDR). Now the acquire signals
+// (longshot) The swapchain's image is waited for on the CPU, never on the replay's queue. A copy into it waiting on the
+// GPU for the acquire's semaphore, on the queue every submission of the game's work goes to, lets whatever holds the image
+// hold the replay. AMD's driver on Windows hands an image back from vkAcquireNextImageKHR at once and leaves the wait to the
+// semaphore; with the game's fullscreen window behind another one (a browser, OBS) the system gives the image back late or
+// never, the queue finishes nothing, and the GPU hang watch ends the game. So the acquire signals
 // acquire_fence; a copy goes to the queue only once the image is free; an image not free in kImageFreeNs is held (frames are
 // not shown meanwhile, the game goes on) and looked at again, without waiting, at each present until it is
 static VkFence acquire_fence = VK_NULL_HANDLE;
@@ -5958,7 +5953,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
         return;
     }
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) return;
-    {   // (#1376: the image free before any work for it goes to the queue; a held one is looked at without waiting)
+    {   // (the image free before any work for it goes to the queue; a held one is looked at without waiting)
         const int64_t free_t0 = fence_t0 ? fps_clock() : 0;
         const bool ready = image_free(was_held ? 0 : kImageFreeNs);
         if (free_t0) fps_wait(fps_stats::kPace, fps_clock() - free_t0);
@@ -6218,7 +6213,7 @@ void present_finish(VkResult res, bool on_presenter) {
 }  // namespace
 
 // (longshot) The presenter thread (RX_VK_PRESENT_THREAD=1; off by default: alone it gains nothing, the game's frame wait holds
-// the game for the same GPU work, docs/development/frame-pipeline.md). With NVIDIA's driver on Wayland, vkQueuePresentKHR waits
+// the game for the same GPU work, docs/dev/reference/architecture.md, The frame pipeline). With NVIDIA's driver on Wayland, vkQueuePresentKHR waits
 // on the CPU until the frame's copy into the window's image is done on the GPU, after all of the frame's work: 2.4 ms a frame of the
 // game's presentation thread on an RTX 3090 in Kokiri Forest (HOS_CHAIN), on the frame's critical path, since the game's main thread
 // waits for that thread's present to return before it starts the next frame's commands. present_image hands the present to a thread
@@ -6349,7 +6344,7 @@ void presenter_loop() {
     }
 }
 bool present_thread_on() {
-    static const bool wanted = [] {   // (off by default: no gain alone, docs/development/frame-pipeline.md)
+    static const bool wanted = [] {   // (off by default: no gain alone, docs/dev/reference/architecture.md, The frame pipeline)
         const char* e = getenv("RX_VK_PRESENT_THREAD");
         return e && atoi(e) != 0;
     }();
@@ -6611,7 +6606,7 @@ int presents_ahead() {   // (RX_VK_PRESENTS_AHEAD=<n>: how many presents the gam
 }
 
 // ---- (longshot) Frame overlap: what each recording does to the game's memory, and the GPU's time between recordings.
-// frame_overlap.h has the rules; docs/development/frame-pipeline.md the frame's sequence. ----
+// frame_overlap.h has the rules; docs/dev/reference/architecture.md, The frame pipeline the frame's sequence. ----
 // The game waits once a frame, with no timeout, for the fence of the frame before's present (OoT's main thread, at
 // 0x8042cde0), and makes the CPU signal its next frame's work waits for only after it: the render thread gets a frame once
 // the GPU has finished the one before. Counted always, with the render thread: per recording, whether it reads the game's
@@ -6642,7 +6637,7 @@ struct {
     std::atomic<int64_t> read_tail, touch_tail, read_tail_ns, touch_tail_ns, idle_ns[frame_overlap::kGapColumns], uploads_ns[frame_overlap::kGapColumns];
 } fo_st;
 // ---- (longshot) Frame ahead: counters only. What the parts recorded in the signal's job took that came with the signal
-// (frame_overlap.h PartInputs; docs/development/frame-pipeline.md has what is and is not counted, and what the numbers decide).
+// (frame_overlap.h PartInputs; docs/dev/reference/architecture.md, The frame pipeline has what is and is not counted, and what the numbers decide).
 struct {
     frame_overlap::AheadTally tally;   // (replay_mu)
     int64_t cap0 = 0, live0 = 0;       // (memory_sync_sources at the last part's end, or at the signal's job's start)
@@ -7292,9 +7287,9 @@ void texture_released_of(const nvn_tex* t) {
     tex_pages_add(t, -1);
     texture_ahead_gone(t);
     if (!async_on()) {
-        // (PR 430: after the stopped work that may use it, when it goes on. The lock is held_mu, only while queues are
-        // stopped: sync_order_mu, taken on every release, made the thread finalizing textures (OptimizeChangeBank) wait for whole
-        // submissions being replayed under it, 45% of its time in Kokiri. A release just after the stopped work went on waits
+        // (after the stopped work that may use it, when it goes on. The lock is held_mu, only while queues are
+        // stopped: sync_order_mu, taken on every release, would make the thread finalizing textures (OptimizeChangeBank) wait
+        // for whole submissions being replayed under it. A release just after the stopped work went on waits
         // for the next update_blocked: the next submit or present)
         if (sync_waits_on() && blocked_n.load()) {
             {
@@ -7315,7 +7310,7 @@ void program_released_locked(const nvn_prog* p) {
     if (!p) return;
     programs_freed(p);   // (the program's life: the game's call, now; the replay's part follows in order below)
     if (!async_on()) {
-        if (sync_waits_on() && blocked_n.load()) {   // (PR 430: as texture releases, on held_mu)
+        if (sync_waits_on() && blocked_n.load()) {   // (as texture releases, on held_mu)
             {
                 std::lock_guard hl(held_mu);
                 held_prog_releases.push_back(*p);
@@ -7337,7 +7332,7 @@ void program_released_locked(const nvn_prog* p) {
 // picture went to pieces below or above a line (edges clamped into stripes, the sky's or fog's colour, the shadows
 // dark) for a frame, with the size changes (every few frames when the resolution swung). Now they are jobs, applied
 // where the game made them among its submits, as finalized textures already were.
-// doc: docs/design.md#4-the-lessons-from-mkw-as-rules-here (rule 3: registrations are queued in order with the submits)
+// doc: docs/dev/reference/architecture.md#rules-from-mkw (rule 3: registrations are queued in order with the submits)
 void register_texture_queued(int id, const nvn_tex* t, const nvn_view* v) {
     if (!async_on()) return register_texture_locked(id, t, v);
     if (id < 0 || id >= (1 << 20) || !t) return;

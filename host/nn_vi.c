@@ -320,7 +320,7 @@ volatile uint64_t hos_step_probe = 0;   /* (f_80706be0's object, set by the lift
 volatile uint32_t hos_frame_seconds_bits = 0;   /* (the frame's seconds as a float's bits for that hook, 0: the game's own step) */
 /* A movie's frame count while the frames' time is given (a Frame rate cap above 60): how many 60ths of a second this update of
    that movie player is worth, the rest carried to its next one, so the count the cutscene's cues are placed by keeps the clock
-   as the movie's picture does (issue 1742: the narration ran ahead above 60 fps). 1, the game's own step, otherwise, and with
+   as the movie's picture does (otherwise the narration runs ahead above 60 fps). 1, the game's own step, otherwise, and with
    HOS_FPS_MOVIE=0 (for comparisons). Called by the lifted f_83b7c710 (nx2/oot_patches.py).
    The step is more than 1 when a frame takes longer than a 60th (up to 4, realtime_step's longest), and the count then passes
    values over. The timeline does not need each one: it fires the events whose time lies between its last frame and the new one,
@@ -391,7 +391,7 @@ uint32_t hos_frame_whole_times(uint64_t at, uint32_t amount_bits, uint32_t times
 }
 /* (nx2/oot_patches.py patch_loop_steps, patch_loop_pose) the step of an animation entry's clock, and the time a skeleton is drawn at,
    for a loop of one frame or less while the frames' own time is the step: whole frames, and the loop's start (host/loop_step.h,
-   issue 988: the frozen Zoras twitched above a 60 cap). Anything else, and a cap of 60, as the game has it. */
+   the frozen Zoras would twitch above a 60 cap). Anything else, and a cap of 60, as the game has it. */
 #include "loop_step.h"
 static LoopStep loop_step_state;
 static SRWLOCK loop_step_lock = SRWLOCK_INIT;   /* (the game's update threads) */

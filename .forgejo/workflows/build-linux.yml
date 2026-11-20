@@ -1,4 +1,4 @@
-# The Linux Longshot Builder (docs/releases.md): Longshot-<version>-x86_64.AppImage, the builder with its Python and Longshot's
+# The Linux Longshot Builder (docs/dev/reference/releases.md): Longshot-<version>-x86_64.AppImage, the builder with its Python and Longshot's
 # sources (scripts/linux/deps.sh's pinned downloads, scripts/linux/appimage.sh), and recomplauncher.json inside. No Vulkan back
 # end is built into it: every player's build compiles it from those sources. Its build tools (the compiler, the sysroot, FFmpeg,
 # SDL2, the Vulkan headers) are not in it either: they are tools.lock's linux-x64 lines, installed here to check that the back
@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   appimage:
-    runs-on: release  # (a release's build: only the runners kept for them take it, docs/forgejo-runners.md)
+    runs-on: release  # (a release's build: only the runners kept for them take it, docs/dev/reference/ci.md)
     container: ubuntu:22.04
     # (about 4 minutes with the dependencies cached; building them all, as a release does, takes longer)
     timeout-minutes: 60

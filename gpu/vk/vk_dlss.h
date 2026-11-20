@@ -1,5 +1,5 @@
 // NVIDIA DLSS Super Resolution, one of the temporal upscaler's engines (vk_temporal.h; vk_dlss.cpp). Built in only with
-// NVIDIA's NGX SDK (LONGSHOT_NGX, scripts/ngx_sdk.py: Linux and Windows); without it these say DLSS is not there and the
+// NVIDIA's NGX SDK (LONGSHOT_NGX, scripts/fetch.py dlss: Linux and Windows); without it these say DLSS is not there and the
 // game's network runs.
 #pragma once
 

@@ -90,8 +90,9 @@
 extern char** environ;
 #endif
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
-#ifndef LONGSHOT_VERSION   // (nx2/build.py gives it to this file: nx2/version.py)
-#define LONGSHOT_VERSION "unknown"
+const char* mkwvk_version();   // (vk_version.cpp: the one renderer file nx2/build.py gives the version to)
+#ifndef LONGSHOT_VERSION   // (a test or a screenshot fixture that compiles this file may give its own)
+#define LONGSHOT_VERSION mkwvk_version()
 #endif
 
 namespace mkwvk {
@@ -110,7 +111,7 @@ enum MenuTab {
     TAB_CONTROLS = 3,
     TAB_NFC = 4,     // (longshot: the player's NFC tags, held to the game's reader: host/nn_nfp.c)
     TAB_MODS = 5,    // (the mods folder's mods and their cheats, shown when there are mods: draw_mods)
-    TAB_DEBUG = 6,   // (the OoT debug tools of #785, a tab of their own)
+    TAB_DEBUG = 6,   // (the OoT debug tools, a tab of their own)
     TAB_COUNT = 7,
     TAB_MOTION = TAB_COUNT,   // (longshot: not a tab of the strip, the Motion page that the Controls tab's Motion row
                               // opens: one past the strip's tabs, so a tab added before TAB_COUNT moves it along)
@@ -2024,7 +2025,7 @@ bool report_default_depends_on_pc(const Row& r) {
 // The report's default for row r: the default options' value (fixed), or the one the
 // menu knows better. The Aspect ratio's is the monitor's shape, as outputs_sync makes
 // it from the default Output resolution and ultrawide=1; the Game language's is
-// language.txt's, else the first (README). Frame generation by with nothing to
+// language.txt's, else the first (the settings table). Frame generation by with nothing to
 // choose (framegen_by_fixed) is the run's, whatever is saved: no change of the player's.
 int report_default(const Row& r, int fixed) {
     static const Options defaults{};
@@ -2321,15 +2322,15 @@ void draw_options(ui::Ctx& c) {
     }
     {   // (which build, at the banner's right, so a report can say it without opening the log: as players see it, version_text,
         // "v3.0.0-rc.1" or "Nightly 46 · 434712bb"; the log and the bug report keep the whole name. Under it, a development
-        // run's own name for what it tests, LONGSHOT_BUILD_NAME (mise run run-win -BuildName), when the run sets one)
+        // run's own name for what it tests, LONGSHOT_BUILD_NAME (dev.py queue run --desc), when the run sets one; draw_startup shows it too)
         const std::string ver = version_text(LONGSHOT_VERSION);
         const char* named = getenv("LONGSHOT_BUILD_NAME");
         const std::string name = named ? named : "";
         const float room = (c.w - total) * 0.5f - 60 * s - c.safe, px = 15 * s, right = c.w - c.safe;
         const auto width = [&](float p) { return ui::size_of(c.f.body, p, ver.c_str()).x; };
-        // (still too long, as a source build's "v2.0.11-821-g7b81752-dirty" since the Audio tab: at Small and Medium smaller
+        // (still too long, as a source build's "v2.0.11-821-g7b81752-dirty": at Small and Medium smaller
         // until it fits, on half-point steps, 10 points at the least; at Large, the size for a TV across the room, at its size
-        // or not at all, as before)
+        // or not at all)
         const float fit = ui::fit_px(px, opts.menu_size == 3 ? px : kVersionMinPt * s, 0.5f * s, room, width);
         const auto name_width = [&](float p) { return ui::size_of(c.f.body, p, name.c_str()).x; };
         const float name_fit = name.empty() ? 0 : ui::fit_px(13 * s, opts.menu_size == 3 ? 13 * s : kVersionMinPt * s, 0.5f * s, room, name_width);
@@ -3118,7 +3119,7 @@ float fps_scale(const ui::Ctx& c) {
 
 /// The FPS counter, in the corner the FPS counter position row chooses (the safe area's; under the banner at the top right
 /// while the menu is open, unless it fits beside the menu's column on a very wide window). The number as it always looked:
-/// green outlined bold, "FPS" small beside it, the frame generation line under them, no plate (#1957, v2.0.14's paint_fps).
+/// green outlined bold, "FPS" small beside it, the frame generation line under them, no plate.
 /// Past FPS (the row's levels, fps_stats.h), a tidy column under it, aligned to the same edge, with the same soft-shadowed
 /// text and no plate either: the frame time (green, amber or red against the cap's) and the 1% low; the graph of the last
 /// 4 s, a thin line over a soft fill, one column a frame span with its slowest frame (a stutter never falls between two), a
@@ -3180,7 +3181,7 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     const float top = bottom ? c.h - c.safe - h : under_banner && !tune_mode && page != 5 && !beside ? banner_h(c) + 10 * s : c.safe;
     // (x for a width at the column's edge)
     const auto at = [&](float w) { return left ? edge : edge - w; };
-    // (the number's colour: at FPS the classic green whatever the rate, the counter as it always was (#1957); from Frame time on
+    // (the number's colour: at FPS the classic green whatever the rate, the counter as it always was; from Frame time on
     // green at the cap's rate, amber under it, red under two thirds of it, as the frame time beside it)
     const double target = fps_target_ms();   // (0: none, Uncapped: the colours against the console's 60, no line)
     const ImU32 grade_col[3] = {green, ui::rgba(255, 200, 60), ui::rgba(255, 95, 80)};
@@ -3512,6 +3513,12 @@ void draw_startup(ui::Ctx& c) {
     ui::spaced(c, c.f.heading, 42 * k, ImVec2(cx, y), ui::rgba(246, 232, 204), "LONGSHOT", 6 * k);
     ui::flourish(c, cx - 190 * k, cx + 190 * k, y + 66 * k, ui::kAccent);
     ui::text_centre(c, c.f.body, 14.5f * k, ImVec2(cx, y + 78 * k), ui::kDim, v.version.c_str());
+    {   // (under it, as under the menu's version: a development run's name for what it tests, LONGSHOT_BUILD_NAME, so a
+        // screenshot or a stream of the first start says which change it is)
+        static const std::string run_name = getenv("LONGSHOT_BUILD_NAME") ? getenv("LONGSHOT_BUILD_NAME") : "";
+        if (!run_name.empty())
+            ui::text_centre(c, c.f.body, 13 * k, ImVec2(cx, y + 96 * k), ui::alpha(ui::kDim, 0.8f), run_name.c_str());
+    }
     if (!v.title.empty()) {
         y += 120 * k;
         if (!v.step.empty()) {   // ("STEP 2 OF 2" as "Step 2 of 2")
@@ -3584,10 +3591,10 @@ void menu_rumble_test() {
 
 void startup_fade_to(float f) { startup_fade.store(f, std::memory_order_relaxed); }
 
-// (longshot, #1886) The Upscaler row's one-time questions: NVIDIA's NGX started (dlss_probe), AMD's FSR 4 loaded
-// (fsr4_probe), Intel's XeSS context made once (xess_probe), FSR 3.1's GPU check. They were asked at the menu's first open, on the frame's thread, and NGX's start
-// alone held that frame about 3 s (an RTX 5080 at 4K; 2.9 s here): the game stood still and its sound ran on, out of
-// step with a cutscene. Now asked once on a thread of their own while the start-up screen shows, where nobody waits on
+// (longshot) The Upscaler row's one-time questions: NVIDIA's NGX started (dlss_probe), AMD's FSR 4 loaded
+// (fsr4_probe), Intel's XeSS context made once (xess_probe), FSR 3.1's GPU check. Asked at the menu's first open, on the
+// frame's thread, NGX's start alone holds that frame about 3 s: the game stands still and its sound runs on, out of
+// step with a cutscene. So they are asked once on a thread of their own while the start-up screen shows, where nobody waits on
 // them; each is locked and asked once (ngx_init, fsr4's load, fsr3::supported's static), so the menu's own calls at its
 // open return at once, or wait for the rest of the one under way.
 static void probe_upscalers_soon() {
@@ -3714,8 +3721,8 @@ void menu_init() {
         // (Game speed is Real time by default now: Per frame played at half speed at 30 fps, the "slow motion" players
         // reported. An options file from before kept the old default whether chosen or not: Real time for it too)
         if (!v2) opts.realtime = 1;
-        // (Descriptor reuse is on by default from options_version 4: a file from before wrote its 0 whether chosen or not, as
-        // the off default it then was; fewer stutters and a better 1% low in the field, the flash checks clean, 2026-11-10)
+        // (Descriptor reuse is on by default from options_version 4: an older file wrote its 0 whether chosen or not, as
+        // the off default it then was; on, it gives fewer stutters and a better 1% low)
         if (version < 4) opts.descriptor_reuse = 1;
         // (Esc opens the menu by default from options_version 5, as a PC game's pause menu: a file from before wrote its
         // Menu shortcut 0, Insert or F1, whether chosen or not, and moves to Insert, F1 or Esc, where Insert and F1 still
@@ -3786,10 +3793,9 @@ void menu_init() {
 /// hardware it was chosen for changes (another card, its memory, the screen's size, a build with or without DLSS or FSR 4):
 /// the fingerprint is kept in the options file (auto_for=). Changing a row yourself comes back to Custom, and then nothing here
 /// touches the settings; the rows no preset sets (the Output resolution) leave it on Auto, and Auto never sets the Output
-/// resolution. The VRAM budgets are no preset's: one rule by the card (texture_budget.h, mirror_budget.h). Before Auto,
-/// a first start chose Minimum or Low by the card's memory alone: an older or smaller card no longer starts with the full-size
-/// budget (a GTX 1050 lost the device at the first scene that way,
-/// Discord 2026-11-10). RX_VK_AUTO_PRESET=0: a first start keeps the defaults, as before Auto.
+/// resolution. The VRAM budgets are no preset's: one rule by the card (texture_budget.h, mirror_budget.h). An older or
+/// smaller card does not start with the full-size budget, which can lose the device at the first scene.
+/// RX_VK_AUTO_PRESET=0: a first start keeps the defaults.
 /// RX_VK_AUTO_PRESET_VRAM_MB=<n>: the card's memory taken as n MB, to try the choice for a smaller or larger card
 void menu_auto_for_gpu(const VkPhysicalDeviceProperties& props, ::auto_settings::Hardware hw) {
     const bool first = first_start;
@@ -4064,7 +4070,7 @@ void menu_option_set(int id, int value) {
     save();
 }
 
-// ---- (longshot) the control bridge's option_get and option_set (host/control.c, docs/control.md) ----
+// ---- (longshot) the control bridge's option_get and option_set (host/control.c, docs/dev/reference/control-bridge.md) ----
 // The settings rows (a value, not a heading or a debug tool, shown on this PC: row_shown), found by their key in
 // longshot_options.ini (ini_key), which stays the same while rows come and go or are renamed. The bridge calls these from
 // its own thread: menu_mu keeps them apart from menu_tick (the present's thread) and from menu_option_set (the game's)

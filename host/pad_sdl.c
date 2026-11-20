@@ -110,7 +110,7 @@ static int pads_start(void) {
        manager's SIGTERM into that event, and the run went on until SIGKILL. Without them the signals end it as usual) */
     if (env_on("HOS_HEADLESS")) hos_sdl_hint("SDL_NO_SIGNAL_HANDLERS", "1");
     /* (longshot) Valve's own pads taken out of the ignore list Steam sets for the games it starts, so that their motion
-       sensors are read (host/steam_pads.h, #1897). Only with an SDL that tells Steam's stand-in pads apart: without
+       sensors are read (host/steam_pads.h). Only with an SDL that tells Steam's stand-in pads apart: without
        that, a real pad and its stand-in would both play. A list emptied or unset in Steam's launch options is left as
        it is */
     {
@@ -525,7 +525,7 @@ static void pads_poll(void) {
             if (motion_only != pads[i].motion_only) {
                 pads[i].motion_only = motion_only;
                 /* (a real Valve pad this SDL opens with no gyroscope: an SDL with no driver for it, so the loosened
-                   list gives no motion, said once so the next person with #1897 sees why) */
+                   list gives no motion, said once so the player sees why) */
                 if (motion_only && !pads[i].motion)
                     hos_log("hid: \"%s\": no motion sensors through this SDL, so Motion controls can't read it; "
                             "its buttons come through Steam Input's pad", hos_sdl_pad_name(gc));
@@ -561,8 +561,8 @@ static void pads_poll(void) {
             v[3] = -v[3];
             /* (longshot) An axis steers once it has been seen at rest (inside the dead zone) since the pad was opened. The sticks are
                the strongest of all the pads', so a device whose axis reads held for good (a mapping that puts a trigger or an
-               unused axis on a stick, a second virtual pad) turned the camera or walked Link in circles on its own, with the
-               player's pad at rest (#1673: Xbox 360 pad, CachyOS; #1661: GameSir 2 Lite, wired). A real stick rests at the start. */
+               unused axis on a stick, a second virtual pad) would turn the camera or walk Link in circles on its own, with the
+               player's pad at rest. A real stick rests at the start. */
             /* (a worn stick resting just past a small dead zone counts once it is pushed the other way: it went past its rest) */
             /* Rest is judged per axis, as before the circle: a phantom axis held past the dead zone keeps its partner
                outside the circle, and the partner must still rest at its own center. */
@@ -579,7 +579,7 @@ static void pads_poll(void) {
             hos_filter_stick((int16_t)v[0], (int16_t)v[1], z, v);
             hos_filter_stick((int16_t)v[2], (int16_t)v[3], z, v + 2);
             /* Camera inversion changes output, not whether the physical stick crossed its rest position. Otherwise
-               toggling the setting admits a held phantom axis, which stays admitted after the setting is restored (#2273). */
+               toggling the setting admits a held phantom axis, which stays admitted after the setting is restored. */
             if (inv_x) v[2] = -v[2];
             if (inv_y) v[3] = -v[3];
             for (int k = 0; k < 4; k++)
