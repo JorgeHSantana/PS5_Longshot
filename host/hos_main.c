@@ -22,6 +22,7 @@
 #include "hos_wide_size.h"   /* (the widescreen picture's size, shared with the Insert menu) */
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/oot_cheat_items.h"
+#include "oot_teleport_check.h"   /* (the teleport's follow-up: a dropped request sent again) */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1060,6 +1061,9 @@ static struct {
     unsigned destination;
     const char *why, *banc;   /* (the last call's: why it was not sent, the map it was sent to; the control bridge's reply) */
     uint64_t result;          /* (and the event manager's answer to the request: 0 seen when the map did not change) */
+    int resent;               /* (the follow-up sent this request again: not a third time) */
+    const char *pending;      /* (the map of the last request sent, which the follow-up checks: a later call that is
+                                 refused clears banc, the bridge's reply, and must not cancel this one's retry) */
 } teleport;
 
 static int oot_teleport(Ctx *c, uint64_t actor, unsigned index) {
@@ -1173,7 +1177,9 @@ static int oot_teleport(Ctx *c, uint64_t actor, unsigned index) {
     }
     teleport.requested_at = now;
     teleport.check_at = now + 1500000000LL;
+    teleport.resent = 0;   /* (a new request: the follow-up may send it once more) */
     teleport.destination = index;
+    teleport.pending = ok ? banc : NULL;
     hos_log("cheats: teleport %s to %s at %s (boot %s, event %s, starter %d): request %s, result %#llx",
             child ? "child" : "adult", banc, start, boot, event, with_starter, ok ? "sent" : "not built",
             (unsigned long long)result);
@@ -1239,15 +1245,26 @@ static int oot_toggle_age(Ctx *c, uint64_t actor) {
     return 1;
 }
 
-static void oot_teleport_followup(Ctx *c) {
+static void oot_teleport_followup(Ctx *c, uint64_t actor) {
     if (!teleport.check_at || hos_now_ns() < teleport.check_at) return;
     teleport.check_at = 0;
-    char next[80], current[80];
+    char next[80] = "", current[80] = "";
     oot_gamedata_string(c, 0xee27bf71u, next, sizeof next);     /* Sequence_ReservedNextBanc */
     oot_gamedata_string(c, 0x1d6189dau, current, sizeof current);   /* Sequence_CurrentBanc */
     const uint64_t events = oot_singleton(c, OOT_EVENTMGR_SLOT);
-    hos_log("cheats: teleport check: reserved \"%s\", current \"%s\", event playing %d", next, current,
-            events && recomp_load64(c, events + 104) ? 1 : 0);
+    const int playing = events && recomp_load64(c, events + 104) ? 1 : 0;
+    int loading = 0;
+    oot_gamedata_bool(c, 0xef2b60c2u, &loading);   /* Sequence_IsLoadingBanc */
+    hos_log("cheats: teleport check: reserved \"%s\", current \"%s\", event playing %d", next, current, playing);
+    /* (dropped by the game, as a request a few frames after a save has loaded is: sent once more, the 8 s guard aside, so
+       the control bridge's wait for the map sees it arrive. oot_teleport_check.h) */
+    if (oot_teleport_dropped(next, current, teleport.pending, playing, loading, teleport.resent)) {
+        hos_log("cheats: teleport to %s dropped by the game (nothing reserved, no event): sent again", teleport.pending);
+        teleport.requested_at = 0;
+        teleport.resent = 1;
+        oot_teleport(c, actor, teleport.destination);
+        teleport.resent = 1;   /* (oot_teleport set it for a new request: this one is the same) */
+    }
 }
 
 /* (longshot) the control bridge (host/control.c): the map the game is in (Sequence_CurrentBanc), read on the game's thread
@@ -1544,7 +1561,7 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
         if (asked & OOT_BRIDGE_AGE) action = OOT_AGE_ACTION, bridge_adult = asked & 1;
         else if (asked) action = OOT_TELEPORT_ACTION + asked - 1;
     }
-    oot_teleport_followup(c);
+    oot_teleport_followup(c, actor);
     oot_inventory_refresh(c, now);
     oot_player_speed(c, components);
     oot_map_refresh(c, now);
