@@ -1108,6 +1108,7 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
         walk_held(0, 0, rx_option(HOS_OPT_WALK_MODE, 0) == 1);   /* (behind: a toggled walk is kept) */
         return;
     }
+    uint64_t down = 0;   /* (the pads' buttons and the bound keys down at this read) */
     {   /* (longshot) while the Insert menu is open the pads are its own, as the keyboard is (key()), and after it
            closed each input it had waits until it is let go (the press that closed it never reaches the game); the
            others and the sticks count again at once, so one input that stays down (a worn trigger, a second pad)
@@ -1115,6 +1116,7 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
         uint64_t pb = 0;
         int32_t ps[4] = {0};
         pads_read(&pb, ps);
+        down = pb;
         static int menu_was;
         const int menu = rx_option(1, 0);
         if (menu || menu_was) pad_after_menu |= (uint32_t)pad_raw_now;   /* (the first read after the close too) */
@@ -1124,13 +1126,19 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
             *buttons |= pad_after_menu ? bound_pad_buttons(pad_raw_game & ~pad_after_menu) : pb;
             stick_max(stick, ps);
         }
-        if (pb || ps[0] > 12000 || ps[0] < -12000 || ps[1] > 12000 || ps[1] < -12000 || ps[2] > 12000 || ps[2] < -12000 ||
+        if (ps[0] > 12000 || ps[0] < -12000 || ps[1] > 12000 || ps[1] < -12000 || ps[2] > 12000 || ps[2] < -12000 ||
             ps[3] > 12000 || ps[3] < -12000)
             player_used();
     }
     binds_load();   /* (the keys: key_default's, or longshot_options.ini's; the mouse's buttons once its capture is known) */
     for (int i = 0; i < HOS_SW_N; i++)
-        if (bound_down(i, 0)) *buttons |= 1ULL << i, player_used();
+        if (bound_down(i, 0)) *buttons |= 1ULL << i, down |= 1ULL << i;
+    /* (a button or a key counts as the player's input when it goes down, not at every read while it stays down: held, as
+       ZL is for the ocarina's song sheet, it kept the game menus' cursor hidden, which the mouse shows by moving: Longshot
+       #1253) */
+    static uint64_t down_was;
+    if (down & ~down_was) player_used();
+    down_was = down;
     int32_t mouse[4] = {0};
     /* the mouse's motion: the camera itself (mouse_native.c) with the menu's Mouse camera on Native, else the right
        stick; also the stick while the game does not give the camera free control (a menu, a lock-on, the pause menu,

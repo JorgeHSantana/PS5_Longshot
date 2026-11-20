@@ -11,6 +11,7 @@ static int toggle_flags, toggle_reset;
 static int controls_case, mouse_mode, native_free = 1, mouse_pointing;
 static int mouse_let_go, game_menu_mouse, side_binds;   /* (the game's menus and the mouse's side buttons: menu_side_case) */
 static int held_keys[256], walk_mode, walk_speed;
+static int player_stamps;   /* (host/nn_hid.c player_used: the input the game menus' cursor hides by; held_input_case) */
 static uint64_t physical_buttons;
 static int InterlockedExchange(int *p, int v) { int old = *p; *p = v; return old; }
 /* API spies must not collide with Windows SDK/import-library names. */
@@ -292,6 +293,28 @@ static void menu_side_case(void) {
     held_keys[VK_XBUTTON1] = 0; packet(0, 0, 0, 0);
 }
 
+/* The player's input hides the game menus' cursor until the mouse moves (host/display.c gm_cursor_shown), so an input
+   counts when it goes down, not at every read while it stays down: the ocarina's song sheet is open while ZL is held,
+   and a ZL held on a pad or the Z key counted at every read, so the cursor the mouse had just shown was hidden again
+   before the menu used it and its hover failed (Longshot #1253). Through the real read_input. */
+static void held_input_case(void) {
+    const uint64_t zl = 1ULL << B_ZL, l = 1ULL << B_L;
+    front = controls_case = 1;
+    packet(0, 0, 0, 0); CHECK(player_stamps == 0);
+    held_keys['Z'] = 1; packet(zl, 0, 0, 0); CHECK(player_stamps == 1);   /* a key goes down: the player's input */
+    for (int i = 0; i < 5; i++) packet(zl, 0, 0, 0);
+    CHECK(player_stamps == 1);                                            /* held: not at every read */
+    held_keys['Z'] = 0; packet(0, 0, 0, 0); CHECK(player_stamps == 1);    /* let go: not an input */
+    held_keys['Z'] = 1; packet(zl, 0, 0, 0); CHECK(player_stamps == 2);   /* down again: one more */
+    held_keys['Z'] = 0; packet(0, 0, 0, 0);
+    physical_buttons = zl; packet(zl, 0, 0, 0); CHECK(player_stamps == 3);   /* a pad's button the same */
+    for (int i = 0; i < 5; i++) packet(zl, 0, 0, 0);
+    CHECK(player_stamps == 3);
+    physical_buttons = zl | l; packet(zl | l, 0, 0, 0); CHECK(player_stamps == 4);   /* a second one, the first held */
+    physical_buttons = l; packet(l, 0, 0, 0); CHECK(player_stamps == 4);
+    physical_buttons = 0; packet(0, 0, 0, 0); CHECK(player_stamps == 4);
+}
+
 /* Walk reads its raw key before the Npad button latch. Neither toggle drives the other. */
 static void walk_toggle_case(void) {
     const uint64_t zl = 1ULL << B_ZL;
@@ -433,6 +456,11 @@ int main(int argc, char **argv) {
     if (!strcmp(name, "menu-side-buttons")) {
         menu_side_case();
         puts("PASS: the mouse's side buttons stay their controls' while one of the game's menus has the mouse");
+        free(memory); return 0;
+    }
+    if (!strcmp(name, "held-input")) {
+        held_input_case();
+        puts("PASS: an input held down is the player's input when it goes down, not at every read");
         free(memory); return 0;
     }
     if (!strcmp(name, "hold-taps")) {

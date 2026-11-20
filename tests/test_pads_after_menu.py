@@ -147,7 +147,8 @@ def main():
         block(hid, "void hos_filter_stick("),
         re.search(r"^static volatile int xinput_pads_now;.*$", hid, re.M).group(0),
         block(hid, "static void pads_read("),
-        "static void game_pads(uint64_t *buttons, int32_t stick[4]) " + pads,
+        # (read_input's `down`, the buttons down at this read, which the cut block fills for the player's input check below it)
+        "static void game_pads(uint64_t *buttons, int32_t stick[4]) {\n    uint64_t down = 0;\n    " + pads + "\n    (void)down;\n}",
         MAIN))
     with tempfile.TemporaryDirectory(prefix="longshot-pads-after-menu-") as tmp:
         src = Path(tmp) / "t.c"
