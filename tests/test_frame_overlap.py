@@ -9,11 +9,11 @@ does: an early answer to the game's wait (RX_VK_FRAME_WAIT_EARLY), short first p
 before it sleeps were each built, measured to gain nothing, and removed (the page has the numbers).
 
 The rules are compiled and run (tests/frame_overlap_test.cpp). And the source:
-- the game's waits are wait(), parts end by RX_VK_CHUNK alone, and the render thread sleeps on its queue: none of the
+- the game's waits are wait(), parts end by maybe_split alone, and the render thread sleeps on its queue: none of the
   three removed things is back;
 - every recording is counted at its end, before its submit; a frame ends at its present's own recording;
 - a draw or dispatch is only counted where it pushes its constants: nothing there ends a part;
-- the presenter thread (RX_VK_PRESENT_THREAD) has the swapchain to itself: present_image waits for it before it acquires.
+- the presenter thread (on every PC) has the swapchain to itself: present_image waits for it before it acquires.
 
 python -I -B tests/test_frame_overlap.py [--cxx g++]
 """

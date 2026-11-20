@@ -39,8 +39,14 @@ extern "C" __declspec(dllimport) int __stdcall GetThreadTimes(void*, void*, void
 #endif
 
 namespace mkwvk {
-std::atomic<uint64_t> work_epoch{0};
-std::atomic<bool> par_active{false};
+thread_local uint64_t work_epoch = 0;   // (vk_work.h's counts, as vk_texture.cpp defines them)
+thread_local bool other_work_since_barrier = true;
+bool gprof_glue_on() { return false; }   // (vk_work.h's profiler glue, off as with RX_VK_PASS_TIMING under 3)
+GprofGlue::GprofGlue(VkCommandBuffer c, const char* l) : cmd(c), label(l) {}
+GprofGlue::~GprofGlue() {}
+const char* const call_kind_names[kCallKinds] = {};   // (vk_work.h's call counts, off as without RX_VK_CALL_COUNT)
+std::atomic<uint64_t> call_counts[kCallKinds];
+bool call_count_on() { return false; }
 void logf(const char* fmt, ...) {   // (the renderer's log: printed, for test_recorder_sync.py to count)
     char b[1024];
     va_list a;
@@ -1616,12 +1622,6 @@ static void thread_checks(const std::vector<Call>& ref) {
         if (!rec::g_rec.broken.load()) std::printf("FAIL thread no ring: the recorder ran\n"), failures++;
         rec::g_rec.broken = false;
     }
-    {   // (a parallel replay records: each packet made at once, after what was published)
-        par_active = true;
-        const std::vector<Call> got = run(frame, rec::THREAD, true);
-        par_active = false;
-        same("thread while par_active (each call made directly)", ref, got);
-    }
     g_delay_ns = 0;
     {   // (stress: >= 1e6 packets through a 16 KB ring, twice; each run's stream hashed, against the direct one's)
         rec::g_rec.stop();
@@ -1687,7 +1687,7 @@ int main(int argc, char** argv) {
     same("fallback order (pNext chain, inline uniform block), deferred", fref, run(fallbacks, rec::DEFER, false));
     if (rec::t_arena().fallbacks != 2) std::printf("FAIL: %llu fallbacks, 2 expected\n", (unsigned long long)rec::t_arena().fallbacks), failures++;
 
-    // ---- defer (step 1.5): the lifecycle, the replay lock, the budgets, an allocation failure, a parallel replay
+    // ---- defer (step 1.5): the lifecycle, the replay lock, the budgets, an allocation failure
     const Out lref = run_tracked(lifecycle, rec::OFF, false);
     if (lref.violations) std::printf("FAIL the lifecycle scenario itself: %s\n", lref.violation.c_str()), failures++;
     const Out ld = run_tracked(lifecycle, rec::DEFER, true);
@@ -1726,19 +1726,6 @@ int main(int argc, char** argv) {
             std::printf("FAIL defer allocation failure: %llu failures (1 expected), %ld blocks lost, %ld left after the thread\n",
                         (unsigned long long)o.failures, o.leaked, g_aligned_live.load() - live), failures++;
         else std::printf("PASS defer allocation failure: held packets drained, the call made directly, no block lost\n");
-    }
-    {   // (a parallel replay records: never held, each packet run at once)
-        par_active = true;
-        rec::set_mode(rec::DEFER);
-        g_mutate = true, g_log.clear();
-        frame();
-        const bool at_once = g_log.size() == ref.size() && !rec::t_arena().head;
-        rec::drain();
-        const std::vector<Call> got = g_log;
-        rec::set_mode(rec::OFF);
-        par_active = false;
-        if (!at_once) std::printf("FAIL defer while par_active: packets held\n"), failures++;
-        same("defer while par_active (each packet run at once)", ref, got);
     }
 
     thread_checks(ref);

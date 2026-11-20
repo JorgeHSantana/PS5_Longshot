@@ -456,10 +456,9 @@ size_t pool_trim() {
 }
 
 // ---- the recording's upload command buffer ----
-thread_local VkCommandBuffer up_cmd = VK_NULL_HANDLE;   // (each recording thread's: a parallel replay's segments
-uint64_t rec_value = 0;                                   // record their own uploads)
+thread_local VkCommandBuffer up_cmd = VK_NULL_HANDLE;
+uint64_t rec_value = 0;
 thread_local bool up_used = false;
-thread_local uint64_t tl_seg = 0;
 uint32_t epoch = 0;
 int64_t st_uploads, st_astc, st_bytes;
 
@@ -470,48 +469,6 @@ VkCommandBuffer upload_cmd() {
     }
     return up_cmd;
 }
-
-// ---- (parallel replay) a new image's first layout change, in queue order ----
-// The segments' workers record at once, and the one that makes an image first need not be the first in the queue to use
-// it: a later segment's worker made it (its UNDEFINED -> GENERAL change in its own uploads, submitted after the earlier
-// segment), the earlier one used it (a copy into it again, the BC3 encoder's dispatch: its uploads, at the start of its
-// command buffers), and the queue reached that use with the image UNDEFINED (VUID-vkCmdDraw-None-09600, RX_VK_PARALLEL
-// only). The change goes to the init command buffer of the earliest segment still being recorded instead: those before
-// it were done before the image was made, so never used it, and each segment's init is submitted before its uploads.
-struct SegInit {
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    bool used = false, open = false;
-};
-std::mutex seg_init_mu;
-std::vector<SegInit> seg_inits;    // (the submission's segments, in queue order; seg_init_mu)
-thread_local int tl_seg_index = -1;   // (the segment this thread records; -1: none)
-/// While it lives, upload_cmd() is the earliest open segment's init command buffer (a segment's worker only)
-struct InitRedirect {
-    std::unique_lock<std::mutex> lk;
-    SegInit* to = nullptr;
-    VkCommandBuffer saved_cmd = VK_NULL_HANDLE;
-    bool saved_used = false;
-    explicit InitRedirect(bool want = true) {
-        if (!want || tl_seg_index < 0) return;
-        lk = std::unique_lock<std::mutex>(seg_init_mu);
-        for (int i = 0; i <= tl_seg_index && i < (int)seg_inits.size(); i++)
-            if (seg_inits[i].open) { to = &seg_inits[i]; break; }
-        if (!to) { lk.unlock(); return; }   // (none open: its own is, while it records)
-        saved_cmd = up_cmd, saved_used = up_used;
-        up_cmd = to->cmd, up_used = to->used;
-    }
-    void done() {
-        if (to) {
-            to->used = up_used;
-            up_cmd = saved_cmd, up_used = saved_used;
-            to = nullptr;
-        }
-        if (lk.owns_lock()) lk.unlock();
-    }
-    ~InitRedirect() { done(); }
-    InitRedirect(const InitRedirect&) = delete;
-    InitRedirect& operator=(const InitRedirect&) = delete;
-};
 
 // ---- staging: host-visible arenas, reused once the submission that filled them completed ----
 struct Arena {
@@ -560,7 +517,7 @@ VkResult texture_compute_pipeline(const VkComputePipelineCreateInfo& ci, VkPipel
     return extern_guarded_compute(VK_NULL_HANDLE, &ci, &out);
 }
 Staging staging(uint64_t n, uint64_t align = 256) {
-    // Separate slices may already be read by submitted parallel segments. A flush must not share their cache atom.
+    // Separate slices may already be read by the submission's parts sent before. A flush must not share their cache atom.
     align = std::max<uint64_t>(align, dev.props.limits.nonCoherentAtomSize);
     for (Arena& a : arenas) {   // the current one first, then any whose readers completed
         if (a.value == rec_value) {
@@ -982,9 +939,6 @@ bool bc_scratch_layout(VkCommandBuffer cmd, bool resized = false) {
         bc_used_at = std::chrono::steady_clock::now();
         bc_last_value = rec_value;
     }
-    // (a segment's worker: a fresh scratch's layout change in queue order, as a new image's)
-    InitRedirect redirect((bc_scratch2_fresh && bc_scratch2) || bc_scratch_fresh);
-    if (redirect.to) cmd = upload_cmd();
     if (bc_scratch2_fresh && bc_scratch2) {   // (longshot-amd: the second scratch, once made)
         bc_scratch2_fresh = false;
         VkImageMemoryBarrier2 b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
@@ -1422,6 +1376,9 @@ bool upload_unswizzle_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
 /// wrote. Block-linear levels are rows of blocks a GOB-block high, each self-contained: a written page re-uploads
 /// the block rows it falls in.
 uint64_t st_made;          // (textures made)
+// (longshot) and by kind, with their bytes (texture_made_kinds): what a frame's new textures are, the work each brings
+// (a colour or depth target cleared whole, an ASTC texture decoded, any other uploaded)
+uint64_t st_made_kind[4], st_made_kind_bytes[4];   // (0 colour target, 1 depth, 2 ASTC or BC, 3 other)
 int64_t st_unswizzle_bytes, st_unswizzle_ns;   // (the CPU's unswizzling)
 std::map<uint64_t, std::pair<uint64_t, uint64_t>> gpu_owned;   // GPU address -> (end, memory generation then)
 thread_local uint64_t tl_watch_prog;
@@ -1580,7 +1537,7 @@ struct UpStat { int64_t n = 0, bytes = 0, ns = 0; };
 UpStat up_frame[UP_COUNT];
 struct UpSlow { int64_t ns; uint32_t w, h, layers, nvn; int route; uint64_t bytes; };
 std::vector<UpSlow> up_slowest;
-std::mutex up_mu;   // (uploads may come from a parallel replay's threads)
+std::mutex up_mu;   // (uploads may come from a background thread)
 std::atomic<int64_t> frame_upload_ns{0};   // (this frame's time in upload(), every thread's)
 std::atomic<int64_t> st_deferred{0}, st_deferred_frame{0};
 void upload_frame_report() {
@@ -2588,7 +2545,6 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
     // MB held, and a budget of 4035 MB took 4300)
     if (!x.sparse) x.pad = std::max(x.bytes, allocation_size(x.allocation)) - x.bytes;
     total_bytes += x.bytes + x.pad;
-    InitRedirect redirect;   // (a parallel replay's worker: into the earliest open segment's init command buffer)
     // into GENERAL, and cleared (a target the game renders into before writing it all reads zeros, not garbage)
     VkCommandBuffer cmd = upload_cmd();
     VkImageMemoryBarrier2 b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
@@ -2624,11 +2580,14 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
         vkCmdPipelineBarrier2(cmd, &di);
     }
     Texture* p = tex.get();
-    redirect.done();
     static uint32_t ids;
     p->id = ++ids;
     p->first_seen = frame_no;
     st_made++;
+    {
+        const int k = depth ? 1 : (is_bc(x.format) || is_astc(x.format) || astc) ? 2 : (x.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) ? 0 : 3;
+        st_made_kind[k]++, st_made_kind_bytes[k] += x.bytes;
+    }
     p->key_layout = key.layout, p->key_cls = key.cls;
     {   // (another image at this storage: what tells them apart; content one renders the other does not see)
         static int told;
@@ -2676,7 +2635,8 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
 
 } // namespace
 
-std::atomic<uint64_t> work_epoch{0};
+thread_local uint64_t work_epoch = 0;   // (vk_work.h: the recording thread's own)
+thread_local bool other_work_since_barrier = true;   // (vk_work.h; true at the start: nothing known)
 namespace {
 // (each thread's own: the display thread's present records barriers too)
 thread_local VkCommandBuffer last_barrier_cmd = VK_NULL_HANDLE;   // (the command buffer this thread's last full barrier went into, and the work count then)
@@ -2692,8 +2652,8 @@ void barrier_stats(int64_t* made, int64_t* left_out) {
 // start barrier, then a dispatch's, were two or three in a row. RX_VK_BARRIER_DEDUPE_OFF=1: all recorded, as before.
 void full_barrier(VkCommandBuffer cmd, const char* why) {
     static const bool off = env_on("RX_VK_BARRIER_DEDUPE_OFF");
-    const bool dedupe = !off && !par_active.load(std::memory_order_relaxed);   // (a parallel replay's threads share command buffers and the count)
-    if (dedupe && cmd == last_barrier_cmd && work_epoch.load(std::memory_order_relaxed) == last_barrier_epoch) {
+    const bool dedupe = !off;   // (the count and the last barrier are the recording thread's own: vk_work.h)
+    if (dedupe && cmd == last_barrier_cmd && work_epoch == last_barrier_epoch) {
         st_barriers_left_out.fetch_add(1, std::memory_order_relaxed);
         return;
     }
@@ -2707,32 +2667,35 @@ void full_barrier(VkCommandBuffer cmd, const char* why) {
     d.memoryBarrierCount = 1;
     d.pMemoryBarriers = &b;
     vkCmdPipelineBarrier2(cmd, &d);
-    last_barrier_cmd = cmd, last_barrier_epoch = work_epoch.load(std::memory_order_relaxed);
+    last_barrier_cmd = cmd, last_barrier_epoch = work_epoch;
+    other_work_since_barrier = false;
 }
 
 namespace {
-thread_local VkCommandBuffer last_pass_end_cmd = VK_NULL_HANDLE;   // (the command buffer this thread's last draw pass ended on, and the work count then)
-thread_local uint64_t last_pass_end_epoch = 0;
 std::atomic<int64_t> st_pass_relaxed{0};
 } // namespace
-void note_pass_end(VkCommandBuffer cmd) {
-    last_pass_end_cmd = cmd, last_pass_end_epoch = work_epoch.load(std::memory_order_relaxed);
-}
 int64_t pass_barriers_relaxed() { return st_pass_relaxed.load(std::memory_order_relaxed); }
+// (longshot) The barrier a draw pass starts with. Full (ALL_COMMANDS to ALL_COMMANDS) where anything but draw passes was
+// recorded on cmd since this thread's last full barrier (vk_work.h note_other_work: a dispatch, a copy, a fill, a blit, a
+// whole image's clear, an upscaler library's dispatches), or where the last full barrier was on another command buffer: what
+// they wrote may be read by any stage of the pass, its vertex fetch and vertex shaders included. Otherwise only draw passes
+// came since: every write before it is made visible to this pass's fragment-side stages (the source stays every stage, so
+// nothing written before is missed), and its vertex, task and mesh stages start while the passes before it finish, as on the
+// console's GPU, which orders a pass's fragments, not its geometry, after the pass before. A pass whose geometry stages read
+// what an earlier pass's fragments wrote in the same stretch has a barrier of the game's between (NOP_BARRIER: full). Left out
+// entirely where nothing was recorded since the last full barrier on cmd (full_barrier's dedupe). RX_VK_PASS_BARRIER=full:
+// always the full barrier (a test)
 void pass_start_barrier(VkCommandBuffer cmd) {
-    static const bool game = [] {
+    static const bool always_full = [] {
         const char* e = getenv("RX_VK_PASS_BARRIER");
-        const bool on = e && !strcmp(e, "game");
-        if (on) logf("vk: RX_VK_PASS_BARRIER=game: a draw pass right after another, no barrier of the game's between, waits in its fragment stages only");
+        const bool on = e && !strcmp(e, "full");
+        if (on) logf("vk: RX_VK_PASS_BARRIER=full: every draw pass starts with a full barrier");
         return on;
     }();
-    if (!game || par_active.load(std::memory_order_relaxed) || cmd != last_pass_end_cmd ||
-        work_epoch.load(std::memory_order_relaxed) != last_pass_end_epoch) {
+    if (always_full || other_work_since_barrier || cmd != last_barrier_cmd || work_epoch == last_barrier_epoch) {
         full_barrier(cmd, "barrier (pass start)");
         return;
     }
-    // (the previous pass's writes, all stages, made visible to this pass's fragment-side stages; its vertex, task and mesh stages run
-    // as soon as they can, as on the console's GPU)
     st_pass_relaxed.fetch_add(1, std::memory_order_relaxed);
     GprofSpan gp(cmd, "barrier (pass start, fragments)");
     VkMemoryBarrier2 b{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
@@ -2745,12 +2708,12 @@ void pass_start_barrier(VkCommandBuffer cmd) {
     d.memoryBarrierCount = 1;
     d.pMemoryBarriers = &b;
     vkCmdPipelineBarrier2(cmd, &d);
-    last_barrier_cmd = VK_NULL_HANDLE;   // (not a full one: the next full barrier is not left out after it)
+    // (cmd stays the last full barrier's: the next pass is relaxed too while only draw passes follow; its epoch moves on, so a
+    // full barrier after this one is not taken for a repeat of the last full one)
 }
 
 void texture_begin_recording(VkCommandBuffer upload, uint64_t value) {
-    last_barrier_cmd = VK_NULL_HANDLE;
-    last_pass_end_cmd = VK_NULL_HANDLE;   // (a new recording: its command buffers start afresh, whatever their handles held)
+    last_barrier_cmd = VK_NULL_HANDLE;   // (a new recording: its command buffers start afresh, whatever their handles held)
     up_cmd = upload;
     if (value != rec_value) epoch++;   // (a submission's parts check a texture's memory once: nothing is collected between)
     rec_value = value;
@@ -3040,7 +3003,6 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
         }
         const uint64_t gen = memory_generation();
         if (!inner.empty() && upload(*tex, &inner)) {
-            tex->upload_value = rec_value, tex->upload_seg = tl_seg;
             static int logged;
             if (logged++ < 20)
                 logf("vk: texture %#llx %ux%u x%u NVN %#x: %llu KB the CPU wrote after the GPU taken", (unsigned long long)tex->gpu,
@@ -3065,13 +3027,6 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
             upload(*tex, nullptr);
             return tex;
         }
-    }
-    if (tex->uploaded && tex->upload_value == rec_value && tex->upload_seg > tl_seg) {
-        // (a parallel replay: uploaded in this submission by a segment after this one, which reads it first in stream
-        // order: uploaded again, the same data, in this segment's uploads)
-        upload(*tex, nullptr);
-        tex->upload_seg = tl_seg;
-        return tex;
     }
     if (tex->uploaded && tex->checked_epoch == epoch) return tex;
     tex->checked_epoch = epoch;
@@ -3204,7 +3159,6 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
     }
     if (up_ok) {
         if (gpu_dirty) tex->gpu_wrote_seen = gpu_dirty;
-        tex->upload_value = rec_value, tex->upload_seg = tl_seg;
         // (its storage joins the submit-time capture: what the game writes into it after a submit is not taken for it)
         // (any size: the capture copies only the pages the CPU wrote, and the big CPU-streamed textures were read as the
         // game had rewritten them a frame or two later. RX_VK_TEX_CAPTURE_MAX_MB=<n>: only up to that, 8 before)
@@ -3453,7 +3407,6 @@ TextureAttachment texture_attachment(Texture* tex, const nvn_tex* t, const nvn_v
         tex->pad += bytes;
         total_bytes += bytes;
 
-        InitRedirect redirect;
         VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
         barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
         barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
@@ -4124,25 +4077,13 @@ int texture_flush_to_guest(uint64_t lo, uint64_t size) {
 static void note_drawn_storage(Texture* tex) {
     if (!tex->id || !tex->guest_size) return;
     const uint64_t end = tex->gpu + tex->guest_size;
-    if (tex->gpu_written && !tex->released && tex->gpu_draw_value == rec_value &&
-        tex->gpu_draw_segment == tl_seg && !wrote_regions::any(tex->gpu, end)) return;
+    if (tex->gpu_written && !tex->released && tex->gpu_draw_value == rec_value && !wrote_regions::any(tex->gpu, end)) return;
     std::lock_guard lk(gpu_wrote_mu);
-    gpu_wrote.drew(tex->id, tex->gpu, end, rec_value, tl_seg);
+    gpu_wrote.drew(tex->id, tex->gpu, end, rec_value);
     tex->gpu_draw_value = rec_value;
-    tex->gpu_draw_segment = tl_seg;
 }
 void texture_written(Texture* tex, const char* why) {
     if (!tex) return;
-    if (tex->upload_value == rec_value && tex->upload_seg > tl_seg) {   // (a parallel replay's order broken: see dry_mark_written)
-        static int64_t n;
-        if (n++ < 40 || n % 500 == 0)
-            logf("vk: parallel: #%u %#llx %ux%u x%u NVN %#x written in segment %llu, uploaded by the later segment %llu (%lld so); "
-                 "written by: %s; before this the GPU had %s it%s%s, first seen at frame %llu, now %llu",
-                 tex->id, (unsigned long long)tex->gpu, tex->width, tex->height, tex->layers, tex->nvn_format,
-                 (unsigned long long)tl_seg, (unsigned long long)tex->upload_seg, (long long)n, why,
-                 tex->gpu_written ? "written" : "not written", tex->only_cleared ? " (only cleared)" : "",
-                 tex->released ? " (released)" : "", (unsigned long long)tex->first_seen, (unsigned long long)frame_no);
-    }
     vw_note(*tex);
     tex->only_cleared = false;
     if (tex->sparse && !tex->gpu_written) {
@@ -4155,9 +4096,8 @@ void texture_written(Texture* tex, const char* why) {
     // (longshot) A texture in a virtual pool that the GPU writes first is marked uploaded below without the first upload,
     // which notes its pages' mapping (texture_touch): its first check after the game finalized it took all of its storage
     // for remapped, and the whole image was uploaded from guest memory over the GPU's texels (OoT's HUD button labels blank
-    // after a zone change). Noted here instead, by the writers that give a reason: each holds the ParLock a change to the
-    // map needs, or is the dry pass (tests/test_drawn_page_map.py lists them). The upscaler's stand-ins give none and run
-    // without that lock. A texture clear gives none: resolve() samples its texture first, which notes the map, unless
+    // after a zone change). Noted here instead, by the writers that give a reason (tests/test_drawn_page_map.py lists them).
+    // The upscaler's stand-ins give none. A texture clear gives none: resolve() samples its texture first, which notes the map, unless
     // only writers that give none wrote it before (then as before)
     if (why && strcmp(why, "?") != 0 && tex->gpu >= (1ull << 40) && tex->page_map.empty() && tex->guest_size) {
         static thread_local Ranges mapped;
@@ -4177,7 +4117,6 @@ bool texture_touch_quick(Texture* tex, bool for_sampling) {
     tex->last_value = rec_value;
     if (!for_sampling) return true;
     if (tex->gpu_written && !tex->released && !tex->only_cleared) return true;
-    if (tex->upload_value == rec_value && tex->upload_seg > tl_seg) return false;
     return tex->uploaded && tex->checked_epoch == epoch;
 }
 void texture_gpu_wrote(uint64_t gpu, uint64_t size) {
@@ -4202,7 +4141,7 @@ void texture_gpu_wrote(uint64_t gpu, uint64_t size) {
     }
     wrote_regions::mark(lo, hi);   // (before the map has it: gpu_wrote_into asks the regions first, without the lock)
     std::lock_guard lk(gpu_wrote_mu);
-    gpu_wrote.record(lo, hi, rec_value, tl_seg);
+    gpu_wrote.record(lo, hi, rec_value);
 }
 /// A completed buffer write into the texture's storage since its last successful upload.
 uint64_t gpu_wrote_into(const Texture& tex) {
@@ -4221,33 +4160,6 @@ uint64_t gpu_wrote_into(const Texture& tex) {
 }
 void texture_watch_prog(uint64_t prog) {
     tl_watch_prog = prog;
-}
-void texture_set_segment(uint64_t seg) {
-    tl_seg = seg;
-}
-uint64_t texture_segment() {
-    return tl_seg;
-}
-void texture_segments_begin(const VkCommandBuffer* init_cmds, size_t n) {
-    std::lock_guard lk(seg_init_mu);
-    seg_inits.assign(n, SegInit{});
-    for (size_t i = 0; i < n; i++) seg_inits[i].cmd = init_cmds[i], seg_inits[i].open = true;
-}
-void texture_segment_worker(int index) {
-    tl_seg_index = index;
-}
-int texture_segment_end(int index) {
-    std::lock_guard lk(seg_init_mu);
-    if (index < 0 || index >= (int)seg_inits.size()) return 0;
-    SegInit& s = seg_inits[index];
-    s.open = false;   // (no new image's change goes to it from here: it is ended)
-    if (s.used) full_barrier(s.cmd);   // (before its uploads and its commands)
-    if (vkEndCommandBuffer(s.cmd) != VK_SUCCESS) return s.used ? -1 : 0;
-    return s.used ? 1 : 0;
-}
-bool texture_marked(const Texture* tex) {
-    return !tex || (tex->gpu_written && !tex->released && tex->uploaded && tex->owned_frame == frame_no &&
-                    tex->first_render_frame);
 }
 
 namespace {
@@ -5901,6 +5813,9 @@ void texture_released(const nvn_tex* t) {
 
 uint64_t texture_made() {
     return st_made;
+}
+void texture_made_kinds(uint64_t n[4], uint64_t bytes[4]) {
+    for (int i = 0; i < 4; i++) n[i] = st_made_kind[i], bytes[i] = st_made_kind_bytes[i];
 }
 void texture_unswizzle_stats(int64_t* bytes, int64_t* ns) {
     *bytes = st_unswizzle_bytes, *ns = st_unswizzle_ns;

@@ -135,13 +135,8 @@ struct Device {
     bool present_queue_supported = false;
     std::mutex present_queue_mu;
     uint32_t present_family = 0;   // (present_queue's family, the swapchain's images shared with it)
-    // (longshot) the presenter thread's own queue (vk_replay.cpp, RX_VK_PRESENT_THREAD=0: none): a second queue of the replay's
-    // family where it has one, else a queue of a compute family; no other thread submits or presents on it, so the presents never
-    // take the replay's lock. VK_NULL_HANDLE, or a family that cannot present to the window: the presents stay on the game's
-    // thread. Its lock is taken after present_queue_mu (device_wait_idle_locked), never before it
-    VkQueue presenter_queue = VK_NULL_HANDLE;
-    uint32_t presenter_family = 0;
-    bool presenter_supported = false;   // (its family presents to the window's surface: choose_present_queue)
+    // (longshot) the presenter thread's use of the swapchain (vk_replay.cpp presenter_loop): held over its present call, which it
+    // makes on the presents' own queue under that queue's lock (present_mu or present_queue_mu), so taken after both, never before
     std::mutex presenter_queue_mu;
     bool present_wait = false;   // (VK_KHR_present_id + VK_KHR_present_wait enabled: the presenter waits for each present to be shown)
     VkPresentModeKHR swap_mode = VK_PRESENT_MODE_FIFO_KHR;   // (the swapchain's present mode, as made)
@@ -253,9 +248,7 @@ uint64_t gpu_bind_stamp();
 /// Around each submission's recording: mirrors wanted since the last one are made (begin), what the GPU wrote into
 /// mirrors goes back to guest memory (end, outside any pass, before the closing barrier)
 void memory_begin_submission();
-void memory_sync_mirrors_before_segments();   // (longshot: vk_memory.cpp)
 bool probe_on();                                // (longshot: vk_draw.cpp, RX_VK_PROBE)
-bool probe_serial();
 void probe_dump_all(const char* why);
 void probe_log(uint64_t frame);
 void memory_end_submission(VkCommandBuffer cmd, uint64_t part = 0);   // (part: the recording cmd is, for the pages it writes back)
@@ -272,29 +265,6 @@ void coopmat_init();   // vk_coopmat.cpp (once the device is made)
 /// pool or texture), RX_VK_CHECKPOINTS
 void checkpoint_mark(VkCommandBuffer cmd, uint64_t key, char kind);
 
-/// Parallel replay (vk_replay.cpp, RX_VK_PARALLEL): while segments of a submission are recorded on several threads,
-/// what they share (textures and their uploads, programs, pipelines, samplers, pools and memory stamps) is used under
-/// one lock; the per-draw caches are each thread's own
-extern std::atomic<bool> par_active;
-extern std::atomic<int64_t> par_lock_wait_ns, par_locks;   // (contention: the time threads waited for it)
-std::recursive_mutex& par_mutex();
-int64_t par_now_ns();
-struct ParLock {
-    bool on;
-    explicit ParLock(bool want = true) : on(want && par_active.load(std::memory_order_relaxed)) {
-        if (!on) return;
-        par_locks.fetch_add(1, std::memory_order_relaxed);
-        if (par_mutex().try_lock()) return;
-        const int64_t t0 = par_now_ns();
-        par_mutex().lock();
-        par_lock_wait_ns.fetch_add(par_now_ns() - t0, std::memory_order_relaxed);
-    }
-    ~ParLock() {
-        if (on) par_mutex().unlock();
-    }
-    ParLock(const ParLock&) = delete;
-    ParLock& operator=(const ParLock&) = delete;
-};
 void memory_pool_created(uint64_t gpu, uint64_t size);
 /// Whether guest memory in [lo, hi) is in an imported pool, live or retired (the GPU may read or write it)
 int memory_guest_imported(uint64_t lo, uint64_t hi);
@@ -412,7 +382,6 @@ void memory_note_cpu_access(uint64_t guest, uint64_t size, bool write);   // (an
 bool memory_wb_followed(uint64_t lo, uint64_t hi);   // (whether a large binding wb_learn.h follows overlaps [lo, hi))
 bool memory_rb_refresh(VkCommandBuffer up);
 void memory_rb_recording_begun();   // (longshot) at a recording's start, on its thread: the submission it joins (memory_rb_refresh)
-void memory_rb_segments_begin(uint64_t base, uint64_t n);   // (and a parallel replay's segments: their order, base on)
 /// (longshot) a range a program may write in the mirror that is not bound as written (not copied back): memory_rb_refresh
 void memory_note_gpu_write(uint64_t gpu, uint64_t size);
 /// (longshot, RX_VK_UB_SNAPSHOT's guard, vk_memory.cpp) the GPU writes this thread's recordings have noted that guest memory

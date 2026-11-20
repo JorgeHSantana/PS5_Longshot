@@ -129,7 +129,7 @@ def main():
     p.add_argument("--headers", type=Path, required=True)
     a = p.parse_args()
     main_cpp = (ROOT / "gpu" / "vk" / "vk_main.cpp").read_text(encoding="utf-8")
-    choice = between(main_cpp, "uint32_t compute_family = UINT32_MAX;", "// (longshot) The presenter thread's own queue",
+    choice = between(main_cpp, "uint32_t compute_family = UINT32_MAX;", "    static const float priorities[2] = {1.0f, 1.0f};",
                      where="gpu/vk/vk_main.cpp create_device")
     # (the Windows branch, where there is one, on any host: the default it sets is what is checked)
     fixture = FIXTURE.replace("/* CHOICE */", choice.replace("#ifdef _WIN32", "#if 1"))

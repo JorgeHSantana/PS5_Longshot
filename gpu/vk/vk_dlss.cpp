@@ -424,7 +424,7 @@ int prepare(VkCommandBuffer cmd, uint32_t rw, uint32_t rh, uint32_t ow, uint32_t
     ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (NGX records into cmd itself: what this thread recorded through vk_work.h reaches cmd first)
     const NVSDK_NGX_Result r = NGX_VULKAN_CREATE_DLSS_EXT(cmd, 1, 1, &s.feature, s.params, &cp);
     const double made_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-    note_work();   // (NGX's own commands, which vk_work.h does not see: the next full_barrier is not left out)
+    note_other_work();   // (NGX's own commands, which vk_work.h does not see: the next full_barrier is not left out)
     if (NVSDK_NGX_FAILED(r) || !s.feature) {
         logf("vk: NVIDIA DLSS: its feature was not made (%#x) for %ux%u -> %ux%u", (unsigned)r, max_w, max_h, ow, oh);
         s.feature = nullptr;
@@ -474,7 +474,7 @@ bool evaluate(VkCommandBuffer cmd, const TemporalFrame& f) {
     }
     ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (NGX records into cmd itself: what this thread recorded through vk_work.h reaches cmd first)
     const NVSDK_NGX_Result r = NGX_VULKAN_EVALUATE_DLSS_EXT(cmd, s.feature, s.params, &ep);
-    note_work();   // (as at its creation: the barrier after it, and the game's next one, are recorded)
+    note_other_work();   // (as at its creation: the barrier after it, and the game's next one, are recorded)
     if (NVSDK_NGX_FAILED(r)) {
         // (the chain tries again at the next frame, kEngine's retry: one that keeps failing says so when its result changes
         // and every 600th time, as the chain's own reason does, not on every frame)
@@ -1060,7 +1060,7 @@ int dlss_fg_frames(VkCommandBuffer cmd, VkImage color, VkImageView color_view, u
         NVSDK_NGX_Parameter_SetUI(g.params, NVSDK_NGX_DLSSG_Parameter_DynamicResolution, 0u);
         ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (NGX records into cmd itself)
         const NVSDK_NGX_Result r = NGX_VK_CREATE_DLSSG(cmd, 1, 1, &g.feature, g.params, &cp);
-        note_work();
+        note_other_work();
         if (NVSDK_NGX_FAILED(r) || !g.feature) {
             g.feature = nullptr;
             g.create_failures++;
@@ -1149,7 +1149,7 @@ int dlss_fg_frames(VkCommandBuffer cmd, VkImage color, VkImageView color_view, u
         o.multiFrameIndex = (unsigned)k;
         ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (NGX records into cmd itself)
         const NVSDK_NGX_Result r = NGX_VK_EVALUATE_DLSSG(cmd, g.feature, g.params, &ep, &o);
-        note_work();
+        note_other_work();
         if (NVSDK_NGX_FAILED(r)) {
             static int told = 0;
             if (told++ < 8) logf("vk: DLSS Frame Gen (NGX): frame %d of %d was refused (%#x)", k, count, (unsigned)r);
@@ -1196,8 +1196,10 @@ void dlss_fg_close() {
     std::unique_lock qk(dev.present_mu, std::defer_lock);
     while (!qk.try_lock() && std::chrono::steady_clock::now() < until) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     // (and the presents' own queues, whose presents let dev.present_mu go while they run: a present stuck there held
-    // device_wait_idle_locked on its lock with no end. Free once while present_mu is held, they stay free: a present takes
-    // present_mu first; only the presenter thread's (RX_VK_PRESENT_THREAD, opt-in) does not)
+    // device_wait_idle_locked on its lock with no end. Free once while present_mu is held, they stay free, but for the
+    // presenter thread's (on every PC): on the Present queue row's queue it takes present_queue_mu, not present_mu, then
+    // presenter_queue_mu, for its present call alone, so a present already handed to it may still take them; the
+    // locks device_wait_idle_locked takes wait that one call out)
     const auto free_by_then = [&](std::mutex& m) {
         for (;;) {
             if (m.try_lock()) return m.unlock(), true;

@@ -1145,7 +1145,7 @@ struct PipeEntry {
 };
 std::unordered_map<uint64_t, std::unique_ptr<PipeEntry>> pipelines;   // (the replay thread's)
 // (longshot) Pipelines made ahead of their first draw by the load at a program's create call (vk_programs.cpp), by their keys.
-// `pipelines` is the replay's own and has no lock outside the parallel replay, so a background job puts what it made here and
+// `pipelines` is the replay's own and has no lock, so a background job puts what it made here and
 // the draw's lookup takes it the first time it asks for that key (graphics_pipeline)
 std::mutex kept_ready_mu;
 std::unordered_map<uint64_t, VkPipeline> kept_ready;
@@ -2647,7 +2647,6 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
     static thread_local FlatMap<uint64_t, PipeEntry*> mine;   // (entries live as long as the cache)
     if (auto m = mine.find(key); m != mine.end()) return FINE_X(FC_PIPE_MAP, 1), remember(m->second);
     PROF_EXACT();   // (new to this thread, or new: rare, and a pipeline made can take milliseconds)
-    ParLock lk;
     auto it = pipelines.find(key);
     if (it != pipelines.end()) return remember(mine[key] = it->second.get());
     pcache_init();
@@ -3177,8 +3176,7 @@ SamplerInfo sampler_info(const VkSamplerCreateInfo& ci) {
     }
     return i;
 }
-/// (longshot) The samplers sampler_make made: one for each SamplerInfo, and the keys that resolve to each, under the replay's lock
-/// (ParLock; the atomics are read without it). A driver makes at most maxSamplerAllocationCount samplers (NVIDIA 4000, NVK 4096):
+/// (longshot) The samplers sampler_make made: one for each SamplerInfo, and the keys that resolve to each. A driver makes at most maxSamplerAllocationCount samplers (NVIDIA 4000, NVK 4096):
 /// past that vkCreateSampler fails, and a draw with a failed sampler is refused (bind_descriptors). So before a new one would go
 /// past the room sampler_room keeps, the least recently resolved one is retired: out of every table at once, and destroyed once
 /// the GPU is past every recording made so far (vk_retirement_value), since a thread's own tables (sampler_for's, mine) may still
@@ -3346,7 +3344,6 @@ VkSampler sampler_make(int id, bool compare, bool one_level) {
     const uint64_t f = sampler_book.watching.load(std::memory_order_relaxed) ? texture_frame_no() : 0;
     if (g != mine_gen || f != mine_frame) mine.clear(), mine_gen = g, mine_frame = f;
     if (auto m = mine.find(key); m != mine.end()) return m->second;
-    ParLock lk;
     SamplerBook& book = sampler_book;
     if (auto it = book.keys.find(key); it != book.keys.end()) {
         it->second->used = ++book.tick;
@@ -3618,17 +3615,13 @@ VkImageView texture_view_of(uint32_t handle, VkImageViewType want, ViewUse use, 
     }
     if (it != handle_hits().end() && it->second.version == version && it->second.destroy_gen == dgen) {
         if (it->second.tex && it->second.tex_epoch != texture_epoch()) {   // (once a submission: its age and contents)
-            if (!texture_touch_quick(it->second.tex, it->second.sampling)) {
-                ParLock lk;
-                texture_touch(it->second.tex, it->second.sampling);
-            }
+            if (!texture_touch_quick(it->second.tex, it->second.sampling)) texture_touch(it->second.tex, it->second.sampling);
             it->second.tex_epoch = texture_epoch();
         }
         if (tex_out) *tex_out = it->second.tex;
         if (level_out) *level_out = it->second.level;
         return it->second.view;
     }
-    ParLock lk;
     nvn_tex t;
     nvn_view v;
     bool has_view = false;
@@ -3900,9 +3893,8 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
         static const bool snapshot = ub_snapshot_wanted();
         // (but a range the GPU writes earlier in this submission, in any of its parts, or in an earlier submission the GPU
         // has not done yet, is bound in place, where the GPU reads it after that write: guest memory and the captures, which
-        // the copy is made from, do not have the GPU's bytes yet. Not asked while a parallel replay records segments
-        // (RX_VK_PARALLEL), whose writes are not noted: memory_gpu_written)
-        const int gpu_written = snapshot && memory_gpu_writes_any() && !par_active.load(std::memory_order_relaxed)
+        // the copy is made from, do not have the GPU's bytes yet: memory_gpu_written)
+        const int gpu_written = snapshot && memory_gpu_writes_any()
                                     ? memory_gpu_written(u.addr < (1ull << 40) ? u.addr : host->gpu_guest(u.addr), n) : 0;
         BufferRef b = snapshot && !gpu_written ? BufferRef{} : gpu_buffer_bind(u.addr, n, false);
         // (the guard's: after a write in this submission, then in an earlier one; bound in place, copied all the same)
@@ -4456,7 +4448,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                     const auto t1 = slow_desc_timing() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
                     const uint64_t guest = host->gpu_guest(base);
                     memory_check_writer(1, p.key);   // (RX_VK_MEM_CHECK: a storage buffer this program writes)
-                    if (guest) { ParLock lk; memory_stamp_gpu(guest, n); }
+                    if (guest) memory_stamp_gpu(guest, n);
                     if (slow_desc_timing()) slow_descriptor(t1, "stamp", base, n);
                 }
             }
@@ -4474,10 +4466,8 @@ void build_descriptors(const NvnState& s, const Program& p) {
                     nvn_view v;
                     bool has_view = false;
                     VkBufferView bv = VK_NULL_HANDLE;
-                    if (handle && texture_of((int)(handle & 0xFFFFF), &t, &v, &has_view)) {
-                        ParLock lk;
+                    if (handle && texture_of((int)(handle & 0xFFFFF), &t, &v, &has_view))
                         bv = texel_buffer_view(&t, has_view ? &v : nullptr, storage);
-                    }
                     out.views.push_back(bv);
                 }
                 w.pTexelBufferView = &out.views[first];
@@ -4588,7 +4578,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 uint32_t level = 0;
                 VkImageView view = handle ? texture_view_of(handle, vt, ViewUse::Storage, image_format(d.format), &tex, &level)
                                           : VK_NULL_HANDLE;
-                if (view && tex && d.is_written) { ParLock lk; texture_written(tex, "a storage image of a draw"); }
+                if (view && tex && d.is_written) texture_written(tex, "a storage image of a draw");
                 if (view && tex) draw_sampled().push_back(tex);
                 if (log_img_wanted(p.key)) {
                     static std::atomic<int> told{0};
@@ -4632,7 +4622,7 @@ struct Pushed {
 TLS_OBJECT(pushed, std::array<Pushed, 2>)   // [graphics, compute]
 } // namespace
 std::string state_list_snapshot(bool* present) { return state_list_bytes(present); }   // (vk_draw.h: the menu's)
-bool uniform_snapshot_on() {   // (vk_internal.h: ub_snapshot_wanted's answer for vk_memory.cpp's guard and vk_replay.cpp's parallel replay)
+bool uniform_snapshot_on() {   // (vk_internal.h: ub_snapshot_wanted's answer for vk_memory.cpp's guard)
     static const bool on = ub_snapshot_wanted();
     return on;
 }
@@ -5089,6 +5079,11 @@ struct Pass {
     uint16_t written = 0;                  // (its targets written so far: colour i bit i, depth bit 8)
 };
 TLS_OBJECT(pass, Pass)
+/// (vk_replay.cpp maybe_split) whether this thread's command buffer is inside a render pass: a part that ends with none open
+/// ends no pass of the game's early (nothing written out and read back in)
+}   // namespace
+bool draw_pass_open() { return pass().open; }
+namespace {
 thread_local bool work_since_barrier = false;   // (GPU work recorded since the last full barrier: a dispatch orders after it)
 // what the command buffer has bound (draws skip what is already there): CmdBound, below, with the types it is made of
 /// The descriptors the graphics bind point has: what they were built from
@@ -5125,7 +5120,6 @@ thread_local Targets cached_targets;
 
 Targets targets(NvnState& s) {
     if (targets_serial == s.rt_serial) return cached_targets;
-    ParLock lk;
     Targets at;
     at.n = std::clamp(s.rt.n, 0, 8);
     for (int i = 0; i < at.n; i++) {
@@ -5216,9 +5210,6 @@ void begin_pass(VkCommandBuffer cmd, const Targets& at) {
     }
     work_since_barrier = true;
     VkRenderingAttachmentInfo ca[8]{};
-    bool marks = !texture_marked(at.depth);
-    for (int i = 0; i < at.n && !marks; i++) marks = !texture_marked(at.color[i]);
-    ParLock lk(marks);
     for (int i = 0; i < at.n; i++) {
         ca[i].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         ca[i].imageView = at.color_view[i];
@@ -5416,7 +5407,7 @@ void dynamic_state(VkCommandBuffer cmd, const NvnState& s, const Targets& at, Vk
     {   // (longshot) The characters' own shadow maps (square, depth only, 768 and less; 1e26755d projects them on the screen): their
         // stored depth is moved away from the light, or they shadow themselves whole: Link and the ferns black in the shade, while
         // the ground behind them keeps their shadow. RX_VK_SHADOW_BIAS=<units>,<slope>; 0: as the game asks
-        // (read once, thread-safely: parallel recording threads reach here at once)
+        // (read once)
         static float units = 250000.0f, slope = 0.0f;
         static const bool bias_read = [] {
             if (const char* e = getenv("RX_VK_SHADOW_BIAS")) sscanf(e, "%f,%f", &units, &slope);
@@ -5878,7 +5869,6 @@ void clear_color_target(VkCommandBuffer cmd, NvnState& s, int index, const float
 #ifdef TRACY_ENABLE
     HT_SCOPE("clear_color_target");
 #endif
-    ParLock lk;
     mask &= 0xF;
     if (!mask) return;
     const Targets at = targets(s);
@@ -5917,7 +5907,6 @@ void clear_color_target(VkCommandBuffer cmd, NvnState& s, int index, const float
 
 void clear_depth_stencil(VkCommandBuffer cmd, NvnState& s, float depth, bool depth_mask, uint32_t stencil,
                          uint32_t stencil_mask) {
-    ParLock lk;
     const Targets at = targets(s);
     if (!at.depth) return;
     VkImageAspectFlags aspect = 0;
@@ -5949,7 +5938,6 @@ namespace {
 } // namespace
 
 void draw_flush_recording(int slot) {
-    ParLock lk;
     const RecordingRes& r = res[slot];
     // Earlier descriptors still name streams we outgrew; later retained streams were not used this recording.
     // (none when the slot's first stream could not be made: draw_begin_recording)
@@ -5962,7 +5950,6 @@ void draw_flush_recording(int slot) {
 void draw_begin_recording(int slot, VkCommandBuffer cmd, uint64_t value) {
     rec_cmd = cmd;
     rec_value = value;
-    ParLock lk;
     if ((size_t)slot >= res.size()) res.resize((size_t)slot + 1);
     RecordingRes& r = res[slot];
     if (!r.pool) {
@@ -6045,7 +6032,7 @@ void trace_line(const char* fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
-    const uint64_t key = (texture_segment() << 24) | (trace_seq++ & 0xFFFFFF);   // (segments: on several threads)
+    const uint64_t key = trace_seq++;
     std::lock_guard lk(trace_mu);
     auto& v = pass_traces[texture_frame_no()];
     if (v.size() < 6000) v.emplace_back(key, line);
@@ -6069,13 +6056,12 @@ bool probe_on() {
     static const bool on = getenv("RX_VK_PROBE") != nullptr;
     return on;
 }
-// (RX_VK_PROBE=2: at speed: replay stays parallel, big images only, the picture's chain; the frame log's white frames dump
+// (RX_VK_PROBE=2: at speed: big images only, the picture's chain; the frame log's white frames dump
 // the last 16 frames, probe_all_<n>.txt)
 bool probe_lite() {
     static const bool on = getenv("RX_VK_PROBE") && atoi(getenv("RX_VK_PROBE")) == 2;
     return on;
 }
-bool probe_serial() { return probe_on() && !probe_lite(); }
 std::mutex probe_mu;
 void probe_image(VkCommandBuffer cmd, Texture* tex, uint32_t level, uint32_t layer, uint64_t prog, char kind, int draws = -1) {
     if (!probe_on() || !tex || !tex->image || tex->samples != VK_SAMPLE_COUNT_1_BIT || tex->astc || tex->bc ||
@@ -6262,7 +6248,6 @@ void end_pass(VkCommandBuffer cmd) {
     if (!ps.open) return;
     vkCmdEndRendering(cmd);
     ps.open = false;
-    note_pass_end(cmd);   // (before the dumps and probes below: they record work, and the next pass's barrier is then a full one)
     if (ps.has_block_images) {
         full_barrier(cmd, "barrier (before BC slice stores)");
         for (int i = 0; i < ps.n; i++)
@@ -7470,7 +7455,7 @@ bool fallback_pipelines_ready(Program& p) {
     int none = 0;
     const bool fresh = p.compute_state.compare_exchange_strong(none, 1);
     if (fresh) {
-        { ParLock lk; pcache_init(); }
+        { pcache_init(); }
         Program* job = &p;
         auto build = [job] {
             fallback_compute_pipelines(*job);
@@ -7754,8 +7739,7 @@ static void skin_check(const NvnState& s, const Program& p, const DrawArgs& d, c
 // them, the game's own picture changes too where it reads that depth: later depth-tested draws, the occlusion counts of what
 // is behind the body, effects made from the depth no longer see the hidden body.
 // One table for every drawing thread: the game submits from several threads, the replay draws one submission at a time
-// (vk_replay.cpp replay_mu), and a mesh's depth and colour can come from two of them. With the parallel replay
-// (RX_VK_PARALLEL=2 and more) the workers draw at once, and nothing here runs (temporal_hidden_mesh_mode).
+// (vk_replay.cpp replay_mu), and a mesh's depth and colour can come from two of them.
 // RX_VK_DLSS_FADED=0: nothing left out; RX_VK_DLSS_FADED_LOG=1: the detailed lines (temporal_hidden_mesh_mode).
 namespace {
 struct HiddenMeshes {
@@ -8094,7 +8078,6 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     ProgramUse use(s.prog, s.has_prog, false);   // (the program's first draw, for the census: vk_programs.h)
     {
         PROF_HOT(PROF_PROGRAM);
-        ParLock lk(d.mesh);   // (graphics programs: each thread's picks, program_pick's own lock)
 #ifdef TRACY_ENABLE
         HT_SCOPE_DRAW("program_for");   // (here, not in vk_shader.cpp: that file is part of the shader caches' stamp)
 #endif
@@ -8274,7 +8257,6 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         PROF_HOT(PROF_PIPE);
         if (!p.layout) {
             PROF_EXACT();
-            ParLock lk;
             ensure_layout(p);
         }
         const int64_t pipes_new = use.on ? use_counters.pipes_new : 0;   // (another file's thread-local: read for the life log only)
@@ -8859,17 +8841,30 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         }
     } else if (d.indexed) {
         const uint32_t unit = d.itype == 0 ? 1 : d.itype == 1 ? 2 : 4;
+        uint32_t first_index = 0;
         BufferRef ib;
         {
             FINE_SCOPE(FT_VERTEX);
             ib = gpu_buffer_bind(d.ibuf, (uint64_t)std::max(d.count, 1) * unit, false);
             if (!ib) SKIP_HERE();
             FINE_N(FC_IBIND, 1);
-            bind_index(cmd, ib.buffer, ib.offset, itype);
+            // (the index buffer bound at its buffer's start and the draw's own place given as its first index: a pool's
+            // draws share one VkBuffer at their own offsets, so with the offset in the bind nearly every draw rebound it (0.97
+            // binds a draw in the Market on an RX 7900 XTX, each a driver call), and with it in the draw only a new buffer
+            // does. Where the offset is not a whole number of indices, or the first index would not fit, the bind takes it as
+            // before. RX_VK_INDEX_REBASE=0: always in the bind)
+            static const bool rebase = !(getenv("RX_VK_INDEX_REBASE") && !strcmp(getenv("RX_VK_INDEX_REBASE"), "0"));
+            if (rebase && ib.offset % unit == 0 && ib.offset / unit <= 0x7fffffffull) {
+                first_index = (uint32_t)(ib.offset / unit);
+                bind_index(cmd, ib.buffer, 0, itype);
+            } else {
+                bind_index(cmd, ib.buffer, ib.offset, itype);
+            }
         }
         FINE_SCOPE(FT_DRAWCALL);
         occ.issue();
-        vkCmdDrawIndexed(cmd, (uint32_t)d.count, (uint32_t)std::max(1, d.instances), 0, d.base_vertex, (uint32_t)d.base_instance);
+        vkCmdDrawIndexed(cmd, (uint32_t)d.count, (uint32_t)std::max(1, d.instances), first_index, d.base_vertex,
+                         (uint32_t)d.base_instance);
     } else {
         FINE_SCOPE(FT_DRAWCALL);
         occ.issue();
@@ -10439,7 +10434,7 @@ bool notes_lost_by_driver() {
 
 void precompile_run(void (*progress)(size_t done, size_t total)) {
     // (the texture pipelines first, into the start's pipeline cache: not compiled inside a frame of play, vk_texture.cpp)
-    { ParLock lk; pcache_init(); }
+    { pcache_init(); }
     texture_pipelines_warm();
     // (longshot, RX_VK_LOAD=create: only once every note has been built into the pipeline cache, so that a load from the
     // caches alone never meets a pipeline the prepare should have compiled. The first start after a preparation builds them
@@ -11347,7 +11342,6 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     }
     Program& p = const_cast<Program&>(*cp);
     if (!p.layout) {
-        ParLock lk;
         ensure_layout(p);
     }
     // (the compute pipeline is compiled on a worker, not here with the recording lock held: AMD's compiler took 15-23 s on the
@@ -11372,7 +11366,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         if (on_worker) intel_gate_busy();
         std::shared_ptr<std::atomic<uint8_t>> made_how;   // (on_worker: how the worker made it, for the census)
         if (fresh) {
-            { ParLock lk; pcache_init(); }
+            { pcache_init(); }
             const Program* job = &p;
             // (one at a time on Intel: serial_builds_on)
             static const bool serial = serial_builds_on();
@@ -11459,7 +11453,6 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         }
         if (p.failed || !cpipe()) SKIP_HERE();
     }
-    ParLock plk(!cpipe());
     if (!cpipe() && !taau_key(p.key)) {
         if (!program_cache_complete(p)) SKIP_HERE();   // (read without its code: see above)
         pcache_init();
@@ -11485,7 +11478,6 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         st_pipelines++;
         pcache_built_since_save++;
     }
-    if (plk.on) par_mutex().unlock(), plk.on = false;
     dclock.t_pipe = slow_dispatch_timing() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     end_pass(cmd);
     grid_patch_want = indirect, grid_patch_at = UINT64_MAX;
@@ -11644,49 +11636,6 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             char what[64];
             snprintf(what, sizeof what, "dispatch %ux%ux%u prog %016llx img%zu", x, y, z, (unsigned long long)p.key, i);
             dump_image(cmd, dump_written()[i].tex, dump_written()[i].level, 0, what);
-        }
-}
-
-// (longshot) In the parallel replay's dry pass, in stream order on the replay thread: the images this draw or dispatch
-// writes marked as the GPU's (texture_written) before any worker runs. Workers record out of order, and that mark was
-// made as each reached its draw: one ahead of it sampled a render target or compute output as never written and
-// uploaded stale guest memory over it, an upload that runs after the earlier segment's work. Targets change address
-// and size as the camera moves: flashes of a lit scene gone black or white in motion (22 per 1000 frames moving, 45
-// against 2 with serial replay)
-thread_local bool dry_last_valid = false;   // (dry_mark_written's last targets are this dry pass's)
-void dry_marks_begin() { dry_last_valid = false; }
-void dry_mark_written(NvnState& s, bool compute, bool first) {
-    if (!compute) {
-        // (longshot) the targets as the draw before had them are skipped, within one dry pass only: `first` is the pass's first draw OR
-        // dispatch, so when a command buffer began with a dispatch its first draw was compared with the last draw of the dry pass
-        // before, a frame ago. With the camera still the game's targets come back at the same addresses, the state matched, and
-        // a target made again since (its texture retired at the present between) went unmarked: the later segment uploaded
-        // stale memory over it and the whole scene was black for a frame. dry_marks_begin() forgets the last targets at each
-        // dry pass
-        static thread_local decltype(s.rt) last;
-        if (!first && dry_last_valid && !std::memcmp(&last, &s.rt, sizeof last)) return;
-        dry_last_valid = true;
-        std::memcpy((void*)&last, (const void*)&s.rt, sizeof last);
-        const Targets at = targets(s);
-        for (int i = 0; i < at.n; i++)
-            if (at.color[i]) texture_written(at.color[i], "the dry pass (a draw's target)");
-        if (at.depth) texture_written(at.depth, "the dry pass (a draw's depth)");
-        return;
-    }
-    const uint8_t types[8]{};
-    const Program* p = program_for(s, ProgramKind::Compute, types);
-    if (!p || !p->ready.load(std::memory_order_acquire) || p->failed) return;
-    for (const Stage& st : p->stages)
-        for (const auto& d : st.info.image_descriptors) {
-            if (!d.is_written) continue;
-            const VkImageViewType vt = view_type(d.type);
-            for (uint32_t k = 0; k < d.count; k++) {
-                const uint32_t handle = handle_of(s, st, d, k);
-                Texture* tex = nullptr;
-                uint32_t level = 0;
-                if (handle && texture_view_of(handle, vt, ViewUse::Storage, image_format(d.format), &tex, &level) && tex)
-                    texture_written(tex, "the dry pass (a dispatch's storage image)");
-            }
         }
 }
 
@@ -12092,7 +12041,6 @@ BufferRef stream_copy(const void* src, uint64_t n) {
 }
 
 UniformUpload uniform_upload(uint64_t size) {
-    ParLock lk;
     if (!cur || !cur->stream || !cur->mapped || !size) return {};
     const uint64_t align = std::max<uint64_t>(256, dev.props.limits.minUniformBufferOffsetAlignment);
     const uint64_t at = stream_alloc(size, align);

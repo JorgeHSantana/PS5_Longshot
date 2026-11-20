@@ -272,7 +272,6 @@ static mkwvk::threaded::Choice row;   // (the menu's threaded_choice, for the ar
 namespace rec {
 @@MODE_ENUM@@
 inline bool (*g_setting_thread)() = nullptr;
-@@PARALLEL@@
 @@MODE_FROM_ENV@@
 }
 @@RENDER_THREAD_MODE@@
@@ -310,11 +309,8 @@ READER_CASES = [
     (AUTO, 2, 0, {"RX_VK_ASYNC": "1"}, 1, REC_OFF, 0),
     (OFF, 16, 0, {"RX_VK_ASYNC": "1", "RX_VK_RECORDER": "thread"}, 1, THREAD, 0),
     (ON, 16, 0, {"RX_VK_ASYNC": "0", "RX_VK_RECORDER": "sync"}, 0, SYNC, 0),
-    # (the recorder thread refused beside the parallel replay, the row's as the switch's; nothing to refuse with 4 cores)
-    (AUTO, 6, 0, {"RX_VK_PARALLEL": "2"}, 1, REC_OFF, 1),
-    (AUTO, 4, 0, {"RX_VK_PARALLEL": "2"}, 1, REC_OFF, 0),
 ]
-SWITCHES = ("RX_VK_ASYNC", "RX_VK_RECORDER", "RX_VK_PARALLEL")
+SWITCHES = ("RX_VK_ASYNC", "RX_VK_RECORDER")
 
 
 def block(text, marker):
@@ -445,6 +441,14 @@ def check_sources(s):
         if "menu_threaded_rendering" in s[key] or re.search(r"\bWhy::Auto(Cpus|FewCpus)\b", s[key]):
             bad.append("%s still names menu_threaded_rendering or Why::AutoCpus: the row has two halves now" % key)
 
+    # (the segment workers stay gone, 19 Nov 2026: 3-35% slower on every PC measured; the recorder thread is back)
+    for key in ("menu", "menu_h", "replay", "recorder", "policy", "native", "rule", "internal"):
+        if re.search(r"\b(menu_segment_workers|par_ceiling|par_threads|workers_for|kAutoWorkerCores|kMaxWorkers|ParLock|"
+                     r"par_active|parallel_configured)\b", s[key]):
+            bad.append("%s still names the segment workers" % key)
+    if not re.search(r'^GONE\(RX_VK_PARALLEL, ', s["switches"], re.M):
+        bad.append("switches.def: RX_VK_PARALLEL is not a GONE row")
+
     # (said where the settings and the switches are)
     settings, docs = s["settings"], s["docs"]
     table = [line for line in settings.splitlines() if line.startswith("| | Developer: Threaded rendering | Auto, On, Off")]
@@ -506,7 +510,6 @@ def check_readers(cxx, s, tmp, name="readers"):
     hook = re.search(r"\(rec::g_setting_thread = (\w+), true\)", s["replay"])
     enum = re.search(r"enum Mode : int \{[^}]*\};", s["recorder"])
     source = READERS_FIXTURE.replace("@@MODE_ENUM@@", enum.group(0) if enum else "") \
-                            .replace("@@PARALLEL@@", block(s["recorder"], "inline bool parallel_configured() {")) \
                             .replace("@@MODE_FROM_ENV@@", block(s["recorder"], "inline int mode_from_env(bool* refused) {")) \
                             .replace("@@RENDER_THREAD_MODE@@", block(s["replay"], "int render_thread_mode() {")) \
                             .replace("@@HOOK@@", hook.group(1) if hook else "nullptr")

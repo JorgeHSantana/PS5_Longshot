@@ -65,6 +65,8 @@ writes at run time goes in two subfolders, which the host creates (`host/game_la
 - `gpu/vk` replays it on Vulkan 1.3. Guest pools are imported as host memory and mirrored in VRAM. SM86 programs go
   through Eden's recompiler to SPIR-V, and mesh and task programs use `VK_EXT_mesh_shader` or a compute fallback
   (`RX_VK_MESH_SHADERS`).
+- Its threads: the game's own, one render thread that replays every command buffer, from 6 cores a recorder thread that
+  makes the driver's calls for it, and a presenter thread ([threads.md](threads.md)).
 - `gpu/vk` is the only renderer. Without a usable Vulkan nothing is drawn, and the log says "no renderer".
 - The interface between the host and the renderer is `MkwVkHost` / `MkwVkRenderer` in
   [`gpu/vk/vk_api.h`](../../../gpu/vk/vk_api.h). Any change to it bumps `MKWVK_API_VERSION`, and both binaries are rebuilt
@@ -94,10 +96,11 @@ frame k.
 3. The main thread runs **the game's frame wait**: `nvnSyncWait`, with no timeout, on the previous present's fence. The
    wait ends at `G(k-1)`.
 4. The main thread signals `S(k)` (`nvnEventSignal`), with a capture of what was written since the submits.
-5. `P(k)` is handed over (`RX_VK_PRESENT_AFTER_SIGNAL`, on). The render thread replays jobs as they come: the
-   submits' memory work, then the signal's job, which records the frame's draws in parts of `RX_VK_CHUNK` (240) draws
-   and submits each part when it ends. With **the frame gate** (`RX_VK_FRAME_GATE=1`, a test) it starts frame k's
-   jobs only once `P(k)` is handed over: whole frames.
+5. `P(k)` is handed over (`RX_VK_PRESENT_AFTER_SIGNAL`, on). The render thread replays jobs as they come: the submits'
+   memory work, then the signal's job, which records the frame's draws in parts and submits each part when it ends: a
+   part ends at the first place the game has ended its render pass from `RX_VK_PART_MIN` (120) draws on (a submission's
+   first from `RX_VK_PART_FIRST`, 32), and at `RX_VK_PART_MAX` (512) at most ([threads.md](threads.md)). With **the
+   frame gate** (`RX_VK_FRAME_GATE=1`, a test) it starts frame k's jobs only once `P(k)` is handed over: whole frames.
 6. The present's job records the copy into the window and calls `vkQueuePresentKHR`. On Linux, NVIDIA's driver holds
    that call until the copy is done.
 7. Meanwhile the game's threads build the next frame. Each readback (`nvnBufferInvalidateMappedRange`) waits for the

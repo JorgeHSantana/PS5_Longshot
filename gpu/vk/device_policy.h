@@ -387,8 +387,7 @@ struct DevicePolicy {
     // the written-out form (Windows not tried). RX_VK_GM_LOOP. Site (vk_coopmat.cpp table_loop_wanted), step 7
     bool global_table_loop = false;
     // Intel's Windows driver on a discrete card: occlusion counts copied to host memory, not read from the pool (an Arc
-    // B580, 34.8 -> 45.8 fps in the market; seen on driver 101.9154). Off with the parallel replay, at the site.
-    // RX_VK_OCC_COPY. Read (vk_replay.cpp occ_copy_wanted)
+    // B580, 34.8 -> 45.8 fps in the market; seen on driver 101.9154). RX_VK_OCC_COPY. Read (vk_replay.cpp occ_copy_wanted)
     bool occ_copy = false;
     // Intel on Windows, the Arc B-series from driver 101.9154: the Intel shader compiles row's Auto is side by side (a
     // B580 froze 248-409 s at an area's first visit one at a time). Site (intel_compiles.h, vk_menu.cpp), step 4
@@ -400,9 +399,12 @@ struct DevicePolicy {
     // The Steam Deck's own APU: its peak clock state while its power level is auto, which the site reads later (+8% to
     // +46% for about 4 W). RX_VK_GPU_CLOCK. Site (gpu_clock.h, vk_gpu_clock.cpp), step 2
     bool gpu_clock_peak = false;
-    // NVIDIA: a queue kept for the presenter thread, which is itself off. The study of these rules doubts it: nothing
-    // uses the queue. RX_VK_PRESENT_THREAD. Site (create_device), step 5
-    bool presenter_queue = false;
+    // The Steam Deck and the handhelds Steam runs as one (auto_profile's hw.handheld): a CPU read of GPU results whose writer
+    // is the newest submission handed out is read without its wait, a frame late (readback_late.h `newest`), on top of the
+    // culling camera block every PC reads late: on a Steam Deck OLED 24.3 -> 30.1 fps on a heavy view, 21.9 -> 26.4 in the
+    // main outdoor area (#238). On an RTX 3090 (Linux) the waits are 0.04-0.2 ms and the rule changed nothing measurable.
+    // RX_VK_READBACK_LATE (its rules, read at the site; set, it replaces this). Read (vk_replay.cpp readback_late_wanted)
+    bool readback_late_newest = false;
     // Linux with NVIDIA's own driver and 20 GB of RAM or less: the pipeline cache's file may be left unread, where
     // NVIDIA's own cache is warm and programs load at create (pcache_load.h decides with those). RX_VK_PCACHE_LOAD. Site
     // (vk_draw.cpp pcache_load_off), step 4
@@ -553,7 +555,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
     p.occ_copy = f.driver_id == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS && f.discrete();
     p.fsr4_tune = f.amd();
     p.gpu_clock_peak = f.amd() && f.deck_apu();
-    p.presenter_queue = f.nvidia();
+    p.readback_late_newest = f.handheld();
     p.pcache_small_pc = !f.windows && f.driver_id == VK_DRIVER_ID_NVIDIA_PROPRIETARY && (f.ram >> 20) && (f.ram >> 20) <= 20480;
 
     // sizes
@@ -770,7 +772,7 @@ template <class Line> void device_policy_log(const DevicePolicy& p, const Device
         l.flag("intel_side_by_side_auto", p.intel_side_by_side_auto, false, "101.9154");
         l.flag("fsr4_tune", p.fsr4_tune, p.set(Sw::fsr4_tune));
         l.flag("gpu_clock_peak", p.gpu_clock_peak);
-        l.flag("presenter_queue", p.presenter_queue);
+        l.flag("readback_late_newest", p.readback_late_newest);
         l.flag("pcache_small_pc", p.pcache_small_pc);
         line(l.text);
     }

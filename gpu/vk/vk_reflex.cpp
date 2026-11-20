@@ -327,6 +327,19 @@ void reflex_presented() {
     r.presenting = 0;
 }
 
+void reflex_present_handed_off() {
+    Reflex& r = rx();
+    std::lock_guard lk(r.mu);
+    r.presenting = 0;   // (its end is the presenter thread's: reflex_present_end)
+}
+
+void reflex_present_end(uint64_t id) {
+    Reflex& r = rx();
+    std::lock_guard lk(r.mu);
+    if (!on() || !id) return;
+    mark(VK_LATENCY_MARKER_PRESENT_END_NV, id);
+}
+
 void reflex_sleep() {
     Reflex& r = rx();
     uint64_t generation, value;

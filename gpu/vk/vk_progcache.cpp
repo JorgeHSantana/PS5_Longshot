@@ -1164,11 +1164,12 @@ unsigned usable_cpus() {
     return n < 64 ? std::clamp(n, 1u, all) : all;
 }
 /// (longshot) The physical cores among the logical processors the process may run on: Threaded rendering's Auto count
-/// (threaded_rendering.h, whose tiers were measured by cores: on 4 cores the recorder thread made a third of the frames long,
-/// 18 Nov). GetLogicalProcessorInformation's cores, one mask each of its logical processors (on Linux host/posix's, from sysfs
-/// core_id and physical_package_id), each counted once when any of its logical processors is in the affinity mask
-/// (threaded::cores_of), so a Steam Deck's 4 cores and 8 threads count 4. The affinity mask not read: every core. The cores
-/// not read (the call fails, or no core is in the mask): usable_cpus, the logical count, as before. Never more than that
+/// (threaded_rendering.h, whose Auto was measured by cores: on 4 cores the old recorder thread made a third of the frames
+/// long, 18 Nov). GetLogicalProcessorInformation's cores, one mask each of its logical processors (on Linux host/posix's,
+/// from sysfs core_id and physical_package_id), each counted once when any of its logical processors is in the affinity
+/// mask (threaded::cores_of), so a Steam Deck's 4 cores and 8 threads count 4. The affinity mask not read: every core. The
+/// cores not read (the call fails, or no core is in the mask): usable_cpus, the logical count, as before. Never more than
+/// that
 unsigned usable_cores() {
     DWORD_PTR proc = 0, sys = 0;
     if (!GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys) || !proc) proc = ~(DWORD_PTR)0;

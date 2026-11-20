@@ -47,9 +47,9 @@ def check_source():
     if make.index("if (p->sparse) {   // (the blocks with memory)") > make.index("vkCmdCopyBuffer(upload_command_buffer(), p->buffer, p->mirror, 1, &all)"):
         raise SystemExit("vk_memory.cpp: mirror_make() copies the whole pool before it looks whether the mirror is sparse")
     bind = block(mem, "BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {")
-    fast = bind[:bind.index("ParLock plk;")]
+    fast = bind[:bind.index("std::lock_guard lk(pools_mu);")]
     need(fast, ["sparse_has(*p, off, size)", "sparse_touch(*p, off, size);"], "gpu_buffer_bind()'s path without the lock")
-    slow = bind[bind.index("ParLock plk;"):]
+    slow = bind[bind.index("std::lock_guard lk(pools_mu);"):]
     at = slow.index("if (p->sparse && !sparse_has(*p, off, size)) {")
     if not at < slow.index("mirror_sync(*p);") < slow.index("return remember({p->mirror, off, size, 0});"):
         raise SystemExit("vk_memory.cpp: gpu_buffer_bind() can hand out a sparse mirror's block with no memory")

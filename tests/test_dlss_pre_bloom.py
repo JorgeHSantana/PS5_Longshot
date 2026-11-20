@@ -90,7 +90,6 @@ def check_sources():
     assert 'if (r.value == &opts.dlss_pre_bloom) return "dlss_pre_bloom";' in menu, "ini_key: dlss_pre_bloom"
     assert 'getenv("RX_VK_DLSS_PRE_BLOOM"); e && *e) env_override(&opts.dlss_pre_bloom, !env_value_off(e));' in menu, \
         "RX_VK_DLSS_PRE_BLOOM over the row for a run"
-    assert 'env_switch("RX_VK_PARALLEL") >= 2' in wanted, "pre_bloom_wanted: off with the parallel replay"
     assert "mode == ur::DLAA" in wanted, "pre_bloom_wanted: DLAA only"
 
 

@@ -26,8 +26,6 @@
 #include "vk_framegen.h"
 #include "vk_internal.h"
 #include "vk_new.h"
-#include "presenter_queue.h"
-static_assert(mkwvk::kQueueGraphics == VK_QUEUE_GRAPHICS_BIT && mkwvk::kQueueCompute == VK_QUEUE_COMPUTE_BIT);
 #include "gpu_choice.h"
 #include "vk_menu.h"
 #include "vk_bug_report.h"
@@ -512,20 +510,6 @@ bool create_device() {
             if ((families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) && !(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))
                 compute_family = i;
     }
-    // (longshot) The presenter thread's own queue (vk_replay.cpp; RX_VK_PRESENT_THREAD=0: none): a second queue of the replay's
-    // family (NVIDIA's has 16), else a queue of a compute-only family (RADV: one graphics queue), its family's next free one. A
-    // device without either presents on the game's thread, as before
-    const char* pt_env = getenv("RX_VK_PRESENT_THREAD");
-    // (hookshot) NVIDIA Optimus: enable dedicated presentation thread/queue by default on NVIDIA dGPUs (0x10DE)
-    // to decouple swapchain presentation over PCIe from the replay render loop.
-    const bool presenter_wanted = pt_env ? (atoi(pt_env) != 0) : (dev.props.vendorID == 0x10DE);
-    uint32_t presenter_family = UINT32_MAX, presenter_index = 0;
-    if (presenter_wanted) {   // (presenter_queue.h: never a queue another part of the renderer takes)
-        std::vector<QueueFamilyInfo> qf(n);
-        for (uint32_t i = 0; i < n; i++) qf[i] = {(uint32_t)families[i].queueFlags, families[i].queueCount};
-        if (!presenter_queue_pick(qf.data(), n, dev.queue_family, compute_family, presenter_family, presenter_index))
-            presenter_family = UINT32_MAX;
-    }
     static const float priorities[2] = {1.0f, 1.0f};
     std::vector<VkDeviceQueueCreateInfo> qs;
     auto queues = [&](uint32_t family, uint32_t count) {
@@ -537,10 +521,9 @@ bool create_device() {
     };
     queues(dev.queue_family, 1);
     if (compute_family != UINT32_MAX) queues(compute_family, 1);
-    if (presenter_family != UINT32_MAX) queues(presenter_family, presenter_index + 1);
     (void)q;
-    // (and the presenter's waits for its presents to be shown: VK_KHR_present_id + VK_KHR_present_wait, where the driver has them)
-    const bool want_present_wait = presenter_family != UINT32_MAX && has_extension(exts, VK_KHR_PRESENT_ID_EXTENSION_NAME) &&
+    // (the presenter thread's waits for its presents to be shown: VK_KHR_present_id + VK_KHR_present_wait, where the driver has them)
+    const bool want_present_wait = has_extension(exts, VK_KHR_PRESENT_ID_EXTENSION_NAME) &&
                                    has_extension(exts, VK_KHR_PRESENT_WAIT_EXTENSION_NAME);
     if (want_present_wait)
         for (const char* name : { VK_KHR_PRESENT_ID_EXTENSION_NAME, VK_KHR_PRESENT_WAIT_EXTENSION_NAME }) {
@@ -839,16 +822,10 @@ bool create_device() {
     dev.present_queue = VK_NULL_HANDLE;
     dev.present_family = dev.queue_family;
     if (compute_family != UINT32_MAX) vkGetDeviceQueue(dev.device, compute_family, 0, &dev.present_queue), dev.present_family = compute_family;
-    dev.presenter_queue = VK_NULL_HANDLE;
-    if (presenter_family != UINT32_MAX) {
-        vkGetDeviceQueue(dev.device, presenter_family, presenter_index, &dev.presenter_queue), dev.presenter_family = presenter_family;
+    {
         const VkPhysicalDevicePresentIdFeaturesKHR* pid = reflex_present_id_features();
         dev.present_wait = want_present_wait && (pid ? pid->presentId : present_id.presentId) && present_wait.presentWait;
-        logf("vk: the presenter thread's queue: family %u, queue %u%s; waits for its presents to be shown: %s", presenter_family,
-             presenter_index, presenter_family == dev.queue_family ? " (the replay's family)" : " (a compute family)",
-             dev.present_wait ? "yes (VK_KHR_present_wait)" : "no");
-    } else if (presenter_wanted) {
-        logf("vk: no second queue for the presenter thread: presents on the game's thread");
+        logf("vk: the presenter thread waits for its presents to be shown: %s", dev.present_wait ? "yes (VK_KHR_present_wait)" : "no");
     }
     if (dev.buffer_marker) buffer_markers_init();
     coopmat_init();
@@ -1160,7 +1137,6 @@ bool create_swapchain(uint32_t width, uint32_t height) {
         sharing[sharing_n++] = family;
     };
     if (dev.present_queue_supported) share(dev.present_family);
-    if (dev.presenter_supported) share(dev.presenter_family);   // (the presenter thread's queue)
     if (sharing_n > 1) {   // (presented from another family: no ownership moves)
         ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
         ci.queueFamilyIndexCount = sharing_n;
@@ -1746,12 +1722,6 @@ bool started_up() {
 }
 // (the window's surface made: the presents' own queue kept where its family can present to it, create_device)
 static void choose_present_queue() {
-    dev.presenter_supported = false;
-    if (dev.presenter_queue) {
-        VkBool32 ok = VK_FALSE;
-        dev.presenter_supported = vkGetPhysicalDeviceSurfaceSupportKHR(dev.physical, dev.presenter_family, dev.surface, &ok) == VK_SUCCESS && ok;
-        if (!dev.presenter_supported) logf("vk: the presenter thread's queue family %u cannot present to the window: presents on the game's thread", dev.presenter_family);
-    }
     dev.present_queue_supported = false;
     if (!dev.present_queue) return;
     VkBool32 ok = VK_FALSE;

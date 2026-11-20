@@ -37,21 +37,18 @@ expect about 21 fps at the GPU's normal clock, and about 28 to 31 with the clock
 spins in the castle town cost about 30%, and loading into a busy outdoor save stutters for a minute or two while the world
 streams in.
 
-## Two switches that help on the Deck
+## A switch that helps on the Deck
 
-Add these lines to `longshot_env.txt` in the game folder ([what the file is](advanced.md#switches-longshot_envtxt)):
+Late readbacks are on by default on the Deck: the game no longer waits on the GPU before it reads back small textures,
+about +20% (the main outdoor area from 21.9 to 26.4 fps). `RX_VK_READBACK_LATE=0` in `longshot_env.txt` turns them off.
+One more line helps; add it to `longshot_env.txt` in the game folder ([what the file is](advanced.md#switches-longshot_envtxt)):
 
 ```
-RX_VK_READBACK_LATE=newest
 HOS_SHORT_SLEEP_TIMER=1
 ```
 
-- `RX_VK_READBACK_LATE=newest` stops the game waiting on the GPU before it reads back small textures: about +20% on a
-  Deck (the main outdoor area from 21.9 to 26.4 fps). It is off by default while it is tested on desktops.
 - `HOS_SHORT_SLEEP_TIMER=1` makes the game's short waits use a finer timer: a few percent, and a quicker reaction to
-  input.
-
-Both are safe together. If a scene still hitches, [report slow performance](performance-report.md).
+  input. If a scene still hitches, [report slow performance](performance-report.md).
 
 ## Loading into a save, and the GPU clock
 

@@ -163,7 +163,7 @@ These override a menu row for the run only (kind `player`).
 | `RX_VK_PACE=0/1`, `RX_VK_UPSCALE=0..2` | Frame pacing, upscaling filter |
 | `RX_VK_DLSS=0/1/2`, `RX_VK_FSR4=0/1/2`, `RX_VK_XESS=0/1/2`, `RX_VK_FSR=0/1` | Upscaler: `0` never, `1` the upscaler, `2` its native AA |
 | `RX_VK_FRAMEGEN=0`, `RX_VK_FRAMEGEN_MULT=2..8`, `RX_VK_DLSS_FG=0/1`, `RX_VK_FSR_FG=0/1` | Frame generation (`RX_VK_FRAMEGEN=0` keeps it off whatever the menu says) |
-| `RX_VK_ASYNC=0/1`, `RX_VK_RECORDER=sync\|defer\|thread` | Threaded rendering: the render thread, the recorder |
+| `RX_VK_ASYNC=0/1`, `RX_VK_RECORDER=sync\|defer\|thread` | Threaded rendering: the render thread, the recorder (the parallel replay is gone: [threads.md](threads.md)) |
 | `RX_VK_COMPILE_SHADERS=most\|all` | Compile shaders |
 | `RX_VK_NO_INTEL_SERIAL=1/0` | Intel shader compiles: Side by side, One at a time ([below](#intels-compiler-on-windows)) |
 | `RX_VK_ASTC_RGBA8=1` | ASTC as RGBA8 (Debug tab): ASTC textures decoded to RGBA8 instead of BC, which takes much more memory |

@@ -94,7 +94,6 @@ struct Pool {
     VmaAllocation mirror_alloc = nullptr;
     uint64_t synced_gen = 0;     // every page stamped up to this generation is in the mirror
     uint64_t synced_epoch = 0;   // the submission that last brought it up to date
-    uint64_t sync_seg = 0;       // (and the parallel replay's segment whose uploads did)
     uint64_t last_value = 0;     // (the newest submission that bound it: its mirror is in use until that one is done)
     uint64_t direct_write_epoch = 0;   // (the part that last wrote it in guest memory, before it had a mirror)
     uint64_t retired_value = 0;  // (retired: the submission that may still use it)
@@ -998,9 +997,7 @@ bool gpu_pages_on() {
 // from the mirrors at each part's end or written there in place. Not covered: a range memory_note_gpu_write noted where
 // the GPU writes past what is copied back (its pool keeps its mirror: gpu_only), once its submission is done. Kept for good,
 // such a range would bind in place memory the game fills again itself, the rewritten uniforms the snapshot is for. Noted
-// only with the snapshot on (uniform_snapshot_on: nothing else asks). A parallel replay is not made then (RX_VK_PARALLEL,
-// off by default: par_snapshot_serial in vk_replay.cpp records each command buffer on the replay thread); a segment's
-// thread notes nothing all the same, and the guard is not asked while segments record
+// only with the snapshot on (uniform_snapshot_on: nothing else asks)
 struct GpuWrite { uint64_t lo, hi, value; };   // ([lo, hi) in guest memory; its submission's timeline value: UINT64_MAX while it is the one recorded)
 thread_local std::vector<GpuWrite> gpu_writes;   // (by lo, apart: merged where they meet, under the later submission's value)
 thread_local uint64_t gpu_writes_lo = UINT64_MAX, gpu_writes_hi = 0;   // (all of them within: most uniforms are elsewhere)
@@ -1019,7 +1016,7 @@ void memory_gpu_writes_begin() {
 }
 void memory_gpu_writes_note(uint64_t guest, uint64_t size) {
     static const bool on = uniform_snapshot_on();
-    if (!on || !guest || !size || par_active.load(std::memory_order_relaxed)) return;
+    if (!on || !guest || !size) return;
     uint64_t lo = guest, hi = guest + size;
     gpu_writes_lo = std::min(gpu_writes_lo, lo), gpu_writes_hi = std::max(gpu_writes_hi, hi);
     gpu_writes_value = std::max(gpu_writes_value, mem_rec_value);
@@ -2381,8 +2378,9 @@ const std::vector<std::pair<uint64_t, uint64_t>>& capture_ranges_merged() {
 //    pool's own address): no call of ours is made for those reads.
 namespace {
 std::atomic<uint64_t> mem_rec_part{0}, mem_in_place_part{0};
+uint64_t rec_part() { return mem_rec_part.load(std::memory_order_relaxed); }
 void note_in_place_read(bool outside = false) {
-    const uint64_t part = mem_rec_part.load() + (outside ? 1 : 0);
+    const uint64_t part = rec_part() + (outside ? 1 : 0);
     uint64_t seen = mem_in_place_part.load();
     while (seen < part && !mem_in_place_part.compare_exchange_weak(seen, part)) {}
 }
@@ -2414,7 +2412,7 @@ std::atomic<bool> early_any{false}, split_wanted{false};
 void rb_page_note(uint64_t lo, uint64_t hi, uint64_t value, uint64_t part) {   // (wb_pages_mu held)
     if (!rb_writers_on()) return;
     RbWriter w;
-    w.value = value, w.part = part ? part : mem_rec_part.load(std::memory_order_relaxed);
+    w.value = value, w.part = part ? part : rec_part();
     w.work = wr_work.load(std::memory_order_relaxed), w.key = wr_key, w.what = wr_what;
     if (part) w.what = kRbWriterWb, w.key = 0;   // (a mirror's write-back at its part's end: when the CPU can have it)
     if (page_writers.size() > (1u << 20)) page_writers.clear();   // (a diagnostic's memory, bounded)
@@ -2431,20 +2429,14 @@ bool rb_writers_on() {
 }
 /// RX_VK_READBACK_EARLY (vk_replay.cpp's invalidate): a read of pages written in place waits for their writer's part. On by
 /// default where the pools have no mirror (readback_early.h), =0 off.
-/// Not with a parallel replay (RX_VK_PARALLEL=2 or more): its segments' recordings are numbered as parts but never put on the
-/// recordings' timeline (vk_replay.cpp begin_segment_recording), so a read of a page a segment wrote would wait for a part that
-/// never comes (250 ms); and the part a command buffer's segments follow had its write-back late there (ballotstomper, the team
-/// room). The reads then wait for their whole submission, as without the switch
-/// Nor with the render thread (readback_early.h: the rule and its numbers)
+/// Not with the render thread (readback_early.h: the rule and its numbers)
 bool readback_early_on() {
     static const bool on = [] {
         readback_early::Facts f;
-        f.env = getenv("RX_VK_READBACK_EARLY"), f.parallel = getenv("RX_VK_PARALLEL");
+        f.env = getenv("RX_VK_READBACK_EARLY");
         f.render_thread = replay_render_thread_on(), f.mirrors = mirror_on();
         const readback_early::Why w = readback_early::choose(f);
-        if (w == readback_early::OFF_PARALLEL)
-            logf("vk: RX_VK_READBACK_EARLY left off: RX_VK_PARALLEL=%s records segments whose parts a read cannot wait for", f.parallel);
-        else if (w == readback_early::OFF_RENDER_THREAD)
+        if (w == readback_early::OFF_RENDER_THREAD)
             logf("vk: RX_VK_READBACK_EARLY left off: the render thread is on (RX_VK_ASYNC, Threaded rendering), which it was not "
                  "measured with; reads of GPU results wait for their whole submission");
         else if (w == readback_early::ON_SWITCH)
@@ -2481,7 +2473,7 @@ uint64_t memory_work_count() { return wr_work.load(std::memory_order_relaxed); }
 thread_local int ec_kind = 0;   // (RX_VK_LOG_EARLY_CHECK: 2 while memory_note_gpu_write notes a bare or wide storage range)
 void early_in_place_write(uint64_t lo, uint64_t hi, uint64_t value) {
     if (!readback_early_on() || hi <= lo || !early_any.load(std::memory_order_relaxed)) return;
-    const uint64_t part = mem_rec_part.load(std::memory_order_relaxed);
+    const uint64_t part = rec_part();
     early_check_gpu_write(lo, hi, value, part, ec_kind ? ec_kind : hi - lo > (1u << 20) ? 1 : 0);   // (RX_VK_LOG_EARLY_CHECK)
     constexpr uint64_t kPageMask = (1ull << kPageShift) - 1;
     bool hit = false;
@@ -2595,10 +2587,10 @@ int64_t memory_late_wait_ns() { return st_late_wait_ns.load(std::memory_order_re
 // stamps or snapshot yet (the first time it is found), or is late for an earlier capture whose fix is not recorded yet.
 // RX_VK_LATE_FIX=0: the wait
 namespace {
-bool late_fix_on() {   // (not with the parallel replay: its segments' workers record copies out of the captures in any order)
+bool late_fix_on() {
     static const bool on = [] {   // (on unless an off value: env_value_off)
         const char* e = getenv("RX_VK_LATE_FIX");
-        return (!e || !env_value_off(e)) && !(getenv("RX_VK_PARALLEL") && atoi(getenv("RX_VK_PARALLEL")) > 1);
+        return !e || !env_value_off(e);
     }();
     return on;
 }
@@ -3090,7 +3082,7 @@ void late_fix_cpu_read(uint32_t page, VkBuffer buffer, uint8_t* slot) {
     bool fixed = lp.fix_value && lp.fix_value <= mem_completed;   // (the buffer is as the fix left it)
     if (fixed) st_lfx.rd_fixed++;
     if (!fixed && lp.fix_value && lp.fix_value < mem_rec_value) vk_timeline_wait(lp.fix_value), fixed = true, st_lfx.rd_earlier_rec++;
-    if (!fixed && lp.fix_value && lp.fix_part && lp.fix_part != mem_rec_part.load()) {   // (an earlier part of this recording)
+    if (!fixed && lp.fix_value && lp.fix_part && lp.fix_part != rec_part()) {   // (an earlier part of this recording)
         const int waited = lp.fix_part == part_wait_failed ? 0 : vk_part_wait(lp.fix_part, kPartWaitGuard);
         if (waited > 0) fixed = true, st_lf_part_waits++;
         else {
@@ -3109,7 +3101,7 @@ void late_fix_cpu_read(uint32_t page, VkBuffer buffer, uint8_t* slot) {
             st_lfx.rd_not_recorded++;
             for (size_t k = lp.first; k < lp.first + lp.n && k < late_fixes.size(); k++) late_fixes[k].count = 0;
         } else if (lp.fix_map) {
-            if (lp.fix_part == mem_rec_part.load()) st_lfx.rd_this_part++;
+            if (lp.fix_part == rec_part()) st_lfx.rd_this_part++;
             for (size_t k = 0; k < lp.n; k++) lp.fix_map[k].count = 0;
             flush_mapped(lp.fix_alloc, lp.fix_end);
         }
@@ -3191,7 +3183,7 @@ void late_fix_emit() {
             for (auto& [pg, lp] : late_pages)
                 if (!lp.fix_value) {
                     lp.fix_value = mem_rec_value, lp.fix_map = (LateFix*)t->map + lp.first;
-                    lp.fix_alloc = t->alloc, lp.fix_part = mem_rec_part.load(), lp.fix_end = (lp.first + lp.n) * sizeof(LateFix);
+                    lp.fix_alloc = t->alloc, lp.fix_part = rec_part(), lp.fix_end = (lp.first + lp.n) * sizeof(LateFix);
                     if (!snap_pages.empty())   // (its snapshot's slot read by this recording: not given back before it is done)
                         if (const auto sp = snap_pages.find(pg); sp != snap_pages.end()) sp->second.used = std::max(sp->second.used, mem_rec_value);
                     for (auto& [g, cb] : cap_bufs)   // (its buffer kept until this recording is done: it writes there)
@@ -3246,7 +3238,7 @@ void late_fix_emit() {
 // reads of GPU results stop waiting (RX_VK_READBACK_LATE=newest), the game writes those pages again while their submission
 // runs, and on the Steam Deck the capture's wait costs about 17 ms a frame of the replay's "memory sync". RX_VK_LATE_DEFER=0:
 // the wait. Off where pools
-// have mirrors (their syncs copy out of the captures) and with the parallel replay (its workers read the captures too)
+// have mirrors (their syncs copy out of the captures)
 namespace {
 bool mirror_on();   // (below)
 struct LateDefer {
@@ -3262,10 +3254,9 @@ double st_ld_read_wait_ms;
 bool late_defer_on() {   // (readback_early.h's defer: where no pool has a mirror, as RX_VK_READBACK_EARLY unless given)
     static const bool on = [] {
         const char* e = getenv("RX_VK_LATE_DEFER");
-        const char* par = getenv("RX_VK_PARALLEL");
-        const bool v = readback_early::defer(e, mirror_on(), par, readback_early_on());
+        const bool v = readback_early::defer(e, mirror_on(), readback_early_on());
         logf("vk: late pages left to their reads %s", v ? (e ? "on (RX_VK_LATE_DEFER)" : "on, with the early reads (RX_VK_LATE_DEFER=0: off)")
-             : mirror_on() ? "off: the pools have mirrors" : readback_early::parallel(par) ? "off: the parallel replay"
+             : mirror_on() ? "off: the pools have mirrors"
              : e ? "off (RX_VK_LATE_DEFER)" : "off, as the early reads (RX_VK_LATE_DEFER=1: on)");
         return v;
     }();
@@ -3630,7 +3621,7 @@ struct TlPool {
     Pool* p;
     uint64_t gen;
 };
-thread_local TlPool tl_pools[1024];   // (a parallel replay thread's: by 64 KB page, read without the lock)
+thread_local TlPool tl_pools[1024];   // (by 64 KB page, read without the lock)
 
 Pool* pool_of(uint64_t guest, uint64_t size) {
     if (!size || size > UINT64_MAX - guest) return nullptr;
@@ -4039,7 +4030,6 @@ uint64_t device_vram_bytes() {
 bool msync_pass_add(Pool& p, VkBuffer buf, const std::vector<VkBufferCopy>& rs);
 void msync_pass_flush();
 void msync_pass_report();
-extern bool msync_batching;
 namespace {
 // (longshot) room past the budget for the one hottest pool the full mirrors left out, while VRAM has it (mirrors_by_heat)
 uint64_t mirror_heat_extra = 0;
@@ -4483,7 +4473,7 @@ void cut_cpu_words(const Pool& p, std::vector<VkBufferCopy>& runs) {
 // lists pointing into a freed map node: the write-back copied with garbage handles and the device was lost (the
 // daytime title scene, whose pools cross chunk ends). Retired pools are kept (a few, never reused). ----
 // (Extracted from the table, not erased: the node, and the Pool in it, stay where they were, so the mirror's lists and
-// a parallel replay thread's pool cache still point at a live one.)
+// the pool cache still point at a live one.)
 std::deque<std::map<uint64_t, Pool>::node_type> retired_pools;
 
 void retire_pool(std::map<uint64_t, Pool>::iterator it) {
@@ -4661,7 +4651,6 @@ void mirror_sync(Pool& p) {
 #endif
     late_fix_emit();   // (the late pages' fix, before this copies out of a capture's buffer)
     p.synced_epoch = mirror_epoch;
-    p.sync_seg = texture_segment();
     mirror_synced.push_back(&p);
     std::vector<VkBufferCopy> runs;   // (from guest memory)
     std::map<VkBuffer, std::vector<VkBufferCopy>> cap_runs;   // (from the captures' copies)
@@ -4761,7 +4750,7 @@ void mirror_sync(Pool& p) {
         for (const VkBufferCopy& r : rs) st_sync_bytes += (int64_t)r.size, gp.bytes += r.size;
         st_sync_copies += (int64_t)rs.size();
     }
-    if (!msync_batching) msync_pass_flush();
+    msync_pass_flush();
     if (runs.empty()) return;
     checkpoint_mark(upload_command_buffer(), p.lo, 'm');
     GprofSpan gp(upload_command_buffer(), "msync copies (CPU pages live from guest memory -> mirror)");
@@ -4872,38 +4861,13 @@ static void wb_skips_report() {
 // one after, and the exposure steps (the light dimming or flaring for a frame). So each submission first copies those
 // pages from guest memory into the mirror, on the GPU as its work starts, last of the uploads: what the CPU wrote by then is what the
 // GPU adds to. ----
-// (longshot) A parallel replay's recordings share one submission (mirror_epoch) and its one write-back at its end: the part
-// before the segments, each segment and the recording after them (vk_replay.cpp replay_handle). A refresh in a later one would
-// copy the guest's page, which has none of the submission's GPU writes, over what the recordings ahead of it had written in the
-// mirror: OoT's exposure sum would come back ~0 and every frame be too bright. So a recording that joined an open submission
-// refreshes a page only when every recording ahead of it in the queue is made and none of them may have written the page: the copy
-// then brings the CPU's writes and wipes nothing (and a page first read in the middle of a submission is refreshed ahead of its first
-// use, unless the recordings up to that use were all made before it was read). What they may have written are the GPU write
-// hazards: every range bound for writing in the mirror, and the ranges a program may write that are not copied back (a bare table
-// entry's guessed range past its first 64 bytes, the pointer table's, a wide binding: vk_draw.cpp, memory_note_gpu_write). A
-// recording that opens its submission, or comes after its write-back (frame generation's), refreshes every page as before: serial
-// replay records the same copies. With RX_VK_FOLLOW_STORES (stores through the page table, bound nowhere) a joining one refreshes
-// none.
+// (longshot) A recording that joined an open submission (a part after its first, or frame generation's after its write-back)
+// refreshes a page only with RX_VK_FOLLOW_STORES off (stores through the page table, bound nowhere, may have written it)
 namespace {
 std::unordered_map<uint32_t, uint64_t> rb_pages;   // (guest page -> mirror_epoch it was last read at)
 std::atomic<int64_t> st_rb_refresh{0}, st_rb_held{0};
 // (the open submission the recording this thread is making joined; 0: none: it opens one, or comes after one's end)
 thread_local uint64_t rb_joined = 0;
-// (the GPU write hazards of submission rb_hazards_epoch, by guest address, with their recording's place in the queue
-// (texture_segment); kept past its write-back, for the recording that ends it)
-struct RbHazard {
-    uint64_t lo, hi, seg;
-};
-std::vector<RbHazard> rb_hazards;
-uint64_t rb_hazards_epoch = 0;
-// (a parallel replay's segments: the submission, the first one's order (texture_segment) and how many; the ones made, by order)
-struct RbSegments {
-    uint64_t epoch = 0, base = 0, n = 0, made = 0;
-} rb_segs;
-void rb_hazard_locked(uint64_t lo, uint64_t hi) {   // (pools_mu held)
-    if (rb_hazards_epoch != mirror_epoch) rb_hazards.clear(), rb_hazards_epoch = mirror_epoch;
-    rb_hazards.push_back({lo, hi, texture_segment()});
-}
 }
 void memory_note_readback(uint64_t guest, uint64_t size) {
     if (!size || size > 0x4000) return;   // (small results only: meters and counters)
@@ -4921,7 +4885,6 @@ void memory_note_gpu_write(uint64_t gpu, uint64_t size) {
     memory_gpu_writes_note(guest, size);   // (RX_VK_UB_SNAPSHOT's guard: a uniform range among them is bound in place)
     if (mem_check_on()) mem_check_gpu_only(guest, size);   // (RX_VK_MEM_CHECK: these pages' GPU words are in the mirror alone)
     std::lock_guard lk(pools_mu);
-    rb_hazard_locked(guest, guest + size);
     // and RX_VK_READBACK_EARLY's writers: a bare storage pointer's guessed range or a wide binding is written in
     // place where pools have no mirror, and no page record held it, so a read let go at an earlier writer's part could come
     // back before it (zeldaootr's review of https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/303, finding 4: on the Steam
@@ -4941,34 +4904,16 @@ void memory_rb_recording_begun() {
     std::lock_guard lk(pools_mu);
     rb_joined = mirror_upload ? mirror_epoch : 0;
 }
-void memory_rb_segments_begin(uint64_t base, uint64_t n) {
-    std::lock_guard lk(pools_mu);
-    rb_segs = {mirror_epoch, base, n, 0};
-}
 /// Records the refresh copies into the submission's upload command buffer; true when it recorded any
 bool memory_rb_refresh(VkCommandBuffer up) {
     std::lock_guard lk(pools_mu);
     static const bool follow_stores = env_on("RX_VK_FOLLOW_STORES");
     const bool joined = rb_joined && rb_joined == mirror_epoch;
-    const uint64_t seg = texture_segment();
-    bool ahead_made = !follow_stores;   // (every recording ahead of this one in the queue made, and what they may write known)
-    if (joined && rb_segs.epoch == mirror_epoch && seg >= rb_segs.base && seg - rb_segs.base < rb_segs.n) {
-        const uint64_t k = seg - rb_segs.base;   // (a segment's: the ones before it made, and this one now)
-        const uint64_t below = k < 64 ? (1ull << k) - 1 : ~0ull;
-        ahead_made = ahead_made && k < 64 && (rb_segs.made & below) == below;
-        if (k < 64) rb_segs.made |= 1ull << k;
-    }
     if (rb_pages.empty() || !up) return false;
     // (no pool has a mirror, as on an integrated GPU: no page has one to be copied into, and each was still looked up among the
     // pools at every recording. The pages not read for a while still go, every 64th time)
     static uint32_t unmirrored = 0;
     if (st_mirrors == st_mirrors_freed && (++unmirrored & 63)) return false;   // (made and freed: a sparse mirror may hold no byte yet)
-    auto written_ahead = [&](uint64_t lo, uint64_t hi) {   // (may be, by a recording ahead of this one in its submission)
-        if (rb_hazards_epoch != mirror_epoch) return false;
-        for (const RbHazard& h : rb_hazards)
-            if (h.seg < seg && h.lo < hi && lo < h.hi) return true;
-        return false;
-    };
     std::map<Pool*, std::vector<VkBufferCopy>> by_pool;
     for (auto it = rb_pages.begin(); it != rb_pages.end();) {
         if (it->second + 600 < mirror_epoch) { it = rb_pages.erase(it); continue; }   // (not read for a while)
@@ -4980,7 +4925,7 @@ bool memory_rb_refresh(VkCommandBuffer up) {
         Pool& p = pit->second;
         if (g < p.lo || g >= p.hi || p.mstate != Pool::MIRROR_ON || !p.mirror) continue;
         const uint64_t a = g - p.lo, b = std::min(g + 4096, p.hi) - p.lo;
-        if (joined && (!ahead_made || written_ahead(p.lo + a, p.lo + b))) {   // (not here: see above)
+        if (joined && follow_stores) {   // (not here: see above)
             st_rb_held++;
             continue;
         }
@@ -5115,7 +5060,6 @@ uint64_t gpu_pool_end(uint64_t gpu) {
     // (storage-buffer tables ask this per entry, and the entries of one table sit in one pool: the locked lookup of a
     // pool was ~8% of replay time before buffer binds cached it)
     if (guest_span_cached(gpu, &lo, &hi)) return hi;
-    ParLock plk;   // (before pools_mu, always)
     std::lock_guard lk(pools_mu);
     if (game_pool_of(gpu, lo, hi)) {
         guest_span_store(lo, hi);
@@ -5127,7 +5071,6 @@ uint64_t gpu_pool_end(uint64_t gpu) {
 uint64_t gpu_pool_start(uint64_t gpu) {   // (EvilOOT) where it begins
     uint64_t lo, hi;
     if (guest_span_cached(gpu, &lo, &hi)) return lo;
-    ParLock plk;
     std::lock_guard lk(pools_mu);
     if (game_pool_of(gpu, lo, hi)) {
         guest_span_store(lo, hi);
@@ -5150,7 +5093,6 @@ uint64_t gpu_pool_piece(uint64_t gpu, uint64_t n, bool& in_pool) {
         guest = host->gpu_guest(gpu);
     }
     if (!n) return 0;
-    ParLock plk;   // (before pools_mu, always)
     std::lock_guard lk(pools_mu);
     // (pool_lookup's pool: the last one starting at or below guest)
     const auto it = std::upper_bound(guest_pools.begin(), guest_pools.end(), guest, [](uint64_t a, const GuestPool& p) { return a < p.lo; });
@@ -5216,9 +5158,8 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
             return m.ref;
     }
     // (a read binding of a pool this thread found before and whose mirror is in use this submission or that has none,
-    // without the lock: every thread's, the replay thread's too (each draw binds several uniform buffers: the pool's
-    // lookup under the lock was ~8% of the replay's time in a race); the rest under it, as below)
-    const bool par = par_active.load(std::memory_order_relaxed);
+    // without the lock (each draw binds several uniform buffers: the pool's lookup under the lock was ~8% of the replay's
+    // time in a race); the rest under it, as below)
     TlPool& tl = tl_pools[(guest >> 16) & 1023];
     if (!written && tl.p && tl.gen == pools_gen.load(std::memory_order_relaxed) && guest >= tl.p->lo &&
         guest <= tl.p->hi && size <= tl.p->hi - guest) {   // (longshot: no wrap-around for a huge size, as pool_of)
@@ -5230,17 +5171,16 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
             note_in_place_read(!mirror_upload);
             return remember({p->buffer, off, size, 0});
         }
-        if (p->mstate == Pool::MIRROR_ON && p->synced_epoch == mirror_epoch && p->sync_seg <= texture_segment() &&
+        if (p->mstate == Pool::MIRROR_ON && p->synced_epoch == mirror_epoch &&
             sparse_has(*p, off, size)) {   // (a sparse mirror's block with no memory: under the lock, below)
             sparse_touch(*p, off, size);
             return remember({p->mirror, off, size, 0});
         }
     }
-    ParLock plk;   // (before pools_mu, always: a mirror sync records into the shared upload command buffer)
     std::lock_guard lk(pools_mu);
-    {   // (longshot, smoothness: import_in_background above. Reads up to 4 MB; not in a parallel replay's segment)
+    {   // (longshot, smoothness: import_in_background above. Reads up to 4 MB)
         static const bool async_import = [] { const char* e = getenv("RX_VK_ASYNC_IMPORT"); return e && atoi(e) != 0; }();
-        if (async_import && !written && !par && size <= (4u << 20) && guest < (1ull << 40) &&
+        if (async_import && !written && size <= (4u << 20) && guest < (1ull << 40) &&
             !(last_pool && guest >= last_pool->lo && guest + size <= last_pool->hi) && import_in_background(guest, size)) {
             uint64_t avail = 0;
             const uint8_t* src = host->gpu_ptr(gpu, &avail);
@@ -5269,11 +5209,8 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
     // (a pool's mirror is made at its first binding, in this part's uploads: bound in guest memory until the next
     // submission, the GPU would read it there while the game's threads write it for their next frames, and a pass that
     // drew over the moment a write landed would come out in two (shadows dark below a line for a frame). Not when this part already wrote it in guest memory:
-    // the copy at the part's start would miss that. Not in a parallel replay's segment either: its copy goes into the
-    // uploads of the segment whose worker bound the pool first, which need not be the first in the queue. A segment
-    // before it would find the mirror in the page table and read it unfilled (houses, rocks and bushes missing, geometry
-    // torn))
-    if (p->mstate == Pool::MIRROR_NONE && !par && p->direct_write_epoch != mirror_epoch && mirror_make(*p)) {
+    // the copy at the part's start would miss that)
+    if (p->mstate == Pool::MIRROR_NONE && p->direct_write_epoch != mirror_epoch && mirror_make(*p)) {
         publish_cap_ranges();
         static int64_t made_now;
         if (++made_now % 200 == 1)
@@ -5317,7 +5254,7 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
         return remember({p->buffer, off, size, 0});
     }
     sparse_touch(*p, off, size);   // (its mirror's blocks are in use: all with memory, or those without past every game pool)
-    if (p->synced_epoch != mirror_epoch || p->sync_seg > texture_segment()) mirror_sync(*p);
+    if (p->synced_epoch != mirror_epoch) mirror_sync(*p);
     if (written) {
         p->gpu_written = true;   // (its mirror kept: mirrors_give_back)
         // (longshot) a binding over RX_VK_WB_MAX_KB (1024 when unset; 0 turns it off) that the CPU has not read through its
@@ -5332,7 +5269,6 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
             for (const auto& [klo, khi] : keep) writebacks.push_back({p, klo - p->lo, khi - p->lo});
             if (wb_skips_log()) wb_skip_note(wlo, whi);
         }
-        rb_hazard_locked(p->lo + off, p->lo + std::min(off + size, p->hi - p->lo));   // (memory_rb_refresh)
     }
     return remember({p->mirror, off, size, 0});
 }
@@ -5586,7 +5522,7 @@ void mirror_free(Pool& p) {
     st_mirror_bytes_freed += size;
     st_mirrors_freed++;
     p.mstate = Pool::MIRROR_NONE;
-    pools_gen++;   // (a parallel replay thread's pool cache: looked up again)
+    pools_gen++;   // (the threads' pool caches: looked up again)
 }
 void mirrors_give_back(uint64_t want_bytes) {   // (pools_mu held)
     // (the mirrors still given back, why, and what the GPU did to them: the first 200, to see which went before a picture fault)
@@ -5806,7 +5742,7 @@ uint64_t st_trim_bytes = 0;
 int trims_waiting = 0;   // (retired by a trim, their mirror still wanted by a part without its own: trims_settle)
 bool mirrors_trim() {   // (pools_mu held; true when one was trimmed: its parts are in mirror_wanted)
     const uint64_t chunk = import_chunk();
-    if (!chunk || mirror_epoch % 64 || par_active.load(std::memory_order_relaxed)) return false;
+    if (!chunk || mirror_epoch % 64) return false;
     uint64_t used = 0, allowed = 0;
     const bool pressed = vram_usage(&used, &allowed) && mirror_trim::pressed(used, allowed);
     Pool* pick = nullptr;
@@ -6072,25 +6008,6 @@ void memory_begin_submission() {
     }
 }
 
-/// (longshot) Before a command buffer's parallel segments: every mirrored pool synced once, into the replay thread's
-/// recording, ahead of all of them. Workers record out of order, so a pool a later segment bound first was synced in
-/// that segment's upload, which runs after the earlier segments' work, and put the CPU's pages back over what the GPU
-/// had just written in them (one frame of wrong lighting or exposure: 5x the flashes of serial replay). A segment
-/// finds its pools synced now (synced_epoch, sync_seg 0).
-void memory_sync_mirrors_before_segments() {
-    if (!mirror_on() || !mirror_upload) return;
-    std::lock_guard lk(pools_mu);
-    msync_batching = true;   // (RX_VK_MSYNC_PASS: every pool's chunks in one dispatch, after the loop)
-    for (auto& kv : imported) {
-        Pool& p = kv.second;
-        if (p.mstate != Pool::MIRROR_ON || p.synced_epoch == mirror_epoch) continue;
-        mirror_sync(p);
-        p.sync_seg = 0;
-    }
-    msync_batching = false;
-    msync_pass_flush();
-}
-
 /// A pool's mirror made, filled in the recording's upload command buffer: all of it, then the pages a capture holds
 /// as they were at their submit (pools_mu held). False over the budget (tried again when next bound, as mirrors are
 /// given back) or over 1 GB (never)
@@ -6216,7 +6133,7 @@ bool mirror_make(Pool& pool) {
                 // copy of guest memory above, and the old mirror's over it counted as synced, stale for good (mirror_inherit.h).
                 // As mirror_sync, a page a shader wrote through a bare entry keeps the mirror's copy (RX_VK_PROTECT_BARE=1).
                 // Synced in this submission: the whole part. Its synced_gen is raised only at the submission's end
-                // (memory_end_submission), so what the GPU wrote in this submission's earlier segments (RX_VK_PARALLEL) is
+                // (memory_end_submission), so what the GPU wrote in this submission's earlier parts is
                 // stamped above it, and guest memory has that only after the write-back; the CPU's writes were collected
                 // before the sync)
                 std::vector<VkBufferCopy> parts;
@@ -6292,7 +6209,6 @@ bool mirror_make(Pool& pool) {
         pools_gen.fetch_add(1, std::memory_order_relaxed);   // (the binding's buffer changes: guest memory, then this mirror)
         p->synced_gen = gen_now;
         p->synced_epoch = mirror_epoch;
-        p->sync_seg = texture_segment();
         mirror_synced.push_back(p);
         mirror_bytes += mirror_size(*p);
         st_mirrors++;
@@ -7318,7 +7234,7 @@ void memory_end_submission(VkCommandBuffer cmd, uint64_t part) {
 // PCIe after the one before. The write-back diff's pass (shaders/wb_diff.comp) is a copy when its shadow is the destination
 // itself: it reads the source, compares it with the destination, and writes it there where they differ (twice, the same
 // address). So the regions go as its chunks, one workgroup a chunk, and a sync's chunks in one dispatch where their copies
-// were: the presync's (memory_sync_mirrors_before_segments) every pool's at once. No barrier between the chunks: the copies had
+// were. No barrier between the chunks: the copies had
 // none either (each page of a mirror comes from one place in a sync), and the full barrier that ends the uploads
 // (texture_uploads_recorded) waits for all commands, the dispatch's too; a sparse mirror's fill before it in the same uploads
 // ends with one (sparse_grow_all: the copies' barrier orders copies only). The tables are blocks of host memory, each table on
@@ -7332,7 +7248,6 @@ struct MsyncCopy {
     std::vector<VkBufferCopy> rs;
 };
 std::vector<MsyncCopy> msync_copies;   // (the same, as copies: for a sync whose table finds no room)
-bool msync_batching = false;
 int64_t st_msync_dispatches = 0, st_msync_chunks = 0, st_msync_fallbacks = 0;
 struct MsyncBlock {
     VkBuffer buf = VK_NULL_HANDLE;

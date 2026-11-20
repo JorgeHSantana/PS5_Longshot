@@ -1,6 +1,11 @@
 // (longshot) RX_VK_READBACK_LATE=<rule>[,<rule>...]: the CPU reads of GPU results that do not wait for their write-back
-// (vk_replay.cpp invalidate). Off unless set: every such read waits. The CPU then reads what guest memory holds,
-// the write-back of the frame before. Two rules, either is enough:
+// (vk_replay.cpp invalidate). The CPU then reads what guest memory holds: the newest write-back already made, the frame
+// before's. Unset: default_sizes(), the culling camera block's 0x3980 bytes on every PC, and on the Steam Deck and
+// handhelds `newest` too (device_policy.h readback_late_newest: +20% on a Steam Deck OLED) (below: the game reads it right
+// after submitting the work that fills it, so on the console it cannot count on that work being done either; the reads of it
+// were 40 to 45% of the readback wait on a Steam Deck). Every other read waits: the exposure meter, whose late read is the
+// white flashes, and Hyrule Field's culling tables, not shown safe to read late. =0: no rule, every read waits. Two rules,
+// either is enough:
 //   newest       the range's writer is the newest submission handed out: the game reads it right after submitting the work
 //                that fills it, so it cannot count on that work being done;
 //   <hex size>   every range of exactly that many bytes, whoever wrote it.
@@ -22,6 +27,9 @@ struct Rules {
     std::vector<uint64_t> sizes;
     bool any() const { return newest || !sizes.empty(); }
 };
+
+/// The rule unset: the culling camera block's size
+inline std::vector<uint64_t> default_sizes() { return {0x3980}; }
 
 inline Rules parse(const char* text) {
     Rules r;

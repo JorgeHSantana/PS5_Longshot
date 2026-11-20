@@ -47,7 +47,6 @@ struct {
     bool custom_border_color = false;
 } dev;
 std::mutex replay_mu;
-struct ParLock { std::lock_guard<std::mutex> lock; ParLock() : lock(replay_mu) {} };
 std::atomic<uint64_t> generation{1};   // (sampler_registrations_generation: a registration, the rows, or a retirement moved it)
 uint64_t frame_no = 1;
 unsigned creates = 0, destroyed = 0;
@@ -209,7 +208,7 @@ void retry(const std::string& test) {
     else next = get();
     valid(next); assert(creates == 2 && get() == next);
 }
-// (sampler reuse) A recording thread that lives through a whole case, as a parallel replay's segment workers do: its own tables
+// (sampler reuse) A recording thread that lives through a whole case, as the render thread does: its own tables
 // (sampler_for's by id, sampler_make's mine) stay from one recording to the next
 struct Worker {
     std::mutex m;

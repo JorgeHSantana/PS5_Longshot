@@ -3312,9 +3312,8 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     static const bool part_waits[fs::kParts] = {false, false, true, false, true, true, true};   // (under the legend's "Waiting on")
     static const int order[fs::kParts] = {fs::kGame, fs::kRender, fs::kWaitMain, fs::kWaitRender, fs::kWaitGpu, fs::kGpuWait,
                                           fs::kPace};
-    static const ImU32 rt_col[fs::kRtParts] = {ui::rgba(168, 132, 230), ui::rgba(210, 190, 245), ui::rgba(232, 72, 60),
-                                                ui::rgba(110, 110, 110)};
-    static const char* const rt_names[fs::kRtParts] = {"Recording", "Workers", "GPU slot", "Idle"};
+    static const ImU32 rt_col[fs::kRtParts] = {ui::rgba(168, 132, 230), ui::rgba(232, 72, 60), ui::rgba(110, 110, 110)};
+    static const char* const rt_names[fs::kRtParts] = {"Recording", "GPU slot", "Idle"};
     const auto alpha = [](ImU32 c, int a) { return (c & 0x00FFFFFF) | ((ImU32)a << 24); };
     c.d->PushClipRect(ImVec2(x0, gy0 - 8 * s), ImVec2(x1, gy1 + 1), true);
     if (parts)
@@ -3459,8 +3458,8 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     if (rt_lane) {
         header("Render thread", "in parallel", dim);
         for (int k = 0; k < fs::kRtParts; k++) {
-            const bool waits = k == fs::kRtWorkers || k == fs::kRtGpu;
-            if (k == fs::kRtWorkers) waiting_on();
+            const bool waits = k == fs::kRtGpu;
+            if (k == fs::kRtGpu) waiting_on();
             cell(-1, rt_col[k], waits, rt_names[k], fps_rt_text[k], ink);
             by += lh;
         }
@@ -3979,7 +3978,7 @@ void fps_texts(int64_t now) {
     for (int p = 0; p < fs::kParts; p++) fs::frame_time_text(fps_part_text[p], sizeof fps_part_text[p], half.part[p]);
     fs::frame_time_text(fps_gpu_text, sizeof fps_gpu_text, half.gpu_ms);
     for (int k = 0; k < fs::kRtParts; k++) fs::frame_time_text(fps_rt_text[k], sizeof fps_rt_text[k], half.rt[k]);
-    fps_rt_on = half.rt[fs::kRtWork] + half.rt[fs::kRtWorkers] + half.rt[fs::kRtGpu] + half.rt[fs::kRtIdle] > 0;
+    fps_rt_on = half.rt[fs::kRtWork] + half.rt[fs::kRtGpu] + half.rt[fs::kRtIdle] > 0;
     snprintf(fps_gpu_busy_text, sizeof fps_gpu_busy_text, "%.0f%%", half.avg_ms > 0 ? std::min(100.0, 100.0 * half.gpu_ms / half.avg_ms) : 0.0);
     const fs::Summary graph = fps_summary(now, fs::kGraphWindow, 0);
     snprintf(fps_built_text, sizeof fps_built_text, "%d", graph.pipelines);

@@ -36,7 +36,6 @@ def state_header(rec, prof):
 #include "longshot_env.h"
 #include "vk_new.h"
 namespace mkwvk {
-extern std::atomic<bool> par_active;
 void logf(const char*, ...);
 inline std::atomic<int64_t> clock_ticks{0}, prof_ns[2]{};
 inline int64_t prof_now() { return clock_ticks.fetch_add(10); }
@@ -82,7 +81,6 @@ B = r'''#include "state.h"
 
 DRIVER = r'''#include "state.h"
 namespace mkwvk {
-std::atomic<bool> par_active{false};
 void logf(const char*, ...) {}
 }
 std::atomic<int> calls{0};

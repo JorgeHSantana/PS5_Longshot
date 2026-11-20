@@ -141,20 +141,16 @@ bool temporal_full_scale() { return ur::full_scale(temporal_mode()); }
 
 namespace {
 /// (longshot) DLAA before the game's bloom and tone map (temporal_pre_bloom) now, the mode being DLAA: the Upscaler's DLAA
-/// before the bloom row (opts.dlss_pre_bloom, off by default; RX_VK_DLSS_PRE_BLOOM over it for a run, vk_menu.cpp), and not
-/// with the parallel replay (RX_VK_PARALLEL=2 and more), whose threads record a frame's passes out of order. Read at each
-/// call, the row changing at once; a change is logged
+/// before the bloom row (opts.dlss_pre_bloom, off by default; RX_VK_DLSS_PRE_BLOOM over it for a run, vk_menu.cpp). Read at
+/// each call, the row changing at once; a change is logged
 bool pre_bloom_wanted(int mode) {
-    static const bool parallel = env_switch("RX_VK_PARALLEL") >= 2;
     const bool asked = opts.dlss_pre_bloom != 0;
     static std::atomic<int> told{-1};
-    const int now = asked ? (parallel ? 2 : 1) : 0;
+    const int now = asked ? 1 : 0;
     if (told.exchange(now, std::memory_order_relaxed) != now)
         logf("vk: upscaler: NVIDIA DLAA %s", now == 0 ? "after the game's bloom and tone map (DLAA before the bloom: off)"
-                                             : now == 2 ? "after the game's bloom and tone map: the parallel replay is on "
-                                                          "(RX_VK_PARALLEL)"
-                                                        : "before the game's bloom and tone map (DLAA before the bloom: on)");
-    return asked && !parallel && mode == ur::DLAA;
+                                                      : "before the game's bloom and tone map (DLAA before the bloom: on)");
+    return asked && mode == ur::DLAA;
 }
 }  // namespace
 
@@ -1087,18 +1083,13 @@ int temporal_hidden_mesh_mode() {
     static const int mode = [] {
         const bool rule = env_switch("RX_VK_DLSS_FADED") != 0;          // (unset: on)
         const bool detail = env_switch("RX_VK_DLSS_FADED_LOG") == 1;   // (unset: off)
-        // (the parallel replay, RX_VK_PARALLEL=2 and more (vk_replay.cpp par_threads), draws a frame's segments on several
-        // threads at once, where the one table is drawn from by one thread at a time: nothing here runs then)
-        const bool parallel = env_switch("RX_VK_PARALLEL") >= 2;
-        if (parallel)
-            logf("vk: upscaler: faded: the parallel replay is on (RX_VK_PARALLEL): hidden meshes' depth draws are drawn");
-        else if (rule)
+        if (rule)
             logf("vk: upscaler: faded: while a temporal upscaler or frame generation draws, the depth draws of a skinned mesh "
                  "that had colour and has had none for %u frames are left out until its colour is back (RX_VK_DLSS_FADED=0 "
                  "draws them)", hidden_mesh::kHiddenAfter);
         else
             logf("vk: upscaler: faded: RX_VK_DLSS_FADED=0: hidden meshes' depth draws are drawn");
-        return parallel ? 0 : (rule ? 1 : 0) | (detail ? 2 : 0);
+        return (rule ? 1 : 0) | (detail ? 2 : 0);
     }();
     return mode;
 }
