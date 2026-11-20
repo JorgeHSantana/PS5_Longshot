@@ -124,7 +124,7 @@ PCS = [
             "mirrors split_ub_flush warp64 fsr4_tune room_in_blocks_rule threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 0, 4, 7158, 2048, 768, 512, 1437, -1, 256, 24, 64, 32, 97, 4, 4, 4, 6, 6, 3)),
     # (the card has the float add, but no run on AMD has shown it right: the loop. RDNA 4 tries the software matrix
-    # multiplies' unrolled forms on AMD's Windows driver; the study doubts the fragment shuffles' fallback and the
+    # multiplies' unrolled forms on AMD's proprietary driver; the study doubts the fragment shuffles' fallback and the
     # unoptimized mesh programs on LLPC, where neither was measured)
     dict(name="RX 9070 XT, AMD's Windows driver (LLPC)",
          facts=(0x1002, 0x7550, "AMD_PROPRIETARY", 0x800161, "DISCRETE_GPU", "26.10.1 (LLPC)", "AMD Radeon RX 9070 XT", 1, 0,
@@ -133,6 +133,22 @@ PCS = [
             "fault_gate_serial allowance_at_count_rule mirrors split_ub_flush warp64 mma_unroll_try fsr4_tune room_in_blocks_rule rdna4 "
             "threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 0, 4, 11000, 3072, 768, 512, 1912, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
+    # (detected by device ID 0x7551 even though the name lacks "RX 9" and "GFX12")
+    dict(name="Radeon AI PRO R9700, AMD's Windows driver (LLPC)",
+         facts=(0x1002, 0x7551, "AMD_PROPRIETARY", 0x800161, "DISCRETE_GPU", "26.10.1 (LLPC)", "AMD Radeon AI PRO R9700", 1, 0,
+                16304, 15300, 32600, 16, 16, 8, 1, 1, 1, 1, 0, 1, 1, 64, 64, 0xFF),
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer amd_cloth_no_optimizer "
+            "fault_gate_serial allowance_at_count_rule mirrors split_ub_flush warp64 mma_unroll_try fsr4_tune room_in_blocks_rule rdna4 "
+            "threaded_auto_render threaded_auto_recorder",
+         num=(0, 0, 0, 2, 0, 4, 11000, 3072, 768, 512, 1912, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
+    # (AMDGPU-PRO on Linux reports VK_DRIVER_ID_AMD_PROPRIETARY as well: mma_unroll_try follows the proprietary driver ID)
+    dict(name="Radeon AI PRO R9700, AMD's proprietary driver on Linux (AMDGPU-PRO)",
+         facts=(0x1002, 0x7551, "AMD_PROPRIETARY", 0x800161, "DISCRETE_GPU", "26.10.1 (LLPC)", "AMD Radeon AI PRO R9700", 0, 0,
+                16304, 15300, 32600, 16, 16, 8, 1, 1, 1, 1, 0, 1, 1, 64, 64, 0xFF),
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
+            "fault_gate_serial dma_buf_imports allowance_at_count_rule mirrors split_ub_flush warp64 mma_unroll_try fsr4_tune room_in_blocks_rule rdna4 "
+            "threaded_auto_render threaded_auto_recorder",
+         num=(0, 0, 0, 1, 85, 4, 11000, 3072, 768, 512, 1912, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
     # (Compute for its mesh programs, with no Mesa version that ends it, which the study doubts.
     # Corrected: fault_gate_serial is off, as issue 996 is AMD's Windows driver's; by the vendor it was on here)
     dict(name="RX 6800 XT, RADV",

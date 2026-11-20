@@ -51,11 +51,6 @@ void device_wait_idle_locked();
 // hdr_sdr_count: how many, for the log's and the menu's line for each
 enum HdrSdrWhy : int { hdr_sdr_none, hdr_sdr_no_extension, hdr_sdr_os_off, hdr_sdr_driver, hdr_sdr_unknown, hdr_sdr_count };
 
-inline bool is_rdna4(uint32_t vendor_id, const char* device_name) {
-    return vendor_id == 0x1002 && device_name &&
-           (std::strstr(device_name, "RX 9") || std::strstr(device_name, "GFX12"));
-}
-
 /// (longshot) What a queue's lock tells the recorder thread (vk_recorder.h queue_lock_event, installed by vk_replay.cpp; null:
 /// nothing, as in the checks): 0 before the lock is taken (lock(), not try_lock()), 3 when it is held by another and the thread
 /// blocks for it, 1 once it is taken, 2 before it is let go

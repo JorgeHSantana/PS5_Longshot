@@ -43,7 +43,7 @@ Output resolution starts at the game's own 2560x1440, or at your screen's size w
 | Your PC | Quality preset | Upscaler and render resolution | Frame rate cap | Frame generation |
 |---|---|---|---|---|
 | **Steam Deck, handheld, integrated GPU or a 4 to 6 GB card** | Auto (this PC) picks Minimum (4GB); Low (6GB) on a 6 GB card | Game's own, as the preset sets it, or AMD FSR 3.1 at Performance | 60 | Off |
-| **Most PCs (8 GB card)** | Auto (this PC) | What Auto chooses: NVIDIA DLSS on an RTX card, AMD FSR 4 on an RX 9000 where the build has it, otherwise the game's own | 60 | Off |
+| **Most PCs (8 GB card)** | Auto (this PC) | What Auto chooses: NVIDIA DLSS on an RTX card, AMD FSR 4 on an AMD RDNA 4 card (RX 9000) where the build has it, otherwise the game's own | 60 | Off |
 | **A fast PC with a high-refresh monitor** | High (12GB) or Ultra (16GB+) | DLSS or FSR 4 at Quality, or Native (DLAA or FSR 4 Native AA) for the sharpest picture | 60 | 2x or Auto, up to your monitor's refresh rate |
 
 - **Keep the frame rate cap at 60.** Caps from 90 to 240 and Uncapped are experimental: some bosses and cutscenes
@@ -188,7 +188,7 @@ helper asks you to.
   with DLSS, FSR 3.1 or FSR 4, the preset's resolution becomes their nearest mode. Changing most other rows yourself
   sets it to Custom.
 - **Auto (this PC)** chooses for the PC it runs on: the memory tier from the card's video memory (Minimum on an
-  integrated GPU, a Steam Deck or a card without mesh shaders), DLSS on an NVIDIA RTX card or FSR 4 on an AMD RX 9000
+  integrated GPU, a Steam Deck or a card without mesh shaders), DLSS on an NVIDIA RTX card or FSR 4 on an AMD RDNA 4 card (RX 9000)
   where the build has them. In the first minute of play it lowers the Render resolution a step while frames are missed
   with the GPU busy, or raises it while the cap holds with the GPU under half busy: at most two steps. It chooses again
   when the card or the screen changes; `longshot_log.txt`'s `Auto (this PC)` lines say what it chose and why.

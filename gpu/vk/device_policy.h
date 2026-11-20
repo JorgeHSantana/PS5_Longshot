@@ -46,13 +46,21 @@
 
 namespace mkwvk {
 
+// AMD RDNA 4 (GFX12): Navi 48 (0x7550 RX 9070 series, 0x7551 Radeon AI PRO R9700) and Navi 44 (0x7590 RX 9060 series),
+// with name matching as a fallback for future or uncatalogued GFX12 cards.
+inline bool is_rdna4(uint32_t vendor_id, uint32_t device_id, const char* device_name) {
+    if (vendor_id != 0x1002) return false;
+    if (device_id == 0x7550 || device_id == 0x7551 || device_id == 0x7590) return true;
+    return device_name && (std::strstr(device_name, "RX 9") || std::strstr(device_name, "GFX12"));
+}
+
 struct DeviceFacts {
     // who
     uint32_t vendor_id = 0, device_id = 0, driver_version = 0;
     VkDriverId driver_id{};
     VkPhysicalDeviceType device_type = VK_PHYSICAL_DEVICE_TYPE_OTHER;
     const char* driver_info = "";   // (VkPhysicalDeviceDriverProperties::driverInfo: AMD's Windows driver names its compiler here)
-    const char* device_name = "";   // (the Steam Deck's APU and the RTX and RX 9000 cards are told by name)
+    const char* device_name = "";   // (the Steam Deck's APU, RTX cards, and fallback RDNA 4 detection by name)
     bool windows = false;           // (the build's OS)
     bool steam_deck_env = false;    // (SteamDeck=1, as auto_profile reads it)
     // memory
@@ -86,7 +94,7 @@ struct DeviceFacts {
     bool radv_gcn() const { return radv() && !storage_io16; }
     bool deck_apu() const { return gpu_clock::deck_apu(device_name); }
     bool handheld() const { return (steam_deck_env && integrated()) || deck_apu(); }   // (auto_profile's hw.handheld)
-    bool rdna4() const { return amd() && device_name && (std::strstr(device_name, "RX 9") || std::strstr(device_name, "GFX12")); }
+    bool rdna4() const { return is_rdna4(vendor_id, device_id, device_name); }
 };
 
 // The rules that are a number or a yes from one or two facts, each as its site has it. device_policy() calls them with
@@ -379,7 +387,7 @@ struct DevicePolicy {
     // RX 580 loses 4 fps). GCN is DeviceFacts::radv_gcn, the one definition (not a 64-lane test, which RX_VK_NO_SUBGROUP_PIN
     // makes true of every 64-lane card and which takes Vega (GFX9) for GCN too). RX_VK_BATCH. Read (vk_replay.cpp batch_on)
     bool batch_submits = false;
-    // RADV and AMD RDNA 4 on AMD's Windows driver: the software matrix multiplies' unrolled forms are tried (measured on the
+    // RADV and AMD RDNA 4 on AMD's proprietary driver: the software matrix multiplies' unrolled forms are tried (measured on the
     // Steam Deck and an RX 9060 XT); a test shader on the device then says which is used. RX_VK_MMA_UNROLL. Site
     // (vk_coopmat.cpp), step 7
     bool mma_unroll_try = false;
@@ -473,7 +481,7 @@ struct DevicePolicy {
     int auto_tier = 0;
     // An integrated GPU beside 4 threads or fewer: Auto's Render resolution is 33% (auto_settings.h choose). Site, step 2
     bool auto_render_third = false;
-    // An NVIDIA card named RTX, an AMD one named RX 9 or GFX12: Auto picks DLSS or FSR 4 where the build has it. Site
+    // An NVIDIA card named RTX, or an AMD RDNA 4 card (is_rdna4): Auto picks DLSS or FSR 4 where the build has it. Site
     // (auto_profile), step 2
     bool rtx = false, rdna4 = false;
     // The background workers (policy_rule::workers). RX_VK_WORKERS=<n>, 1 to 16. Read (vk_jobs.cpp start)
