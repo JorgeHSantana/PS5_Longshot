@@ -863,8 +863,9 @@ uint32_t bc_layers() {
 /// image, 4 more of the output buffer), beside the 2048 x 2048 scratch's 20; not made on a card of small VRAM
 /// (low_vram_texture_mips) or where it would land in system memory. RX_VK_BC_SMALL_LAYERS=<n>: its layers (8; 1: no
 /// small scratch, every run one layer). One layer a run (ec89f92e) was for grid lines on the far ground, layers after a
-/// run's first wrong at the small levels on an RX 6600; no cause was found. Runs still never hold a repacked level
-/// (upload_astc_gpu); multi-layer runs showed no grid lines on RDNA4 RADV, other GPUs are still to be seen
+/// run's first wrong at the small levels on an RX 6600, and they came back with this scratch on AMD's Windows driver
+/// (#2006): the copy out of the encoder's buffer left the layers' pitch to the driver, and now gives it (bc_encode_into).
+/// Runs still never hold a repacked level (upload_astc_gpu)
 constexpr uint32_t kBcSmallDim = 1024;
 uint32_t bc_small_layers() {
     static const uint32_t n = getenv("RX_VK_BC_SMALL_LAYERS") ? std::clamp<uint32_t>((uint32_t)atoi(getenv("RX_VK_BC_SMALL_LAYERS")), 1u, kBcLayers) : kBcLayers;
@@ -1085,7 +1086,11 @@ void bc_encode_into(VkCommandBuffer cmd, uint32_t w, uint32_t h, uint32_t n, Tex
     vkCmdPushConstants(cmd, bc_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
     vkCmdDispatch(cmd, (pc.blocks_x + 7) / 8, (pc.blocks_y + 7) / 8, n);
     full_barrier(cmd);
-    const VkBufferImageCopy c{0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, level, layer, n}, {dx, dy, 0}, {w, h, 1}};
+    // (the buffer's rows and layers given in whole blocks, as the encoder wrote them: blocks_x * blocks_y blocks a layer.
+    // Left at 0, the driver worked the layers' pitch out from the extent, and a level not a multiple of 4 leaves that to
+    // its rounding: the terrain's material arrays are 1365 x 1365, and on AMD's Windows driver (an RX 6700 XT; an RX 6600
+    // before, ec89f92e) every layer after a run's first came out wrong, Hyrule Field's ground in a grid of dark lines, #2006)
+    const VkBufferImageCopy c{0, pc.blocks_x * 4, pc.blocks_y * 4, {VK_IMAGE_ASPECT_COLOR_BIT, level, layer, n}, {dx, dy, 0}, {w, h, 1}};
     vkCmdCopyBufferToImage(cmd, bc_out, dst.image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
     full_barrier(cmd);   // (the scratch and the buffer are the next part's)
 }

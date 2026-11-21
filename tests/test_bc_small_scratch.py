@@ -5,8 +5,9 @@ encode, a copy and three full barriers. The 2048 x 2048 scratch has one layer (R
 material arrays (1365 x 1365 x 90, 11 levels) made ~990 runs, and at Hyrule Field's entry on an RX 9070 XT the GPU took
 51 ms an array, most of it between runs (#1720). Levels no larger than 1024 x 1024 now go through a small scratch of
 bc_small_layers() layers (8; RX_VK_BC_SMALL_LAYERS=1: none): 15 ms an array, for 36 MB more, not made on a small-VRAM
-card or out of VRAM. One layer a run (ec89f92e) was for Hyrule Field's grid lines on an RX 6600, whose cause was not
-found; runs still never hold a repacked level (`!repack`), and a run is no longer than the upload chunk holds.
+card or out of VRAM. One layer a run (ec89f92e) was for Hyrule Field's grid lines on an RX 6600, which came back on AMD's
+Windows driver with this scratch (#2006; the copy's layer pitch, tests/test_bc_copy_layer_pitch.py); runs still never
+hold a repacked level (`!repack`), and a run is no longer than the upload chunk holds.
 
 python -I -B tests/test_bc_small_scratch.py [--cxx g++]
 """
