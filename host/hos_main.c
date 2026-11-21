@@ -1275,12 +1275,13 @@ static void oot_teleport_followup(Ctx *c, uint64_t actor) {
     hos_log("cheats: teleport check: reserved \"%s\", current \"%s\", event playing %d", next, current, playing);
     /* (dropped by the game, as a request a few frames after a save has loaded is: sent once more, the 8 s guard aside, so
        the control bridge's wait for the map sees it arrive. oot_teleport_check.h) */
-    if (oot_teleport_dropped(next, current, teleport.pending, playing, loading, teleport.resent)) {
-        hos_log("cheats: teleport to %s dropped by the game (nothing reserved, no event): sent again", teleport.pending);
+    if (oot_teleport_dropped(next, current, teleport.pending, playing, loading, teleport.result, teleport.resent)) {
+        hos_log("cheats: teleport to %s dropped by the game (answered 0, nothing reserved, no event): sending it again",
+                teleport.pending);
         teleport.requested_at = 0;
-        teleport.resent = 1;
-        oot_teleport(c, actor, teleport.destination);
+        const int sent = oot_teleport(c, actor, teleport.destination);
         teleport.resent = 1;   /* (oot_teleport set it for a new request: this one is the same) */
+        if (!sent) hos_log("cheats: teleport to %s: not sent again: %s", teleport.pending, teleport.why);
     }
 }
 
