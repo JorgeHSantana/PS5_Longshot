@@ -158,6 +158,14 @@ PCS = [
             "split_ub_flush warp64 batch_submits mma_unroll_try fsr4_tune room_in_blocks_rule "
             "threaded_auto_render threaded_auto_recorder",
          num=(0, 2, 0, 1, 85, 4, 11000, 3072, 768, 512, 2000, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
+    # (RDNA 4 on RADV: no batched submits, the gaps between held submits let its clock drop)
+    dict(name="RX 9070 XT, RADV",
+         facts=(0x1002, 0x7550, "MESA_RADV", 0, "DISCRETE_GPU", "Mesa 26.2.6", "AMD Radeon RX 9070 XT (RADV GFX1201)", 0, 0,
+                16304, 15300, 32600, 16, 16, 8, 1, 1, 1, 0, 0, 1, 1, 64, 64, 0xFF),
+         on="fetch_bounds networks_left_out gather_offset position_invariant dma_buf_imports allowance_at_count_rule mirrors "
+            "split_ub_flush warp64 mma_unroll_try fsr4_tune room_in_blocks_rule rdna4 "
+            "threaded_auto_render threaded_auto_recorder",
+         num=(0, 2, 0, 1, 85, 4, 11000, 3072, 768, 512, 1912, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
     # (GCN: no batched submits, the phi limit. Its heap is 8192 MB exactly: the small blocks (<= 8 GB) and the large
     # card's 15% of blocks at the start (< 8 GB is the other branch), the two comparators the study names.
     # Corrected: fault_gate_serial is off on RADV)

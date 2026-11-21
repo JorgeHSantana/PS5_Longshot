@@ -271,7 +271,7 @@ SW(RX_VK_AVAIL_RESERVE_MB, tune, int, "1536 MB (0 turns the check off)", "Physic
 SW(RX_VK_BARE_READ_MB, tune, int, "min(maxStorageBufferRange, 1 GB) minus 64 KB, at least 1 MB", "Caps in MB how far a size-less read-only storage buffer table entry is bound towards its pool's end.")
 SW(RX_VK_BARRIER_DEDUPE_OFF, kill, bool, "off: a full barrier right after another on the same command buffer is left out", "Records every full barrier again instead of leaving out the second of two in a row.")
 SW(RX_VK_BARRIER_EVERY_DRAW, attempt, bool, "off", "Ends the pass before every draw, so each draw gets a pass of its own.")
-SW(RX_VK_BATCH, hw, bool, "on with Mesa RADV except on GCN 1-4 cards (no 16-bit stage inputs), off elsewhere", "Turns batching of queue submits on or off.")
+SW(RX_VK_BATCH, hw, bool, "on with Mesa RADV except on GCN 1-4 cards (no 16-bit stage inputs) and discrete RDNA 4 cards, off elsewhere", "Turns batching of queue submits on or off.")
 SW(RX_VK_BATCH_MAX, tune, int, "32 command buffers", "The most command buffers held in one batched submit before it is sent.")
 SW(RX_VK_BATCH_POLL_US, tune, int, "2000 us", "A progress poll sends held submits only once the oldest has waited this many microseconds (0: always).")
 SW(RX_VK_BC_IDLE_S, tune, int, "0: the BC scratch images are kept once made", "Seconds of disuse after which the ASTC-to-BC scratch images are given back; 0 never.")
