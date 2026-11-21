@@ -1402,7 +1402,7 @@ uint64_t translator_stamp() {
                                (mesh_fallback_shared_warp ? 8192u : 0u) | (mesh_fallback_shared_warp_check ? 16384u : 0u) |
                                (mesh_fallback_strict_fmul ? 32768u : 0u) |
                                (mma_wmma16 ? 65536u : 0u) | (mma_wmma16_fast ? 131072u : 0u) |
-                               (mma_wmma16 && mma_wmma16_fused ? 262144u : 0u);
+                               (mma_wmma16 && mma_wmma16_fused ? 262144u : 0u) | (uint32_t)graphics_table_loads << 19;
         add(&flags, sizeof flags);
         add(mma_order_a.data(), sizeof(uint32_t) * mma_order_a.size());
         add(mma_order_b.data(), sizeof(uint32_t) * mma_order_b.size());
@@ -1454,6 +1454,9 @@ uint64_t translator_stamp() {
     for (char** e = _environ; e && *e; e++) {
         const char* const eq = strchr(*e, '=');
         if (eq && switches::find_gone(std::string(*e, (size_t)(eq - *e)).c_str())) continue;
+        // (RX_VK_GP_TABLE: what it does is graphics_table_loads, in the flags above; by its name too, setting it to the default
+        // prepared every shader again)
+        if (!strncmp(*e, "RX_VK_GP_TABLE=", 15)) continue;
         for (const char* pre : {"RX_VK_MMA", "RX_VK_NATIVE", "RX_VK_NAN", "RX_VK_TASK_CAP", "RX_VK_NETWORK", "RX_VK_GP_", "RX_VK_FOLLOW", "RX_VK_NO_F16", "RX_VK_MESH", "RX_VK_NO_INVARIANT", "RX_VK_MARKERS",
                                 "RX_VK_ALL_GLOBAL_PROGS", "RX_VK_MISS_LOG", "RX_VK_BLOCK_PROBE", "EDEN_"})
             if (!strncmp(*e, pre, strlen(pre))) add(*e, strlen(*e));

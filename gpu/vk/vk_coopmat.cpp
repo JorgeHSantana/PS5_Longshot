@@ -667,6 +667,13 @@ void wmma16_init() {
     logf("vk: native matrix multiplies on (WMMA 16x16x16 through workgroup tiles, %s, %s)",
          mma_wmma16_fused ? "fused" : "unfused", mma_wmma16_fast ? "fast K=16" : "exact K=8");
 }
+/// (longshot, mma_layout.h graphics_table_loads) 1 by default, RX_VK_GP_TABLE's 0, 1 or 2 over it (anything else 0); 0 where the
+/// table cannot hold the pools: the guest's memory not imported, or no device addresses (tests/test_mesh_fallback_pages.py)
+int table_loads_wanted(const char* env, bool host_import, bool device_addresses) {
+    int v = env ? std::atoi(env) : 1;
+    if (v != 1 && v != 2) v = 0;
+    return host_import && device_addresses ? v : 0;
+}
 } // namespace
 
 void coopmat_init() {
@@ -684,6 +691,20 @@ void coopmat_init() {
     Shader::Backend::SPIRV::global_table_loop = table_loop_wanted(dev.driver_id, dev.features.shaderStorageBufferArrayDynamicIndexing,
                                                                   std::getenv("RX_VK_GM_LOOP"));
     if (Shader::Backend::SPIRV::global_table_loop) logf("vk: storage buffer tables searched in loops (RX_VK_GM_LOOP=0: written out)");
+    {   // (mma_layout.h graphics_table_loads: on where the table can hold the pools, the guest's memory imported with device addresses;
+        // elsewhere it stays empty and every load through it would read 0)
+        const char* e = std::getenv("RX_VK_GP_TABLE");
+        const int v = table_loads_wanted(e, dev.external_memory_host, dev.facts.buffer_device_address);
+        if (!v && table_loads_wanted(e, true, true))
+            logf("vk: global loads search the storage buffers: the guest page table needs host memory import and buffer device "
+                 "addresses (RX_VK_GP_TABLE not taken)");
+        Shader::Backend::SPIRV::graphics_table_loads = v;
+    }
+    if (Shader::Backend::SPIRV::graphics_table_loads == 1)
+        logf("vk: vertex, fragment and compute stages' global loads read the guest page table alone (RX_VK_GP_TABLE=0: they search the "
+             "storage buffers)");
+    else if (Shader::Backend::SPIRV::graphics_table_loads == 2)
+        logf("vk: vertex, fragment and compute stages' global loads checked against the guest page table (RX_VK_GP_TABLE=2)");
     Shader::Backend::SPIRV::mesh_fallback_pages = mesh_pages_wanted(dev.driver_id, std::getenv("RX_VK_MESH_PAGES"));
     if (Shader::Backend::SPIRV::mesh_fallback_pages)
         logf("vk: the mesh fallback's global loads read the guest page table (RX_VK_MESH_PAGES=0: they search the storage buffers)");

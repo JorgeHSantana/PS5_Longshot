@@ -563,26 +563,120 @@ VkBuffer guest_pages_buffer = VK_NULL_HANDLE;
 // counts: the culling's foliage gone for a frame), and a mirror made but not yet filled read as garbage: the foliage
 // culling 53caac5f looped on a count from it until Windows reset the driver (the device lost of ~1 start in 5, always
 // after pool merges, 2 s after the GPU stopped)
-struct TableRun { uint64_t first, count, address; };
+using TableRun = PageTableRun;   // (page_table_census.h: its host check reads them too)
 thread_local std::vector<TableRun> table_pending;
+// (RX_VK_GP_TABLE's cover) the runs of the last submissions' table writes: memory_table_flush hands them to the GPU as transfers into
+// the table, which the host's view of it shows only once those have run. The cover reads the table as the GPU will: the host's
+// entries, these after them (the oldest first), then its own recording's pending ones. Eight submissions: more than are ever in flight
+std::mutex table_flushed_mu;
+std::deque<std::vector<TableRun>> table_flushed;
 thread_local bool table_defer = false;
+// (longshot, RX_VK_GP_TABLE) where the table changed: a generation stamped on each 64 KB of entries a write touches (16 entries), and
+// the highest of those on each 16 MB (4096 entries). memory_table_cover looks again only at what changed since it last found a
+// binding's entries right: an unchanged binding is a few reads, whatever its size
+std::atomic<uint32_t> table_generation{1};
+std::vector<std::atomic<uint32_t>> table_changed_64k((kPageTableEntries + 15) / 16), table_changed_16m((kPageTableEntries + 4095) / 4096);
+void table_mark_changed(uint64_t first, uint64_t count) {
+    if (!count) return;
+    const uint32_t g = table_generation.fetch_add(1, std::memory_order_relaxed) + 1;
+    for (uint64_t r = first / 16; r <= (first + count - 1) / 16; r++) table_changed_64k[r].store(g, std::memory_order_relaxed);
+    for (uint64_t r = first / 4096; r <= (first + count - 1) / 4096; r++) table_changed_16m[r].store(g, std::memory_order_relaxed);
+}
 void guest_pages_set(uint64_t lo, uint64_t hi, uint64_t address) {
     if (!guest_pages) return;
     // (on by default since 11-08: 14 of 14 starts without the device lost, against ~1 in 7 written at once; one-frame flashes
     // 0-1 bright / 4 dark in two 40 s Kokiri runs, as many as without it, and the same fps. One earlier run with 21 dark ones was
     // the runs' spread, not this)
-    // (two windows, as spirv_emit_context.cpp reads them: page_table_census.h)
-    for (const PageWindow& w : kPageWindows) {
-        const uint64_t a0 = std::max(lo, w.base) & ~0xFFFull, a1 = std::min(hi, w.base + w.bytes);
-        if (a0 >= a1) continue;
-        const uint64_t first = w.first + ((a0 - w.base) >> 12), count = (a1 - a0 + 0xFFF) >> 12;
-        const uint64_t at = address ? address + (a0 - lo) : 0;
+    // (its windows, as spirv_emit_context.cpp reads them: page_table_census.h)
+    page_table_runs(lo, hi, address, [](uint64_t first, uint64_t count, uint64_t at) {
+        table_mark_changed(first, count);
         if (table_defer) {
             table_pending.push_back({first, count, at});
-            continue;
+            return;
         }
         for (uint64_t i = 0; i < count; i++) guest_pages[first + i] = at ? at + (i << 12) : 0;
+    });
+}
+namespace {   // (below: the pools, and a buffer's device address)
+Pool* pool_of(uint64_t guest, uint64_t size);
+VkDeviceAddress buffer_address(VkBuffer buffer);
+}   // namespace
+/// (longshot, RX_VK_GP_TABLE: page_table_census.h page_table_cover) A storage buffer bound at gpu, n bytes, that reads device address
+/// address: where the table does not give its pages that memory, the entries are written so (in this submission's table writes,
+/// as every change of the table). Then a stage that reads global memory through the table alone reads what the storage buffer
+/// search read. A binding found right is remembered with the generation it was found at: next time only the 64 KB pieces of
+/// its range written since are looked at again, page by page
+TableCover memory_table_cover(uint64_t gpu, uint64_t n, uint64_t address) {
+    if (!guest_pages) return TableCover::Outside;
+    n = std::max<uint64_t>(n, 1);
+    struct Seen { uint64_t gpu, n, address; uint32_t generation; TableCover how; };
+    static thread_local Seen seen[4096]{};
+    Seen& m = seen[((gpu >> 12) ^ (n >> 4) ^ (address >> 12) * 0x9E37u) & 4095];
+    // (a virtual pool's pages are looked at every time: their entries are the memory behind them, which changes with that memory's
+    // own entries, not theirs)
+    const bool known = m.gpu == gpu && m.n == n && m.address == address && m.generation && gpu < (1ull << 40);
+    const uint32_t now = table_generation.load(std::memory_order_relaxed);
+    if (known && (m.how == TableCover::Outside || m.how == TableCover::Copy)) return m.how;   // (as before: it cannot be covered)
+    // (the pieces to look at: all of them the first time, else those written since m.generation)
+    PageCover c;
+    bool looked = false;
+    const uint64_t end = gpu + n;
+    if (end < gpu) return TableCover::Outside;
+    // (the table as the GPU will read it: the last submissions' writes not yet seen by the host, then this recording's)
+    static thread_local std::vector<TableRun> runs;
+    runs.clear();
+    {
+        std::lock_guard lk(table_flushed_mu);
+        for (const std::vector<TableRun>& f : table_flushed) runs.insert(runs.end(), f.begin(), f.end());
     }
+    runs.insert(runs.end(), table_pending.begin(), table_pending.end());
+    const auto look = [&](uint64_t lo, uint64_t hi) {
+        const PageCover k = page_table_cover(guest_pages, runs.data(), runs.size(), lo, hi - lo, address + (lo - gpu));
+        c.pages += k.pages, c.wrong += k.wrong, c.conflicts += k.conflicts, c.outside |= k.outside;
+        looked = true;
+    };
+    if (!known) {
+        look(gpu, end);
+    } else {
+        for (uint64_t at = gpu & ~0xFFFFull; at < end && !c.outside;) {   // (by 64 KB, skipping each 16 MB unchanged since)
+            const int64_t i = page_table_index(at);
+            if (i < 0) {
+                c.outside = true;
+                break;
+            }
+            if (table_changed_16m[(uint64_t)i / 4096].load(std::memory_order_relaxed) <= m.generation) {
+                at = (at & ~0xFFFFFFull) + (16ull << 20);
+                continue;
+            }
+            if (table_changed_64k[(uint64_t)i / 16].load(std::memory_order_relaxed) > m.generation)
+                look(std::max<uint64_t>(at, gpu), std::min<uint64_t>(at + (64ull << 10), end));
+            at += 64ull << 10;
+        }
+    }
+    if (c.outside) {
+        m = {gpu, n, address, now, TableCover::Outside};
+        return TableCover::Outside;
+    }
+    if (!c.wrong) {
+        m = {gpu, n, address, now, TableCover::Held};
+        return TableCover::Held;
+    }
+    {
+        std::lock_guard lk(pools_mu);
+        // (only a pool's memory or its mirror's: a binding served from a copy in the recording's stream (RX_VK_ASYNC_IMPORT) is
+        // memory reused next submission, never an entry)
+        const uint64_t guest = gpu < (1ull << 40) ? gpu : host->gpu_guest(gpu);
+        const Pool* p = guest ? pool_of(guest, n) : nullptr;
+        if (!p || (address != p->address + (guest - p->lo) &&
+                   !(p->mirror && address == buffer_address(p->mirror) + (guest - p->lo)))) {
+            m = {gpu, n, address, now, TableCover::Copy};
+            return TableCover::Copy;
+        }
+        guest_pages_set(gpu, end, address);
+    }
+    (void)looked;
+    m = {gpu, n, address, now, TableCover::Written};   // (from before the look: whatever was written since, its own write too, is looked at again)
+    return c.conflicts ? TableCover::Conflict : TableCover::Written;
 }
 void memory_table_begin() {
     if (!table_pending.empty()) {   // (left by a recording that never ended: written now)
@@ -664,6 +758,11 @@ bool memory_table_flush() {
         }
     }
     if (!batch.empty()) emit();
+    {
+        std::lock_guard lk(table_flushed_mu);
+        table_flushed.push_back(table_pending);
+        if (table_flushed.size() > 8) table_flushed.pop_front();
+    }
     table_pending.clear();
     return true;
 }

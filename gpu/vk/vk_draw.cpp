@@ -45,6 +45,7 @@
 #include "../../host/hos_tracy.h"   // (LONGSHOT_TRACY: the profiler's zones; nothing in any other build)
 #endif
 #include "draw_key.h"     // (the draw path's questions answered from their arguments alone: pipe_same, dyn_same, ...)
+#include "page_table_census.h"
 #include "flat_map.h"
 #include "vk_menu.h"          // (opts.anisotropy: the Anisotropic filtering row; resolution_scale)
 #include "grass_distance.h"
@@ -94,6 +95,9 @@
 #include "shaders/shadow_stab_comp_spv.h"
 #include "shaders/movie_upscale_comp_spv.h"
 #include "shader_recompiler/backend/spirv/mma_layout.h"
+namespace Shader::Optimization {   // (collect_shader_info_pass.cpp: RX_VK_GP_TABLE=2's programs left unchecked)
+extern std::atomic<uint32_t> g_table_check_unchecked;
+}
 #ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
 #include "longshot_env.h"
 #endif
@@ -335,6 +339,103 @@ VkDescriptorBufferInfo miss_binding(uint64_t prog) {
         it = miss_slot.emplace(prog, (uint32_t)miss_slot.size()).first;
     }
     return {miss_buf, (VkDeviceSize)it->second * kMissSlice, kMissSlice};
+}
+/// (longshot, RX_VK_GP_TABLE: vk_memory.cpp memory_table_cover) a storage buffer bound to a stage that reads global memory through the
+/// guest page table alone must have its memory in the table, or a load the storage buffer search found there reads otherwise. The
+/// table follows the pools by itself: a pool's pages give its memory from its import, its mirror's from the moment the mirror is
+/// made, and every branch of gpu_buffer_bind binds what the table points at, but two: a sparse mirror's blocks with no memory
+/// (read in place where a game pool is, the table pointing there too; past every pool, where both read nothing) and NVN's virtual
+/// pools, from 1 TB, which no table write follows. So a virtual pool's binding is covered here, its pages looked at each time
+/// (what the table gives there is the memory behind them, which can change under them); any other is left alone, at the cost of
+/// one comparison. With RX_VK_GP_TABLE set, every binding is looked at, the check of that rule: written ones are where it failed.
+/// Counted by what it took, and the programs whose bindings could not be covered or conflicted named, the first ten
+std::atomic<uint64_t> gp_cover_count[5]{};   // (TableCover: held, written, conflict, outside, copy)
+void gp_table_cover(uint64_t prog, const Stage& st, uint64_t base, uint64_t n, const BufferRef& b) {
+    static const bool every = [] {   // (RX_VK_GP_TABLE set: every binding looked at, the rule above checked)
+        const char* e = getenv("RX_VK_GP_TABLE");
+        return e && (atoi(e) == 1 || atoi(e) == 2);
+    }();
+    if (!page_table_cover_wanted(base, every)) return;
+    if (!Shader::Backend::SPIRV::graphics_table_loads || !st.info.uses_global_memory || st.info.uses_render_area) return;
+    // (what the binding reads: its buffer's device address, the pool's or its mirror's; 0 for one without, a copy)
+    VkBufferDeviceAddressInfo da{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    da.buffer = b.buffer;
+    const VkDeviceAddress at = vkGetBufferDeviceAddress(dev.device, &da);
+    const uint64_t address = at ? at + b.offset : 0;
+    const TableCover c = memory_table_cover(base, n, address);
+    gp_cover_count[(int)c].fetch_add(1, std::memory_order_relaxed);
+    if (c == TableCover::Held || (c == TableCover::Written && base >= (1ull << 40))) return;   // (written: a virtual pool's, as meant)
+    static std::mutex named_mu;
+    static std::unordered_set<uint64_t> named;   // (each program named once, the first ten)
+    {
+        std::lock_guard lk(named_mu);
+        if (named.size() >= 10 || !named.insert(prog).second) return;
+    }
+    logf("vk: page table: program %016llx binds a storage buffer at %#llx (%llu bytes) %s", (unsigned long long)prog,
+         (unsigned long long)base, (unsigned long long)n,
+         c == TableCover::Written  ? "whose pages the table did not give its memory (written now): a branch of gpu_buffer_bind "
+                                     "the table does not follow"
+         : c == TableCover::Conflict ? "whose pages another binding gave other memory this submission: its loads through the table "
+                                       "read what was bound last"
+         : c == TableCover::Copy || !address ? "served from a copy: its loads through the table read the pool's memory"
+         : base >= (1ull << 40)    ? "in a virtual pool past the table's window: its loads through the table read 0"
+                                   : "outside the table's windows: its loads through the table read 0");
+}
+/// (longshot, RX_VK_GP_TABLE) how the storage buffers of the stages reading through the guest page table were covered
+/// (gp_table_cover, the CPU's own counts), a line every 30 s with RX_VK_GP_TABLE set, else when bindings could not be covered or
+/// conflicted; and with =2, at close only (final), the loads the table answered otherwise than the bound buffer, by program, from
+/// the miss buffer the shaders write: read once the GPU is idle and the buffer invalidated, never while shaders may still write it
+void gp_table_check_log(bool final) {
+    static const int mode = [] {
+        const char* e = getenv("RX_VK_GP_TABLE");
+        return e ? atoi(e) : 0;
+    }();
+    if (!Shader::Backend::SPIRV::graphics_table_loads) return;
+    static auto next = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    const auto now = std::chrono::steady_clock::now();
+    if (!final && now < next) return;
+    next = now + std::chrono::seconds(30);
+    uint64_t c[5];
+    for (int i = 0; i < 5; i++) c[i] = gp_cover_count[i].load(std::memory_order_relaxed);
+    static uint64_t told_bad = 0;
+    if (mode == 1 || mode == 2 || final || c[2] + c[3] + c[4] != told_bad) {
+        told_bad = c[2] + c[3] + c[4];
+        logf("vk: page table%s: %llu storage buffer bindings of stages reading through it: %llu held, %llu written to give their "
+             "memory, %llu over another binding's this submission, %llu outside its windows, %llu served from a copy",
+             final ? " (close)" : "", (unsigned long long)(c[0] + c[1] + c[2] + c[3] + c[4]), (unsigned long long)c[0],
+             (unsigned long long)c[1], (unsigned long long)c[2], (unsigned long long)c[3], (unsigned long long)c[4]);
+    }
+    if (Shader::Backend::SPIRV::graphics_table_loads != 2 || !final) return;
+    {   // (what the shaders wrote, all of it: no submission running, the buffer seen as the GPU left it)
+        std::lock_guard lk(dev.present_mu);
+        device_wait_idle_locked();
+    }
+    std::vector<std::pair<uint32_t, uint64_t>> rows;   // (disagreements, program)
+    std::string first;
+    uint64_t total = 0;
+    size_t checked = 0;
+    {
+        std::lock_guard ml(miss_mu);
+        if (!miss_map) return;
+        invalidate_mapped(miss_mem, (uint64_t)kMissSlice * kMissSlices);
+        checked = miss_slot.size();
+        for (const auto& [prog, slot] : miss_slot)
+            if (const uint32_t m = miss_map[(size_t)slot * (kMissSlice / 4)]) rows.emplace_back(m, prog), total += m;
+        std::sort(rows.rbegin(), rows.rend());
+        for (size_t r = 0; r < rows.size() && r < 4; r++) {
+            const uint32_t* w = miss_map + (size_t)miss_slot[rows[r].second] * (kMissSlice / 4);
+            char t[96];
+            snprintf(t, sizeof t, "%s%016llx %u (first at %#llx)", r ? ", " : "", (unsigned long long)rows[r].second,
+                     rows[r].first, (unsigned long long)(w[1] | (uint64_t)w[2] << 32));
+            first += t;
+        }
+    }
+    const uint32_t unchecked = Shader::Optimization::g_table_check_unchecked.load(std::memory_order_relaxed);
+    char none[128] = "";
+    if (unchecked)
+        snprintf(none, sizeof none, "; %u programs not checked: no room for the check's buffer among their storage buffers", unchecked);
+    logf("vk: page table check (close): %llu loads of %zu of %zu checked programs read otherwise through the table%s%s%s",
+         (unsigned long long)total, rows.size(), checked, rows.empty() ? "" : ": ", first.c_str(), none);
 }
 /// (RX_VK_DRAW_STATS_PROGS) a stage's uniform and storage buffers as recorded, hex (first 1 KB each), once per program
 void stats_dump_stage(uint64_t prog, const NvnState& s, int stage) {
@@ -4488,6 +4589,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 // pointer table's, a wide binding's): not copied back, but a GPU write hazard for the readback refresh of a later
                 // recording in the submission (vk_memory.cpp memory_rb_refresh)
                 if (b && d.is_written && (bare || wide_n)) memory_note_gpu_write(base, n);
+                if (b) gp_table_cover(p.key, st, base, n, b);   // (as bound at last, the smaller retry's and the wide one's)
                 {   // (EvilOOT) the wanted programs' storage descriptors in order, once: descriptor n = the IR's "#n"
                     static std::mutex lm;
                     static std::unordered_set<uint64_t> told;
@@ -6834,6 +6936,7 @@ void stats_code_keys(FILE* f, uint32_t n) {
 }
 /// (each draw) arms a capture when the trigger file is there; writes the results once the measured frame is long done
 void stats_tick() {
+    gp_table_check_log(false);
     const char* dir = stats_dir();
     if (!dir) return;
     const int64_t frame = (int64_t)texture_frame_no();
@@ -7313,6 +7416,8 @@ void StatsQuery::copy_args(VkCommandBuffer cmd, const DrawArgs& d, uint32_t inde
     }
 }
 } // namespace
+/// (RX_VK_GP_TABLE) the page table's last line, at close
+void page_table_check_close() { gp_table_check_log(true); }
 /// (longshot) the occlusion queries draw() left unbegun since the last call, by why (vk_draw.h)
 void occ_draw_counts(uint64_t out[3]) {
     for (int i = 0; i < 3; i++) out[i] = occ_not_begun[i].exchange(0, std::memory_order_relaxed);

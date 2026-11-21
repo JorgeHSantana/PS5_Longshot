@@ -68,6 +68,7 @@
 #include "frame_overlap.h"   // (longshot: when the game's frame wait is answered, and where the presents are made)
 #include "submit_retry.h"    // (longshot, #1879: a submit refused for want of memory made again)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
+#include "shader_recompiler/backend/spirv/mma_layout.h"   // (graphics_table_loads, mesh_fallback_pages: replay_start)
 
 namespace mkwvk {
 extern std::recursive_mutex menu_mu;
@@ -8111,6 +8112,15 @@ bool replay_start() {
     menu_init();
     if (opts.reshade) reshade::select(opts.reshade);
     if (!memory_init() || !vma_init(instance_proc())) return false;
+    {   // (longshot) the guest page table made now, before a shader is translated: the stages that read global memory through it
+        // alone (mma_layout.h graphics_table_loads, mesh_fallback_pages) would read address 0 without it, so without one they
+        // search the storage buffers instead
+        using namespace Shader::Backend::SPIRV;
+        if ((graphics_table_loads || mesh_fallback_pages) && !memory_guest_pages()) {
+            graphics_table_loads = 0, mesh_fallback_pages = false;
+            logf("vk: no guest page table: global loads search the storage buffers (RX_VK_GP_TABLE and RX_VK_MESH_PAGES not taken)");
+        }
+    }
     VkSemaphoreTypeCreateInfo ti{VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO};
     ti.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
     VkSemaphoreCreateInfo tsi{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
