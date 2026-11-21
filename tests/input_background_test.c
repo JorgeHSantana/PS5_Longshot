@@ -7,7 +7,7 @@
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); exit(1); } } while (0)
 #include "input_constants.inc"
 #include "../host/hold_toggle.h"
-static int toggle_flags, toggle_reset;
+static int toggle_flags, toggle_reset, sprint_reset_pending;
 static int controls_case, mouse_mode, native_free = 1, mouse_pointing;
 static int mouse_let_go, game_menu_mouse, side_binds;   /* (the game's menus and the mouse's side buttons: menu_side_case) */
 static int held_keys[256], walk_mode, walk_speed;
@@ -28,7 +28,9 @@ enum { GWL_EXSTYLE = -20, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x8000000,
        VK_MENU = 0x12, VK_CAPITAL = 0x14, VK_RETURN = 0x0d, VK_LEFT = 0x25, VK_UP, VK_RIGHT, VK_DOWN,
        VK_LBUTTON = 1, VK_RBUTTON = 2, VK_MBUTTON = 4, VK_XBUTTON1 = 5, VK_XBUTTON2 = 6 };
 static int front, menu_background, menu_open, bridge_active, bootstrap_polls, pad_merges, key_queries, mouse_queries, focus_queries, commands;
+static int focus_gain_after_query;
 static uint64_t bridge_buttons;
+static int bridge_up;
 typedef int64_t LONG64;
 volatile LONG64 hos_present_count = 1000;
 static int frame_reads;
@@ -51,7 +53,8 @@ static int pad_bind[HOS_KEY_N][2] = { [HOS_KEY_TOGGLE_HUD] = {-1, -1}, [HOS_KEY_
 static LONG hud_bind_generation;
 static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
 static SRWLOCK input_bind_lock = SRWLOCK_INIT;
-static _Thread_local int sprint_frame, input_snapshot_active;
+static _Thread_local int sprint_frame, sprint_toggle_frame, sprint_excluded, input_in_front, input_snapshot_active;
+static _Thread_local uint64_t injected_buttons;
 static _Thread_local int input_keys[HOS_KEY_N][2], input_pads[HOS_KEY_N][2];
 static int sampled_key(int i, int k) { return input_snapshot_active ? input_keys[i][k] : key_bind[i][k]; }
 static int sampled_pad(int i, int k) { return input_snapshot_active ? input_pads[i][k] : pad_bind[i][k]; }
@@ -67,7 +70,7 @@ static long long logged_origin;
 volatile int64_t hos_hid_last_read;
 volatile uint64_t hos_hid_buttons;   /* (host/cheats.c reads it) */
 volatile int hos_nvn_sync_log_on;
-int hos_control_input(uint64_t *buttons, int32_t stick[4]) { (void)stick; *buttons |= bridge_buttons; return bridge_active; }
+int hos_control_input(uint64_t *buttons, int32_t stick[4]) { if (bridge_up) stick[1] = 32767; *buttons |= bridge_buttons; return bridge_active; }
 static void *at(uint64_t address) { CHECK(address <= 512 - 8); return memory + address; }
 #define GP(a) at(a)
 static void *hos_guest_range(uint64_t a, uint64_t n) { return a <= 512 && n <= 512 - a ? memory + a : NULL; }
@@ -100,7 +103,11 @@ void hos_log(const char *format, ...) {
         CHECK(!strcmp(last_log, "hid: input frame clock origin=1000 native presents; rate=60"));
     }
 }
-HWND GetForegroundWindow(void) { focus_queries++; return (HWND)(uintptr_t)(front ? 1 : 2); }
+HWND GetForegroundWindow(void) {
+    const HWND result = (HWND)(uintptr_t)(front ? 1 : 2);
+    if (++focus_queries == focus_gain_after_query) front = 1;
+    return result;
+}
 DWORD GetWindowThreadProcessId(HWND window, DWORD *pid) { *pid = window == (HWND)(uintptr_t)1 ? 10 : 20; return 1; }
 DWORD GetCurrentProcessId(void) { return 10; }
 LONG_PTR GetWindowLongPtrA(HWND window, int index) { (void)window; (void)index; return 0; }
@@ -209,6 +216,67 @@ static void hold_toggle_case(void) {
     bridge_buttons = plus; packet(plus, 0, 0, 0);   /* pause itself remains usable */
     packet(plus, 0, 0, 0); /* Plus stays an ordinary hold, even with a hand-written flag. */
     bridge_buttons = 0; packet(0, 0, 0, 0);
+}
+
+static void sprint_toggle_case(void) {
+    const uint64_t a = 1ULL << B_A;
+    controls_case = front = 1;
+    sprint_toggle_mode = 1;
+    key_bind[HOS_KEY_SPRINT][0] = 'G';
+    held_keys['W'] = 1;
+    packet(0, 0, 32767, 0);
+    held_keys['G'] = 1; packet(a, 0, 32767, 0);
+    menu_open = 1; packet(0, 0, 0, 0);
+    menu_open = 0; packet(0, 0, 32767, 0);
+    held_keys['G'] = 0; packet(0, 0, 32767, 0);
+    held_keys['G'] = 1; packet(a, 0, 32767, 0);
+    front = 0; focus_gain_after_query = focus_queries + 1; packet(0, 0, 0, 0);
+    CHECK(front); packet(0, 0, 32767, 0); /* focus returned after the background sample, while G was held */
+    held_keys['G'] = 0; packet(0, 0, 32767, 0);
+    held_keys['G'] = 1; packet(a, 0, 32767, 0);
+    held_keys['G'] = 0; packet(a, 0, 32767, 0);
+    bridge_active = 1; bridge_up = 1; bridge_buttons = a; packet(0, 0, 32767, 0);
+    uint64_t previous = G64(72);
+    bridge_active = 0; bridge_buttons = 0; packet(0, 0, 32767, 0);
+    bridge_active = 1; packet(0, 0, 32767, 0); /* a second takeover preserves the bridge tap */
+    now_ns += 60000000; packet(a, 0, 32767, 0);
+    CHECK((G64(72) & ~previous & a) && !(hos_sprint_press_mask & a));
+    bridge_buttons = 0; now_ns += 60000000; packet(0, 0, 32767, 0);
+    bridge_active = 0; packet(a, 0, 32767, 0); /* exclusion kept the physical latch */
+    held_keys['G'] = 1; packet(0, 0, 32767, 0);
+    held_keys['G'] = 0; packet(0, 0, 32767, 0);
+    held_keys['G'] = 1; packet(a, 0, 32767, 0);
+    held_keys['G'] = 0; packet(a, 0, 32767, 0);
+    bridge_buttons = a; packet(0, 0, 32767, 0); /* nonexclusive injected tap during Sprint */
+    bridge_buttons = 0; bridge_active = 1; bridge_up = 1; packet(0, 0, 32767, 0);
+    now_ns += 60000000; packet(a, 0, 32767, 0);
+    CHECK(!(hos_sprint_press_mask & a));
+    now_ns += 60000000; packet(0, 0, 32767, 0);
+    bridge_active = 0; packet(a, 0, 32767, 0);
+    physical_buttons = a; packet(0, 0, 32767, 0); /* handoff pending */
+    physical_buttons = 0;
+    bridge_active = 1; bridge_buttons = 0; packet(0, 0, 32767, 0);
+    now_ns += 60000000; packet(0, 0, 32767, 0);
+    bridge_active = 0; packet(a, 0, 32767, 0);
+    physical_buttons = a; packet(0, 0, 32767, 0); /* physical tap starts the gap */
+    physical_buttons = 0; packet(0, 0, 32767, 0);
+    bridge_buttons = a; packet(0, 0, 32767, 0); /* injected tap joins it */
+    bridge_buttons = 0; packet(0, 0, 32767, 0);
+    previous = G64(72);
+    bridge_active = 1; packet(0, 0, 32767, 0); /* movement-only exclusive takeover */
+    now_ns += 60000000; packet(a, 0, 32767, 0);
+    CHECK((G64(72) & ~previous & a) && !(hos_sprint_press_mask & a));
+    now_ns += 60000000; packet(0, 0, 32767, 0);
+    bridge_up = 1;
+    bridge_buttons = 1ULL << B_SPRINT; packet(a, 0, 32767, 0);
+    bridge_buttons = 0; packet(0, 0, 32767, 0);
+    bridge_active = 0; packet(a, 0, 32767, 0); /* released G rearms the retained latch */
+    held_keys['G'] = 1; packet(0, 0, 32767, 0); /* turn the latch off */
+    held_keys['G'] = 0; packet(0, 0, 32767, 0);
+    held_keys['G'] = 1; packet(a, 0, 32767, 0);
+    held_keys['G'] = 0; packet(a, 0, 32767, 0);
+    bridge_active = 1; front = 0; packet(0, 0, 32767, 0);
+    front = 1; bridge_active = 0; packet(0, 0, 32767, 0); /* real focus loss resets it */
 }
 
 /* The game's menus' mouse clicks (host/oot_menu.c), through the real hos_hid_tap and host_taps: a click is a short
@@ -517,6 +585,10 @@ int main(int argc, char **argv) {
     CHECK(!pads_in_background("0", 1));    /* HOS_INPUT_BACKGROUND=0 wins over the menu */
     memory = calloc(512, 1); CHECK(memory);
     const char *name = argv[1];
+    if (!strcmp(name, "sprint-toggle")) {
+        sprint_toggle_case();
+        free(memory); return 0;
+    }
     if (!strcmp(name, "walk-toggle")) {
         walk_toggle_case();
         puts("PASS: Walk Hold/Toggle beside button Toggle; independent edges, speed and menu/focus/pause resets");

@@ -15,7 +15,6 @@ python -I -B tests/test_walk_key.py   (needs a C compiler)
 """
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -28,6 +27,7 @@ ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))   # (python -I leaves the check's own folder off the path)
 from menu_model_fixture import menu_text  # noqa: E402
+from test_sprint import compiler_command  # noqa: E402
 
 
 def block(text, marker):
@@ -140,6 +140,7 @@ static int sprint_now;
 enum { SPRINT_KEY = 1, SPRINT_PAD = 2 };
 static int pad_sprint_down(void) { return 0; }
 static int sprint_read(void) { return sprint_now; }
+static int sprint_frame_read(void) { return sprint_frame; }   /* (read_input sets it; npad_states, not cut here, reads it) */
 /* a controller's sticks and the captured mouse as the right stick, as a case sets them */
 static int32_t pad_stick[4], mouse_right[2];
 static int mouse_captured;
@@ -167,6 +168,7 @@ static void poll(void) {
     uint64_t taps = 0;
     read_input(&buttons, &taps, st);
     CHECK(oc_consumed_pads == 0);   /* the inactive note layer must not consume the controller while walking */
+    CHECK(!sprint_toggle_frame && !sprint_excluded && !injected_buttons);   /* no toggle or injected input in these cases */
 }
 static void release(void) { memset(held, 0, sizeof held); }
 static int near_share(int32_t v, int percent) {   /* (a straight tilt: percent of 32767, within one step) */
@@ -332,8 +334,8 @@ def names(text):
 
 class WalkKeyTests(unittest.TestCase):
     def test_walk(self):
-        compiler = shutil.which("gcc") or shutil.which("clang")
-        if not compiler:
+        compiler = compiler_command("CC", "gcc", "clang")
+        if not compiler[0]:
             self.skipTest("no C compiler")
         hid = read("host", "nn_hid.c")
         code = [block(hid, "enum { B_A"), block(hid, "static int key("), block(hid, "static int kmap_down("),
@@ -350,7 +352,7 @@ class WalkKeyTests(unittest.TestCase):
             tmp = Path(tmp)
             (tmp / "t.c").write_text(source, encoding="utf-8")
             binary = tmp / ("t.exe" if sys.platform == "win32" else "t")
-            build = subprocess.run([compiler, "-std=gnu11", "-D_CRT_SECURE_NO_WARNINGS", "-include", ENV_ON_H, "-Wall", "-Wextra", "-Werror",
+            build = subprocess.run(compiler + ["-std=gnu11", "-D_CRT_SECURE_NO_WARNINGS", "-include", ENV_ON_H, "-Wall", "-Wextra", "-Werror",
                                     "-Wno-unused-function", "-I", str(ROOT / "gpu" / "vk"), str(tmp / "t.c"), "-o", str(binary)],
                                    text=True, capture_output=True)
             self.assertEqual(build.returncode, 0, build.stderr)

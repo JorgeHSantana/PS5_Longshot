@@ -22,8 +22,6 @@ python -I -B tests/test_sprint.py   (needs a C and a C++ compiler)
 """
 import os
 import re
-import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -32,53 +30,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
+from compiler_command import compiler_command, windows_arguments  # noqa: E402
 import test_bound_keys  # noqa: E402  (its PRELUDE and the helpers that cut code out of a source)
 
 
-def windows_arguments(line):
-    """Split compiler arguments using Windows backslash and double-quote rules."""
-    out, cur, quoted, have, i = [], [], False, False, 0
-    while i < len(line):
-        if line[i] == "\\":
-            start = i
-            while i < len(line) and line[i] == "\\":
-                i += 1
-            n = i - start
-            if i < len(line) and line[i] == '"':
-                cur.append("\\" * (n // 2))
-                if n % 2:
-                    cur.append('"')
-                    i += 1
-            else:
-                cur.append("\\" * n)
-            have = True
-        elif line[i] == '"':
-            if quoted and i + 1 < len(line) and line[i + 1] == '"':
-                cur.append('"')
-                i += 2
-            else:
-                quoted, i = not quoted, i + 1
-            have = True
-        elif line[i] in " \t" and not quoted:
-            if have:
-                out.append("".join(cur))
-            cur, have, i = [], False, i + 1
-        else:
-            cur.append(line[i])
-            have, i = True, i + 1
-    if have:
-        out.append("".join(cur))
-    return out
-
-
-def compiler_command(variable, *fallbacks):
-    """Accept a bare executable path or a compiler command with flags."""
-    configured = os.environ.get(variable)
-    if configured:
-        if os.path.isfile(configured) or shutil.which(configured):
-            return [configured]
-        return windows_arguments(configured) if sys.platform == "win32" else shlex.split(configured)
-    return [next((path for name in fallbacks if (path := shutil.which(name))), None)]
 
 
 MAIN = r"""
@@ -263,9 +218,9 @@ class SprintTests(unittest.TestCase):
         self.assertLess(read.index("ReleaseSRWLockShared(&input_bind_lock);"), read.index("hos_oot_autoload_input();"))
         self.assertLess(read.index("input_pads[i][k] = pad_bind[i][k]"), read.index("ReleaseSRWLockShared(&input_bind_lock);"))
         self.assertLess(npad.index("read_input(&buttons, &taps, stick);"), npad.index("const int sprint_enabled = sprint_frame;"))
-        self.assertIn("const int sprint_held = sprint_enabled ? sprint_now : 0;", npad,
-                      "Sprint runs without the Controls tab's Sprint row on")
-        self.assertIn("sprint_step(&buttons, sprint_held, steered, menu_open || hos_oc_wait == 1, hos_now_ns());", npad,
+        self.assertIn("const int physical_sprint = sprint_enabled ? sprint_now : 0;",
+                      npad, "Sprint runs without the Controls tab's Sprint row on")
+        self.assertIn("sprint_step(&buttons, sprint_held, steered, menu_open || hos_oc_wait == 1, hos_now_ns(),", npad,
                       "npad_states does not give Sprint the buttons as the game will get them")
         self.assertLess(npad.index("const int steered ="), npad.index("sprint_step("),
                         "Sprint must see the stick before it lets it go")
@@ -277,7 +232,7 @@ class SprintTests(unittest.TestCase):
         self.assertIn("enum { B_SPRINT = 48 };", hid, "the bridge's SPRINT bit is not nn_hid.c's")
         self.assertIn("& ~(pad_after_menu | hud_pad_mask());", test_bound_keys.block(hid, "static int pad_sprint_down("),
                       "Sprint's gamepad input fires with the HUD shortcut's, which owns its inputs")
-        took = npad.index("if (buttons >> B_SPRINT & 1) sprint_now |= SPRINT_KEY;")
+        took = npad.index("const int synthetic_sprint = buttons >> B_SPRINT & 1;")
         self.assertLess(npad.index("read_input(&buttons, &taps, stick);"), took)
         self.assertLess(took, npad.index("buttons &= ~(1ULL << B_SPRINT);"))
         self.assertLess(npad.index("buttons &= ~(1ULL << B_SPRINT);"), npad.index("hos_hid_buttons = buttons;"),
@@ -366,7 +321,7 @@ static int fails;
 static uint64_t b;
 static void step_a(int held, int steered, int menu, int64_t ms, int own_a) {
     b = own_a ? 1 : 0;
-    sprint_step(&b, held, steered, menu, ms * 1000000);
+    sprint_step(&b, held, steered, menu, ms * 1000000, 0);
 }
 static void step(int held, int steered, int menu, int64_t ms) { step_a(held, steered, menu, ms, 0); }
 #define RUNS (b & 1)
@@ -438,6 +393,71 @@ int main(void) {
     return fails != 0;
 }
 """
+
+
+TOGGLE_MAIN = r"""
+#include <stdio.h>
+static int fails;
+#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
+int main(void) {
+    /* Toggle off: held as it is */
+    CHECK(sprint_toggle_step(SPRINT_PAD, 0, 0) == SPRINT_PAD);
+    CHECK(sprint_toggle_step(0, 0, 0) == 0);
+    /* Toggle on: a press starts it, it stays on let go, the next press ends it */
+    CHECK(sprint_toggle_step(SPRINT_PAD, 1, 0) == SPRINT_KEY);
+    CHECK(sprint_toggle_step(SPRINT_PAD, 1, 0) == SPRINT_KEY);   /* (still the same press) */
+    CHECK(sprint_toggle_step(0, 1, 0) == SPRINT_KEY);            /* let go: still on */
+    CHECK(sprint_toggle_step(SPRINT_KEY, 1, 0) == 0);            /* the next press: off */
+    CHECK(sprint_toggle_step(0, 1, 0) == 0);
+    /* a reset ends it, and the press held across it does not start it again */
+    CHECK(sprint_toggle_step(SPRINT_PAD, 1, 0) == SPRINT_KEY);
+    CHECK(sprint_toggle_step(SPRINT_PAD, 1, 1) == 0);
+    CHECK(sprint_toggle_step(SPRINT_PAD, 1, 0) == 0);
+    CHECK(sprint_toggle_step(0, 1, 0) == 0);
+    CHECK(sprint_toggle_step(SPRINT_PAD, 1, 0) == SPRINT_KEY);   /* a new press: on */
+    /* the Toggle turned off: held again at once, nothing latched */
+    CHECK(sprint_toggle_step(0, 0, 0) == 0);
+    CHECK(sprint_toggle_step(0, 1, 0) == 0);
+    if (!fails) printf("PASS\n");
+    return fails != 0;
+}
+"""
+
+
+class SprintToggleTests(unittest.TestCase):
+    """host/nn_hid.c sprint_toggle_step alone: the Controls page's Toggle for Sprint"""
+
+    def test_toggle(self):
+        compiler = compiler_command("CC", "gcc", "clang")
+        if not compiler[0]:
+            self.skipTest("no C compiler")
+        hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
+        code = (test_bound_keys.block(hid, "enum { SPRINT_KEY") + ";\n" +
+                test_bound_keys.block(hid, "static int sprint_toggle_step("))
+        with tempfile.TemporaryDirectory(prefix="longshot-sprint-toggle-") as tmp:
+            tmp = Path(tmp)
+            (tmp / "t.c").write_text(code + "\n#define sprint_toggle_step(a,b,c) sprint_toggle_step(a,b,c,0)\n" + TOGGLE_MAIN, encoding="utf-8")
+            binary = tmp / ("t.exe" if sys.platform == "win32" else "t")
+            build = subprocess.run(compiler + ["-std=gnu11", "-Wall", "-Werror", str(tmp / "t.c"), "-o", str(binary)],
+                                   text=True, capture_output=True)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
+    def test_wiring(self):
+        hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
+        npad = test_bound_keys.block(hid, "static void npad_states(")
+        self.assertIn("const int sprint_toggle = sprint_enabled && sprint_toggle_frame;", npad)
+        self.assertIn("sprint_toggle_step(physical_sprint, sprint_toggle, sprint_reset, suppressed)", npad,
+                      "npad_states does not give Sprint's held through its Toggle")
+        menu = (ROOT / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
+        self.assertIn("|| button == HOS_KEY_SPRINT;", test_bound_keys.block(menu, "bool has_toggle(int button) {"),
+                      "the Controls page has no Toggle for Sprint")
+        self.assertIn('if (i < HOS_SW_N || i == HOS_KEY_SPRINT) fprintf(f, "toggle_%s=%d\\n"', menu,
+                      "the menu does not save toggle_sprint")
+        replay = (ROOT / "gpu" / "vk" / "vk_replay.cpp").read_text(encoding="utf-8")
+        self.assertIn("host->binding(HOS_BIND_SPRINT_TOGGLE, 0, 0)", replay,
+                      "the host cannot see Sprint's Toggle")
 
 
 class SprintStepTests(unittest.TestCase):

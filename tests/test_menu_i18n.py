@@ -200,6 +200,17 @@ class MenuI18nTests(unittest.TestCase):
             with self.subTest(table=table):
                 self.assertTrue(set(texts) <= translated.keys())
 
+    def test_sprint_help(self):
+        for prefix in ("Enable Sprint in the Controls tab", "Toggle for Sprint: On,", "With Sprint On, by default",
+                       "L3 is assigned to Sprint.", "Left stick press", "Right stick press"):
+            texts = [text for text in self.menu if text.startswith(prefix)]
+            self.assertEqual(len(texts), 1)
+            for table, pairs in self.tables.items():
+                with self.subTest(table=table, text=texts[0]):
+                    translated = dict(pairs)
+                    self.assertIn(texts[0], translated)
+                    self.assertNotEqual(translated[texts[0]], texts[0])
+
     def test_conversions_and_spaces(self):
         for table, pairs in self.tables.items():
             keys = [en for en, _ in pairs]

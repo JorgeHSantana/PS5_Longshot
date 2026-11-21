@@ -974,6 +974,7 @@ const char* const bind_names[HOS_KEY_N] = {"a", "b", "x", "y", "ls", "rs", "l", 
                                            "move_right", "cam_up", "cam_down", "cam_left", "cam_right",
                                            "note_l", "note_r", "note_a", "note_y", "note_x", "walk", "toggle_hud",
                                            "sprint"};
+bool toggle_on(int button);   // (the Controls page's Toggle column: below, with the page)
 void save() {
     // (one writer at a time: the present's thread, the game's (menu_option_set) and the control bridge's, menu_setting_set)
     static std::mutex save_mu;
@@ -1070,7 +1071,7 @@ void save() {
                 if (alternate >= 0) fprintf(f, ",%d", alternate);
                 fputc('\n', f);
             }
-            if (i < HOS_SW_N) fprintf(f, "toggle_%s=%d\n", bind_names[i], (opts.hold_toggle >> i) & 1);
+            if (i < HOS_SW_N || i == HOS_KEY_SPRINT) fprintf(f, "toggle_%s=%d\n", bind_names[i], toggle_on(i) ? 1 : 0);
             fprintf(f, "key_%s=%d,%d\n", bind_names[i], host->binding(HOS_BIND_KEY, i, 0), host->binding(HOS_BIND_KEY, i, 1));
         }
     };
@@ -1376,11 +1377,12 @@ const Control controls[] = {{HOS_SW_A, "A"}, {HOS_SW_B, "B"}, {HOS_SW_X, "X"}, {
                             {HOS_SW_R, "R"}, {HOS_SW_ZL, "ZL"}, {HOS_SW_ZR, "ZR"}, {HOS_SW_PLUS, "Plus"},
                             {HOS_SW_MINUS, "Minus"}, {HOS_SW_LS, "Left stick press"}, {HOS_SW_RS, "Right stick press"},
                             {HOS_SW_UP, "D-pad up"}, {HOS_SW_DOWN, "D-pad down"}, {HOS_SW_LEFT, "D-pad left"},
-                            {HOS_SW_RIGHT, "D-pad right"}, {HOS_KEY_SPRINT, "Sprint"}, {HOS_KEY_MOVE_UP, "Move forward"},
+                            {HOS_SW_RIGHT, "D-pad right"}, {HOS_KEY_MOVE_UP, "Move forward"},
                             {HOS_KEY_MOVE_DOWN, "Move back"}, {HOS_KEY_MOVE_LEFT, "Move left"},
                             {HOS_KEY_MOVE_RIGHT, "Move right"}, {HOS_KEY_CAM_UP, "Camera up"},
                             {HOS_KEY_CAM_DOWN, "Camera down"}, {HOS_KEY_CAM_LEFT, "Camera left"},
-                            {HOS_KEY_CAM_RIGHT, "Camera right"}, {HOS_KEY_WALK, "Walk"}, {HOS_KEY_OC_NOTE_L, "Ocarina note (L)"},
+                            {HOS_KEY_CAM_RIGHT, "Camera right"}, {HOS_KEY_WALK, "Walk"}, {HOS_KEY_SPRINT, "Sprint"},
+                            {HOS_KEY_OC_NOTE_L, "Ocarina note (L)"},
                             {HOS_KEY_OC_NOTE_R, "Ocarina note (R)"}, {HOS_KEY_OC_NOTE_A, "Ocarina note (A)"},
                             {HOS_KEY_OC_NOTE_Y, "Ocarina note (Y)"}, {HOS_KEY_OC_NOTE_X, "Ocarina note (X)"},
                             {HOS_KEY_TOGGLE_HUD, "Toggle HUD"}};
@@ -1391,6 +1393,19 @@ bool keys_only(int i) {
     return i < kControls && ((controls[i].button >= HOS_KEY_MOVE_UP && controls[i].button <= HOS_KEY_CAM_RIGHT) ||
                              controls[i].button == HOS_KEY_WALK);
 }
+// (the controls with a Toggle column: the Switch's buttons but Plus and Minus (opts.hold_toggle, a bit each), and Sprint
+// (opts.sprint_toggle keeps Sprint out of the Switch-button mask and avoids its sign bit))
+bool has_toggle(int button) {
+    return (button < HOS_SW_N && button != HOS_SW_PLUS && button != HOS_SW_MINUS) || button == HOS_KEY_SPRINT;
+}
+bool toggle_on(int button) { return button == HOS_KEY_SPRINT ? opts.sprint_toggle != 0 : ((opts.hold_toggle >> button) & 1) != 0; }
+void toggle_set(int button, bool on) {
+    if (button == HOS_KEY_SPRINT) {
+        opts.sprint_toggle = on;
+        if (host && host->version >= 40 && host->bind) host->bind(HOS_BIND_SPRINT_TOGGLE, 0, 0, on);
+    }
+    else opts.hold_toggle = on ? opts.hold_toggle | (1 << button) : opts.hold_toggle & ~(1 << button);
+}
 // a pad input's name on the controller of the button prompts (the Button prompts row's choice; Auto: the face in use),
 // else by its place
 const char* pad_name(int p) {
@@ -1398,11 +1413,11 @@ const char* pad_name(int p) {
     static const char* paddles[] = {"R4", "L4", "R5", "L5"};
     if (p >= HOS_PAD_RPADDLE1) return paddles[p - HOS_PAD_RPADDLE1];
     static const char* t[HOS_PROMPT_KEYBOARD + 1][HOS_PAD_RPADDLE1] = {   // (by place, then HOS_PROMPT_*; the keyboard's: by place)
-        {"Bottom button", "Right button", "Left button", "Top button", "Select / Back", "Home", "Start", "L stick press",
-         "R stick press", "L1 / LB", "R1 / RB", "D-pad up", "D-pad down", "D-pad left", "D-pad right", "L2 / LT", "R2 / RT"},
-        {"B", "A", "Y", "X", "Minus", "Home", "Plus", "L stick press", "R stick press", "L", "R", "D-pad up",
+        {"Bottom button", "Right button", "Left button", "Top button", "Select / Back", "Home", "Start", "L3", "R3",
+         "L1 / LB", "R1 / RB", "D-pad up", "D-pad down", "D-pad left", "D-pad right", "L2 / LT", "R2 / RT"},
+        {"B", "A", "Y", "X", "Minus", "Home", "Plus", "L3", "R3", "L", "R", "D-pad up",
          "D-pad down", "D-pad left", "D-pad right", "ZL", "ZR"},
-        {"A", "B", "X", "Y", "View", "Xbox", "Menu", "L stick press", "R stick press", "LB", "RB", "D-pad up",
+        {"A", "B", "X", "Y", "View", "Xbox", "Menu", "L3", "R3", "LB", "RB", "D-pad up",
          "D-pad down", "D-pad left", "D-pad right", "LT", "RT"},
         {"Cross", "Circle", "Square", "Triangle", "Share", "PS", "Options", "L3", "R3", "L1", "R1", "D-pad up", "D-pad down",
          "D-pad left", "D-pad right", "L2", "R2"},
@@ -2541,19 +2556,30 @@ void draw_controls(ui::Ctx& c) {
     const ui::Prompt wait[] = {{ui::kBack, "Cancel"}};
     const float bar_top = ui::prompt_bar_top(c);   // (the strip itself drawn last, over all: below)
     const Row* page_row = sel_i < 0 ? &rows[tab_row_to_global(TAB_PAGE, csel)] : nullptr;
+    const bool l3_sprints = opts.sprint && sel_i >= 0 && sel_i < kControls && controls[sel_i].button == HOS_SW_LS &&
+                            (host->binding(HOS_BIND_PAD, HOS_KEY_SPRINT, 0) == HOS_PAD_LSTICK ||
+                             host->binding(HOS_BIND_PAD, HOS_KEY_SPRINT, 1) == HOS_PAD_LSTICK) &&
+                            host->binding(HOS_BIND_PAD, HOS_KEY_TOGGLE_HUD, 0) != HOS_PAD_LSTICK &&
+                            host->binding(HOS_BIND_PAD, HOS_KEY_TOGGLE_HUD, 1) != HOS_PAD_LSTICK;
     const char* title = page_row ? page_row->name : sel_i < kControls ? controls[sel_i].name : "Reset to defaults";
     const char* help = listening ? (listening == 1 ? "Press the gamepad button to use. Esc cancels." : "Press the key to use. Esc cancels.")
                        : page_row ? page_row->help
+                       : sel_i < kControls && controls[sel_i].button == HOS_KEY_SPRINT && ccol == kCtlToggle
+                           ? "Toggle for Sprint: On, a press of its key or button starts Sprint and the next ends it; Off, Link "
+                             "sprints only while you hold it. Opening Insert, pressing Plus or Minus or focus loss ends it. Off by "
+                             "default."
                        : sel_i < kControls && controls[sel_i].button == HOS_KEY_SPRINT
-                           ? "Link runs while you move and hold the key or the gamepad button, without rolling, talking or "
-                             "picking things up. Only with the Controls tab's Sprint row on, "
-                             "which gives it Shift and the "
-                             "left stick's press. Enter binds; Delete clears it."
+                           ? "Enable Sprint in the Controls tab to sprint without rolling. With Toggle off, hold the assigned input "
+                             "while moving. With Toggle on, press it to start or stop. Enabling Sprint moves L3 to Sprint if Sprint "
+                             "has no gamepad input and L3 is still the primary Switch left-stick-press binding."
                        : sel_i < kControls && controls[sel_i].button < HOS_SW_N && controls[sel_i].button != HOS_SW_PLUS &&
                          controls[sel_i].button != HOS_SW_MINUS && ccol == kCtlToggle
                            ? "Hold-to-toggle: press once to hold this Switch button, again to release it. Either gamepad input or a "
                              "bound key works. Opening Insert, pressing Plus or Minus, focus loss or rebinding releases it. Off by default."
-                           : "Either gamepad input or an assigned key presses the selected Switch button. Enter binds the "
+                       : l3_sprints
+                           ? "L3 is assigned to Sprint. Use the inputs shown on this row to press the Switch left stick. "
+                             "Enter binds the selected input and Delete clears it."
+                       : "Either gamepad input or an assigned key presses the selected Switch button. Enter binds the "
                              "selected input and Delete clears it. A button's only gamepad input stays with it: it does not move into "
                              "another's empty Input 2. The game's button icons follow after a restart.";
     const char* hint = page_row ? (page_row->hint ? page_row->hint(*page_row->value, -1) : nullptr)
@@ -2609,10 +2635,10 @@ void draw_controls(ui::Ctx& c) {
         const bool keys = keys_only(i);
         for (int col = kCtlPrimary; col < kCtlColumns; col++) {
             const bool keyboard = col == kCtlKeyboard, toggle = col == kCtlToggle;
-            const bool disabled = (keys && !keyboard) || (toggle && (ctl.button >= HOS_SW_N || ctl.button == HOS_SW_PLUS || ctl.button == HOS_SW_MINUS));
+            const bool disabled = (keys && !keyboard) || (toggle && !has_toggle(ctl.button));
             const float a = col_x[col] + (col == kCtlPrimary ? 0 : 3 * s), b = col_x[col + 1] - (toggle ? 0 : 3 * s);
             const std::string v = disabled ? "-" : keyboard ? keys_text(ctl.button) : toggle
-                ? tx_onoff((opts.hold_toggle >> ctl.button) & 1) : pad_name(host->binding(HOS_BIND_PAD, ctl.button, col));
+                ? tx_onoff(toggle_on(ctl.button)) : pad_name(host->binding(HOS_BIND_PAD, ctl.button, col));
             const bool here = sel && col == (keys ? kCtlKeyboard : ccol);
             const ImVec2 va(a, y), vb(b, y + rh);
             if (here && listening) {   // (waiting for the new input: amber, the outline as a selected value's)
@@ -3690,10 +3716,12 @@ void menu_init() {
                 *r.value = r.value == &opts.output_res ? parse_output(eq + 1) : std::min(std::max(v, r.lo), r.hi);
             }
             if (!strncmp(line, "toggle_", 7))
-                for (int i = 0; i < HOS_SW_N; i++)
-                    if (i != HOS_SW_PLUS && i != HOS_SW_MINUS && !strcmp(line + 7, bind_names[i])) {
-                        const int bit = 1 << i;
-                        opts.hold_toggle = atoi(eq + 1) == 1 ? opts.hold_toggle | bit : opts.hold_toggle & ~bit;
+                for (int i = 0; i < HOS_KEY_N; i++)
+                    if (has_toggle(i) && !strcmp(line + 7, bind_names[i])) {
+                        char* end;
+                        const long value = strtol(eq + 1, &end, 10);
+                        while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') end++;
+                        toggle_set(i, end != eq + 1 && !*end && value == 1);
                     }
             has_resolution |= !strcmp(line, "resolution");
             has_vibration |= !strcmp(line, "vibration");   // (longshot)
@@ -4243,6 +4271,7 @@ int menu_setting_set(const char* key, int value, MkwVkSetting* out) {
         if (!walk_to([&] { return std::pair(native() ? -1 : *r.value, opts.dlss); }, [&] { return *r.value == want && !native(); },
                      [&](int dir) { set_row(r, *r.value + dir * r.step, dir, false); }, 64)) {
             opts = opts_was;
+            toggle_set(HOS_KEY_SPRINT, opts.sprint_toggle != 0);
             std::copy(std::begin(env_was), std::end(env_was), env_overrides);
             restart_state = restart_was;
             samplers_changed();
@@ -4762,8 +4791,7 @@ void menu_tick() {
                 set_row(r, *r.value + (press[3] ? -r.step : r.step), press[3] ? -1 : 1);
                 changed = true;
             } else if (i >= 0) {
-                const int columns = i < kControls && controls[i].button < HOS_SW_N &&
-                                    controls[i].button != HOS_SW_PLUS && controls[i].button != HOS_SW_MINUS ? kCtlColumns : kCtlToggle;
+                const int columns = i < kControls && has_toggle(controls[i].button) ? kCtlColumns : kCtlToggle;
                 if (ccol >= columns) ccol = kCtlKeyboard;   // (no toggle on pause, map, stick directions or ocarina notes)
                 if ((press[3] || press[4]) && i < kControls && !keys_only(i)) {
                     ccol = (ccol + columns + (press[3] ? -1 : 1)) % columns;
@@ -4775,18 +4803,19 @@ void menu_tick() {
                         host->bind(HOS_BIND_PAD, -1, 0, 0);
                         opts.pad_layout = 0;
                         opts.hold_toggle = 0;
+                        toggle_set(HOS_KEY_SPRINT, false);
                         if (opts.sprint) apply_sprint_layout(true);   // (the defaults give Sprint nothing)
                         save();
                     }
                     else if (col == kCtlToggle) {
-                        opts.hold_toggle ^= 1 << controls[i].button;
+                        toggle_set(controls[i].button, !toggle_on(controls[i].button));
                         save();
                     }
                     else listening = col == kCtlKeyboard ? 2 : 1, listen_armed = false, listen_end = prof_now() + 6000000000LL;
                     changed = true;
                 }
                 if ((press[8] || press[9]) && i < kControls) {
-                    if (col == kCtlToggle) opts.hold_toggle &= ~(1 << controls[i].button);
+                    if (col == kCtlToggle) toggle_set(controls[i].button, false);
                     else if (col != kCtlKeyboard) {
                         host->bind(HOS_BIND_PAD, controls[i].button, col, -1);
                         opts.pad_layout = detect_pad_layout();

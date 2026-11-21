@@ -147,7 +147,7 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | Motion | Opens the Motion page: Motion controls (Off, On; On), Motion sensitivity X (10% to 600%) and Y (10% to 300%, in steps of 10; 100%), Invert motion X and Y (Off, On; Off), Motion deadzone (Low, Standard, High; Standard) | |
 | | Walk mode | Hold, Toggle | Hold |
 | | Walk speed | 15% to 90%, in steps of 5 | 45% |
-| | Sprint | Off, On (Link runs while you move and hold <kbd>Shift</kbd> or the left stick pressed in, without rolling; turning it on moves Shift and the left stick's press to Sprint) | Off |
+| | Sprint | Off, On (by default, Link runs while you move and hold <kbd>Shift</kbd> or the left stick pressed in, without rolling; the Controls page's Toggle cell changes this to a press; turning Sprint on moves Shift and the left stick's press to Sprint) | Off |
 | | Controls | Opens the Controls page | |
 | | Menu shortcut | Insert or F1; F1 only; Insert, F1 or Esc | Insert, F1 or Esc |
 | | Controller menu button | None, Home, Back left (GL), Back right (GR) | Home |
@@ -263,8 +263,9 @@ helper asks you to.
 - **Walk mode** and **Walk speed:** while the Walk key is held (<kbd>Caps Lock</kbd> unless you change it), the movement
   keys tilt the stick only Walk speed of the way. With Toggle, one press walks and the next runs.
 - **Sprint** (Controls tab, off by default): Link runs the game's own run, the one after a roll while A stays held,
-  without the roll. Hold <kbd>Shift</kbd> while you move, or on a controller hold the left stick pressed in; let go and
-  he moves as before. He runs past people, signs and pots without talking, reading or picking up; tap A to roll or
+  without the roll. By default, hold <kbd>Shift</kbd> while you move, or on a controller hold the left stick pressed in; let go and
+  he moves as before. With Sprint On, its **Toggle** cell on the Controls page instead starts and stops it with a press.
+  He runs past people, signs and pots without talking, reading or picking up; tap A to roll or
   act as usual. Sprint is disabled while the instrument is waiting for a note. Turning the row on moves <kbd>Shift</kbd> from B
   to Sprint (B goes to <kbd>V</kbd>, when no control has V) and the left stick's press from LS to Sprint; turning it off
   puts them back. Controls you rebound yourself are left alone, and the Controls page's **Sprint** line rebinds it.
@@ -303,7 +304,8 @@ over any gameplay action on the same key or button.
 **Change a binding** on the Controls tab's **Controls** page: choose a row and a column (Gamepad or Keyboard), press
 <kbd>Enter</kbd> (or the bottom face button), then the new button or key. <kbd>Esc</kbd> cancels, <kbd>Delete</kbd>
 clears it, and **Reset to defaults** puts them all back. A gamepad button taken from another Switch button swaps with
-it. The **Toggle** column makes a Switch button stay held from one press to the next. The five note rows (the
+it. The **Toggle** column makes a Switch button stay held from one press to the next, and Sprint run from one press to
+the next instead of while held, when the Controls tab's Sprint setting is On. The five note rows (the
 instrument's notes) are unset until you bind them to inputs of your own.
 
 **Mouse in the game's menus (Windows):** the title screen, the pause menu, the map and the save dialogs free the mouse.
@@ -347,7 +349,7 @@ keys only, the left stick's and the camera's directions and walking: `move_up` `
 `cam_up` `cam_down` `cam_left` `cam_right` `walk`; and the five notes, which also take a `pad_` line:
 `note_l` `note_r` `note_a` `note_y` `note_x`; and `sprint`, which takes both lines (none by default; the Sprint row
 gives it Shift and the left stick's press). A button the file leaves out keeps its default. `toggle_<button>=1` turns
-that button's Toggle on (not for `plus`, `minus`, the stick directions, `walk`, the notes or `sprint`).
+that button's Toggle on (not for `plus`, `minus`, the stick directions, `walk` or the notes; `toggle_sprint=1` for Sprint).
 
 </details>
 

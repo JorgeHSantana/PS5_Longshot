@@ -29,22 +29,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves t
 from menu_model_fixture import menu_text  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # (tests/srccut.py: python -I leaves this folder off the path)
 from srccut import block   # noqa: E402
+from compiler_command import compiler_command, parse_compiler  # noqa: E402
 
 # (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/longshot_env.h)
 ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "longshot_env.h")
 
-RUN_ALL_ARGS = ["--cc", "gcc"]
+RUN_ALL_ARGS = ["--cc", "{cc}"]
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ("foreground", "script-background", "script-background-switch", "headless", "noactivate", "live-background",
          "no-script-background", "exclusive-foreground", "exclusive-background", "pads-env", "pads-menu", "pads-off",
          "frame-hold", "live-frame", "reuse-frame", "wall", "zero", "empty", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle",
-         "hold-taps", "menu-side-buttons", "deck-mouse", "deck-motion", "held-input")
+         "hold-taps", "menu-side-buttons", "deck-mouse", "deck-motion", "held-input", "sprint-toggle")
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--cc", default="gcc")
+    p.add_argument("--cc", default=None)
     p.add_argument("--case", choices=CASES)
     a = p.parse_args()
     hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
@@ -52,7 +53,7 @@ def main():
     menu = menu_text()   # (vk_menu.cpp and its modules' rows, #1633)
 
     read = block(hid, "static void read_input(")
-    behind = read[read.index("if (!game_in_front()"):]   # (with or without PR 545's scripted-background test)
+    behind = read[read.index("if (!input_in_front)"):]
     behind = behind[:behind.index("goto done;") + len("goto done;")]
     if "pads_in_background(" not in behind or "pads_read(" not in behind:
         raise SystemExit("behind another window the pads are never read")
@@ -72,7 +73,8 @@ def main():
     constants += block(api, "enum { HOS_KEY_MOVE_UP") + ";\n"   # (the keys-only controls, and Sprint)
     constants += block(api, "enum { HOS_OPT_CHEAT_HEARTS") + ";\n"
     constants += block(api, "enum { HOS_OPT_HOLD_TOGGLE") + ";\n"
-    constants += block(api, "enum { HOS_OPT_SPRINT") + ";\n"   # (the Gameplay tab's Sprint row: the fixture's rx_option says on)
+    constants += block(api, "enum { HOS_OPT_SPRINT = ") + ";\n"   # (the Controls tab's Sprint row: the fixture's rx_option says on)
+    constants += block(api, "enum { HOS_OPT_SPRINT_TOGGLE") + ";\n"   # (Sprint's Toggle: the fixture's rx_option says off)
     constants += block(api, "enum { HOS_BIND_PAD") + ";\n"   # (the live input's !bind)
     constants += block(api, "enum { HOS_OPT_WALK_MODE") + ";\n"   # (the Walk key's rows: read_input asks for them)
     for name in ("STATE_SIZE", "NPAD_NO1", "ATTR_CONNECTED"):
@@ -87,9 +89,10 @@ def main():
     cheat_state += "\n" + block(hid, "enum { SPRINT_KEY") + ";\n"   # (Sprint; its gamepad input leaves the HUD shortcut's out)
     cheat_state += "static uint64_t hud_pad_mask(void);\n" + block(hid, "static int pad_sprint_down(")
     # (Sprint on for the input, as the row's layout publishes it: the fixture's rx_option says the row is on)
-    cheat_state += "\nstatic volatile LONG sprint_on = 1;\n"
+    cheat_state += "\nstatic volatile LONG sprint_on = 1, sprint_toggle_mode;\n"
     cheat_state += "\nvolatile uint32_t hos_sprint_press_mask;\n"
     cheat_state += re.search(r"^#define SPRINT_ROLL_GAP_MS [^\n]*", hid, re.M).group(0) + "\n"
+    cheat_state += block(hid, "static int sprint_toggle_step(") + "\n"   # (npad_states': Sprint's Toggle)
     cheat_state += block(hid, "static void sprint_step(")   # (npad_states': A held, without the roll)
     cheat_spies = """
 volatile int hos_oot_live_action;
@@ -141,12 +144,15 @@ static void player_used(void) { player_stamps++; }
         (folder / "input_actual.inc").write_text(actual, encoding="utf-8")
         exe = folder / "fixture.exe"
         # Production's button table deliberately leaves its unused axis fields zero-initialized.
-        run([a.cc, "-std=c11", "-include", ENV_ON_H, "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers",
+        cc = parse_compiler(a.cc) if a.cc else compiler_command("CC", "gcc", "clang")
+        if not cc or not cc[0]:
+            raise SystemExit("missing C compiler (set CC or install gcc or clang)")
+        run(cc + ["-std=c11", "-include", ENV_ON_H, "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers",
              "-D_CRT_SECURE_NO_WARNINGS",
              "-I" + str(folder), str(ROOT / "tests/input_background_test.c"), "-o", str(exe)])
         for case in ((a.case,) if a.case else CASES):
             case_env = dict(env)
-            if case not in ("live-background", "no-script-background", "live-frame", "reuse-frame", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle", "hold-taps", "menu-side-buttons", "deck-mouse", "deck-motion", "held-input"):
+            if case not in ("live-background", "no-script-background", "live-frame", "reuse-frame", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle", "hold-taps", "menu-side-buttons", "deck-mouse", "deck-motion", "held-input", "sprint-toggle"):
                 case_env["HOS_INPUT_SCRIPT"] = "0:A+LUP/200"
             if case in ("frame-hold", "live-frame", "reuse-frame"):
                 case_env["HOS_INPUT_FRAME_CLOCK"] = "1"

@@ -81,8 +81,8 @@ MENU_MODULE(sprint) {
     menu::tab("controls")
         .row({.key = "sprint",
               .label = "Sprint",
-              .help = "Hold Shift, or click and hold the left stick, while moving: Link runs without rolling, talking or "
-                      "picking things up, and moves as before once you let go. Turning it on changes your controls: Shift moves from B to Sprint (B goes "
+              .help = "With Sprint On, by default hold Shift, or click and hold the left stick, while moving: Link runs without rolling, talking or "
+                      "picking things up, and moves as before once you let go. The Controls page's Sprint Toggle cell changes this to a press to start and stop. Turning Sprint on changes your controls: Shift moves from B to Sprint (B goes "
                       "to V) and the left stick's press from LS to Sprint. Turning it off puts them back. Controls you rebound "
                       "yourself are left alone; the Controls page's Sprint line rebinds it.",
               .kind = menu::Kind::Toggle,

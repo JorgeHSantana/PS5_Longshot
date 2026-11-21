@@ -68,7 +68,7 @@ enum { HOS_SW_N = 16, HOS_KEY_OC_NOTE_L = 24, HOS_KEY_OC_NOTE_X = 28, HOS_KEY_TO
 enum { HOS_BIND_PAD, HOS_BIND_KEY, HOS_BIND_SPRINT_AUTO };
 struct Out { unsigned w, h; };
 struct Options { int preset = 1, fps_cap = 0, vram_budget = 1, output_res = 0, ultrawide = 1, game_lang = 0, budget = 1,
-                 hold_toggle = 0, gpu_device = 0; } opts;
+                 hold_toggle = 0, sprint_toggle = 0, gpu_device = 0; } opts;
 struct Row { const char* name; int* value; };
 int output_pick = 0;
 std::string output_want, output_saved_name;
@@ -124,6 +124,7 @@ Host host_v{binding};
 Host* host = &host_v;
 bool can_bind() { return true; }
 
+@TOGGLE_ON@
 @SAVE@
 
 std::string slurp(const std::string& p) {
@@ -383,7 +384,8 @@ def main():
         print("SKIP: as root the read-only cases' modes do not hold")
         return
     src = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
-    fixture = FIXTURE.replace("@SAVE@", block(src, "void save() {"))
+    fixture = FIXTURE.replace("@TOGGLE_ON@", block(src, "bool toggle_on(int button) {"))
+    fixture = fixture.replace("@SAVE@", block(src, "void save() {"))
     failed = []
     with tempfile.TemporaryDirectory(prefix="menu-save-") as tmp:
         cpp = Path(tmp) / "menu_save.cpp"

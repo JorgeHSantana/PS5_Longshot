@@ -111,6 +111,7 @@ constexpr int HOS_KEY_OC_NOTE_L = 1, HOS_KEY_OC_NOTE_X = 1, HOS_KEY_TOGGLE_HUD =
 const char* const bind_names[1] = {"a"};
 struct Host { int (*binding)(int, int, int); } host_value{nullptr}, *host = &host_value;
 bool can_bind() { return host->binding != nullptr; }
+bool toggle_on(int b) { return ((opts.hold_toggle >> b) & 1) != 0; }   // (the Controls page's Toggle column, as vk_menu.cpp's)
 void logf(const char*, ...) {}   // (save()'s line when the file cannot be written)
 /* INI_KEY */
 /* SAVE */

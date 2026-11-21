@@ -84,6 +84,8 @@ struct Options {
     int disable_camera_centering = 0; // 0: stock movement-follow turning; 1: keep the player's horizontal direction
     int sprint = 0; // 1: Sprint's key and button run (host/nn_hid.c sprint_step, HOS_OPT_SPRINT), and turning it on gave them
                     // Shift and the left stick's press (vk_menu.cpp apply_sprint_layout); 0, the default: they do nothing
+    int sprint_toggle = 0; // the Controls page's Toggle for Sprint (toggle_sprint=, HOS_OPT_SPRINT_TOGGLE): 1, a press turns it
+                           // on and the next off; 0, the default: Sprint while its key or button is held
     int mouse_sens = 100; // the mouse's sensitivity in percent: 0.1 degrees a count at 100 with native look (host/nn_hid.c)
     int mouse_invert = 0; // the mouse's up and down swapped
     int mouse_invert_x = 0; // the mouse's left and right swapped (HOS_OPT_MOUSE_INVERT_X, 61)

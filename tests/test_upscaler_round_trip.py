@@ -143,6 +143,10 @@ const char* bind_names[1] = {"a"};
 struct Host { int (*binding)(int, int, int); float (*aspect_ratio)(); void (*audio_output_select)(const char*);
               void (*monitor_select)(const char*); } *host = nullptr;
 bool can_bind() { return false; }
+// (the Controls page's Toggle column, as vk_menu.cpp's: the Switch's buttons but Plus and Minus; the stub's Sprint is past them)
+bool has_toggle(int b) { return b < HOS_SW_N && b != HOS_SW_PLUS && b != HOS_SW_MINUS; }
+bool toggle_on(int b) { return ((opts.hold_toggle >> b) & 1) != 0; }
+void toggle_set(int b, bool on) { if (b == HOS_KEY_SPRINT) opts.sprint_toggle = on; else opts.hold_toggle = on ? opts.hold_toggle | (1 << b) : opts.hold_toggle & ~(1 << b); }
 // No hardware profile or measured tuning owns the manual round trips.
 uint64_t auto_for = 0, auto_fp = 0, auto_tuned = 0;
 #include "gpu_choice.h"   // (the GPU device row saved as the card itself, which save() writes)

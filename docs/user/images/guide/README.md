@@ -14,8 +14,9 @@ The current Graphics image was captured from main `f1f2dc5bd2821cef061798ba40a04
 The [fullscreen-monitor source review](source-review-fullscreen-monitor.md) records the nightly 680 comparison and
 historical rc.8 comparisons. Earlier images remain in repository history.
 
-The current Graphics entry names that exact Git commit in `reviewed_source.revision`. Verify it with
-`scripts/check_guide_screenshots.py --review-sources` from a checkout with the recorded source and fixture files.
+The Graphics entry's `captured_source` records that original capture. Its `reviewed_source.revision` gives the
+Git commit last compared with the image. Verify the reviewed source and fixture files with
+`scripts/check_guide_screenshots.py --review-sources`.
 Older reviews may use a `sha256:` revision computed from the sorted file/hash pairs in `reviewed_source.files`.
 These are real maintained views rendered with synthetic state, not screenshots of a running game or a claim of
 reproducible official binaries. `captured_source` records the capture inputs; `reviewed_source` records the inputs reviewed for retention.

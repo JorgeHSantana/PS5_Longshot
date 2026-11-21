@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 39   /* (37: HOS_KEY_SPRINT; 38: HOS_BIND_SPRINT_ON; 39: HOS_BIND_SPRINT_BEGIN) */
+#define MKWVK_API_VERSION 40   /* (40: HOS_BIND_SPRINT_TOGGLE) */
 enum { HOS_MONITOR_CURRENT = 1, HOS_MONITOR_PRIMARY = 2 };
 typedef struct MkwVkMonitor {
     char id[512];             /* opaque persistent preference; never a runtime handle or list index */
@@ -71,6 +71,9 @@ enum { HOS_OPT_AUDIO_OUTPUT = 57 };
 /* (HOS_OPT_SPRINT, 97: the Controls tab's Sprint row, host/nn_hid.c sprint_step: 1 on, 0 Sprint's key and button do
    nothing) */
 enum { HOS_OPT_SPRINT = 97 };
+/* (HOS_OPT_SPRINT_TOGGLE, 98: the Controls page's Toggle for Sprint, toggle_sprint=: 1, a press of Sprint's key or button
+   turns it on and the next turns it off (host/nn_hid.c sprint_toggle_step); 0, the default: Sprint while held) */
+enum { HOS_OPT_SPRINT_TOGGLE = 98 };
 /* Damage taken: 0 Half, 1 Normal (unchanged), 2 Double, 3 Quadruple. */
 enum { HOS_OPT_DAMAGE_TAKEN = 55 };
 /* (HOS_OPT_SHADOW_RES, 56: Graphics' Shadow resolution, host/oot_shadow.c: the sun's cascades as drawn, its Auto resolved
@@ -127,8 +130,9 @@ enum { HOS_PAD_ART_N = HOS_PAD_RTRIGGER + 1 };
 enum { HOS_PAD_TOUCHPAD = 31 };
 /* HOS_BIND_SPRINT_AUTO gets/sets the packed provenance of Sprint's automatic bindings (button and slot unused).
    HOS_BIND_SPRINT_BEGIN starts a layout update, finished by HOS_BIND_SPRINT_ON setting Sprint to 1 or 0.
-   Input reads the value and bindings together (button and slot unused). */
-enum { HOS_BIND_PAD, HOS_BIND_KEY, HOS_BIND_SPRINT_AUTO, HOS_BIND_SPRINT_ON, HOS_BIND_SPRINT_BEGIN };
+   HOS_BIND_SPRINT_TOGGLE publishes the Controls page's toggle mode. Input reads these values and bindings together
+   (button and slot unused). */
+enum { HOS_BIND_PAD, HOS_BIND_KEY, HOS_BIND_SPRINT_AUTO, HOS_BIND_SPRINT_ON, HOS_BIND_SPRINT_BEGIN, HOS_BIND_SPRINT_TOGGLE };
 enum { HOS_SPRINT_AUTO_KEY = 1, HOS_SPRINT_AUTO_B = 2, HOS_SPRINT_AUTO_PAD = 4, HOS_SPRINT_AUTO_LS_SHIFT = 3 };
 /* (longshot) the controller faces of the button prompts (host/prompts.c): the Switch, then nx2/prompt_faces.py FACES' order,
    then the keyboard's (nx2/prompt_keys.py: the keys bound, not the pad inputs); the Button prompts row's value is one more (0

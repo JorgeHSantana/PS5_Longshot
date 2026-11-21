@@ -552,17 +552,18 @@ static const unsigned char key_default[HOS_KEY_N][2] = {
     {VK_TAB, VK_RETURN}, {'M'}, {'1'}, {'2'}, {'3'}, {'4'}, {'W'}, {'S'}, {'A'}, {'D'}, {VK_UP, 'I'}, {VK_DOWN, 'K'},
     {VK_LEFT, 'J'}, {VK_RIGHT, 'L'}, {0}, {0}, {0}, {0}, {0}, {VK_CAPITAL}};   /* (the five note rows start unset: oc_pad_word; the HUD's
                                                                                   and Sprint too) */
-static volatile LONG toggle_reset, hud_bind_generation;
+static volatile LONG toggle_reset, sprint_reset_pending, hud_bind_generation;
 static HoldToggle toggles;
 void hos_input_clear_toggles(void) { InterlockedExchange(&toggle_reset, 1); }
 static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
 static SRWLOCK input_bind_lock = SRWLOCK_INIT;
 static _Thread_local int sprint_layout_update;
-static _Thread_local int sprint_frame;
+static _Thread_local int sprint_frame, sprint_toggle_frame, sprint_excluded, input_in_front;
+static _Thread_local uint64_t injected_buttons;
 static int pad_bind[HOS_KEY_N][2];   /* (-1 for the keys-only controls, !has_pad) */
 static volatile LONG sprint_auto;
 /* Sprint and its bindings are read together under input_bind_lock. */
-static volatile LONG sprint_on;
+static volatile LONG sprint_on, sprint_toggle_mode;
 static volatile LONG key_bind[HOS_KEY_N][2];   /* (the menu changes them as the game reads them) */
 static _Thread_local int input_snapshot_active;
 static _Thread_local int input_keys[HOS_KEY_N][2], input_pads[HOS_KEY_N][2];
@@ -688,6 +689,7 @@ int hos_binding(int set, int button, int slot) {
     binds_load();
     if (set == HOS_BIND_SPRINT_AUTO) return sprint_auto_valid((int)sprint_auto);
     if (set == HOS_BIND_SPRINT_ON) return (int)__atomic_load_n(&sprint_on, __ATOMIC_ACQUIRE);
+    if (set == HOS_BIND_SPRINT_TOGGLE) return (int)__atomic_load_n(&sprint_toggle_mode, __ATOMIC_ACQUIRE);
     if (button < 0 || button >= HOS_KEY_N || slot < 0 || slot > 1)
         return set == HOS_BIND_PAD ? -1 : 0;
     if (set != HOS_BIND_PAD) return (int)key_bind[button][slot];
@@ -708,6 +710,11 @@ static void bind_one(int set, int button, int slot, int code) {
     }
     if (set == HOS_BIND_SPRINT_ON) {
         InterlockedExchange(&sprint_on, code != 0);
+        if (!code) InterlockedExchange(&sprint_reset_pending, 1);
+        return;
+    }
+    if (set == HOS_BIND_SPRINT_TOGGLE) {
+        InterlockedExchange(&sprint_toggle_mode, code != 0);
         return;
     }
     if (button < 0) {
@@ -1001,24 +1008,42 @@ static int pad_sprint_down(void) {
    while their A is down and for SPRINT_ROLL_GAP_MS after the gap, so a tap shorter than the gap still counts.
    held: SPRINT_KEY | SPRINT_PAD as read now; steered: the left stick pushed; paused: the menu open, or the ocarina waiting
    for a note (A is a note there and the stick bends its pitch), where Sprint holds nothing; now: hos_now_ns. */
+/* Sprint's Toggle (the Controls page's Toggle column for Sprint, HOS_OPT_SPRINT_TOGGLE): toggle on, a press of its key or
+   button (held going from 0 to not 0) starts Sprint and the next ends it; reset ends it, and a press still held across the
+   reset does not start it again. Toggle off: held as it is. The result is sprint_step's held */
+static int sprint_toggle_step(int held, int toggle, int reset, int suppressed) {
+    static int latched, was, blocked;
+    const int down = held != 0;
+    if (!toggle) latched = 0;
+    if (reset) latched = 0, blocked = 1;
+    if (suppressed) blocked = 1;
+    else if (!down) blocked = 0;
+    if (toggle && !reset && !suppressed && !blocked && down && !was) latched = !latched;
+    was = down;
+    return suppressed ? 0 : toggle ? (latched ? SPRINT_KEY : 0) : held;
+}
+
 volatile uint32_t hos_sprint_press_mask;
 #define SPRINT_ROLL_GAP_MS 50   /* (A let go as the player's own A goes down mid-sprint: a frame at 20 fps) */
-static void sprint_step(uint64_t *buttons, int held, int steered, int paused, int64_t now) {
-    static int running, own_was, pending;
+static void sprint_step(uint64_t *buttons, int held, int steered, int paused, int64_t now, int injected) {
+    static int running, own_was, pending, pending_injected;
     static int64_t gap_until, owed_until;
     const int want = steered && !paused && (held & (SPRINT_KEY | SPRINT_PAD));   /* (only while held) */
     const int own = (int)(*buttons >> B_A & 1);   /* (the player's own A: the pads', the keys', a script's) */
     const int own_down = own && !own_was;
     own_was = own;
     if (paused) {
-        running = pending = 0, gap_until = owed_until = 0;
+        if (paused != 2) running = 0;   /* (exclusive handoff keeps the last emitted A for a new tap) */
+        if (paused != 2 || !pending_injected) pending = 0, gap_until = 0;
+        owed_until = 0;
         __atomic_store_n(&hos_sprint_press_mask, 0, __ATOMIC_RELAXED);
         return;
     }
     if (running && own_down) {   /* (theirs going down while Sprint held A, even if Sprint is released now) */
         gap_until = now + (int64_t)SPRINT_ROLL_GAP_MS * 1000000;
-        pending = 1;
+        pending = 1, pending_injected = injected;
     }
+    if (pending && injected) pending_injected = 1;   /* (an injected A can join a physical tap's gap) */
     running = 0;
     if (pending && now < gap_until) {
         *buttons &= ~(1ULL << B_A);
@@ -1214,10 +1239,14 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
     *buttons = *taps = 0;
     memset(stick, 0, 4 * sizeof *stick);
     sprint_now = 0;
+    sprint_excluded = 0;
+    input_in_front = 0;
     scripted_input(buttons, taps, stick);
+    injected_buttons = *buttons | *taps;
     binds_load();
     AcquireSRWLockShared(&input_bind_lock);
     sprint_frame = (int)__atomic_load_n(&sprint_on, __ATOMIC_ACQUIRE);
+    sprint_toggle_frame = (int)__atomic_load_n(&sprint_toggle_mode, __ATOMIC_ACQUIRE);
     for (int i = 0; i < HOS_KEY_N; i++)
         for (int k = 0; k < 2; k++) input_keys[i][k] = (int)key_bind[i][k], input_pads[i][k] = pad_bind[i][k];
     input_snapshot_active = 1;
@@ -1227,7 +1256,10 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
     hos_oot_autoload_input();
     /* (longshot) HOS_CONTROL: the control bridge's presses (host/control.c); one that asked to be exclusive keeps the
        player's devices out while it lasts */
-    if (hos_control_input(buttons, stick)) {
+    const int control_exclusive = hos_control_input(buttons, stick);
+    injected_buttons |= *buttons;
+    if (control_exclusive) {
+        sprint_excluded = 1;
         hud_shortcut(0, 0);
         goto done;
     }
@@ -1241,6 +1273,7 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
     static int exclusive = -1;
     if (exclusive < 0) exclusive = env_on("HOS_INPUT_EXCLUSIVE");
     if (exclusive && npresses > 0 && script_elapsed_ms(hos_now_ns()) < script_end_ms + 5000) {
+        sprint_excluded = 1;
         hud_shortcut(0, 0);
         goto done;
     }
@@ -1257,7 +1290,8 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
             hos_log("hid: HOS_INPUT_SCRIPT_BACKGROUND is no longer needed: scripted and control-bridge presses count with "
                     "the game's window behind another one, and the player's keyboard and mouse stay out");
     }
-    if (!game_in_front()) {   /* (the pads alone, when the player asked for them behind other windows) */
+    input_in_front = game_in_front();
+    if (!input_in_front) {   /* (the pads alone, when the player asked for them behind other windows) */
         static const char *env;
         static int looked;
         if (!looked) looked = 1, env = getenv("HOS_INPUT_BACKGROUND");
@@ -1416,7 +1450,7 @@ static void npad_states(Ctx *c) {
     if (connected) {
         read_input(&buttons, &taps, stick);
         const int sprint_enabled = sprint_frame;
-        if (buttons >> B_SPRINT & 1) sprint_now |= SPRINT_KEY;   /* (a script's or the bridge's SPRINT: Sprint's key, held) */
+        const int synthetic_sprint = buttons >> B_SPRINT & 1;
         buttons &= ~(1ULL << B_SPRINT);
         hos_hid_buttons = buttons;   /* (cheats.c: the cheats' button conditions) */
         uint64_t axes = 0;
@@ -1425,7 +1459,7 @@ static void npad_states(Ctx *c) {
         const int menu_open = rx_option(1, 0);
         const uint64_t enabled = (uint32_t)rx_option(HOS_OPT_HOLD_TOGGLE, 0) &
                                  ~((1ULL << B_PLUS) | (1ULL << B_MINUS));
-        const int reset = InterlockedExchange(&toggle_reset, 0) || menu_open || (enabled && !game_in_front() &&
+        const int reset = InterlockedExchange(&toggle_reset, 0) || menu_open || (enabled && !(sprint_excluded ? game_in_front() : input_in_front) &&
                           !pads_in_background(getenv("HOS_INPUT_BACKGROUND"), rx_option(4, 0)));
         /* Pause/map must release shield/aim before the game's menu reads input. */
         const uint64_t pause = buttons & ~toggles.previous & ((1ULL << B_PLUS) | (1ULL << B_MINUS));
@@ -1451,9 +1485,30 @@ static void npad_states(Ctx *c) {
         /* Sprint (the Controls page's line; the Controls tab's Sprint row on gives it Shift and the left stick's press): A
            held, only while Sprint's key or button is held and the left stick is pushed (standing still, A would talk, open,
            pick up), started without the roll (sprint_step). The row off (the default): its key and button do nothing */
-        const int sprint_held = sprint_enabled ? sprint_now : 0;
+        /* Sprint's Toggle (the Controls page): a press starts it and the next ends it, ended as the buttons' toggles are
+           (opening Insert, Plus or Minus, the focus lost) */
+        const int sprint_toggle = sprint_enabled && sprint_toggle_frame;
+        const int sprint_front = sprint_toggle && sprint_excluded ? game_in_front() : input_in_front;
+        const int sprint_reset = (sprint_toggle && InterlockedExchange(&sprint_reset_pending, 0)) || reset || pause != 0 ||
+                                 (sprint_toggle && !sprint_front);
+        static int was_sprint_toggle;
+        const int physical_sprint = sprint_enabled ? sprint_now : 0;
+        const int suppressed = menu_open || hos_oc_wait == 1 || sprint_excluded || (sprint_toggle && !sprint_front);
+        int sprint_held = physical_sprint;
+        if (sprint_toggle || was_sprint_toggle)
+            sprint_held = sprint_toggle_step(physical_sprint, sprint_toggle, sprint_reset, suppressed);
+        else if (suppressed) sprint_held = 0;
+        was_sprint_toggle = sprint_toggle;
+        sprint_held |= sprint_enabled && synthetic_sprint ? SPRINT_KEY : 0;
+        static int was_excluded;
+        if (sprint_excluded && !was_excluded) {
+            uint64_t none = 0;
+            sprint_step(&none, 0, 0, 2, hos_now_ns(), 1);
+        }
+        was_excluded = sprint_excluded;
         /* (the ocarina's note wait, as oc_notes left it this read: Sprint lets go) */
-        sprint_step(&buttons, sprint_held, steered, menu_open || hos_oc_wait == 1, hos_now_ns());
+        sprint_step(&buttons, sprint_held, steered, menu_open || hos_oc_wait == 1, hos_now_ns(),
+                    !!(injected_buttons & (1ULL << B_A)));
         __atomic_store_n(&free_camera_axes, axes, __ATOMIC_RELAXED);
         __atomic_store_n(&free_camera_height, height, __ATOMIC_RELAXED);
     }

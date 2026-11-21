@@ -26,6 +26,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves the check's own folder off the path)
 from menu_model_fixture import menu_model_prelude, menu_model_member  , menu_text# noqa: E402
+from srccut import block  # noqa: E402
 
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 
@@ -42,7 +43,14 @@ FIXTURE = r'''#include "gpu/vk/vk_menu_keys.h"
 #include <cstring>
 #include <cctype>
 #include <initializer_list>
+#include <mutex>
 #include <string>
+#include <vector>
+#include <cerrno>
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); std::exit(1); } } while (0)
 using namespace mkwvk::menu_keys;
 namespace monitor_choice = mkwvk::monitor_choice;
@@ -89,6 +97,13 @@ enum {
 };
 using HWND = int;
 using DWORD = unsigned;
+#ifdef _WIN32
+static constexpr DWORD INVALID_FILE_ATTRIBUTES = ~0u, FILE_ATTRIBUTE_READONLY = 1, FILE_ATTRIBUTE_REPARSE_POINT = 0x400;
+static constexpr DWORD MOVEFILE_REPLACE_EXISTING = 1;
+static DWORD GetFileAttributesA(const char*) { return INVALID_FILE_ATTRIBUTES; }
+static DWORD GetLastError() { return 0; }
+static bool MoveFileExA(const char* from, const char* to, DWORD) { std::remove(to); return std::rename(from, to) == 0; }
+#endif
 static int down_key, queued_key;
 static bool focused, pad_last;
 // The key-poll extraction contains its lifetime guard. Full mic state is checked in test_microphone_test_gain.py.
@@ -106,13 +121,19 @@ static bool take_key_press(int key) {
     queued_key = 0;
     return true;
 }
+static int host_sprint_toggle;
+static void bind_test(int set, int, int, int value) { if (set == HOS_BIND_SPRINT_TOGGLE) host_sprint_toggle = value; }
+static int binding_test(int set, int, int) { return set == HOS_BIND_SPRINT_TOGGLE ? host_sprint_toggle : -1; }
 static struct {
+    int version;
+    void (*bind)(int, int, int, int);
     bool (*take_key_press)(int);
     float (*aspect_ratio)();
     int64_t (*now_ns)();
     void (*audio_output_select)(const char*);
     void (*monitor_select)(const char*);
-} queue_host{take_key_press, nullptr, nullptr, nullptr, nullptr}, *host;
+    int (*binding)(int, int, int);
+} queue_host{40, bind_test, take_key_press, nullptr, nullptr, nullptr, nullptr, binding_test}, *host;
 
 static bool keyboard_toggle(int mode, int key, bool queued, bool has_focus = true) {
     opts.menu_shortcut = mode;
@@ -242,9 +263,39 @@ struct Row { int tab; const char* name; int* value; int lo, hi; // MODEL_MEMBER
 };
 // INI_KEY
 // BIND_NAMES
+// TOGGLE_HELPERS
 static Row rows[] = {{0, "Menu shortcut", &opts.menu_shortcut, 0, 2}};
+struct Out { unsigned w, h; };
+static int output_pick;
+static int saved_value(int* v) { return *v; }
+static int custom_index() { return 1; }
+static bool env_holds(const int*) { return false; }
+static Out player_custom_output{};
+static Out output_at(int) { return {1280, 800}; }
+static int aspect_started, ultrawide_read;
+static bool aspect_follows_host(int) { return true; }
+namespace gpu_choice { struct Card {}; static std::string card_id(const std::vector<Card>&, int) { return {}; } }
+static std::vector<gpu_choice::Card> gpu_device_cards;
+static bool gpu_card_missing;
+static bool can_bind() { return host && host->binding; }
+static void logf(const char*, ...) {}
+static void apply_sprint_layout(bool) {}
+// SAVE
+static void reset_controls() {
+    // RESET_CONTROLS
+}
 
 // The Menu shortcut after menu_init reads a file with menu_shortcut=<shortcut> and options_version=<version> (-1: no line)
+static int reload() {
+    opts = Options{};
+    mic_want.clear();
+    bool has_options = false;
+    [[maybe_unused]] bool has_memory_budget = false;
+    [[maybe_unused]] bool has_output = false;   // (menu_init's: an output_res= line read)
+    // LOAD_OPTIONS
+    CHECK(has_options);
+    return opts.menu_shortcut;
+}
 static int loaded_as(int shortcut, int version, const char* toggles = "") {
     if (FILE* w = fopen(ini_file.c_str(), "w")) {
         fputs("output_res=2560x1440\n", w);
@@ -253,13 +304,7 @@ static int loaded_as(int shortcut, int version, const char* toggles = "") {
         if (version >= 0) fprintf(w, "options_version=%d\n", version);
         fclose(w);
     }
-    opts = Options{};
-    mic_want.clear();
-    bool has_options = false, has_memory_budget = false;
-    [[maybe_unused]] bool has_output = false;   // (menu_init's: an output_res= line read)
-    // LOAD_OPTIONS
-    CHECK(has_options && !has_memory_budget);
-    return opts.menu_shortcut;
+    return reload();
 }
 
 static int input_option(int id) {
@@ -269,6 +314,7 @@ static int input_option(int id) {
 
 static void test_saved() {
     CHECK(Options{}.hold_toggle == 0);
+    CHECK(!has_toggle(HOS_SW_PLUS) && !has_toggle(HOS_SW_MINUS));
     loaded_as(2, SAVED_VERSION, "toggle_r=1\ntoggle_zl=0\ntoggle_a=9\ntoggle_move_up=1\ntoggle_plus=1\ntoggle_minus=1\ntoggle_walk=1\n");
     CHECK(opts.hold_toggle == (1 << HOS_SW_R));
     CHECK(input_option(HOS_OPT_HOLD_TOGGLE) == opts.hold_toggle);
@@ -276,6 +322,23 @@ static void test_saved() {
     CHECK(opts.walk_mode == 0 && opts.walk_speed == 45);   // toggle_walk is not a Walk mode setting
     loaded_as(2, SAVED_VERSION, "toggle_r=1\ntoggle_r=0\n");
     CHECK(opts.hold_toggle == 0);
+    loaded_as(2, SAVED_VERSION, "toggle_sprint=4294967297\n");
+    CHECK(opts.sprint_toggle == 0);
+    loaded_as(2, SAVED_VERSION, "toggle_sprint=1\n");
+    CHECK(opts.sprint_toggle == 1);
+    loaded_as(2, SAVED_VERSION, "toggle_sprint=1junk\n");
+    CHECK(opts.sprint_toggle == 0);
+    host = &queue_host;
+    toggle_set(HOS_KEY_SPRINT, true);
+    save();
+    opts = Options{}; host_sprint_toggle = -1;
+    reload();
+    CHECK(opts.sprint_toggle == 1 && host_sprint_toggle == 1 && input_option(HOS_OPT_SPRINT_TOGGLE) == 1);
+    reset_controls();
+    CHECK(opts.sprint_toggle == 0 && host_sprint_toggle == 0 && input_option(HOS_OPT_SPRINT_TOGGLE) == 0);
+    opts.sprint_toggle = 1; host_sprint_toggle = -1;
+    reload();
+    CHECK(opts.sprint_toggle == 0 && host_sprint_toggle == 0 && input_option(HOS_OPT_SPRINT_TOGGLE) == 0);
     // (from before the version Esc came with, ESC_FROM (-1, no line: before 2): Insert or F1 was the default, written
     // whether chosen or not, and moves to Insert, F1 or Esc; F1 only was chosen and stays; no line: the default)
     for (int old = -1; old < ESC_FROM; old++) {
@@ -308,7 +371,7 @@ def main():
     api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
     # The public header pulls in C-only NVN assertions; use its real enums as test_pad_layout does.
     enums = [re.search(r"enum \{ " + first + r"\b.*?\};", api, re.S).group(0)
-             for first in ("HOS_SW_A", "HOS_KEY_MOVE_UP", "HOS_OPT_HOLD_TOGGLE")]
+             for first in ("HOS_SW_A", "HOS_KEY_MOVE_UP", "HOS_OPT_HOLD_TOGGLE", "HOS_OPT_SPRINT_TOGGLE", "HOS_BIND_PAD")]
     tick = menu[menu.index("void menu_tick() {"):]
     key_poll = tick[tick.index("    enum { K_N ="):tick.index("    // (longshot) the gamepads")]
     esc_at = tick.index("    const bool esc_opens")
@@ -337,10 +400,17 @@ def main():
         raise SystemExit("FAIL: vk_menu.cpp: save() writes a version below the Menu shortcut's move: a choice would move again")
     bind_names = re.search(r"const char\* const bind_names\[HOS_KEY_N\] = \{.*?\};", menu, re.S).group(0)
     replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
-    toggle_option = re.search(r"if \(id == HOS_OPT_HOLD_TOGGLE\) return opts.hold_toggle;", replay).group(0)
+    toggle_option = (re.search(r"if \(id == HOS_OPT_HOLD_TOGGLE\) return opts.hold_toggle;", replay).group(0) + "\n" +
+                     re.search(r"if \(id == HOS_OPT_SPRINT_TOGGLE\)\s*return [^;]+;", replay).group(0))
+    reset_start = tick.index("                        host->bind(HOS_BIND_PAD, -1, 0, 0);")
+    reset_controls = tick[reset_start:tick.index("\n                    }", reset_start)]
     keyboard = (KEYBOARD.replace("// OPTIONS", options.group(0)).replace("// TX_MENU_SHORTCUT", tx)
                 .replace("    // KEY_POLL", key_poll).replace("    // ESC_BLOCK", esc_block)
-                .replace("// INI_KEY", ini_key).replace("// BIND_NAMES", bind_names).replace("// TOGGLE_OPTION", toggle_option).replace("    // LOAD_OPTIONS", load)
+                .replace("// INI_KEY", ini_key).replace("// BIND_NAMES", bind_names)
+                .replace("// TOGGLE_HELPERS", menu[menu.index("bool has_toggle(int button) {"):menu.index("// a pad input's name")])
+                .replace("// SAVE", block(menu, "void save()"))
+                .replace("    // RESET_CONTROLS", reset_controls)
+                .replace("// TOGGLE_OPTION", toggle_option).replace("    // LOAD_OPTIONS", load)
                 .replace("SAVED_VERSION", saved_version.group(1)).replace("ESC_FROM", esc_from.group(1)))
     fixture = FIXTURE.replace("// API_ENUMS", "\n".join(enums)).replace("// KEYBOARD_FIXTURE", keyboard)
     with tempfile.TemporaryDirectory(prefix="menu-keys-") as tmp:
@@ -353,9 +423,9 @@ def main():
 
     need(menu, r'\{TAB_CONTROLS, "Menu shortcut", &opts\.menu_shortcut, 0, 2, 1, tx_menu_shortcut,[^}]*nullptr, false, true\}',
          "the shortcut choice must be saved in Controls and exempt from presets")
-    need(menu, r"const bool disabled = .*ctl.button == HOS_SW_PLUS.*ctl.button == HOS_SW_MINUS",
+    need(menu, r"const bool disabled = .*toggle && !has_toggle\(ctl.button\)",
          "Plus and Minus must have disabled Toggle cells")
-    need(tick, r"const int columns = .*?controls\[i\].button != HOS_SW_PLUS && controls\[i\].button != HOS_SW_MINUS",
+    need(tick, r"const int columns = .*?has_toggle\(controls\[i\].button\)",
          "keyboard navigation must skip Plus and Minus Toggle cells")
     # (Insert, F1 or Esc: Esc on a closed menu opens it, and that press does not also go back a page)
     need(tick, r"const bool esc_opens = opts\.menu_shortcut == 2 && press\[5\] && !open_now\.load\(\);\s*"
@@ -386,8 +456,8 @@ def main():
     if "page == 2" in tick or "page = 2" in tick:
         raise SystemExit("FAIL: vk_menu.cpp: the debug tools' old page is still reached")
     for page in ("4", "3"):
-        block = tick[tick.index("open_now.load() && page == %s" % page):]
-        need(block[:1500], r"if \(press\[5\]\) page = 0", "back from page %s does not return to the Debug tab" % page)
+        page_block = tick[tick.index("open_now.load() && page == %s" % page):]
+        need(page_block[:1500], r"if \(press\[5\]\) page = 0", "back from page %s does not return to the Debug tab" % page)
     need(menu, r'\{TAB_DEBUG, "Developer", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true\}',
          "the Debug tab has no Developer heading")
     for name in ("Descriptor reuse", "Sampler cache", "Robust buffers", "ASTC as RGBA8"):

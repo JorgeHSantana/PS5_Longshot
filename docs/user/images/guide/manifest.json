@@ -954,7 +954,7 @@
       },
       "reviewed_source": {
         "repository": "https://git.magicbean.dev/MagicBeanDev/Longshot",
-        "revision": "f1f2dc5bd2821cef061798ba40a043d281ac1707",
+        "revision": "27a16d06cced8f5d03af212aa20541844e964f5e",
         "files": {
           "assets/longshot.png": "9186c5ea9c3c5d4b22725d3dbffd4eb81a8965f66cebbcfa1c492423b9defb2b",
           "gpu/render/nvn_api.h": "f40e44b4b63aa20892399547167d367a652c1ed0793ca4a0f9299a8988289b82",
@@ -1007,7 +1007,7 @@
           "gpu/vk/menu/preset.h": "2a23016d0dfa6bee1b5870ce82178b939504cc062c73363dcd9b70a63fc96d8f",
           "gpu/vk/menu/replay_cache.cpp": "671e179e4c7361f149606be30dfd6134c641dcdabc1e1a0b76cbbbbf60bb1f3a",
           "gpu/vk/menu/session.cpp": "a62f4e55a6f7cd1355136454522112cc1cccf3fd5add816ce00547ebeb547fa4",
-          "gpu/vk/menu/sprint.cpp": "50b20dc89cb158ca9734f4cf2b835a773070e775edbda86fd10be299b1cdf39e",
+          "gpu/vk/menu/sprint.cpp": "daadae4bec653da627b2373d9744cfc0217bcda8637b66406705d3dddc51f748",
           "gpu/vk/menu/sprint.h": "774b758847033cccf94884dc2bc3f131fc89ffba73c2d986c2e38fa8a7a9cb0a",
           "gpu/vk/menu/threads.cpp": "6eab5b02dc7ff89407e885c8d5662ba2c1a6c4628aa6c686e3be1438e186e145",
           "gpu/vk/menu/upscaler.cpp": "06eaab12ead46e84f662e08d6204701d7a25f78d586f3a5bb16c1cda8eade692",
@@ -1015,7 +1015,7 @@
           "gpu/vk/menu/volume.cpp": "5cdc1cb943f6381b72f2f1cbabc6d6331a84fd29388b1d7a5ddbcc56cb19ec17",
           "gpu/vk/menu/walk.cpp": "365a57a8462a0586011db2374f38709441f6bbecbb479c96d1914250d199729d",
           "gpu/vk/menu/widescreen.cpp": "60563ec3e91e86a6bbdf33023bea15ab02c24e191baf2f67d3df1736f7e128df",
-          "gpu/vk/menu_i18n.h": "ea59727c7ce2266f4a7e0d67666b2c3c0db35535c17abacac061498f97e3db40",
+          "gpu/vk/menu_i18n.h": "54d3ac11093cc769d208c07c1d524dbec37ed802620c946e53761f0f741f6f8a",
           "gpu/vk/menu_model.cpp": "c61f4e3e051c0313a0862abcffd799cd02b96d67cc5a2278739458db4bbe9e8e",
           "gpu/vk/menu_model.h": "5d57010c1f1c65cd9a96e435e420356551c192b2159186ac48303e66f811387c",
           "gpu/vk/menu_module.h": "1a68e045a36ae60d6c073366f3ff9104112d18e8bfd1eb929d31f455fae4adb1",
@@ -1031,7 +1031,7 @@
           "gpu/vk/threaded_rendering.h": "76f341c154f46844a0928054b2f174bb5b0703f6f270a42f2892ae11d2eee555",
           "gpu/vk/upscaler_rows.h": "9dcd98577ae0a286d1d4efecd83e316594bfb93a984486d34454a8e68a9a98e5",
           "gpu/vk/vk_antilag.h": "e43538dde4493328eef266c1580a983e2187645c613d00a108fa92ed1376b5be",
-          "gpu/vk/vk_api.h": "4d8b7be7db838fef873deee2162a009ae5cc6a4410ce6037fd7b3cf51f366fca",
+          "gpu/vk/vk_api.h": "67afe292900bfa73a1a429027975fff213cc662147a9c9e39963b26345e3ee52",
           "gpu/vk/vk_bug_report.h": "026d6e09fe64aebb03fb8cc8c2872e60ad170ae7c20b121deb340dcbc4e1f523",
           "gpu/vk/vk_dlss.h": "d11f21a7a52b1510fea9ef885f1b38283f2d2221e5b9d0ac1af91f068548757c",
           "gpu/vk/vk_draw.h": "e0dde8113730709f92f37ce0e824d80ce74cdf06c3c69dea93c03fd53be710fd",
@@ -1043,8 +1043,8 @@
           "gpu/vk/vk_imgui.h": "89246a2eb2ceab0320634a8cab24b4a7608389666192bcad740477d9b0b6c106",
           "gpu/vk/vk_internal.h": "ca53d9b0dfb9cead2629a26ae3a18e46453ae8b3be099190bac2c9175936ffc4",
           "gpu/vk/vk_loader.h": "00639b30657abed6ca089d9c15dd45321f2ab7fd33974e1b009f86957ccdd7f6",
-          "gpu/vk/vk_menu.cpp": "1409dc9c4a933249d57aedb8212edb4c1ce0e0219f0ba4e37b8d5650026b0ba1",
-          "gpu/vk/vk_menu.h": "c4f1ae776ee68de60fe2165f2267c8bce43326dd105d2a7f9159d4e41d9c392f",
+          "gpu/vk/vk_menu.cpp": "49e893299e69de44f53851742a8b0ced911107898f8555fd837dec7880f0182a",
+          "gpu/vk/vk_menu.h": "54ff4a16a8bc9732d33b15c0378ba55ad6581bdf75804f392459efedfbd0fdf9",
           "gpu/vk/vk_menu_hit.h": "bec415bc52f29b1429cfb6164ff02af6122e6f43861642b79ded7b2cb8b713f9",
           "gpu/vk/vk_menu_i18n.cpp": "fa5bfc1b6c8a1563605892d64e63e8d42e42eb447016d0671567f68b4e523ad3",
           "gpu/vk/vk_menu_i18n.h": "282f9c3ab0f4ce253a822a6e866650a3acd0dece2d2512226bedf44e65ef92eb",
@@ -1104,7 +1104,7 @@
         "contains_save_data": false,
         "contains_private_paths": false,
         "font_source": "Bundled Libertinus Sans Regular/Bold and Serif Semibold; third_party/fonts/libertinus/OFL.txt.",
-        "notes": "Recaptured from main f1f2dc5b using the updated game-free fixture. The banner, six tabs, visible Graphics rows, Quality preset help and keyboard prompts were compared with the previous proposed rc.8 capture. The version, scrollbar and layout pixels changed. No game, live monitor probe, save, private path or game-derived asset is used. The first Graphics view remains a Quality preset illustration with illustrative Custom values."
+        "notes": "Recaptured from main f1f2dc5b using the updated game-free fixture. The banner, six tabs, visible Graphics rows, Quality preset help and keyboard prompts were compared with the previous proposed rc.8 capture. The version, scrollbar and layout pixels changed. No game, live monitor probe, save, private path or game-derived asset is used. The first Graphics view remains a Quality preset illustration with illustrative Custom values. For Sprint Toggle, the 1280×720 RGB render at 2a74b3f2 matched the retained Graphics image and the same render on main 40bfceb0 outside the version text at the upper right. The only intervening change to the capture inputs at 27a16d06 is in the Controls binding grid help for the left stick. Graphics does not draw that grid. The captured image is retained."
       }
     },
     {

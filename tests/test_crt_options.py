@@ -119,12 +119,13 @@ void mic_tell_host() {}
 namespace i18n { int game_lang_index() { return 0; } }   // no external language.txt in this fixture
 /* RUMBLE_STEP */
 constexpr int HOS_KEY_N = 1, HOS_SW_N = 1, HOS_SW_PLUS = 10, HOS_SW_MINUS = 11, HOS_BIND_PAD = 0, HOS_BIND_KEY = 1, HOS_BIND_SPRINT_AUTO = 2;
-constexpr int HOS_KEY_OC_NOTE_L = 1, HOS_KEY_OC_NOTE_X = 1, HOS_KEY_TOGGLE_HUD = 1, HOS_KEY_SPRINT = 1;
+constexpr int HOS_KEY_OC_NOTE_L = 1, HOS_KEY_OC_NOTE_X = 1, HOS_KEY_TOGGLE_HUD = 1, HOS_KEY_SPRINT = 1, HOS_BIND_SPRINT_TOGGLE = 5;
 const char* const bind_names[HOS_KEY_N] = {"a"};
-struct Host { int (*binding)(int, int, int); float (*aspect_ratio)(); };
+struct Host { int (*binding)(int, int, int); float (*aspect_ratio)(); int version; void (*bind)(int, int, int, int); };
 Host host_value{}, *host = &host_value;
 bool can_bind() { return false; }
 /* INI_KEY */
+/* TOGGLE_HELPERS */
 /* SAVE */
 
 // The real read block, including old-file migrations, can run more than once
@@ -367,6 +368,7 @@ def fixture(source):
         "/* APPLY_AUTO */": definition(menu, "void apply_auto"),
         "/* RUMBLE_STEP */": definition(menu, "int rumble_step"),
         "/* INI_KEY */": definition(menu, "const char* ini_key"),
+        "/* TOGGLE_HELPERS */": definition(menu, "bool has_toggle") + "\n" + definition(menu, "bool toggle_on") + "\n" + definition(menu, "void toggle_set"),
         "/* SAVE */": definition(menu, "void save"),
         "/* LOAD_OPTIONS */": init[load_at:init.index("    first_start = !has_options;", load_at)],
         "/* ROW_RESTART_VALUE */": definition(menu, "int row_restart_value"),

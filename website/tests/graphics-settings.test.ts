@@ -32,6 +32,17 @@ test('CRT-line visibility has a badge and still requires its documented conditio
   assert.throws(() => readGraphicsSettings(undocumented, menu), /no condition for CRT lines/);
 });
 
+test('Custom HUD rows require their visibility condition and the registered reset action', () => {
+  const settings = readGraphicsSettings(page, menu).flatMap(group => group.settings);
+  for (const name of ['Hearts and magic horizontal', 'Reset HUD placement']) {
+    assert(settings.find(setting => setting.name === name).badges.includes('Custom HUD layout without a HOS_WIDE_UI override'));
+  }
+  assert.throws(() => readGraphicsSettings(page.replaceAll('shown with HUD layout set to Custom and no `HOS_WIDE_UI` override', 'Custom'), menu),
+    /no condition for Hearts and magic horizontal/);
+  assert.throws(() => readGraphicsSettings(page, menu.replace('MENU_HOOK(reset_hud_placement)', 'MENU_HOOK(other_action)')),
+    /coverage mismatch at Reset HUD placement/);
+});
+
 test('the registered fullscreen monitor selector retains its identity-backed choices; unsupported rows fail', () => {
   const setting = readGraphicsSettings(page, menu).flatMap(group => group.settings)
     .find(setting => setting.name === 'Fullscreen monitor');
