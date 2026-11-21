@@ -10317,6 +10317,26 @@ void prepare_background() {
 /// (longshot) A line every 10 s while the preparation builds pipelines: their count and an estimate of the time left. The
 /// pipeline steps wrote nothing to the log for 10-30 minutes on some AMD cards, and players pasted a log whose last lines (the
 /// vertex formats) looked like a hang (Discord 2026-11-10, "stuck on preparing shaders"); the Builder's bar moved, the log did not
+/// (longshot) The pipeline cache written while a warm builds, every kWarmSaveEvery, not only at its end. A preparation on a cold
+/// driver cache is hours of compiles (AMD: nightly-622's, 80 minutes in and going, with no longshot_vk_pipelines.bin written yet),
+/// and one killed, crashed, or stopped before its end (make_game's silence timeout, the player closing it) kept none of them: the
+/// file was written once, after the last build. Now what was built up to the last save is in the file, and the next start's warm
+/// finds it in the cache. warm_save_due: whether a save is due at `now` (the first call only sets the next one); warm_save_tick: a
+/// background save when one is (pipeline_cache_save(false): its own thread, the builds go on, nothing written when nothing new)
+constexpr auto kWarmSaveEvery = std::chrono::minutes(10);
+bool warm_save_due(std::chrono::steady_clock::time_point now, std::chrono::steady_clock::time_point& next) {
+    if (next == std::chrono::steady_clock::time_point{}) {
+        next = now + kWarmSaveEvery;
+        return false;
+    }
+    if (now < next) return false;
+    next = now + kWarmSaveEvery;
+    return true;
+}
+void warm_save_tick(std::chrono::steady_clock::time_point& next) {
+    if (warm_save_due(std::chrono::steady_clock::now(), next)) pipeline_cache_save(false);
+}
+
 void prepare_progress_log(const char* what, size_t done, size_t total, std::chrono::steady_clock::time_point t0,
                           std::chrono::steady_clock::time_point& next) {
     const auto now = std::chrono::steady_clock::now();
@@ -10435,6 +10455,7 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
     std::atomic<size_t> done{0}, built{0}, failed{0}, no_program{0};
     const std::string notes_path = pipe_notes_path();
     auto log_at = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    std::chrono::steady_clock::time_point save_at{};   // (warm_save_tick: the cache written as it goes)
     const unsigned threads = std::min(usable_cpus(), 16u);
     warm_bounded::run(progs.size(), threads, [&](size_t i) {
         static thread_local bool off = (ub_thread_off(), true);   // (a background thread: see ub_thread_off)
@@ -10458,6 +10479,7 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
     }, [] { return prepare_stopped(); }, [&](size_t) {
         if (progress) progress(done.load(), all_n);
         prepare_progress_log("noted pipelines", done.load(), total, t0, log_at);
+        warm_save_tick(save_at);
     });
     // Build the selected compute pipelines into the cache after the graphics notes.
     std::atomic<size_t> computes_done{0}, computes_built{0}, computes_failed{0};
@@ -10482,6 +10504,7 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
     }, [] { return prepare_stopped(); }, [&](size_t) {
         if (progress) progress(total + computes_done.load(), all_n);
         prepare_progress_log("compute pipelines", computes_done.load(), computes.size(), c0, log_at);
+        warm_save_tick(save_at);
     });
     const bool all = done == total && computes_done == computes.size();
     static const bool prepare_only = env_on("LONGSHOT_PREPARE_ONLY");   // (a --prepare-shaders run: vk_main.cpp)
@@ -10910,10 +10933,12 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     auto last_change = std::chrono::steady_clock::now();
     bool gone_on = false;
     auto log_at = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    std::chrono::steady_clock::time_point save_at{};   // (warm_save_tick: the cache written as it goes)
     const auto built0 = std::chrono::steady_clock::now();
     while (done.load() < total && !prepare_stopped()) {
         if (progress) progress(done.load(), total);
         prepare_progress_log("noted pipelines", done.load(), total, built0, log_at);
+        warm_save_tick(save_at);
         Sleep(100);
         if (next.load() >= total + threads.size()) break;
         const auto now = std::chrono::steady_clock::now();
