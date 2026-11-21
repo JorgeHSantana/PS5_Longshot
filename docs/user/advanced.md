@@ -85,7 +85,8 @@ script. Each version's builder is on [Longshot's releases](https://git.magicbean
 
 On Windows, unpack `LongshotBuilder-<version>-windows-x64.zip` and run `LongshotBuilder.exe --cli` with the same
 options. `--check` only checks your game's version; `--log <file>` saves the build's output; `--jobs <n>` (or
-`LONGSHOT_JOBS=<n>`) limits how many files compile at once. To build from a clone of this repository, see the
+`LONGSHOT_JOBS=<n>`) limits how many files compile at once, and how many CPU threads every other step of the build uses
+(translating, the button prompts, preparing the shaders), so the PC stays usable while it builds. To build from a clone of this repository, see the
 [developer setup](../dev/setup.md).
 
 ## Linux: faster GPU memory (/dev/udmabuf)

@@ -53,6 +53,7 @@ import long_paths  # noqa: E402
 long_paths.install()   # (paths past 260 characters on Windows, before anything reads a file)
 from prompt_faces import FACES, override, parts   # noqa: E402 (the faces: their icons, drawings and their parts)
 import prompt_keys   # noqa: E402 (the keyboard face)
+import build_jobs   # noqa: E402 (the workers the build was asked for: LONGSHOT_JOBS)
 KENNEY = os.path.join(os.path.dirname(HERE), "third_party", "kenney_input")
 KENNEY_KEYBOARD = os.path.join(os.path.dirname(HERE), "third_party", "kenney_input_keyboard")   # (the keyboard face's)
 FONT = "Font2/Scalable/External.Nin_Ounce_NVN2.bfotf.zs"
@@ -1296,11 +1297,11 @@ def make_prompts(a, incremental=False):
 
 
 def face_jobs(faces):
-    """processes for the faces' textures: LONGSHOT_PROMPT_JOBS, else one a face, at most the CPU threads and one
+    """processes for the faces' textures: LONGSHOT_PROMPT_JOBS, else one a face, at most the CPU threads (and LONGSHOT_JOBS, nx2/build_jobs.py) and one
     per GB of available memory (each holds the 244 MB Common.bntx and its images)"""
     if os.environ.get("LONGSHOT_PROMPT_JOBS"):
         return max(1, int(os.environ["LONGSHOT_PROMPT_JOBS"]))
-    n = min(faces, os.cpu_count() or 1)
+    n = build_jobs.cap(min(faces, os.cpu_count() or 1))
     gb = None
     try:
         if os.name == "nt":

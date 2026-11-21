@@ -46,7 +46,7 @@ Read by the build, not the game, so they are not in `switches.def`.
 
 | Switch | What it does |
 |---|---|
-| `LONGSHOT_JOBS=<n>` (or `--jobs`) | Compilers at once. Default: one per CPU thread but one, each started when memory holds it ([below](#the-compiler-memory-gate); `LONGSHOT_MEM_GATE=0` turns that off) |
+| `LONGSHOT_JOBS=<n>` (or `--jobs`) | Compilers at once. Default: one per CPU thread but one, each started when memory holds it ([below](#the-compiler-memory-gate); `LONGSHOT_MEM_GATE=0` turns that off). Given (not 0), it is also the most workers of every other step `make_game.py` runs side by side: the lift's processes and its discovery, the prompts' faces, and the shader preparation, started on that many CPUs (`nx2/build_jobs.py`). Not given: each step keeps its own count |
 | `LONGSHOT_MEM_LIMIT_GB=<n>` | Memory the compilers may reserve together, whatever is free now |
 | `LONGSHOT_LIFT_JOBS=<n>` | Processes that write the lifted C |
 | `LONGSHOT_KEEP_BUILD_FILES=1` | Keep the lifted C and objects after a build |

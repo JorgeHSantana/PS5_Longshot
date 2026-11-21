@@ -26,6 +26,7 @@ import re
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 import whole_write   # (rewrites written beside and moved over)
+import build_jobs   # (the workers the build was asked for)
 
 import a64_lift
 import lifted_c
@@ -143,7 +144,7 @@ def _no_fork():
 
 def file_jobs():
     """Processes for the per-file passes (split_big, edit_c) and for the emit: LONGSHOT_LIFT_JOBS, else the cores this process
-    may use (at most 16; each holds its run's texts and the pages of the lift it touches), and at most one per 2 GB of available
+    may use (at most 16, and at most LONGSHOT_JOBS when the build was given a count; each holds its run's texts and the pages of the lift it touches), and at most one per 2 GB of available
     memory where they are forked (one per 0.75 GB where they are spawned: Windows, its available physical memory): a Steam
     Deck (16 GB) ran out with 8, and the system's out-of-memory
     handling stopped the lift ("lift.py stopped (signal 15): BrokenPipeError") or one worker (the update then sat at "jump tables"
@@ -155,7 +156,7 @@ def file_jobs():
         n = len(os.sched_getaffinity(0))
     except AttributeError:
         n = os.cpu_count() or 1
-    n = max(1, min(16, n))
+    n = build_jobs.cap(max(1, min(16, n)))   # (no more than the build was asked for: LONGSHOT_JOBS, nx2/build_jobs.py)
     gb = _available_gb()
     if gb is not None:
         # a new process (spawn: Windows) holds only the emit's tables and its run's bodies: 395 MB at most, measured
