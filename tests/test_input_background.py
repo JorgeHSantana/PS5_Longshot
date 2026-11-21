@@ -15,6 +15,12 @@ confirms a choice, Longshot #1306); the left button stays that menu's click.
 held-input: an input held down is the player's input (the game menus' cursor hides by it) when it goes down, not at every
 read while it stays down, so the mouse's hover works while ZL is held for the ocarina's song sheet (Longshot #1253).
 
+Every Npad state is checked to carry the buttons alone, with no stick direction bits (16-23) whatever the sticks: with
+them, the left stick pushed forward (bit 17) reached the game's controllers as a held D-pad bit, and A pressed while
+running forward did not roll (sprint's cases: A with the stick fully forward). stick-directions: each stick pushed all the
+way in each direction and diagonal with A held, and the D-pad's four with the stick forward: the buttons alone, and the
+D-pad still reaches the state.
+
 python -I -B tests/test_input_background.py [--cc gcc]
 """
 import argparse
@@ -40,7 +46,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CASES = ("foreground", "script-background", "script-background-switch", "headless", "noactivate", "live-background",
          "no-script-background", "exclusive-foreground", "exclusive-background", "pads-env", "pads-menu", "pads-off",
          "frame-hold", "live-frame", "reuse-frame", "wall", "zero", "empty", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle",
-         "hold-taps", "menu-side-buttons", "deck-mouse", "deck-motion", "held-input", "sprint-toggle")
+         "hold-taps", "menu-side-buttons", "deck-mouse", "deck-motion", "held-input", "sprint-toggle", "stick-directions")
 
 
 def main():
@@ -121,7 +127,7 @@ static void player_used(void) { player_stamps++; }
         # (walking on the keyboard: the movement keys' tilt, read_input asks for it)
         block(hid, "static int walk_held("), block(hid, "enum { WALK_SPEED_DEFAULT") + ";",
         block(hid, "static int walk_percent("), block(hid, "static void move_keys_stick("),
-        block(hid, "static int flight_jump_shortcut("), read, block(hid, "static uint64_t stick_buttons("),
+        block(hid, "static int flight_jump_shortcut("), read,
         block(hid, "static void npad_states(")))
     glue = (ROOT / "host/mkw_glue.c").read_text(encoding="utf-8")
     actual += "\n" + "\n".join(block(glue, "uint64_t " + name + "(")

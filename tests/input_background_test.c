@@ -70,7 +70,14 @@ static long long logged_origin;
 volatile int64_t hos_hid_last_read;
 volatile uint64_t hos_hid_buttons;   /* (host/cheats.c reads it) */
 volatile int hos_nvn_sync_log_on;
-int hos_control_input(uint64_t *buttons, int32_t stick[4]) { if (bridge_up) stick[1] = 32767; *buttons |= bridge_buttons; return bridge_active; }
+static int32_t bridge_stick[4];   /* (the bridge's sticks: the stick-directions case) */
+int hos_control_input(uint64_t *buttons, int32_t stick[4]) {
+    if (bridge_up) stick[1] = 32767;
+    *buttons |= bridge_buttons;
+    for (int i = 0; i < 4; i++)
+        if (bridge_stick[i]) stick[i] = bridge_stick[i];
+    return bridge_active;
+}
 static void *at(uint64_t address) { CHECK(address <= 512 - 8); return memory + address; }
 #define GP(a) at(a)
 static void *hos_guest_range(uint64_t a, uint64_t n) { return a <= 512 && n <= 512 - a ? memory + a : NULL; }
@@ -160,7 +167,7 @@ void rx_flash_dark_arm(void) { commands++; }
 
 #include "input_actual.inc"
 
-static void packet(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx) {
+static void packet4(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
     static int64_t expected_sampling;
     Ctx context = {{0}};
     context.x[0] = 64; context.x[1] = 2; context.x[2] = 16; context.x[30] = 0x1234;
@@ -169,18 +176,46 @@ static void packet(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx) {
     npad_states(&context);
     CHECK(context.x[0] == 2);
     expected_sampling++;
-    const int32_t sticks[4] = {lx, ly, rx, 0};
-    buttons |= stick_buttons(sticks);   /* (the sticks' direction bits 16-23: tests/test_stick_buttons.py checks them) */
+    /* (the buttons alone, whatever the sticks: no direction bits 16-23. The game's own controllers read bits 16-19 as the
+       D-pad, so a stick pushed forward with them held the D-pad and A pressed then did not roll) */
     for (int i = 0; i < 2; i++) {
         const uint64_t address = 64 + (uint64_t)i * STATE_SIZE;
         CHECK(G64(address) == (uint64_t)(expected_sampling - i));
         CHECK(G64(address + 8) == buttons);
         CHECK((int32_t)G32(address + 16) == lx && (int32_t)G32(address + 20) == ly);
-        CHECK((int32_t)G32(address + 24) == rx && G32(address + 28) == 0);
+        CHECK((int32_t)G32(address + 24) == rx && (int32_t)G32(address + 28) == ry);
         CHECK(G32(address + 32) == ATTR_CONNECTED && G32(address + 36) == 0);
     }
     for (int i = 0; i < 8; i++) CHECK(memory[64 + 2 * STATE_SIZE + i] == 0xa5);
     CHECK(commands == 0);
+}
+static void packet(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx) { packet4(buttons, lx, ly, rx, 0); }
+/* (stick-directions) Each stick pushed all the way in each direction, and both diagonals of each, with A held, then the
+   D-pad's four with the left stick forward: the state carries the buttons alone, and a D-pad press still reaches it. With
+   the sticks' direction bits (16-23) the left stick forward reached the game's controllers as a held D-pad bit, and A
+   pressed while running forward did not roll */
+static void stick_directions_case(void) {
+    static const int32_t d[8][2] = {{0, 32767}, {0, -32767}, {-32767, 0}, {32767, 0},
+                                    {-23170, 23170}, {23170, 23170}, {-23170, -23170}, {23170, -23170}};
+    const uint64_t a = 1ULL << B_A;
+    front = bridge_active = 1;
+    for (int stick = 0; stick < 2; stick++)
+        for (int k = 0; k < 8; k++) {
+            memset(bridge_stick, 0, sizeof bridge_stick);
+            bridge_stick[2 * stick] = d[k][0], bridge_stick[2 * stick + 1] = d[k][1];
+            bridge_buttons = a;
+            packet4(a, bridge_stick[0], bridge_stick[1], bridge_stick[2], bridge_stick[3]);
+        }
+    static const int dpad[4] = {B_UP, B_DOWN, B_LEFT, B_RIGHT};
+    memset(bridge_stick, 0, sizeof bridge_stick);
+    bridge_stick[1] = 32767;
+    for (int k = 0; k < 4; k++) {
+        bridge_buttons = a | 1ULL << dpad[k];
+        packet4(bridge_buttons, 0, 32767, 0, 0);
+    }
+    memset(bridge_stick, 0, sizeof bridge_stick);
+    bridge_buttons = 0, bridge_active = 0;
+    packet(0, 0, 0, 0);
 }
 
 /* The real Npad writer, with the control socket boundary providing exclusive logical presses. */
@@ -613,6 +648,11 @@ int main(int argc, char **argv) {
     if (!strcmp(name, "deck-motion")) {
         deck_motion_case();
         puts("PASS: the Deck's built-in controls' right stick is the camera once, not the mouse's motion as well; the pointer is still taken in");
+        free(memory); return 0;
+    }
+    if (!strcmp(name, "stick-directions")) {
+        stick_directions_case();
+        puts("PASS: the Npad states carry the buttons alone, whatever the sticks; the D-pad still reaches them");
         free(memory); return 0;
     }
     if (!strcmp(name, "held-input")) {
