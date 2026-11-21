@@ -120,10 +120,11 @@ def mounts():
 
 
 def on_ram(path, table=None):
-    """The path is on a RAM file system (tmpfs, ramfs): never for builds, game folders or test output"""
-    if WINDOWS:
+    """The path is on a RAM file system (tmpfs, ramfs): never for builds, game folders or test output. table: a made-up
+    mount table and a path of it as it is, on any OS (the test)"""
+    if WINDOWS and table is None:
         return False
-    p = os.path.realpath(path)
+    p = os.path.realpath(path) if table is None else path
     best, kind = "", ""
     for mnt, fs in mounts() if table is None else table:
         if (p == mnt or p.startswith(mnt.rstrip("/") + "/")) and len(mnt) >= len(best):
