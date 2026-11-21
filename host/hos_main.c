@@ -2138,6 +2138,13 @@ static int game_main(int argc, char **argv) {
     hos_log("longshot %s", LONGSHOT_VERSION);   /* (the log's first line: which build a report comes from) */
     const char *hos_report_run_id(void);
     hos_log("run_id: %s", hos_report_run_id());
+    hos_log_flush();   /* (the run's own boundary, on disk before anything written straight to stderr: on Windows
+                          hos_log batches up to 250 ms, and a fast start that fails right after (no image, a guest
+                          window that can't be reserved, an image that can't be opened) writes its line direct —
+                          physically before the queued banner, so the crash dialog's reader gated at the run's
+                          run_id would never see the failure it is there to explain. The flush costs one write at
+                          start, and the report keeps both the version and the startup-failure line (issue #1374,
+                          review round three)) */
     hos_game_layout_log();
     driver_env_log();
     void hos_crash_record_log_notes(void);

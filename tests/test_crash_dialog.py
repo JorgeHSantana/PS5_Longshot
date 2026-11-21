@@ -308,10 +308,15 @@ int main(int argc, char **argv) {
     snprintf(logs, sizeof logs, "%s/logs", dir);
     mkdir(logs, 0700);
     snprintf(log, sizeof log, "%s/longshot_log.txt", logs);
-    hos_crash_record_start(dir, "vtest-1", log);
-    FILE *f = fopen(log, "w");
-    fprintf(f, "[hos host] longshot vtest-1\n[hos host] run_id: %s\n", hos_crash_record_run());
+    hos_crash_record_start(dir, getenv("CRASH_TEST_RECORD_VERSION") ? getenv("CRASH_TEST_RECORD_VERSION") : "vtest-1", log);
+    /* (the exec'd run after a Restart now: stderr and the log are the same open file the run before left; the game
+       does not start its log over, it appends where that run stopped) */
+    FILE *f = getenv("RESTARTED") ? fopen(log, "a") : fopen(log, "w");
+    fprintf(f, "[hos host] longshot %s\n[hos host] run_id: %s\n",
+            getenv("CRASH_TEST_LOG_VERSION") ? getenv("CRASH_TEST_LOG_VERSION") : "vtest-1", hos_crash_record_run());
     for (int i = 3; i < argc; i++) fprintf(f, "%s\n", argv[i]);
+    /* (the restarted run's own lines: only it writes these, the way the real game keeps logging after a restart) */
+    if (getenv("RESTARTED") && getenv("CRASH_TEST_RESTARTED_LOG")) fprintf(f, "%s\n", getenv("CRASH_TEST_RESTARTED_LOG"));
     fclose(f);
     char *prepare[] = {argv[0], (char *)"--prepare-shaders", NULL};
     if (!strcmp(mode, "prepare")) hos_crash_watch_start(2, prepare);
@@ -319,7 +324,9 @@ int main(int argc, char **argv) {
     if (!strcmp(mode, "relaunch")) {   /* (Linux's Restart now: the same process again, a new run) */
         hos_crash_quit_asked();
         hos_crash_clean_end();
-        char *again[] = {argv[0], argv[1], (char *)"clean", NULL};
+        const char *to = getenv("CRASH_TEST_RELAUNCH_TO");   /* (what the restarted run does: default "clean") */
+        setenv("RESTARTED", "1", 1);   /* (the exec sees the environment: the restarted run keeps the open log) */
+        char *again[] = {argv[0], argv[1], (char *)(to && *to ? to : "clean"), NULL};
         execv("/proc/self/exe", again);
         return 9;
     }
@@ -413,6 +420,16 @@ def source_checks():
     close = close[:close.index("\n}\n")]
     assert close.index("hos_crash_quit_asked();") < close.index("if (!vk_module) return;"), \
         "a quit is noted first, before the renderer's close that can take seconds"
+    own = dialog[dialog.index("static int log_is_run(const char *path, const char *run_id, uint64_t *at) {"):]
+    own = own[:own.index("\n}\n")]
+    assert "read_text" not in own and "fgets" in own and "*at =" in own and "banner_at" in own, \
+        "the log-ownership probe streams the file for its run_id line AND says where it sits: a head window " \
+        "(read_text) misses the run after a posix Restart now, whose line sits where the run before stopped (issue #1374)"
+    rdl = dialog[dialog.index("static void read_log(RunLog *r, const Who *who) {"):]
+    rdl = rdl[:rdl.index("\n}\n")]
+    assert "line_at >= r->from" in rdl, \
+        "the facts the report reads come from the located run_id line on: a shared log holds the run before too, " \
+        "and its map must not describe the restarted run (issue #1374, review round two)"
     spawn = dialog[dialog.index("static int spawn_exe(const char *exe_path, const char *const *args, int n, int wait_ms, int *code) {"):]
     spawn = spawn[:spawn.index("\n}\n")]
     assert "CREATE_NO_WINDOW" in spawn and re.search(r"CreateProcessW\(program, cmd, NULL, NULL, FALSE,", spawn), \
@@ -952,6 +969,65 @@ def behaviour(cc, tmp):
     assert boxes(got) == ["Longshot couldn't start"] and "Vulkan 1.3" in got[0][1], got
     _, got = game("relaunch", ends=2)
     assert boxes(got) == [], "a restart in the same process (execve) says nothing, from the old helper or the new"
+    # issue #1374: the run after a Restart now appends to the log the run before left, at that run's offset; any
+    # play session is past 8 KB, and the report searched only the log's first 8192 bytes for its run_id line, so its
+    # own crash said "the game logged to no file" while its lines sat in the file past the window.
+    filler = ["filler line %04d and some more text to reach past the window" % i for i in range(400)]
+    folder, got = game("relaunch", *filler, ends=2, buttons="0",
+                       extra={"CRASH_TEST_RELAUNCH_TO": "crash",
+                              "CRASH_TEST_RESTARTED_LOG": "RESTARTED-TAIL-MARKER"})   # (the restarted run's own line)
+    crash_boxes = [e[1] for e in got if e[0] == "BOX" and e[1].startswith("Longshot closed unexpectedly")]
+    assert len(crash_boxes) == 1, ("the run after a restart still shows its crash once", got)
+    clip = next((e[1] for e in got if e[0] == "CLIP"), "")
+    assert clip.startswith("Longshot crash report"), ("Report manually copies the full report", clip[:120])
+    assert "Not found: the game logged to no file" not in clip, \
+        "the restarted run's report says the game logged to no file: its run_id line sits at %d bytes, past the " \
+        "old 8 KB head window, and find_run_log never looked further (issue #1374)" % sum(len(x) + 1 for x in filler)
+    assert "RESTARTED-TAIL-MARKER" in clip, "the restarted run's report must carry its own log tail"
+    print("PASS: the run after a Restart now: its crash report finds the deep run_id line and carries the log tail")
+    # round two (review): the file holds TWO runs now — the facts the report reads (map, stage) must come from this
+    # run's own lines, not from the run before it. The run before played in Kokiri Forest; the restarted run crashed
+    # at the start, before any map: its report must not blame "while you were playing" with the old run's map.
+    folder, got = game("relaunch", *(filler + ["[hos Main] map: Kokiri Forest (spot 0)"]), ends=2, buttons="0",
+                       extra={"CRASH_TEST_RELAUNCH_TO": "crash",
+                              "CRASH_TEST_RESTARTED_LOG": "RESTARTED-START-MARKER"})
+    box = next(e[1] for e in got if e[0] == "BOX" and e[1].startswith("Longshot closed unexpectedly"))
+    clip = next((e[1] for e in got if e[0] == "CLIP"), "")
+    assert "during the start" in box, \
+        "the restarted run's box names the stage from its own run: the run before loaded a map, this one never did"
+    assert "Map: Kokiri" not in clip and "Map: Title and intro" in clip, \
+        "the restarted run's report keeps the run before's map as its own (issue #1374, review): the facts must be " \
+        "read from the located run_id line on, not from byte zero of the shared log"
+    assert "RESTARTED-START-MARKER" in clip, "the restarted run's own line is still in its tail"
+    print("PASS: the run after a Restart now: facts (map, stage) come from its own lines, not the run before")
+    # round three (review): the gate starts at the run's OWN banner, not at its run_id line: the version line sits
+    # one line before the run_id, and a gate that starts at run_id always drops the version — the report falls back
+    # to the crash record's, or says "not known" (P3). The case makes the two versions distinct on purpose: the
+    # report must name the one in the run's own LOG, not the record's — proving the gate reaches the banner line.
+    folder, got = game("relaunch", *(filler + ["[hos Main] map: Kokiri Forest (spot 0)"]), ends=2, buttons="0",
+                       extra={"CRASH_TEST_RELAUNCH_TO": "crash",
+                              "CRASH_TEST_RESTARTED_LOG": "RESTARTED-START-MARKER",
+                              "CRASH_TEST_LOG_VERSION": "vlog-9",       # (what the restarted run logs)
+                              "CRASH_TEST_RECORD_VERSION": "vrec-7"})   # (what the crash record alone would say)
+    clip = next((e[1] for e in got if e[0] == "CLIP"), "")
+    assert "Version: vlog-9" in clip and "Version: vrec-7" not in clip, \
+        "the restarted run's report lost the version from its own log: the gate started at the run_id line, one " \
+        "line after the version banner, and the report fell back to the crash record (issue #1374, review round " \
+        "three): %s" % [l for l in clip.splitlines() if l.startswith("Version")][:1]
+    assert "Map: Kokiri" not in clip, \
+        "reaching back to this run's banner must not reach back past it: the run before's map is still out " \
+        "(issue #1374, review round three)"
+    print("PASS: the report's version comes from the run's own banner, and the gate still excludes the run before")
+    # round three, P2 (Windows): hos_log batches up to 250 ms, and the startup failures write straight to stderr —
+    # physically BEFORE the queued banner — so a reader gated at the run's boundary would never see the failure.
+    # The shipped game writes its boundary first (hos_log_flush right after run_id). Pinned on the source: Windows
+    # can't be built here, and the flush's own writer machinery is the tested logger, not this file's.
+    main_c = open(os.path.join(ROOT, "host", "hos_main.c"), encoding="utf-8").read()
+    at_banner = main_c.index('hos_log("run_id: %s"')
+    assert "hos_log_flush();" in main_c[at_banner:at_banner + 900], \
+        "the run's banner and run_id are not on disk before the direct-stderr startup diagnostics can write: on " \
+        "Windows the batched logger lands after them and the startup-failure box loses its log (issue #1374, " \
+        "review round three)"
     for mode, extra in (("crash", {"HOS_HEADLESS": "1"}), ("crash", {"HOS_CRASH_WATCH": "0"}), ("prepare", {}),
                         ("crash", {"HOS_PGO": str(tmp / "pgo")}), ("crash", {"GAMESCOPE_WAYLAND_DISPLAY": "gamescope-0"}),
                         ("crash", {"XDG_CURRENT_DESKTOP": "gamescope"})):
