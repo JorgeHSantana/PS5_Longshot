@@ -47,6 +47,7 @@ SW(HOS_FPS_LOG, diag, bool, "off", "Logs the game's frame limiter, VRR flags, no
 SW(HOS_FPS_MAX, player, int, "the Game frame rate cap row (frame_rate_cap in the options file)", "Sets the game's frame rate cap for a run (30 or 61-1000), over the menu's Game frame rate cap row.")
 SW(HOS_FPS_MOVIE, kill, bool, "on: movie players' updates are timed by the frames' own time", "=0 turns off the timed movie update count at frame rates other than 60.")
 SW(HOS_FPS_STEP, kill, bool, "on: above/below a 60 cap the game steps by the frames' own time", "=0: every frame steps 1/60 s and the rate goes up to the cap, as before.")
+SW(HOS_FPS_TAKEOFF, kill, bool, "on: above a 60 cap a backflip's takeoff lifts Link's body as far as a 60 fps step would (the rest on the update after it)", "=0 (or off, false, no): the takeoff lifts it by one shorter step of the takeoff speed, as before (lower hops; a backflip down a slope can take off twice).")
 SW(HOS_FPS_TARGET, attempt, int, "0: the game's frame limiter left alone", "Holds the engine's frame limiter (+0xfc) at the given fps.")
 SW(HOS_FRAME_CARRY, kill, bool, "on: at a 60 cap, a step that is not a whole frame (below 60 fps) keeps its fractions in the game's whole-frame counters", "=0: at a 60 cap the game's cuts drop the fraction of a step under 60 fps (46 fps: the time of day at 77 %), as before.")
 SW(HOS_FRAME_SLEEP_MS, diag, int, "0: no sleep", "Sleeps <ms> after every present, to test game speed against frame rate.")
