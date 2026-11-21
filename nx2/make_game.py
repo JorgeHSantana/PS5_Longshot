@@ -3403,6 +3403,11 @@ def main(a=None):
         src = os.path.join(built, n)
         if os.path.exists(src):
             staged.append((src, os.path.join(game_dir, n)))
+    for vendor, licence in (("reshade_fx", "LICENSE.md"), ("stb_image", "LICENSE")):
+        licence_dir = os.path.join(out, "licenses", vendor)
+        os.makedirs(licence_dir, exist_ok=True)
+        for name in (licence, "PROVENANCE.md"):
+            staged.append((os.path.join(ROOT, "third_party", vendor, name), os.path.join(licence_dir, name)))
     staged.append((os.path.join(work, "sa", "image", "image.bin"), os.path.join(out, "image.bin")))
     if launcher:
         staged.append((launcher, os.path.join(out, BESIDE[0])))

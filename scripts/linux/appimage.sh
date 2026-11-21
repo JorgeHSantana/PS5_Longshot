@@ -77,6 +77,7 @@ cp -a third_party/kenney_input_keyboard "$T/third_party/"
 # profile and the hot list, assets/profiles/)
 cp -a gpu/vk gpu/compat gpu/third_party "$T/gpu/"
 cp -a third_party/imgui third_party/zstd third_party/fonts "$T/third_party/"
+cp -a third_party/reshade_fx third_party/stb_image "$T/third_party/"
 # (AMD FSR 4, when chosen: AMD's MIT FSR API headers, which the player's Vulkan back end builds with (make_game.py --fsr,
 # nx2/build.py). AMD's runtime is not among them: on Linux the player's own amd_fidelityfx_upscaler_vk.so, the readme)
 cp -a third_party/fidelityfx "$T/third_party/"
@@ -107,6 +108,9 @@ cp third_party/fonts/libertinus/OFL.txt third_party/fonts/PROVENANCE.md "$T/lice
 cp third_party/fidelityfx/LICENSE.md third_party/fidelityfx/PROVENANCE.md "$T/licenses/fidelityfx/"   # (with AMD FSR 4)
 # (AMD's FidelityFX SDK shaders, compiled into gpu/vk/shaders' FSR 3.1 headers that every build has: scripts/shaders.py fsr3)
 cp third_party/fidelityfx-sdk/LICENSE.txt third_party/fidelityfx-sdk/PROVENANCE.md "$T/licenses/fidelityfx-sdk/"
+mkdir -p "$T/licenses/reshade_fx" "$T/licenses/stb_image"
+cp third_party/reshade_fx/LICENSE.md third_party/reshade_fx/PROVENANCE.md "$T/licenses/reshade_fx/"
+cp third_party/stb_image/LICENSE third_party/stb_image/PROVENANCE.md "$T/licenses/stb_image/"
 # ---- end of the licences ----
 
 # ---- the third-party code's objects, compiled here with the build tools every player's build uses (tools.lock's clang,

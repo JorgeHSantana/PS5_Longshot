@@ -91,6 +91,7 @@
 #include "shaders/dlss_out_comp_spv.h"
 #include "shaders/dlss_out_rgba_comp_spv.h"
 #include "shaders/dlss_prep_comp_spv.h"
+#include "reshade/fx_runtime.h"
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
@@ -194,6 +195,12 @@ struct Camera {
     bool valid = false;
 };
 
+struct SceneDepth {
+    Texture* texture = nullptr;
+    uint32_t width = 0, height = 0;
+    uint64_t generation = 0, frame = 0;
+};
+
 /// An engine as the chain keeps it: started once, failed for good once
 struct Engine {
     const TemporalEngine* e = nullptr;
@@ -231,6 +238,7 @@ struct State {
     bool psycho_last = false; // A tone mapper or input encoding change discards temporal history.
     VkFormat history_input = VK_FORMAT_UNDEFINED;
     Camera cam;               // (this frame's, since the last upscale)
+    SceneDepth reshade_depth; // The upscale consumes the camera before the post-processing pass can use its depth.
     // (the gameplay upscale's output, as last seen: the scene sizes the upscaler can take follow from it,
     // temporal_scene_size. Read on the game's draws without the lock)
     std::atomic<uint32_t> out_w{0}, out_h{0};
@@ -960,7 +968,8 @@ void temporal_note_scene_draw(const Texture* color0, uint32_t width, uint32_t he
     if (!color0 || !depth || !camera || camera_size < 0x230 || !temporal_scene_size(width, height)) return;
     // (with the Upscaler Off too: its stretch takes the fixed shares' networks only with the frame's scene as their input)
     // (and with no engine, for frame generation's inputs: temporal_fg_inputs)
-    if (!temporal_scene_format(color0->format) || (!temporal_wanted() && !temporal_off() && !temporal_fg_inputs())) return;
+    if (!temporal_scene_format(color0->format) || (!temporal_wanted() && !temporal_off() && !temporal_fg_inputs() &&
+                                                !reshade::depth_requested.load(std::memory_order_relaxed))) return;
     State& s = st();
     std::lock_guard lk(s.mu);
     const uint64_t now = texture_frame_no();
@@ -988,6 +997,8 @@ void temporal_note_scene_draw(const Texture* color0, uint32_t width, uint32_t he
     k.scene_format = color0->format;
     k.color = color0;
     k.valid = true;
+    if (reshade::depth_requested.load(std::memory_order_relaxed))
+        s.reshade_depth = {depth, width, height, k.depth_gen, now};
     // (longshot) DLAA before the bloom: the scene at the output's size (as last seen: a frame that changed it runs DLAA at the
     // network), and this frame's pass list started (temporal_pre_bloom)
     const bool pre = pre_bloom_wanted(temporal_mode()) && width == s.out_w.load(std::memory_order_relaxed) &&
@@ -1226,6 +1237,35 @@ bool temporal_scene_depth_is(const Texture* depth) {
     State& s = st();
     std::lock_guard lk(s.mu);
     return depth && s.cam.valid && s.cam.depth == depth && s.cam.frame == texture_frame_no();
+}
+
+VkImageView temporal_reshade_depth(uint32_t width, uint32_t height) {
+    State& s = st();
+    std::lock_guard lk(s.mu);
+    const auto& scene = s.reshade_depth;
+    static const char* previous = nullptr;
+    const auto missing = [](const char* reason) -> VkImageView {
+        if (reason != previous) {
+            previous = reason;
+            logf("vk: ReShade: waiting for gameplay depth (%s)", reason);
+        }
+        return {};
+    };
+    // As in temporal_upscale, a present between replay batches can advance the frame counter here.
+    if (!scene.texture || texture_frame_no() - scene.frame > 1) return missing("no current camera");
+    if (scene.generation != texture_destroy_generation()) return missing("texture generation changed");
+    auto* depth = scene.texture;
+    if (!depth->image || !(depth->usage & VK_IMAGE_USAGE_SAMPLED_BIT) ||
+        !(depth->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) || depth->samples != VK_SAMPLE_COUNT_1_BIT ||
+        depth->width != scene.width || depth->height != scene.height) return missing("depth attachment not sampleable");
+    if (!dlss_checks::scene_size_fits(scene.width, scene.height, width, height) ||
+        std::abs(double(scene.width) / width - double(scene.height) / height) > 0.02)
+        return missing("depth does not cover the output");
+    const auto view = depth_view(depth);
+    if (!view) return missing("cannot make a depth-only view");
+    depth->last_frame = texture_frame_no();
+    depth->last_value = std::max(depth->last_value, vk_retirement_value());
+    return view;
 }
 
 void temporal_note_skinned_draw(const SkinnedDraw& k) {

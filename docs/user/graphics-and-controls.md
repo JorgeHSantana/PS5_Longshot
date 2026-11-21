@@ -110,6 +110,10 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | HDR contrast | 50% to 200% around mid grey, in steps of 5 (while HDR is on) | 100% |
 | | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's; with HDR set to Native). Compatible DLSS/DLAA, FSR 4/native AA and shared-chain FSR 3.1 upscaling run automatically; `RX_VK_PSYCHOV35_DLSS=0` disables that compatibility route. Off and the spatial/FXAA TAAU replacement support PsychoV35 directly. FSR 3.1 FG remains separately opt-in and 2x only; legacy own-input FSR upscaling remains unsupported | Vanilla |
 | | Colour vision correction | Off, Protan (red-green), Deutan (red-green), Tritan (blue-yellow). Changes apply immediately. | Off |
+| | ReShade preset | Applies a built-in or imported preset to the gameplay scene before the HUD. Includes twenty Clarity looks for Zelda, depth effects and an HDR preset. See [ReShade FX presets](reshade-presets.md). | Off |
+| | Compare ReShade Preset | Opens a compact toolbar to toggle the effect and browse presets. User adds a row for imported INI files. | |
+| | User preset file | A ReShade INI from the profile's `reshade/presets` folder (with User selected). | No preset |
+| | Rescan ReShade presets | Refreshes the user preset list and reloads the selected file. | |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
 | | Shadow resolution | Auto (for the card's memory), Game's (1600), High (2200), Highest (3072): the sun's shadow maps, applies at once; Highest also keeps the nearest shadows from shimmering as much | Auto |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |

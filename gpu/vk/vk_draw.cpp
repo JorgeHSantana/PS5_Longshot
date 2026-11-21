@@ -53,6 +53,7 @@
 #include "vk_temporal.h"
 #include "upscale_route.h"   // (the FPS counter footer's record of the gameplay upscale as drawn)
 #include "vk_framegen.h"   // (framegen_hud_before: a gameplay upscale's picture, for FSR 3.1 frame interpolation's HUD mark)
+#include "reshade/fx_runtime.h"
 #include "vk_fsr3fi.h"     // (frames_wanted)
 #include "vk_fsr3.h"          // (AMD FSR 3.1 in the gameplay upscale's place)
 #include "vk_fsr3_inputs.h"
@@ -9772,7 +9773,7 @@ bool temporal_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p)
 /// HUD mark (vk_framegen.h framegen_hud_before: copied once the upscale wrote it, whichever drew it). Null unless AMD FSR
 /// 3.1's frame interpolation is asked for, or for any other dispatch
 static Texture* upscale_picture(const NvnState& s, const Program& p, uint32_t* level) {
-    if (p.stages.empty() || !fsr3fi::frames_wanted()) return nullptr;
+    if (p.stages.empty() || (!fsr3fi::frames_wanted() && !reshade::enabled.load(std::memory_order_relaxed))) return nullptr;
     const Stage& st = p.stages[0];
     const bool known = gameplay_network(p.key);
     if (!known && !(st.info.uses_cooperative_matrix && st.info.texture_descriptors.size() == 1 &&
@@ -9811,6 +9812,12 @@ static void route_network_drawn(const NvnState& s, const Program& p) {
     if (const uint32_t h = handle_of(s, st, od, 0))
         texture_view_of(h, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, &level);
     if (in && out && (known || in->format == out->format)) route_publish(upscale_route::Route::Network, known, in, out, level);
+}
+
+static void finish_upscale_picture(VkCommandBuffer cmd, Texture* picture, uint32_t level) {
+    if (picture && reshade::enabled.load(std::memory_order_relaxed) &&
+        reshade::record(cmd, picture, level, dev.hdr && opts.hdr == 2)) bound().reset();
+    framegen_hud_before(cmd, picture, level);
 }
 /// (longshot) The same for an upscale network that did not translate on this GPU (upscale_stub found its input, the largest
 /// texture it samples, and its output, the largest image it writes): the Render resolution row's fixed shares (67%
@@ -11822,7 +11829,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
                                 (force_stub >= 2 || !gameplay_network(cp->key))));
     if ((!cp || cp->failed || slow_network) && upscale_stub(cmd, s, compute_code_key(s))) {
         // (a gameplay upscale's picture, as the dispatch below copies its own: frame generation's HUD mark)
-        if (stub_picture && fsr3fi::frames_wanted()) framegen_hud_before(cmd, stub_picture, 0);
+        if (stub_picture) finish_upscale_picture(cmd, stub_picture, 0);
         return void(st_dispatches++);
     }
     if (slow_network) SKIP_HERE();   // (an earlier pass of the network: the stub is its last pass)
@@ -12047,9 +12054,9 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     // (a gameplay upscale's picture, copied for frame generation's HUD mark once it is written, whoever writes it)
     uint32_t picture_level = 0;
     Texture* const picture = upscale_picture(s, p, &picture_level);
-    if (fsr3_stand_in(cmd, s, p)) return framegen_hud_before(cmd, picture, picture_level), void(st_dispatches++);
-    if (temporal_stand_in(cmd, s, p)) return framegen_hud_before(cmd, picture, picture_level), void(st_dispatches++);
-    if (taau_stand_in(cmd, s, p)) return framegen_hud_before(cmd, picture, picture_level), void(st_dispatches++);
+    if (fsr3_stand_in(cmd, s, p)) return finish_upscale_picture(cmd, picture, picture_level), void(st_dispatches++);
+    if (temporal_stand_in(cmd, s, p)) return finish_upscale_picture(cmd, picture, picture_level), void(st_dispatches++);
+    if (taau_stand_in(cmd, s, p)) return finish_upscale_picture(cmd, picture, picture_level), void(st_dispatches++);
     const VkPipeline pipe = cpipe();
     if (!pipe) SKIP_HERE();
     dump_ssbos(cmd, p, "before");
@@ -12135,7 +12142,6 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             vkCmdDispatch(cmd, x, y, z);
         }
     }
-    framegen_hud_before(cmd, picture, picture_level);   // (the game's own network drew the gameplay upscale)
     route_network_drawn(s, p);
     if (dump_on() && dump_ssbo_wanted(p.key)) dump_ssbos(cmd, p, "after");
     if (gprof_on()) {
@@ -12143,6 +12149,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         snprintf(label, sizeof label, "dispatch %s prog %016llx", indirect ? "indirect" : "", (unsigned long long)p.key);
         gprof_end(cmd, label);
     }
+    finish_upscale_picture(cmd, picture, picture_level);   // (the game's own network drew the gameplay upscale)
     st_dispatches++;
     if (pass_trace_on())
         trace_line("dispatch %ux%ux%u%s prog %016llx", x, y, z, indirect ? " indirect" : "", (unsigned long long)p.key);

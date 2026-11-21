@@ -72,6 +72,7 @@
 #include "menu/pipeline_list.h"   // (Save my pipeline list's, still used here: its worker finished, its line measured)
 #include "menu/nfc.h"   // (the NFC module's, still used here: its tags listed when the menu opens, a scan followed)
 #include "menu/framegen.h"   // (the frame generation module's, still used here: the pipeline share's line, set_row, row_fixed)
+#include "menu/reshade.h"
 #include "auto_settings.h"
 #include "menu_restart.h"
 #include "threaded_rendering.h"   // (the Threaded rendering row's rule, and the one gate over its Auto)
@@ -3183,6 +3184,11 @@ float menu_ox = 0;   // (the menu's column's left edge in the window: more than 
 /// middle (a window of 16:9 or narrower: the whole of it). The pages draw from 0 as on 16:9; their vertices and clip
 /// rectangles are moved over after, and menu_tick moves the mouse back by menu_ox before it tests the hits
 void draw_menu(ui::Ctx& c) {
+    if (reshade_menu::comparing()) {
+        menu_ox = 0;
+        reshade_menu::draw_comparison(c, hits);
+        return;
+    }
     if (!(tune_mode && page == 0)) c.d->AddRectFilled(ImVec2(0, 0), ImVec2(c.w, c.h), ui::rgba(8, 5, 2, ui::kDimAlpha));   // (the game behind, dimmed)
     ui::Ctx k = c;
     k.w = std::min(c.w, std::floor(c.h * 16.0f / 9.0f + 0.5f));
@@ -4854,7 +4860,12 @@ void menu_tick() {
     // control can be bound to Esc, so nothing in play changes; the window gives the captured mouse back on the close)
     const bool esc_opens = opts.menu_shortcut == 2 && press[5] && !open_now.load();
     if (esc_opens) press[5] = false;
-    const bool home_debug = press[15] && (!open_now.load() || (quick_debug && page == 0));
+    const bool comparing = open_now.load() && reshade_menu::comparing();
+    if (comparing && (press[0] || press[6] || press[17])) {
+        press[5] = true;
+        press[0] = press[6] = press[17] = false;
+    }
+    const bool home_debug = !comparing && press[15] && (!open_now.load() || (quick_debug && page == 0));
     if ((press[17] || home_debug) && !editing && !listening && !debug_warning && page != 5) {
         if (home_debug) press[15] = false;
         if (open_now.load() && quick_debug && page == 0) press[5] = true;
@@ -4898,7 +4909,13 @@ void menu_tick() {
         if (open_now.load()) refresh_monitors();
         if (open_now.load()) refresh_nfc();    // (and the NFC tags of the player's folder)
     }
-    if (open_now.load() && debug_warning) {
+    if (comparing) {
+        const auto click = mouse && (ptr.pressed & HOS_MOUSE_LEFT) ? hits.at((float)mx, (float)my) : menu_hit::Hit{};
+        const int horizontal = int(press[4]) - int(press[3]);
+        const int vertical = int(press[2] || tab_right) - int(press[1] || tab_left);
+        const bool cancel = press[5] || (mouse && (ptr.pressed & HOS_MOUSE_RIGHT));
+        changed |= reshade_menu::update_comparison(horizontal, vertical, press[7], cancel, click);
+    } else if (open_now.load() && debug_warning) {
         if (press[3] || press[4]) debug_warning_choice = 1 - debug_warning_choice, changed = true;
         if (mouse) {
             const auto hit = hits.at((float)mx, (float)my);

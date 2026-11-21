@@ -107,6 +107,8 @@ FROZEN = {   # (a key: the value its row saves, as players' files hold them)
     "quality_preset": "&opts.preset",
     "queue_submits_line": "&opts.fps_dev_show[9]",
     "render_passes_line": "&opts.fps_dev_show[4]",
+    "reshade_preset": "&opts.reshade",
+    "reshade_user_pick": "&user_pick",
     "resolution": "&opts.resolution",
     "robust_buffers": "&opts.robust",
     "rumble_strength": "&opts.rumble",

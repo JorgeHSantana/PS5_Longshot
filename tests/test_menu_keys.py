@@ -173,6 +173,7 @@ static void test_keyboard() {
 static std::atomic<bool> open_now;
 static int page, ask_sel, listening;
 static bool quick_debug, debug_warning, editing, tab_left, tab_right;
+namespace reshade_menu { static bool comparing() { return false; } }
 static constexpr int TAB_DEBUG = 1;
 static int cur_tab, tab_selected[2];
 [[maybe_unused]] static int warp_warning_action;
@@ -379,7 +380,7 @@ def main():
     key_poll = tick[tick.index("    enum { K_N ="):tick.index("    // (longshot) the gamepads")]
     esc_at = tick.index("    const bool esc_opens")
     # (the Esc block ends where the keys' branches begin: the text field's first, as the Insert menu's text fields have it)
-    esc_block = tick[esc_at:tick.index("    if (open_now.load() && debug_warning) {", esc_at)]
+    esc_block = tick[esc_at:tick.index("    if (comparing) {", esc_at)]
     tx_at = menu.index("const char* tx_menu_shortcut(int v) {")
     tx = menu[tx_at:menu.index("\n}\n", tx_at) + 3]
     header = (ROOT / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")

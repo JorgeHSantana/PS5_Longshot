@@ -47,6 +47,7 @@
 #include "vk_fps.h"
 #include "perf_report.h"
 #include "vk_menu.h"
+#include "reshade/fx_runtime.h"
 #include "vk_jobs.h"
 #include "vk_shader.h"
 #include "vk_state.h"
@@ -5388,6 +5389,7 @@ void do_present(const nvn_tex* t, const int crop[4], uint64_t native_generation 
     // present) the driver's sleep until the next frame should begin. AMD Anti-Lag 2 (vk_antilag.cpp) waits there as well: the
     // next frame's input stage
     temporal_idle();   // (DLSS, FSR: their video memory let go once not used for a while)
+    if (reshade::needs_tick.load(std::memory_order_relaxed)) reshade::tick();
     status_tick();   // (the status line, and the video-memory warning)
     reflex_present_begins();
     struct ReflexSleep { ~ReflexSleep() { FpsWait fw(fps_stats::kPace); reflex_sleep(); antilag_input(); } } reflex_sleep_after;
@@ -8107,6 +8109,7 @@ bool replay_flush_upload(VkCommandBuffer cur) {
 
 bool replay_start() {
     menu_init();
+    if (opts.reshade) reshade::select(opts.reshade);
     if (!memory_init() || !vma_init(instance_proc())) return false;
     VkSemaphoreTypeCreateInfo ti{VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO};
     ti.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;

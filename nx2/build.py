@@ -48,6 +48,7 @@ import lifted_c
 import rtgen
 import logo_rgba
 import object_store
+import reshade_fx
 import ui_fonts
 import toolchain
 import third_party_objects
@@ -1196,9 +1197,10 @@ if MARCH == "native" and not _native:
 if _native:
     print("build: the game is built for this PC's CPU (%s)" % _native, flush=True)
     CPU += ["-DLONGSHOT_NATIVE_CPU=" + _native]
-# The third-party code (nx2/third_party_objects.py SOURCES: Eden's recompiler, sirit, Dear ImGui, zstd, libopus) is built for
-# x86-64-v3 on every CPU that has it, not -march=native: the release ships it compiled for that level, so a player's build
-# links it instead of compiling it (its keys name no CPU). A CPU below v3, or an RX_MARCH, builds it as the rest
+# The third-party code (nx2/third_party_objects.py SOURCES: Eden's recompiler, sirit, Dear ImGui, zstd, libopus, ReShade's FX
+# compiler) is built for x86-64-v3 on every CPU that has it, not -march=native: the release ships it compiled for that level,
+# so a player's build links it instead of compiling it (its keys name no CPU). A CPU below v3, or an RX_MARCH, builds it as
+# the rest
 THIRD_PARTY_CPU = ["-march=x86-64-v3", "-ffp-contract=off"] if not os.environ.get("RX_MARCH") and MARCH in ("native", "x86-64-v3") \
     else list(CPU)
 OPT = "O1"   # (the lifted code's level; code_hot.c's is RX_HOT_OPT)
@@ -2052,7 +2054,7 @@ def main():
                        "-DIMGUI_DISABLE_WIN32_FUNCTIONS", "-DIMGUI_DISABLE_DEMO_WINDOWS", "-DIMGUI_DISABLE_DEBUG_TOOLS"]
         imgui_deps = b"".join(open(os.path.join(d, f), "rb").read() for d in (imgui, os.path.join(imgui, "backends"), zbic)
                               for f in sorted(os.listdir(d)) if f.endswith(".h"))
-        imgui_users = ("vk_imgui.cpp", "vk_menu.cpp", "vk_crash_window.cpp")
+        imgui_users = ("vk_imgui.cpp", "vk_menu.cpp", "vk_crash_window.cpp", "reshade.cpp")
         for f in ("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp", "backends/imgui_impl_vulkan.cpp"):
             vk_jobs.append((cxx, os.path.join(imgui, *f.split("/")),
                             os.path.join(obj_dir, "vk_imgui_" + os.path.basename(f)[:-4] + ".o"), tp_vflags + imgui_flags,
@@ -2108,6 +2110,8 @@ def main():
                             (fsr_flags if os.path.basename(src) == "vk_fsr4.cpp" else []) +
                             (xess_flags if os.path.basename(src) == "vk_xess.cpp" else []),
                             vk_lib_deps + tp_deps if lib else renderer_deps(vdeps, vdeps_roots, obj) + extras))
+        vk_jobs.extend(reshade_fx.build_jobs(cxx, kit.ROOT, gen_dir, obj_dir, vflags + vk_pgo_flags, tp_vflags,
+                                             vdeps, windows=not LINUX, third_party=tp_deps))
         # (longshot) the program cache's zstd compression (RX_VK_PROGRAM_CACHE_ZSTD): third_party/zbic's single-file
         # zstd, built as C into the same DLL. Its headers are the object's dependencies.
         zstd_src = os.path.join(kit.ROOT, "third_party", "zbic", "zstd.c")
