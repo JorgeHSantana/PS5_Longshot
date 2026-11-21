@@ -95,7 +95,9 @@ def check_vk_symbols(so):
     globals written inside an anonymous namespace, which makes a different symbol that nothing
     defines.
     """
-    nm = shutil.which("nm") or shutil.which("llvm-nm")
+    # GNU nm on some Linux distributions omits symbol-version suffixes here,
+    # making normal libc imports look unresolved. llvm-nm keeps those suffixes.
+    nm = shutil.which("llvm-nm") or shutil.which("nm")
     if not nm:
         return True   # (not a reason to fail a build; the check is a guard, not a dependency)
     try:
