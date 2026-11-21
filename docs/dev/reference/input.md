@@ -8,7 +8,7 @@ Switch's bottom one, B). The player's bindings come from the Insert menu's Contr
 | Source | Code | Notes |
 |---|---|---|
 | SDL controllers | [`host/pad_sdl.c`](../../../host/pad_sdl.c) | SDL3, else SDL2, loaded at run time. Its own thread polls every 4 ms (on Linux, the window's thread). Also motion and rumble |
-| XInput | `nn_hid.c` | Polled only while SDL has no controller open (`HOS_XINPUT=1` polls it always) |
+| XInput | `nn_hid.c` | Polled only while SDL has no controller open (`HOS_XINPUT=1` polls it always), on a thread of its own (`xinput_main`): every 2 ms while a pad is there, every 100 ms while none is. Never on the game's thread: asking an empty slot is slow, and the game hitched once a second for players with no controller |
 | Switch 2 Pro Controller | [`host/pad_switch2.c`](../../../host/pad_switch2.c) | Windows, USB only. Read through WinUSB and given to SDL3 as a virtual gamepad (needs SDL3) |
 | Steam Input | [`host/steam_pads.h`](../../../host/steam_pads.h) | Under Steam, Valve's pads are opened too; while Steam's stand-in pad is open they give only their motion. The Steam Deck's built-in controls stay ignored |
 | Keyboard, captured mouse | `nn_hid.c`, [`host/mouse_native.c`](../../../host/mouse_native.c) | Only while the window has the focus. Mouse motion drives the right stick, or the camera directly with Mouse camera set to Native |
