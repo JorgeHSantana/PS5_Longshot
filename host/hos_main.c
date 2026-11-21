@@ -414,10 +414,21 @@ static void delete_tree(const char *p) {
     }
     RemoveDirectoryA(p);
 }
+static int save_work_pending(const char *beside) {
+    char pattern[MAX_PATH];
+    if (snprintf(pattern, sizeof pattern, "%s" SEP_S "save-work" SEP_S "*.journal", beside) >= (int)sizeof pattern) return 1;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    if (h != INVALID_HANDLE_VALUE) { FindClose(h); return 1; }
+    const DWORD e = GetLastError();
+    return e != ERROR_FILE_NOT_FOUND && e != ERROR_PATH_NOT_FOUND;
+}
 static const char *saves_dir(const char *beside) {
     static char dir[MAX_PATH];
     const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME");
     if (is_link(beside)) return beside;
+    /* (a pending journal belongs with C; let the next save mount finish recovery before moving C) */
+    if (save_work_pending(beside)) return beside;
     if (xdg && xdg[0] == '/') snprintf(dir, sizeof dir, "%s", xdg);
     else if (home && home[0] == '/') {
         snprintf(dir, sizeof dir, "%s/.local", home);
@@ -444,7 +455,7 @@ static const char *saves_dir(const char *beside) {
         HANDLE h = FindFirstFileA(pattern, &fd);
         if (h == INVALID_HANDLE_VALUE) return dir;
         do {
-            if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..") || (move && kept)) continue;
+            if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..") || !strcmp(fd.cFileName, "save-work") || (move && kept)) continue;
             char from[MAX_PATH], to[MAX_PATH];
             snprintf(from, sizeof from, "%s" SEP_S "%s", beside, fd.cFileName);
             snprintf(to, sizeof to, "%s" SEP_S "%s", dir, fd.cFileName);

@@ -1810,8 +1810,7 @@ static int mem_finished(Pending *p, Conn *c, int64_t now) {
     return 1;
 }
 
-/* ---- saves: the save folder the game uses, listed on the bridge's thread (a slot being written may show a size or time
-   between two writes: it is read as it is, never locked) ---- */
+/* ---- saves: hold the game's read guard through the listing and caption reads ---- */
 typedef struct { char name[64]; int64_t size, mtime; } SaveFile;
 typedef struct { char name[16]; SaveFile files[8]; int nfiles; int64_t mtime; } SaveSlot;
 /* the entries of a folder: name, size, modification time (Unix seconds), whether a folder. -1 when it cannot be read */
@@ -1905,10 +1904,13 @@ static void cmd_saves(int ci, const char *id) {
     Conn *c = &G.conns[ci];
     char root[1100];
     if (!G.game->save_root || !G.game->save_root(root, sizeof root))
-        return reply_error(c, id, "unavailable", "the game has not opened its saves yet");
+        return reply_error(c, id, "unavailable", "a consistent save listing is not available");
     static SaveList l;
     memset(&l, 0, sizeof l);
-    if (dir_list(root, top_entry, &l) < 0) return reply_error(c, id, "failed", "%.300s could not be read", root);
+    if (dir_list(root, top_entry, &l) < 0) {
+        if (G.game->save_end) G.game->save_end();
+        return reply_error(c, id, "failed", "%.300s could not be read", root);
+    }
     for (int i = 0; i < l.nslots; i++) {
         char dir[1200];
         snprintf(dir, sizeof dir, "%s%c%s", root, CTL_SEP, l.slots[i].name);
@@ -1936,6 +1938,7 @@ static void cmd_saves(int ci, const char *id) {
         buf_puts(&b, "}");
     }
     buf_puts(&b, "]");
+    if (G.game->save_end) G.game->save_end();
     reply_end(c, &b);
 }
 
@@ -2571,6 +2574,7 @@ static void game_mem_write(uint64_t addr, const void *src, uint64_t size) {
     hos_mark_written(hos_guest_base() + addr, size);   /* (the soft write watch: synced into the GPU mirror next frame) */
 }
 int hos_fs_save_root(char *out, size_t cap);   /* (nn_fs.c) */
+void hos_fs_save_end(void);
 static int game_save_root(char *out, size_t cap) {
     if (!hos_fs_save_root(out, cap)) return 0;
 #ifndef _WIN32
@@ -2627,7 +2631,7 @@ static void game_recorder(HosControlRecorder *out) {
 static HosControlGame game = {
     .frame = game_frame, .frame_info = rx_control_frame_info, .shot = rx_control_shot, .setting = rx_control_setting,
     .setting_set = rx_control_setting_set, .mem_region = game_mem_region, .mem_read = game_mem_read,
-    .mem_write = game_mem_write, .save_root = game_save_root, .log = game_log, .quit = game_quit,
+    .mem_write = game_mem_write, .save_root = game_save_root, .save_end = hos_fs_save_end, .log = game_log, .quit = game_quit,
     .renderer = game_renderer, .map = hos_oot_current_map, .destination = hos_oot_destination,
     .teleport = hos_oot_teleport_ask, .teleport_result = hos_oot_teleport_result,
     .teleport_cancel = hos_oot_teleport_cancel, .age = hos_oot_age_ask, .oot_state = hos_oot_state,

@@ -331,8 +331,9 @@ needing `HOS_CONTROL_MEM`. `unavailable` until the game has opened its saves.
 ```
 
 Slots come newest first; `newest` is what Continue loads. Times are Unix seconds. `caption` appears only when
-`caption.sav` has the known layout; its thumbnail is the JPEG at that offset. A slot being written may show
-in-between sizes.
+`caption.sav` has the known layout; its thumbnail is the JPEG at that offset. Publication replaces files one at a
+time. The bridge waits for publication to finish and refuses the request while recovery is pending or the save is
+mounted in place. Other programs reading the save folder can observe intermediate states.
 
 ### quit and relaunch
 

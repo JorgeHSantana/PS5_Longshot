@@ -69,8 +69,9 @@ typedef struct HosControlGame {
     int (*mem_region)(uint64_t addr, uint64_t size);
     void (*mem_read)(uint64_t addr, void *dst, uint64_t size);
     void (*mem_write)(uint64_t addr, const void *src, uint64_t size);
-    /* the folder the game's saves are mounted from (<user>/save/<user id>): 0 before the game opened them */
+    /* Begin a save listing; on success save_end releases its read guard, if supplied. */
     int (*save_root)(char *out, size_t cap);
+    void (*save_end)(void);
     void (*log)(const char *line);
     void (*quit)(void);   /* does not return */
     const char *(*renderer)(void);   /* the renderer's description, or NULL */

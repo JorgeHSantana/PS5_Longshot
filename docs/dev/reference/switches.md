@@ -145,7 +145,7 @@ Upscaler switches are in [upscalers](upscalers.md#switches).
 | `HOS_DISPLAY_MODES=<w>x<h>,...` | Pretend the screen has these modes, to check the size rows for a screen you lack |
 | `HOS_NO_SDL=1` | No SDL controller thread: no SDL pads |
 | `HOS_TRACE=1` | Log every Horizon call (as `--trace`) |
-| `HOS_FS_TRACE=1` | Log every file the game opens or doesn't find |
+| `HOS_FS_TRACE=1` | File opens and writable changes in call order: create, write offset/size/result, resize, delete, rename and close; save Commit counts, open writers, result and milliseconds |
 | `HOS_TEST_ALLOC_REFUSE=<label text>` | Refuse host allocations whose label contains the text, to see what a player sees at the commit limit |
 | `RX_VK_UI_GAME_FONT=0` | The menu, counter and start-up screen in the included Libertinus, even where the game's files have its own fonts |
 | `RX_VK_UI_PROMPTS=pad\|keys` | The menu's button prompts for a controller or the keyboard, whatever was used last (screenshots) |
