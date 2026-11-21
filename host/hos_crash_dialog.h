@@ -694,9 +694,8 @@ static inline int hos_crash_show_at_start(const char *name, const char *shown, i
 }
 
 /* ---- Report automatically: the report built and sent here (docs/dev/reference/crash-window.md) ---- */
-/* Where it goes: crash_reports= (Longshot-api's POST /telemetry/crash) and crash_issue= (the issue the reports are posted on,
-   the only place the Sent page's link may go) in the folder's longshot_version.txt, which nx2/make_game.py writes from
-   nx2/addresses.ini. A key's value, "" when the stamp has none; 0 then, or when it is not an https:// address on one line */
+/* Where it goes: crash_reports= (Longshot-api's POST /telemetry/crash, which keeps the reports where only the team reads
+   them) in the folder's longshot_version.txt, which nx2/make_game.py writes from nx2/addresses.ini. A key's value, "" when the stamp has none; 0 then, or when it is not an https:// address on one line */
 static inline int hos_crash_stamp_address(const char *stamp, const char *key, char *out, size_t cap) {
     const size_t kn = strlen(key);
     if (cap) out[0] = 0;
@@ -1018,9 +1017,9 @@ static inline void hos_crash_report_version(char *out, size_t cap, const char *v
 }
 
 /* The answer to the send, from the HTTP status (0: no answer: curl could not reach the server, or did not run) and the relay's
-   JSON ({"comment": link} or {"error": why}), as the Sent page or the Not sent page says it: 1 sent (*link: the report's own
-   comment on the crash issue when the answer names one there, else the issue itself), 0 not (*again: whether trying again
-   could help: the server unreachable or busy, not a refusal) */
+   JSON ({"error": why} on a refusal), as the Sent page or the Not sent page says it: 1 sent, 0 not (*again: whether trying
+   again could help: the server unreachable or busy, not a refusal). The reports are kept where only the team reads them, so
+   the Sent page links nowhere, whatever the answer names (an older relay's {"comment": link} is ignored) */
 static inline int hos_crash_json_field(const char *json, const char *key, char *out, size_t cap) {
     char want[64];
     snprintf(want, sizeof want, "\"%s\"", key);
@@ -1038,19 +1037,11 @@ static inline int hos_crash_json_field(const char *json, const char *key, char *
     out[o] = 0;
     return *at == '"';
 }
-static inline int hos_crash_answer(char *out, size_t cap, int status, const char *body, const char *issue, char *link,
-                                   size_t link_cap, int *again) {
-    char said[300], comment[300];
+static inline int hos_crash_answer(char *out, size_t cap, int status, const char *body, int *again) {
+    char said[300];
     *again = 0;
-    if (link_cap) link[0] = 0;
     if (status >= 200 && status < 300) {
-        hos_crash_json_field(body, "comment", comment, sizeof comment);
-        const size_t in = issue ? strlen(issue) : 0;
-        int own = in && !strncmp(comment, issue, in) && !strncmp(comment + in, "#issuecomment-", 14) && comment[in + 14];
-        for (const char *d = comment + in + 14; own && *d; d++) own = isdigit((unsigned char)*d);
-        snprintf(link, link_cap, "%s", own ? comment : issue ? issue : "");
-        snprintf(out, cap, "Sent. Thank you: the team sees it%s.%s", link[0] ? " on the crash reports' issue" : "",
-                 link[0] ? " Open it to follow the crash there." : "");
+        snprintf(out, cap, "Sent. Thank you: the Longshot team has it. Only the team can read it.");
         return 1;
     }
     if (status == 429) {

@@ -177,11 +177,11 @@ int main(int argc, char **argv) {
         char *ini = slurp(argv[2]);
         printf("%d\n", hos_crash_auto_send(ini ? ini : ""));
         free(ini);
-    } else if (!strcmp(cmd, "answer")) {   /* status body issue */
-        char out[1000], link[600];
+    } else if (!strcmp(cmd, "answer")) {   /* status body */
+        char out[1000];
         int again = 0;
-        const int sent = hos_crash_answer(out, sizeof out, atoi(argv[2]), argv[3], argv[4], link, sizeof link, &again);
-        printf("%d|%d|%s|%s\n", sent, again, link, out);
+        const int sent = hos_crash_answer(out, sizeof out, atoi(argv[2]), argv[3], &again);
+        printf("%d|%d|%s\n", sent, again, out);
     } else if (!strcmp(cmd, "status")) {   /* curl's --dump-header file */
         char *h = slurp(argv[2]);
         printf("%d\n", hos_crash_http_status(h ? h : ""));
@@ -618,7 +618,8 @@ def logic_checks(exe, menu, tmp, form):
     stamp = tmp / "stamp.txt"
     for text, key, want in (("version=v3.1.0\ncrash_reports=https://d.example/telemetry/crash\n", "crash_reports",
                              "1|https://d.example/telemetry/crash"),
-                            ("crash_issue=https://g.example/o/r/issues/81\r\n", "crash_issue", "1|https://g.example/o/r/issues/81"),
+                            ("crash_reports=https://d.example/telemetry/crash\r\n", "crash_reports",
+                             "1|https://d.example/telemetry/crash"),
                             ("crash_reports=http://d.example/x\n", "crash_reports", "0|"), ("crash_reports=\n", "crash_reports", "0|"),
                             ("crash_reports=https://a b\n", "crash_reports", "0|"), ("x_crash_reports=https://d/x\n", "crash_reports", "0|"),
                             ("version=v3.1.0\n", "crash_reports", "0|")):
@@ -656,17 +657,15 @@ def logic_checks(exe, menu, tmp, form):
     assert run(exe, "cleancap", "dev éééé", 15, "dev").rstrip("\n") == "ok|<device> éé"
     assert run(exe, "cleancap", "audio in: Mi open (48000 Hz", 20, "zzz").rstrip("\n") == "ok|audio in: <device>"
     assert run(exe, "json", 'a"b\\c\nd\x02').rstrip("\n") == '"a\\"b\\\\c\\nd\\u0002"'
-    issue = "https://g.example/o/r/issues/81"
-    sent, again, link, text = run(exe, "answer", 201, '{"comment": "%s#issuecomment-5", "new": true}' % issue, issue).rstrip("\n").split("|", 3)
-    assert (sent, link) == ("1", issue + "#issuecomment-5") and text.startswith("Sent."), text
-    assert run(exe, "answer", 200, '{"comment": "https://evil.example/x"}', issue).split("|")[2] == issue, \
-        "a comment elsewhere is not opened: the crash issue is"
-    assert run(exe, "answer", 200, '{"comment": "%s#issuecomment-5x"}' % issue, issue).split("|")[2] == issue
-    assert run(exe, "answer", 429, "{}", issue).startswith("0|1||Not sent: the crash server is busy")
-    assert run(exe, "answer", 400, '{"error": "crash is required"}', issue).rstrip("\n") == \
-        "0|0||Not sent: the crash server refused the report (400: crash is required)."
-    assert run(exe, "answer", 502, "", issue).startswith("0|1||"), "a server error: try again"
-    assert run(exe, "answer", 0, "", issue).startswith("0|1||Not sent: couldn't reach"), "no answer: try again"
+    # (sent: the team has it, and the Sent page links nowhere: an older relay's comment link is not shown or opened)
+    for body in ('{"accepted": true}', '{"comment": "https://g.example/o/r/issues/81#issuecomment-5", "new": true}', ""):
+        sent = run(exe, "answer", 201, body).rstrip("\n")
+        assert sent == "1|0|Sent. Thank you: the Longshot team has it. Only the team can read it.", sent
+    assert run(exe, "answer", 429, "{}").startswith("0|1|Not sent: the crash server is busy")
+    assert run(exe, "answer", 400, '{"error": "crash is required"}').rstrip("\n") == \
+        "0|0|Not sent: the crash server refused the report (400: crash is required)."
+    assert run(exe, "answer", 502, "").startswith("0|1|"), "a server error: try again"
+    assert run(exe, "answer", 0, "").startswith("0|1|Not sent: couldn't reach"), "no answer: try again"
     headers = tmp / "headers.txt"
     headers.write_text("HTTP/1.1 301 Moved\r\nLocation: x\r\n\r\nHTTP/2 201 \r\ncontent-type: application/json\r\n", encoding="utf-8")
     assert run(exe, "status", headers).strip() == "201", "the last answer's status"
@@ -1083,6 +1082,7 @@ refused) printf 'HTTP/1.1 400 Bad Request\\r\\n\\r\\n' > "$head"; printf '{"erro
 esac
 """, encoding="utf-8")
     curl.chmod(0o755)
+    # (crash_issue=: what a build made before the reports went team-only has in its stamp, now ignored)
     stamp = "version=vtest-1\ncrash_reports=https://d.example/telemetry/crash\ncrash_issue=https://g.example/o/r/issues/81\n"
     log = ("[hos host] report: os Arch Linux", "[hos host] report: cpu Ryzen 7 7700 (16 threads), 32 GB",
            "[hos host] vk: NVIDIA GeForce RTX 3090, Vulkan 1.4, driver 0x9b118180; mesh shaders yes, host memory import yes",
@@ -1114,10 +1114,12 @@ esac
             "CRASH: exception 0xc0000005" in got[1][1], got[1]
         assert got[1][1].split("\n")[-1] == "Send|Show all of it|Cancel|", got[1]
         if answer == "sent":
-            assert kinds == ["BOX", "BOX", "OPEN", "BOX", "BOX", "OPEN", "BOX", "END"], kinds
+            # (the stamp's old crash_issue= and the answer's comment link are ignored: the Sent page has Done only, opens nothing)
+            assert kinds == ["BOX", "BOX", "OPEN", "BOX", "BOX", "BOX", "END"], kinds
             assert got[2][1].endswith(".json") and "sending-crash-" in got[2][1], "Show all of it opens the report as it is sent"
-            assert got[4][1].startswith("Longshot: sent\nSent.") and got[5][1] == "https://g.example/o/r/issues/81#issuecomment-5", got[4:6]
-            assert not got[6][1].split("\n")[-1].startswith("Report automatically"), "sent: not offered again"
+            assert got[4][1].startswith("Longshot: sent\nSent.") and got[4][1].split("\n")[-1] == "Done|", got[4]
+            assert "issues/81" not in got[4][1], "no link to the reports: only the team can read them"
+            assert not got[5][1].split("\n")[-1].startswith("Report automatically"), "sent: not offered again"
             assert list((folder / "bug-reports/sent").iterdir()), "the answer kept"
         elif answer == "busy":
             assert kinds == ["BOX", "BOX", "BOX", "BOX", "END"], kinds
@@ -1155,7 +1157,7 @@ esac
             copies = list((folder / "bug-reports/sent").glob("*.json"))
             assert len(copies) == 1 and json.loads(copies[0].read_text(encoding="utf-8")) == report, \
                 "a copy of what was sent kept beside its answer: %s" % copies
-            assert "[hos crash] sent on its own (longshot_crash.ini): https://g.example/o/r/issues/81#issuecomment-5\n" in run_log, \
+            assert "[hos crash] sent on its own (longshot_crash.ini): Sent. Thank you: the Longshot team has it." in run_log, \
                 "the answer in the run's log"
         else:
             assert boxes(got) == ["Longshot closed unexpectedly"], got

@@ -3528,12 +3528,12 @@ def main(a=None):
             f.write("source=%s\n" % _version.fingerprint(ROOT))
             if os.environ.get("LONGSHOT_BUILDER_EXE"):
                 f.write("builder=%s\n" % os.environ["LONGSHOT_BUILDER_EXE"])
-            # (where the crash window's Report automatically posts the report, and the issue its Sent page may link to: the game
-            # sends it itself, with the system's curl (host/hos_crash_dialog.c). Either left out of nx2/addresses.ini: no Send)
+            # (where the crash window's Report automatically posts the report: the game sends it itself, with the system's
+            # curl (host/hos_crash_dialog.c). Left out of nx2/addresses.ini: no Send)
             import addresses as _addresses
-            reports, issue = _addresses.address("crash_reports"), _addresses.address("crash_issue")
-            if reports.startswith("https://") and issue.startswith("https://"):
-                f.write("crash_reports=%s\ncrash_issue=%s\n" % (reports, issue))
+            reports = _addresses.address("crash_reports")
+            if reports.startswith("https://"):
+                f.write("crash_reports=%s\n" % reports)
             # (the game sends its own perf summaries to this address; the launcher only configures it, as for crash reports)
             perf = _addresses.address("perf_reports")
             if perf.startswith("https://"):

@@ -1031,9 +1031,8 @@ typedef struct Shown {
     const char *dir, *record, *record_name, *options;
     RunLog *log;
     Who who;
-    /* (where Report automatically sends to: longshot_version.txt's crash_reports= and crash_issue=, hos_crash_stamp_address;
-       both "" when it has not both) */
-    char reports[512], issue[512];
+    /* (where Report automatically sends to: longshot_version.txt's crash_reports=, hos_crash_stamp_address; "" without it) */
+    char reports[512];
 } Shown;
 static void log_folder(const Shown *s, char *out, size_t cap) {
     snprintf(out, cap, "%s", s->log->path[0] ? s->log->path : "");
@@ -1192,9 +1191,7 @@ static int sent_already(const Shown *s) {
 static void find_addresses(Shown *s) {
     char path[PATH_MAX_UTF8];
     char *stamp = join(path, sizeof path, s->dir, "longshot_version.txt") ? read_text(path, 16 << 10, NULL) : NULL;
-    if (!stamp || !hos_crash_stamp_address(stamp, "crash_reports", s->reports, sizeof s->reports) ||
-        !hos_crash_stamp_address(stamp, "crash_issue", s->issue, sizeof s->issue))
-        s->reports[0] = s->issue[0] = 0;
+    if (!stamp || !hos_crash_stamp_address(stamp, "crash_reports", s->reports, sizeof s->reports)) s->reports[0] = 0;
     free(stamp);
 }
 /* A line of the report, cleaned (hos_crash_clean), as a JSON string after sep */
@@ -1411,9 +1408,9 @@ static void note_in_log(const Shown *s, const char *line) {
     fclose(f);
 }
 /* (a report sent: its answer kept in bug-reports/sent/<record>, so it is not offered or sent again) */
-static void keep_answer(const Shown *s, int status, const char *link) {
-    char path[PATH_MAX_UTF8], kept[HOS_CRASH_LINK_MAX + 64];
-    const int n = snprintf(kept, sizeof kept, "status: %d\nlink: %s\n", status, link);
+static void keep_answer(const Shown *s, int status) {
+    char path[PATH_MAX_UTF8], kept[64];
+    const int n = snprintf(kept, sizeof kept, "status: %d\n", status);
     if (sent_path(s, path, sizeof path, 1) && n > 0) write_text(path, kept, (size_t)n);
 }
 /* Report automatically with no window, as the player chose in the launcher (hos_crash_auto_send): the same report, posted
@@ -1429,18 +1426,18 @@ static int send_quietly(const Shown *s) {
     int sent = 0;
     if (sending_path(s, ".json", payload, sizeof payload) && build_report(s, &json, &shown, &why) &&
         write_text(payload, json.s, json.n)) {
-        char *body = NULL, result[700], link[HOS_CRASH_LINK_MAX + 1];
+        char *body = NULL, result[700];
         int again = 0;
         const int status = post_report(s, payload, &body);
-        sent = hos_crash_answer(result, sizeof result, status, body, s->issue, link, sizeof link, &again);
+        sent = hos_crash_answer(result, sizeof result, status, body, &again);
         free(body);
         /* (what went, kept beside its answer, and the answer in the run's log: with no window, the player can still see both) */
-        char copy[PATH_MAX_UTF8], line[sizeof result + sizeof link + 64];
+        char copy[PATH_MAX_UTF8], line[sizeof result + 64];
         if (sent) {
-            keep_answer(s, status, link);
+            keep_answer(s, status);
             if (sent_copy_path(s, copy, sizeof copy)) write_text(copy, json.s, json.n);
         }
-        snprintf(line, sizeof line, "[hos crash] sent on its own (longshot_crash.ini): %s", sent ? link : result);
+        snprintf(line, sizeof line, "[hos crash] sent on its own (longshot_crash.ini): %s", result);
         for (char *p = line; *p; p++)
             if (*p == '\n' || *p == '\r') *p = ' ';
         note_in_log(s, line);
@@ -1468,24 +1465,23 @@ static int send_report(const Shown *s) {
     int sent = 0;
     for (;;) {
         const int hit = page_serving("Longshot: send to the team",
-                                     "This is what goes to the Longshot team, and nothing else. Show all of it opens the report as it "
-                                     "is sent, every line of it.",
+                                     "This is what goes to the Longshot team, and nothing else; only the team can read it. Show all "
+                                     "of it opens the report as it is sent, every line of it.",
                                      shown.s ? shown.s : "", ask, 3);
         if (hit == 1) {
             open_thing(payload);
             continue;
         }
         if (hit != 0) break;
-        char *body = NULL, result[700], link[HOS_CRASH_LINK_MAX + 1];
+        char *body = NULL, result[700];
         int again = 0;
         const int status = post_report(s, payload, &body);
-        sent = hos_crash_answer(result, sizeof result, status, body, s->issue, link, sizeof link, &again);
+        sent = hos_crash_answer(result, sizeof result, status, body, &again);
         free(body);
         if (sent) {
-            keep_answer(s, status, link);
-            const char *const done[] = {"Open it", "Done"};
-            if (box_serving("Longshot: sent", result, link[0] ? done : done + 1, link[0] ? 2 : 1) == 0 && link[0])
-                open_thing(link);
+            keep_answer(s, status);
+            const char *const done[] = {"Done"};
+            box_serving("Longshot: sent", result, done, 1);
             break;
         }
         const char *const retry[] = {"Try again", "Close"};
