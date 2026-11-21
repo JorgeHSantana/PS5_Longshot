@@ -65,6 +65,7 @@
 #include "menu/output.h"   // (the output module's, still used here: the options file, the bug report, the pipeline share)
 #include "menu/upscaler.h"   // (the upscaler module's, still used here: the pipeline share's line, the bug report)
 #include "menu/bindings.h"   // (the Controls page's module, still used here: the grid, the options file, menu_tick)
+#include "menu/sprint.h"   // (the Sprint module's, still used here: the Controls page's Reset lays Sprint out again)
 #include "menu/pipeline_list.h"   // (Save my pipeline list's, still used here: its worker finished, its line measured)
 #include "menu/nfc.h"   // (the NFC module's, still used here: its tags listed when the menu opens, a scan followed)
 #include "menu/framegen.h"   // (the frame generation module's, still used here: the pipeline share's line, set_row, row_fixed)
@@ -971,7 +972,8 @@ const char* ini_key(const Row& r) {
 const char* const bind_names[HOS_KEY_N] = {"a", "b", "x", "y", "ls", "rs", "l", "r", "zl", "zr", "plus", "minus",
                                            "left", "up", "right", "down", "move_up", "move_down", "move_left",
                                            "move_right", "cam_up", "cam_down", "cam_left", "cam_right",
-                                           "note_l", "note_r", "note_a", "note_y", "note_x", "walk", "toggle_hud"};
+                                           "note_l", "note_r", "note_a", "note_y", "note_x", "walk", "toggle_hud",
+                                           "sprint"};
 void save() {
     // (one writer at a time: the present's thread, the game's (menu_option_set) and the control bridge's, menu_setting_set)
     static std::mutex save_mu;
@@ -993,11 +995,16 @@ void save() {
             const char* eq = strchr(line, '=');
             if (!eq || eq == line) continue;
             const std::string key(line, (size_t)(eq - line));
+            if (key == "sprint_auto_bind" && !can_bind()) {
+                kept += line;
+                continue;
+            }
             // (memory_budget and auto_for too: save() writes them, and the file's old line, kept after it, won at the next start;
             // auto_output, the Output resolution Auto once set, is no longer written: its old line is dropped)
             bool mine = key == "audio_output_device_id" || key == "audio_output_device_name" || key == "output_device" ||
                         key == "microphone_device" || key == "options_version" || key == "memory_budget" || key == "auto_for" ||
                         key == "auto_tuned" || key == "auto_output" || key == "auto_steps";
+            mine |= key == "sprint_auto_bind";
             mine |= key == "fullscreen_monitor_id";
             mine |= key == "fullscreen_monitor_name";
             // (and the Mesh shaders row's line, no longer read (gpu/vk/mesh_mode.h): dropped, not kept for nothing)
@@ -1053,8 +1060,11 @@ void save() {
         fprintf(f, "options_version=6\n");
         fputs(others.c_str(), f);
         if (!can_bind()) fputs(kept.c_str(), f);
-        for (int i = 0; i < HOS_KEY_N && can_bind(); i++) {   // (the stick's and camera's rows, HOS_KEY_MOVE_*/CAM_*, have no pad_ line; the ocarina note rows do)
-            if (i < HOS_SW_N || (i >= HOS_KEY_OC_NOTE_L && i <= HOS_KEY_OC_NOTE_X) || i == HOS_KEY_TOGGLE_HUD) {
+        else if (const int sprint_auto = host->binding(HOS_BIND_SPRINT_AUTO, 0, 0))
+            fprintf(f, "sprint_auto_bind=%d\n", sprint_auto);
+        for (int i = 0; i < HOS_KEY_N && can_bind(); i++) {   // (the stick's and camera's rows, HOS_KEY_MOVE_*/CAM_*, have no pad_ line; the ocarina note rows, the HUD's and Sprint do)
+            if (i < HOS_SW_N || (i >= HOS_KEY_OC_NOTE_L && i <= HOS_KEY_OC_NOTE_X) || i == HOS_KEY_TOGGLE_HUD ||
+                i == HOS_KEY_SPRINT) {
                 const int alternate = host->binding(HOS_BIND_PAD, i, 1);
                 fprintf(f, "pad_%s=%d", bind_names[i], host->binding(HOS_BIND_PAD, i, 0));
                 if (alternate >= 0) fprintf(f, ",%d", alternate);
@@ -1359,14 +1369,14 @@ void edit_end(bool done) {
 
 // ---- (longshot) the Controls page: what presses each of the Switch's buttons, a gamepad input and up to two keys ----
 struct Control {
-    int button;   // HOS_SW_*, or HOS_KEY_* (keys only)
+    int button;   // HOS_SW_*, or HOS_KEY_* (the stick's and camera's: keys only)
     const char* name;
 };
 const Control controls[] = {{HOS_SW_A, "A"}, {HOS_SW_B, "B"}, {HOS_SW_X, "X"}, {HOS_SW_Y, "Y"}, {HOS_SW_L, "L"},
                             {HOS_SW_R, "R"}, {HOS_SW_ZL, "ZL"}, {HOS_SW_ZR, "ZR"}, {HOS_SW_PLUS, "Plus"},
                             {HOS_SW_MINUS, "Minus"}, {HOS_SW_LS, "Left stick press"}, {HOS_SW_RS, "Right stick press"},
                             {HOS_SW_UP, "D-pad up"}, {HOS_SW_DOWN, "D-pad down"}, {HOS_SW_LEFT, "D-pad left"},
-                            {HOS_SW_RIGHT, "D-pad right"}, {HOS_KEY_MOVE_UP, "Move forward"},
+                            {HOS_SW_RIGHT, "D-pad right"}, {HOS_KEY_SPRINT, "Sprint"}, {HOS_KEY_MOVE_UP, "Move forward"},
                             {HOS_KEY_MOVE_DOWN, "Move back"}, {HOS_KEY_MOVE_LEFT, "Move left"},
                             {HOS_KEY_MOVE_RIGHT, "Move right"}, {HOS_KEY_CAM_UP, "Camera up"},
                             {HOS_KEY_CAM_DOWN, "Camera down"}, {HOS_KEY_CAM_LEFT, "Camera left"},
@@ -1375,7 +1385,8 @@ const Control controls[] = {{HOS_SW_A, "A"}, {HOS_SW_B, "B"}, {HOS_SW_X, "X"}, {
                             {HOS_KEY_OC_NOTE_Y, "Ocarina note (Y)"}, {HOS_KEY_OC_NOTE_X, "Ocarina note (X)"},
                             {HOS_KEY_TOGGLE_HUD, "Toggle HUD"}};
 constexpr int kControls = sizeof controls / sizeof controls[0];   // (then "Reset to defaults")
-// (the stick's and camera's directions and Walk: keys only; the ocarina's note rows take a gamepad input too, host/nn_hid.c)
+// (the stick's and camera's directions and Walk: keys only; the ocarina's note rows and Sprint take a gamepad input too,
+// host/nn_hid.c)
 bool keys_only(int i) {
     return i < kControls && ((controls[i].button >= HOS_KEY_MOVE_UP && controls[i].button <= HOS_KEY_CAM_RIGHT) ||
                              controls[i].button == HOS_KEY_WALK);
@@ -2533,6 +2544,11 @@ void draw_controls(ui::Ctx& c) {
     const char* title = page_row ? page_row->name : sel_i < kControls ? controls[sel_i].name : "Reset to defaults";
     const char* help = listening ? (listening == 1 ? "Press the gamepad button to use. Esc cancels." : "Press the key to use. Esc cancels.")
                        : page_row ? page_row->help
+                       : sel_i < kControls && controls[sel_i].button == HOS_KEY_SPRINT
+                           ? "Link runs while you move: the key while it is held, the gamepad button pressed once until you "
+                             "stop, without rolling, talking or picking things up. Only with the Gameplay tab's Sprint row on, "
+                             "which gives it Shift and the "
+                             "left stick's press. Enter binds; Delete clears it."
                        : sel_i < kControls && controls[sel_i].button < HOS_SW_N && controls[sel_i].button != HOS_SW_PLUS &&
                          controls[sel_i].button != HOS_SW_MINUS && ccol == kCtlToggle
                            ? "Hold-to-toggle: press once to hold this Switch button, again to release it. Either gamepad input or a "
@@ -4759,6 +4775,7 @@ void menu_tick() {
                         host->bind(HOS_BIND_PAD, -1, 0, 0);
                         opts.pad_layout = 0;
                         opts.hold_toggle = 0;
+                        if (opts.sprint) apply_sprint_layout(true);   // (the defaults give Sprint nothing)
                         save();
                     }
                     else if (col == kCtlToggle) {

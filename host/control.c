@@ -605,7 +605,8 @@ static const struct { const char *name; int bit, axis, dir; } NAMES[] = {
     {"A", 0, 0, 0}, {"B", 1, 0, 0}, {"X", 2, 0, 0}, {"Y", 3, 0, 0}, {"LS", 4, 0, 0}, {"RS", 5, 0, 0}, {"L", 6, 0, 0}, {"R", 7, 0, 0}, {"ZL", 8, 0, 0}, {"ZR", 9, 0, 0},
     {"PLUS", 10, 0, 0}, {"MINUS", 11, 0, 0}, {"LEFT", 12, 0, 0}, {"UP", 13, 0, 0}, {"RIGHT", 14, 0, 0}, {"DOWN", 15, 0, 0},
     {"LUP", -1, 1, 1}, {"LDOWN", -1, 1, -1}, {"LLEFT", -1, 0, -1}, {"LRIGHT", -1, 0, 1},
-    {"RUP", -1, 3, 1}, {"RDOWN", -1, 3, -1}, {"RLEFT", -1, 2, -1}, {"RRIGHT", -1, 2, 1}};
+    {"RUP", -1, 3, 1}, {"RDOWN", -1, 3, -1}, {"RLEFT", -1, 2, -1}, {"RRIGHT", -1, 2, 1},
+    {"SPRINT", 48, 0, 0}};   /* (Sprint's key held, past the Switch's buttons: nn_hid.c B_SPRINT, npad_states) */
 
 /* One token of a button list into in: a button, a stick direction, or LX=/LY=/RX=/RY=<-32767..32767>. 0: not one */
 static int input_token(Input *in, const char *s, size_t n) {

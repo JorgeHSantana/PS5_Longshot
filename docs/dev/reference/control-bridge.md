@@ -119,7 +119,8 @@ A frame is one of the game's own presents (frame generation's do not count). An 
 read after its request, plus `at` frames, and is held for `frames` frames (1 to 216000; `at` 0 to 216000).
 
 - **Names** are `HOS_INPUT_SCRIPT`'s: buttons `A B X Y L R ZL ZR PLUS MINUS LS RS LEFT UP RIGHT DOWN`; stick directions
-  `LUP LDOWN LLEFT LRIGHT RUP RDOWN RLEFT RRIGHT`; axes `LX= LY= RX= RY=` from -32767 to 32767 (positive y is up). Give
+  `LUP LDOWN LLEFT LRIGHT RUP RDOWN RLEFT RRIGHT`; axes `LX= LY= RX= RY=` from -32767 to 32767 (positive y is up);
+  `SPRINT`, the Sprint control's key held (with the Gameplay tab's Sprint row on; never a button the game sees). Give
   them as `"A+B"` or `["A", "B"]`, any case.
 - **Mixing:** the bridge's buttons add to the player's. On the axes it sets, its sticks replace an input script's; the
   player's pad, keys and mouse still count (larger deflection wins) unless `"exclusive": true`, which shuts them out

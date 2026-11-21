@@ -36,7 +36,7 @@ RUN_ALL_SKIP = {"windows": "RLIMIT_FSIZE, symlinks and POSIX modes stand in for 
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ["full_disk", "success", "symlink", "folder_read_only", "mode", "file_read_only", "user_folder", "no_file",
-         "output_device"]
+         "output_device", "sprint_auto"]
 
 
 def block(text, marker):
@@ -64,8 +64,8 @@ FIXTURE = r'''#include <cerrno>
 #include <sys/stat.h>
 #include <unistd.h>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); std::exit(1); } } while (0)
-enum { HOS_SW_N = 16, HOS_KEY_OC_NOTE_L = 24, HOS_KEY_OC_NOTE_X = 28, HOS_KEY_N = 30 };
-enum { HOS_BIND_PAD, HOS_BIND_KEY };
+enum { HOS_SW_N = 16, HOS_KEY_OC_NOTE_L = 24, HOS_KEY_OC_NOTE_X = 28, HOS_KEY_TOGGLE_HUD = 30, HOS_KEY_SPRINT = 31, HOS_KEY_N = 32 };
+enum { HOS_BIND_PAD, HOS_BIND_KEY, HOS_BIND_SPRINT_AUTO };
 struct Out { unsigned w, h; };
 struct Options { int preset = 1, fps_cap = 0, vram_budget = 1, output_res = 0, ultrawide = 1, game_lang = 0, budget = 1,
                  hold_toggle = 0, gpu_device = 0; } opts;
@@ -113,9 +113,13 @@ bool gpu_card_missing = false;
 struct { int steps = 0; bool went_down = false; } auto_tuning;
 const char* const bind_names[HOS_KEY_N] = {"a", "b", "x", "y", "ls", "rs", "l", "r", "zl", "zr", "plus", "minus", "left",
     "up", "right", "down", "move_up", "move_down", "move_left", "move_right", "cam_up", "cam_down", "cam_left", "cam_right",
-    "note_l", "note_r", "note_a", "note_y", "note_x", "walk"};
+    "note_l", "note_r", "note_a", "note_y", "note_x", "walk", "toggle_hud", "sprint"};
 struct Host { int (*binding)(int set, int button, int slot); };
-int binding(int set, int button, int slot) { return set == HOS_BIND_PAD ? (slot ? -1 : button % 4) : slot ? 0 : 'A' + button; }
+int sprint_auto = 0;
+int binding(int set, int button, int slot) {
+    if (set == HOS_BIND_SPRINT_AUTO) return sprint_auto;
+    return set == HOS_BIND_PAD ? (slot ? -1 : button % 4) : slot ? 0 : 'A' + button;
+}
 Host host_v{binding};
 Host* host = &host_v;
 bool can_bind() { return true; }
@@ -339,6 +343,17 @@ int main(int argc, char** argv) {
         CHECK(!has(defaults, "\noutput_device="));
         CHECK(has(defaults, "discord_app_id=1234567890\n") && has(defaults, "key_walk="));
         CHECK(names(dir).size() == 1 && logged.empty());
+    } else if (c == "sprint_auto") {
+        sprint_auto = 7;
+        save();
+        CHECK(has(slurp(ini_path()), "sprint_auto_bind=7\n"));
+        sprint_auto = 1;
+        save();
+        const std::string changed = slurp(ini_path());
+        CHECK(has(changed, "sprint_auto_bind=1\n") && !has(changed, "sprint_auto_bind=7\n"));
+        sprint_auto = 0;
+        save();
+        CHECK(!has(slurp(ini_path()), "sprint_auto_bind="));
     } else if (c == "no_file") {
         CHECK(chdir(dir.c_str()) == 0);
         no_file = true;

@@ -72,6 +72,9 @@ static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
 static int pad_bind[HOS_KEY_N][2] = {[HOS_KEY_TOGGLE_HUD] = {-1, -1}};
 static LONG hud_bind_generation;
 static uint64_t oc_consumed_pads;
+static int sprint_now;   /* (Sprint's gamepad input, read with the pads: tests/test_sprint.py) */
+enum { SPRINT_PAD = 2 };
+static int sprint_read(void) { return sprint_now; }
 """
 
 MAIN = r"""
@@ -80,6 +83,7 @@ static uint64_t game(int32_t stick[4]) {
     now_ns += 16000000;   /* (past pads_read's 2 ms cache) */
     uint64_t buttons = 0;
     memset(stick, 0, 4 * sizeof *stick);
+    sprint_now = 0;   /* read_input clears the sampled state before its pad block */
     game_pads(&buttons, stick);
     return buttons;
 }
@@ -92,6 +96,17 @@ int main(void) {
     CHECK(game(s) == 0);
     pads_down = PAD(SOUTH); CHECK(game(s) == SW(B));   /* (by position: the bottom face button is the Switch's B) */
     pads_down = 0; CHECK(game(s) == 0);
+
+    /* Sprint held through closing the menu waits for release, even while moving. */
+    pad_bind[HOS_SW_LS][0] = -1;   /* the automatic layout moved L3 from LS to Sprint */
+    pad_bind[HOS_KEY_SPRINT][0] = HOS_PAD_LSTICK;
+    pad_bind[HOS_KEY_SPRINT][1] = -1;
+    menu_open = 1; pads_down = PAD(LSTICK); pads_stick[0] = 30000; CHECK(game(s) == 0);
+    menu_open = 0; CHECK(game(s) == 0 && sprint_now == 0 && s[0] == 30000);
+    CHECK(game(s) == 0 && sprint_now == 0);
+    pads_down = 0; CHECK(game(s) == 0 && sprint_now == 0);
+    pads_down = PAD(LSTICK); CHECK(game(s) == 0 && sprint_now == SPRINT_PAD);
+    pads_down = 0; pads_stick[0] = 0; CHECK(game(s) == 0);
 
     /* A trigger that stays down through the menu (worn, or past its rest), the menu closed with East (A) */
     menu_open = 1;
@@ -144,6 +159,7 @@ def main():
         block(hid, "static const signed char pad_default[HOS_SW_N] =") + ";",
         block(hid, "static void stick_max("), block(hid, "static uint64_t hud_pad_mask("),
         block(hid, "static uint64_t bound_pad_buttons("), state,
+        block(hid, "static int pad_sprint_down("),
         block(hid, "void hos_filter_stick("),
         re.search(r"^static volatile int xinput_pads_now;.*$", hid, re.M).group(0),
         block(hid, "static void pads_read("),

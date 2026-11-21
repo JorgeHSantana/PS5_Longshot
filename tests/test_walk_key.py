@@ -135,6 +135,11 @@ void hos_gameplay_hud_toggle(void) {}
 """
 
 STUBS = r"""
+/* Sprint's read (tests/test_sprint.py): none here */
+static int sprint_now;
+enum { SPRINT_KEY = 1, SPRINT_PAD = 2 };
+static int pad_sprint_down(void) { return 0; }
+static int sprint_read(void) { return sprint_now; }
 /* a controller's sticks and the captured mouse as the right stick, as a case sets them */
 static int32_t pad_stick[4], mouse_right[2];
 static int mouse_captured;
@@ -361,10 +366,10 @@ class WalkKeyTests(unittest.TestCase):
         api, hid, menu = read("gpu", "vk", "vk_api.h"), read("host", "nn_hid.c"), menu_text(ROOT)   # (with the modules' rows: gpu/vk/menu/walk.cpp)
         header, replay = read("gpu", "vk", "vk_menu.h"), read("gpu", "vk", "vk_replay.cpp")
         self.assertIn("enum { HOS_OPT_WALK_MODE = 49, HOS_OPT_WALK_SPEED };", api)
-        self.assertRegex(api, r"HOS_KEY_OC_NOTE_X, HOS_KEY_WALK, HOS_KEY_TOGGLE_HUD, HOS_KEY_N \};")
+        self.assertRegex(api, r"HOS_KEY_OC_NOTE_X, HOS_KEY_WALK, HOS_KEY_TOGGLE_HUD, HOS_KEY_SPRINT, HOS_KEY_N \};")
         # (the host's two copies of the names: the ini's key_walk)
         self.assertEqual(names(hid), names(menu))
-        self.assertEqual(names(hid)[-2:], ["walk", "toggle_hud"])
+        self.assertEqual(names(hid)[-3:], ["walk", "toggle_hud", "sprint"])
         self.assertIn('{HOS_KEY_WALK, "Walk"}', menu, "the Controls page has no Walk row")
         option = replay[replay.index("t.option = "):]
         option = option[:option.index("};")]

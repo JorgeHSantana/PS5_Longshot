@@ -114,6 +114,7 @@ FROZEN = {   # (a key: the value its row saves, as players' files hold them)
     "sharpness": "&opts.sharpness",
     "skip_opening": "&opts.skip_opening",
     "skip_title_screen": "&opts.skip_title",
+    "sprint": "&opts.sprint",
     "stick_dead_zone": "&opts.stick_dead_zone",
     "text_size": "&opts.text_size",
     "text_speed": "&opts.text_speed",

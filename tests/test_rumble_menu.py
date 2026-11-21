@@ -72,6 +72,7 @@ int saves = 0, presets = 0;
 void save() { saves++; }
 void apply_pad_layout(int) {}
 int detect_pad_layout() { return opts.pad_layout; }
+void apply_sprint_layout(bool) {}
 void apply_preset(int) { presets++; }
 void env_release(const int*) {}   // (the environment's hold on a row: none here)
 /* (stand-ins for the rest of set_row, which the Vibration strength row never reaches: the Upscaler's rows, the restart offer) */

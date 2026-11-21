@@ -118,8 +118,8 @@ void refresh_mics() {}
 void mic_tell_host() {}
 namespace i18n { int game_lang_index() { return 0; } }   // no external language.txt in this fixture
 /* RUMBLE_STEP */
-constexpr int HOS_KEY_N = 1, HOS_SW_N = 1, HOS_SW_PLUS = 10, HOS_SW_MINUS = 11, HOS_BIND_PAD = 0, HOS_BIND_KEY = 1;
-constexpr int HOS_KEY_OC_NOTE_L = 1, HOS_KEY_OC_NOTE_X = 1;
+constexpr int HOS_KEY_N = 1, HOS_SW_N = 1, HOS_SW_PLUS = 10, HOS_SW_MINUS = 11, HOS_BIND_PAD = 0, HOS_BIND_KEY = 1, HOS_BIND_SPRINT_AUTO = 2;
+constexpr int HOS_KEY_OC_NOTE_L = 1, HOS_KEY_OC_NOTE_X = 1, HOS_KEY_TOGGLE_HUD = 1, HOS_KEY_SPRINT = 1;
 const char* const bind_names[HOS_KEY_N] = {"a"};
 struct Host { int (*binding)(int, int, int); float (*aspect_ratio)(); };
 Host host_value{}, *host = &host_value;

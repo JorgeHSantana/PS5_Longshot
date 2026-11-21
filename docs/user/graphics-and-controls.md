@@ -123,6 +123,7 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | Text speed | Normal, 2x, 4x, Instant | Normal |
 | | Text size | Original, 110%, 125%, 150%, 175% (dialogue, Navi and signs) | Original |
 | | Skip title screen | Off, On (after a restart) | Off |
+| | Sprint | Off, On (Link runs while <kbd>Shift</kbd> is held, or from a press of the left stick until he stops, without rolling; turning it on moves Shift and the left stick's press to Sprint) | Off |
 | | Game language | The game's 16 languages, each by its own name (after a restart) | `language.txt`'s, else English (US) |
 | | Menu language | Auto (the game's language), or English, Português (Brasil), Español (Latinoamérica), Español (España), Français, Deutsch, Italiano, Nederlands, Polski, Русский, 日本語, 한국어, 简体中文, 繁體中文 | Auto |
 | | Discord status | Off, On ("Playing Longshot" and the time played in your Discord status, while Discord runs on this PC) | On |
@@ -261,6 +262,12 @@ helper asks you to.
   pads in Switch mode, DualSense and DualShock 4. Set the pad down for a second if the aim creeps.
 - **Walk mode** and **Walk speed:** while the Walk key is held (<kbd>Caps Lock</kbd> unless you change it), the movement
   keys tilt the stick only Walk speed of the way. With Toggle, one press walks and the next runs.
+- **Sprint** (Gameplay tab, off by default): Link runs the game's own run, the one after a roll while A stays held,
+  without the roll. Hold <kbd>Shift</kbd> while you move; on a controller, press the left stick once while you move and
+  Link runs until he stops. He runs past people, signs and pots without talking, reading or picking up; tap A to roll or
+  act as usual. While the ocarina waits for a note, Sprint does nothing. Turning the row on moves <kbd>Shift</kbd> from B
+  to Sprint (B goes to <kbd>V</kbd>, when no control has V) and the left stick's press from LS to Sprint; turning it off
+  puts them back. Controls you rebound yourself are left alone, and the Controls page's **Sprint** line rebinds it.
 
 ### Discord status
 
@@ -338,8 +345,9 @@ toggle_a=0
 buttons). The buttons are `a` `b` `x` `y` `l` `r` `zl` `zr` `plus` `minus` `ls` `rs` `left` `up` `right` `down`; for
 keys only, the left stick's and the camera's directions and walking: `move_up` `move_down` `move_left` `move_right`
 `cam_up` `cam_down` `cam_left` `cam_right` `walk`; and the five notes, which also take a `pad_` line:
-`note_l` `note_r` `note_a` `note_y` `note_x`. A button the file leaves out keeps its default. `toggle_<button>=1` turns
-that button's Toggle on (not for `plus`, `minus`, the stick directions, `walk` or the notes).
+`note_l` `note_r` `note_a` `note_y` `note_x`; and `sprint`, which takes both lines (none by default; the Sprint row
+gives it Shift and the left stick's press). A button the file leaves out keeps its default. `toggle_<button>=1` turns
+that button's Toggle on (not for `plus`, `minus`, the stick directions, `walk`, the notes or `sprint`).
 
 </details>
 

@@ -45,7 +45,7 @@ static void AcquireSRWLockShared(SRWLOCK *p) { (void)p; }
 static void ReleaseSRWLockShared(SRWLOCK *p) { (void)p; }
 static void AcquireSRWLockExclusive(SRWLOCK *p) { (void)p; }   /* (hos_hid_tap's) */
 static void ReleaseSRWLockExclusive(SRWLOCK *p) { (void)p; }
-static int pad_bind[HOS_KEY_N][2] = { [HOS_KEY_TOGGLE_HUD] = {-1, -1} };
+static int pad_bind[HOS_KEY_N][2] = { [HOS_KEY_TOGGLE_HUD] = {-1, -1}, [HOS_KEY_SPRINT] = {-1, -1} };
 static LONG hud_bind_generation;
 static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
 static uint64_t pad_after_menu, pad_raw_game;   /* (pad_raw_now stays 0 here: no pad input waits after the menu) */
@@ -112,6 +112,7 @@ void pads_read(uint64_t *buttons, int32_t stick[4]) {
 }
 void binds_load(void) {
     key_bind[B_X][0] = 'P';
+    pad_bind[HOS_KEY_SPRINT][0] = pad_bind[HOS_KEY_SPRINT][1] = -1;
     /* (the left stick's and the camera's keys are bindings too: the defaults, WASD and the arrows) */
     key_bind[HOS_KEY_MOVE_UP][0] = 'W', key_bind[HOS_KEY_MOVE_DOWN][0] = 'S', key_bind[HOS_KEY_MOVE_LEFT][0] = 'A';
     key_bind[HOS_KEY_MOVE_RIGHT][0] = 'D', key_bind[HOS_KEY_CAM_UP][0] = VK_UP, key_bind[HOS_KEY_CAM_DOWN][0] = VK_DOWN;
