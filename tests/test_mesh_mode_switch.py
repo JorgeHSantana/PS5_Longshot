@@ -113,6 +113,8 @@ def check_source():
     line = line[:line.index(";\n")]
     if 'dev.mesh_shader ? "yes" : "no"' in line or "mesh_note" not in line:
         raise SystemExit("FAIL: the device line says only this run's mesh path, not what the driver offers")
+    if "mesh_mode_used = 2" in device[device.index(rule) + len(rule):device.index("if (mesh_mode_used == 2) dev.mesh_shader = false;")]:
+        raise SystemExit("FAIL: Automatic picks Compute for an unmeasured configuration")
 
     menu = (vk / "vk_menu.cpp").read_text(encoding="utf-8")
     table = menu[menu.index("Row rows[] = {"):]

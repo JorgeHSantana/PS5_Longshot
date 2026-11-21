@@ -280,6 +280,14 @@ PCS = [
             "amd_cloth_no_optimizer fault_gate_serial allowance_at_count_rule split_ub_flush warp64 fsr4_tune "
             "astc_bc_all threaded_auto_render",
          num=(0, 0, 0, 2, 0, 16, 4096, 3072, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 6, 4, 8, 6, 4)),
+    # (Krackan Point gfx1152: native mesh and native float atomics from 0x8001a0 on Windows)
+    dict(name="Radeon 860M (0x1002:0x1114), AMD's Windows driver 26.10.1 (LLPC)",
+         facts=(0x1002, 0x1114, "AMD_PROPRIETARY", 0x8001a0, "INTEGRATED_GPU", "26.10.1 (LLPC)", "AMD Radeon(TM) 860M Graphics", 1, 0,
+                6144, 12288, 26283, 16, 16, 8, 1, 1, 1, 1, 0, 1, 1, 64, 64, 0xF0),
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
+            "amd_cloth_no_optimizer fault_gate_serial allowance_at_count_rule split_ub_flush native_float_add warp64 fsr4_tune "
+            "astc_bc_all dlss_cnn threaded_auto_render threaded_auto_recorder",
+         num=(0, 0, 0, 2, 0, 16, 4096, 1700, 768, 512, 512, -1, 256, 0, 32, 16, 90, 1, 6, 4, 8, 6, 4)),
 ]
 
 # The switches (device_policy_env). The fields a switch can set, in the Sw enum's order (its bit in set_by_switch), and what
@@ -431,18 +439,23 @@ RULES = [
     ("(long long)policy_rule::program_workers_in_play(24, 24)", 4),
     ("(long long)policy_rule::program_workers_in_play(4, 4)", 2),
     # (the float add's list: NVIDIA's driver; Intel's Windows driver by family, from the driver that was run)
-    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_NVIDIA_PROPRIETARY, 0x2204, 0)", 1),
-    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_MESA_NVK, 0x2204, 0)", 0),
-    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x7D55, 101u << 14 | 9175u)", 1),
-    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x7D55, 101u << 14 | 9174u)", 0),
-    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0xE20B, 101u << 14 | 9153u)", 0),
-    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0xB080, 101u << 14 | 9150u)", 1),
-    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0xB080, 101u << 14 | 9149u)", 0),
-    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x64A0, 101u << 14 | 8991u)", 1),
-    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x64A0, 101u << 14 | 8990u)", 0),
-    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x56A1, 101u << 14 | 9999u)", 0),
-    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA, 0x7D55, 0xFFFFFFFFu)", 0),
-    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_AMD_PROPRIETARY, 0x7550, 0xFFFFFFFFu)", 0),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_NVIDIA_PROPRIETARY, 0x2204, 0, false)", 1),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_MESA_NVK, 0x2204, 0, false)", 0),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x7D55, 101u << 14 | 9175u, true)", 1),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x7D55, 101u << 14 | 9174u, true)", 0),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0xE20B, 101u << 14 | 9153u, true)", 0),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0xB080, 101u << 14 | 9150u, true)", 1),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0xB080, 101u << 14 | 9149u, true)", 0),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x64A0, 101u << 14 | 8991u, true)", 1),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x64A0, 101u << 14 | 8990u, true)", 0),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x56A1, 101u << 14 | 9999u, true)", 0),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA, 0x7D55, 0xFFFFFFFFu, false)", 0),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_AMD_PROPRIETARY, 0x1114, 0x8001a0u, true)", 1),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_AMD_PROPRIETARY, 0x1114, 0x8001a0u, false)", 0),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_AMD_PROPRIETARY, 0x1114, 0x80019fu, true)", 0),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_AMD_PROPRIETARY, 0x7550, 0xFFFFFFFFu, true)", 0),
+    ("(long long)[] { DeviceFacts f{}; f.driver_id = VK_DRIVER_ID_AMD_PROPRIETARY; f.device_id = 0x1114; f.driver_version = 0x8001a0; f.float32_atomic_add = true; f.windows = false; return device_policy(f).native_float_add; }()", 0),
+    ("(long long)[] { DeviceFacts f{}; f.driver_id = VK_DRIVER_ID_AMD_PROPRIETARY; f.device_id = 0x1114; f.driver_version = 0x8001a0; f.float32_atomic_add = true; f.windows = true; return device_policy(f).native_float_add; }()", 1),
 ]
 
 FIXTURE = r"""
@@ -645,7 +658,7 @@ def check_source():
                        ("vk_draw.cpp", "static const float eq_bias = dev.policy.equal_depth_bias;"),
                        ("vk_draw.cpp", "q.set_serial(driver_faults_mode() == 2 || dev.policy.fault_gate_serial);"),
                        # (the Intel families' list written once: native_fadd_wanted asks policy_rule's)
-                       ("vk_main.cpp", "return policy_rule::native_fadd_listed(driver, device, version);")):
+                       ("vk_main.cpp", "return policy_rule::native_fadd_listed(driver, device, version, windows);")):
         if need not in sources.setdefault(path, (VK / path).read_text(encoding="utf-8")):
             raise SystemExit("FAIL: %s no longer has %s" % (path, need))
     if "0x7D00u" in main or "0xE200u" in main:

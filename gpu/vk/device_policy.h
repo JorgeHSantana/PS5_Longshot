@@ -104,12 +104,14 @@ namespace policy_rule {
 constexpr uint64_t kMB = 1ull << 20, kGB = 1ull << 30;
 
 /// RX_VK_NATIVE_FADD unset: the drivers the GPU's own float add was run on (vk_main.cpp native_fadd_wanted has the runs).
-/// NVIDIA's driver; Intel's Windows driver on Meteor Lake and Arrow Lake (0x7Dxx) from 101.9175, Battlemage (0xE2xx) from
+/// NVIDIA's driver; AMD's Windows driver on Radeon 860M/840M (0x1114) from 0x8001a0 (Adrenalin 26.10.1); Intel's Windows
+/// driver on Meteor Lake and Arrow Lake (0x7Dxx) from 101.9175, Battlemage (0xE2xx) from
 /// 101.9154, Panther Lake (0xB0xx) from 101.9150 and Lunar Lake (0x64xx: 0x6420, 0x64A0, 0x64B0) from 101.8991 (with the loop
 /// Arc 140Vs lost the device, at 499dbfd0 among other programs: Longshot issues 844, 878, 1027 and 1225). Intel's Windows driverVersion is
 /// 101 << 14 | build on every family; Mesa's Intel driver numbers its versions otherwise and is never listed
-inline bool native_fadd_listed(VkDriverId driver, uint32_t device, uint32_t version) {
+inline bool native_fadd_listed(VkDriverId driver, uint32_t device, uint32_t version, bool windows) {
     if (driver == VK_DRIVER_ID_NVIDIA_PROPRIETARY) return true;
+    if (driver == VK_DRIVER_ID_AMD_PROPRIETARY) return windows && device == 0x1114u && version >= 0x8001a0u;
     if (driver != VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS) return false;
     return ((device & 0xFF00u) == 0x7D00u && version >= (101u << 14 | 9175u)) ||
            ((device & 0xFF00u) == 0xE200u && version >= (101u << 14 | 9154u)) ||
@@ -377,8 +379,10 @@ struct DevicePolicy {
     // RX_VK_SPLIT_UBFLUSH. Read (vk_replay.cpp)
     bool split_ub_flush = true;
     // The GPU's own float add on storage buffers, where the card has it and a run has shown it right
-    // (policy_rule::native_fadd_listed, the one list: NVIDIA's driver; Intel's Windows driver from 101.9175 on Meteor Lake
-    // and Arrow Lake, 101.9154 on Battlemage, 101.9150 on Panther Lake, 101.8991 on Lunar Lake); elsewhere the compare-exchange loop.
+    // (policy_rule::native_fadd_listed, the one list: NVIDIA's driver; AMD's Windows driver on 0x1114 from 0x8001a0;
+    // Intel's Windows driver from 101.9175 on Meteor Lake and Arrow Lake, 101.9154 on Battlemage, 101.9150 on Panther Lake,
+    // and 101.8991 on Lunar Lake);
+    // elsewhere the compare-exchange loop.
     // RX_VK_NATIVE_FADD, read at the site. Site (create_device, which asks the list itself), step 5
     bool native_float_add = false;
     // A subgroup can have more than 32 lanes: the long warp path for the stages the GPU does not pin to 32 (the site's
@@ -568,7 +572,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
     p.import_chunk_mb = p.mirrors ? 4 : 16;
     p.ub_snapshot = f.intel();
     p.split_ub_flush = !f.intel() || p.mirrors;
-    p.native_float_add = native_fadd_listed(f.driver_id, f.device_id, f.driver_version) && f.float32_atomic_add;
+    p.native_float_add = native_fadd_listed(f.driver_id, f.device_id, f.driver_version, f.windows) && f.float32_atomic_add;
     p.warp64 = f.subgroup_max > 32;
 
     // measured on one card
@@ -790,7 +794,8 @@ template <class Line> void device_policy_log(const DevicePolicy& p, const Device
         l.add(" import_chunk=%u MB", (unsigned)p.import_chunk_mb);
         l.flag("ub_snapshot", p.ub_snapshot, p.set(Sw::ub_snapshot));
         l.flag("split_ub_flush", p.split_ub_flush, p.set(Sw::split_ub_flush));
-        l.flag("native_float_add", p.native_float_add, false, f.nvidia() ? nullptr : "Intel 101.8991 to 101.9175 by family");
+        l.flag("native_float_add", p.native_float_add, false,
+               f.nvidia() ? nullptr : f.amd() ? "AMD 0x8001a0" : "Intel 101.8991 to 101.9175 by family");
         l.flag("warp64", p.warp64);
         l.flag("batch_submits", p.batch_submits, p.set(Sw::batch_submits));
         l.flag("mma_unroll_try", p.mma_unroll_try);

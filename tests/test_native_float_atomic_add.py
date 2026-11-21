@@ -187,11 +187,13 @@ def check_source():
         raise SystemExit("FAIL: EmitContext has no native_f32_add")
     main_cpp = (VK / "vk_main.cpp").read_text(encoding="utf-8")
     device = cut(main_cpp, "bool create_device() {", "vk_main.cpp")
+    if "#ifdef _WIN32\n    constexpr bool fadd_windows = true;\n#else\n    constexpr bool fadd_windows = false;\n#endif" not in device:
+        raise SystemExit("FAIL: create_device does not pass the platform to native_fadd_wanted")
     for piece, why in (
         ("if (fadd_wanted) optional(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, atomic_float);",
          "VK_EXT_shader_atomic_float is not asked for, or is asked for where the native add is not wanted"),
         ('getenv("RX_VK_NATIVE_FADD")', "RX_VK_NATIVE_FADD is not read"),
-        ("const bool fadd_wanted = native_fadd_wanted(fadd_env, fadd_driver.driverID, dev.props.deviceID, dev.props.driverVersion);",
+        ("const bool fadd_wanted = native_fadd_wanted(fadd_env, fadd_driver.driverID, dev.props.deviceID, dev.props.driverVersion, fadd_windows);",
          "the native add is not decided by native_fadd_wanted from the switch, the driver, the GPU and its driver's version"),
         # (the driver is asked once, at the function's start, for the mesh mode too: the order is checked below)
         ("        p2.pNext = &fadd_driver;\n        vkGetPhysicalDeviceProperties2(dev.physical, &p2);\n    }\n",
@@ -253,6 +255,8 @@ SWITCH_CASES = ([(None, "NVIDIA_PROPRIETARY", 0x2684, 0, 1)] +
                  (None, INTEL_WIN, LNL, LNL_MEASURED - 1, 0), (None, INTEL_WIN, MTL, LNL_MEASURED, 0),
                  (None, INTEL_WIN, PTL, LNL_MEASURED, 0), (None, "INTEL_OPEN_SOURCE_MESA", LNL, LNL_MEASURED, 0),
                  ("0", INTEL_WIN, LNL, LNL_MEASURED, 0)] +
+                [(None, "AMD_PROPRIETARY", 0x1114, 0x8001a0, 1), (None, "AMD_PROPRIETARY", 0x1114, 0x80019f, 0),
+                 (None, "AMD_PROPRIETARY", 0x7550, 0x8001a0, 0), ("0", "AMD_PROPRIETARY", 0x1114, 0x8001a0, 0)] +
                 [(None, d, MTL, MEASURED, 0) for d in DRIVERS if d not in ("NVIDIA_PROPRIETARY", INTEL_WIN)] +
                 [(v, d, 0, 0, 1) for v in ("1", "on", "yes", "true", "2") for d in ("MESA_RADV", "NVIDIA_PROPRIETARY")] +
                 [(v, "AMD_PROPRIETARY", 0, 0, 1) for v in ("1", "on")] + [("1", "INTEL_OPEN_SOURCE_MESA", MTL, 0, 1)] +
@@ -274,10 +278,15 @@ int main(int argc, char** argv) {
         const char* v = strcmp(argv[i], "-unset") ? argv[i] : nullptr;
         const VkDriverId driver = static_cast<VkDriverId>(atoi(argv[i + 1]));
         const uint32_t device = (uint32_t)strtoul(argv[i + 2], nullptr, 0), version = (uint32_t)strtoul(argv[i + 3], nullptr, 0);
-        const bool got = native_fadd_wanted(v, driver, device, version);
+        const bool got = native_fadd_wanted(v, driver, device, version, true);
         if (got != (atoi(argv[i + 4]) != 0)) {
             printf("FAIL: RX_VK_NATIVE_FADD=[%s], driver %d, device 0x%04x, version %u.%u: %s\n", v ? v : "(unset)",
                    static_cast<int>(driver), device, version >> 14, version & 0x3fff, got ? "native" : "the loop");
+            return 1;
+        }
+        if (!v && driver == VK_DRIVER_ID_AMD_PROPRIETARY && device == 0x1114 &&
+            native_fadd_wanted(v, driver, device, version, false)) {
+            puts("FAIL: AMD proprietary Linux driver defaults to native float add");
             return 1;
         }
     }
@@ -291,7 +300,7 @@ def check_switch(cxx, tmp, vulkan_headers):
     wanted = cut(main_cpp, "static bool native_fadd_wanted(", "vk_main.cpp")
     # (the list itself is device_policy.h's, asked by the function cut here: the two are compiled together, with the Vulkan
     # headers' own driver numbers, which DRIVERS must be)
-    if "policy_rule::native_fadd_listed(driver, device, version)" not in wanted:
+    if "policy_rule::native_fadd_listed(driver, device, version, windows)" not in wanted:
         raise SystemExit("FAIL: native_fadd_wanted no longer asks device_policy.h's list (a second copy of it?)")
     cpp, exe = tmp / "switch.cpp", tmp / "switch"
     drivers = " && ".join("VK_DRIVER_ID_%s == %d" % kv for kv in DRIVERS.items())
