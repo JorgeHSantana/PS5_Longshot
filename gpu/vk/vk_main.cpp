@@ -45,6 +45,7 @@
 #ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
 #include "longshot_env.h"
 #endif
+#include "longshot_no_gpu.h"   // (why Vulkan listed no GPU, where the PC says: pick_device)
 #include "switches.h"   // (the switches' table: what the run has set, said at the start)
 #ifndef _WIN32
 extern char** environ;
@@ -283,6 +284,18 @@ bool pick_device() {
     vkEnumeratePhysicalDevices(dev.instance, &n, nullptr);
     std::vector<VkPhysicalDevice> all(n);
     vkEnumeratePhysicalDevices(dev.instance, &n, all.data());
+    if (!n) {   // (longshot) no device at all: no Vulkan driver lists a GPU. Why, where the PC says (NVIDIA's driver not loaded, a
+                // real-time kernel): the window after the start reads this line (host/hos_crash_dialog.h)
+        LongshotNoGpu why;
+#ifdef _WIN32
+        longshot_no_gpu_probe(nullptr, &why);
+#else
+        longshot_no_gpu_probe("", &why);
+#endif
+        char line[400];
+        longshot_no_gpu_line(line, sizeof line, &why);
+        logf("vk: %s", line);
+    }
 
     std::vector<uint32_t> valid_gpus;
     gpu_device_names.clear();

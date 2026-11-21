@@ -85,8 +85,8 @@ VK_LIB = "longshot_vk.so" if LINUX else "longshot_vk.dll"
 
 def check_vk_symbols(so):
     """The back end is dlopened with RTLD_NOW, so one unresolved symbol stops the whole thing
-    loading -- and the only sign of that at run time is "the renderer did not start: the window
-    stays black", with no symbol named. The link itself does not fail: a shared object is allowed to
+    loading -- and the only sign of that at run time is "the renderer did not start: the game
+    ends", with no symbol named. The link itself does not fail: a shared object is allowed to
     leave symbols for its loader to supply, which is exactly what the host executable does for the
     weak hos_* ones.
 

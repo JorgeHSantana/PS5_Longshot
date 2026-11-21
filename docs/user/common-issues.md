@@ -98,7 +98,11 @@ the FPS on the title screen and in the first scene.
 1. **Check Vulkan and mesh shaders.** `vulkaninfo | grep mesh` should list `VK_EXT_mesh_shader`. The game needs a
    Vulkan 1.3 driver, ideally with mesh shaders.
 2. **Update Mesa or the NVIDIA driver** if it doesn't.
-3. **The log warns that `/dev/udmabuf` is denied:** the game runs, but imports GPU memory more slowly, much more on AMD.
+3. **NVIDIA on a real-time kernel** (one with `rt` in its name, such as CachyOS's `linux-cachyos-rt-bore`): if the NVIDIA
+   kernel module is not loaded, a driver compatibility or loading issue may be involved. Check the driver and kernel module
+   logs, try a supported NVIDIA driver or a standard kernel, and check that a Vulkan driver is installed and loaded.
+   `vulkaninfo --summary` lists the available Vulkan devices.
+4. **The log warns that `/dev/udmabuf` is denied:** the game runs, but imports GPU memory more slowly, much more on AMD.
    [Give your user access](advanced.md#linux-faster-gpu-memory-devudmabuf).
 
 [Search Linux reports](https://longshot.magicbean.dev/progress/#problem-search?q=linux)

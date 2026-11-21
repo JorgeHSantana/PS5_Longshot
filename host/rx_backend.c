@@ -609,7 +609,22 @@ int rx_prepare_shaders(void) {
 }
 /* (longshot) the window is being closed: a back end still preparing its shaders stops and keeps what it made first (a few
    seconds at most). One without the export (an older one) has nothing to keep */
+#ifndef _WIN32
+/* Startup failure and all close callers share one claim, before either can end the process or clean up. */
+static int rx_end_claim;   /* 0 neither, 1 close, 2 startup failure */
+int rx_start_failure_claim(void) {
+    int expected = 0;
+    return __atomic_compare_exchange_n(&rx_end_claim, &expected, 2, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+}
+#endif
 void rx_close_asked(void) {
+#ifndef _WIN32
+    int expected = 0;
+    if (!__atomic_compare_exchange_n(&rx_end_claim, &expected, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) && expected == 2) {
+        /* The renderer has already claimed the failure and will exit; do not race it with close cleanup. */
+        for (;;) Sleep(1000);
+    }
+#endif
     /* (first, before anything that takes time: the player asked to quit, so however the process ends from here (a second
        close of a window that stopped answering) the crash window says nothing; a crash still counts: host/hos_crash_dialog.h) */
     void hos_crash_quit_asked(void);
