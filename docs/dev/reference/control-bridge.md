@@ -253,6 +253,11 @@ Render resolution, output resolution) are stepped until they reach `value`; if n
 reply is `failed`. A `fixed` row also replies `failed`. For Render resolution, `value` is the saved scale choice and
 `text` the active upscaler's supported size.
 
+For a Grass distance farm run, leave `RX_VK_GRASS_DISTANCE` unset so it does not override the row. With `CTL` and
+`HOS_CONTROL` set as in the client example below, use `$CTL option set grass_distance 1` for 2x or
+`$CTL option set grass_distance 0` for Game's, then `$CTL option get grass_distance` and check both `value` and `text`.
+Values 2 and 3 select 3x and 4x. The row is saved, so restore the previous value after the run.
+
 The first `option_get` or `option_set` after start can wait about 3 s for the upscalers' start-up check, holding up
 other replies meanwhile.
 

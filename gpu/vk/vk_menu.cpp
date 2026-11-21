@@ -595,6 +595,7 @@ bool cheats_env = false;   // (HOS_OOT_CHEATS=1: on whatever the Debug tab says)
 /// The debug tools: the Debug tab's row, or HOS_OOT_CHEATS=1
 bool cheats_on() { return cheats_env || opts.debug_tools; }
 std::atomic<bool> transition_autosave_enabled{true};
+std::atomic<int> grass_distance_now{0};
 void sync_transition_autosave() {
     transition_autosave_enabled.store(opts.transition_autosave != 0, std::memory_order_relaxed);
 }
@@ -1257,6 +1258,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
     }
     if (r.setting && r.setting->on_change) r.setting->on_change(*r.value);   // (#1633: a module's row's own)
     if (r.value == &opts.transition_autosave) sync_transition_autosave();
+    if (r.value == &opts.grass_distance) grass_distance_now.store(opts.grass_distance, std::memory_order_relaxed);
     // (longshot: the samplers made again, at once: their anisotropy, and the upscalers' LOD bias, vk_draw.cpp upscale_lod_bias)
     if (r.value == &opts.anisotropy || r.value == &opts.dlss || r.value == &opts.resolution || r.value == &opts.preset)
         samplers_changed();
@@ -3975,6 +3977,7 @@ void menu_init() {
     menu_colour_vision_changed(opts.colour_vision);
     menu_sync_hud_placement();
     sync_transition_autosave();
+    grass_distance_now.store(opts.grass_distance, std::memory_order_relaxed);
     const char* handheld_env = getenv("HOS_HANDHELD");   // (host/nn_applet.c handheld(): the environment over the file's)
     if (!has_output && !(handheld_env ? !env_value_off(handheld_env) : opts.handheld != 0)) {
         // (none chosen, a new install: the size host/nn_applet.c took at boot, the game's 2560x1440 or the main screen's where
@@ -4135,6 +4138,7 @@ void menu_set_gpu_count(int count) {
 }
 
 bool menu_is_open() { return open_now.load(std::memory_order_relaxed); }
+int menu_grass_distance() { return grass_distance_now.load(std::memory_order_relaxed); }
 double menu_target_ms() { return fps_target_ms(); }   // (the performance summary's: perf_report.cpp)
 int menu_fps_cap() { return fps_cap_now(); }          // (likewise: its fps_cap label)
 bool scene_tonemap_on() { return dev.hdr && opts.hdr == 2 && opts.hdr_tonemap == 1; }

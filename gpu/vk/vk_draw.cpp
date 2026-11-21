@@ -47,6 +47,7 @@
 #include "draw_key.h"     // (the draw path's questions answered from their arguments alone: pipe_same, dyn_same, ...)
 #include "flat_map.h"
 #include "vk_menu.h"          // (opts.anisotropy: the Anisotropic filtering row; resolution_scale)
+#include "grass_distance.h"
 #include "upscaler_rows.h"    // (upscale_lod_bias: which upscalers draw the 3D smaller)
 #include "dlss_actor.h"
 #include "hidden_mesh.h"      // (longshot: a hidden mesh's depth draws left out, hidden_depth_draw)
@@ -3905,6 +3906,24 @@ void ub_snap_check(UbSnap* memo, bool hit, uint64_t addr, uint8_t* dst, uint64_t
         memo->bytes.assign(now.begin(), now.end());
     }
 }
+// (longshot) The Grass distance row (opts.grass_distance): how far the grass reaches. Two kinds. The short blades (Kokiri
+// Forest's tufts, the moss on its stones): The game draws them from patches that a compute program picks around Link (383a566958350efe), its
+// scene buffer's word 75 the radius (22 m), and each blade goes through a random cut by its distance in the task stage of
+// both programs that draw it: 43ec86f35fd937b9 (the colour) and 8a8304edb7bdf4bf (a pass over the same blades), words 46 and
+// 47 of their scene buffer (the shaders' c3) giving a fade from 12 to 22 m. At n times the reach the radius is n times as
+// large and both fades n times as far: the copy the GPU reads is changed, never the game's memory. Only a positive value of
+// those words is changed (the same buffer slot has other numbers in other stages). The main grass retains the game's density:
+// increasing it can overflow its fixed blade list.
+// RX_VK_GRASS_DISTANCE=<n> (1 to 8) over the row for a run
+thread_local uint64_t ub_prog_key = 0;   // (the program whose descriptors build_descriptors is making: draw and dispatch set it)
+float grass_reach() {
+    static const char* const env = getenv("RX_VK_GRASS_DISTANCE");
+    static const float forced = env && *env ? std::clamp((float)atof(env), 1.0f, 8.0f) : 0.0f;
+    if (forced > 0.0f) return forced;
+    static const float times[] = {1.0f, 2.0f, 3.0f, 4.0f};
+    const int v = menu_grass_distance();
+    return v >= 0 && v < 4 ? times[v] : 1.0f;
+}
 VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_t index) {
     VkDescriptorBufferInfo bi{VK_NULL_HANDLE, 0, VK_WHOLE_SIZE};
     const uint64_t align = std::max<uint64_t>(dev.props.limits.minUniformBufferOffsetAlignment, 16);
@@ -3989,6 +4008,29 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
         const uint64_t want = used ? std::max<uint64_t>(used, 16) : std::max<uint64_t>(u.size, 16);
         const uint64_t n = std::min<uint64_t>(std::min<uint64_t>(want, u.size ? std::max<uint64_t>(u.size, 16) : want),
                                               dev.props.limits.maxUniformBufferRange);
+        {   // (the Grass distance row: grass_reach)
+            uint16_t words[2];
+            int power[2];
+            const int nw = index == 3 && ub_prog_key ? grass_words(ub_prog_key, words, power) : 0;
+            const float reach = nw ? grass_reach() : 1.0f;
+            if (nw && reach != 1.0f && stream_reserve(n, align)) {
+                uint64_t at = ub_overlay(u.addr, n, cur->mapped, [&](uint64_t bytes) { return stream_alloc(bytes, align); });
+                if (at == UINT64_MAX) {
+                    at = stream_alloc(n, align);
+                    if (at == UINT64_MAX) return bi;
+                    memory_read_as_submitted(u.addr, cur->mapped + at, n);
+                }
+                grass_patch(ub_prog_key, index, cur->mapped + at, n, reach, [&](uint16_t word, float was, float v) {
+                    static std::mutex told_mu;   // (once for each program and word: what the row changes)
+                    static std::set<std::pair<uint64_t, uint16_t>> told;
+                    std::lock_guard<std::mutex> lk(told_mu);
+                    if (told.insert({ub_prog_key, word}).second)
+                        logf("vk: Grass distance %gx: program %016llx word %u %g -> %g", (double)reach,
+                             (unsigned long long)ub_prog_key, (unsigned)word, (double)was, (double)v);
+                });
+                return {cur->stream, at, n};
+            }
+        }
         // (updates the stream made to this range in this submission or ones still in flight: a copy with them in)
         // (room first: the overlay copies into the stream's mapping, which a move to a bigger stream in the middle would change)
         if (stream_reserve(n, align))
@@ -8746,7 +8788,9 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         PROF_HOT(PROF_DESC);
         FINE_N(FC_BUILDS, 1);
         trace_tex_hit = nullptr, trace_tex_mask = 0;
+        ub_prog_key = p.key;   // (the Grass distance row: uniform_range)
         build_descriptors(s, p);   // (textures first used here are uploaded by the recording's upload command buffer)
+        ub_prog_key = 0;
         FINE_N(FC_WRITES, (int64_t)dw().writes.size());
         static std::string last_logged;
         if (dump_on()) {
@@ -12004,7 +12048,9 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     dclock.t_pipe = slow_dispatch_timing() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     end_pass(cmd);
     grid_patch_want = indirect, grid_patch_at = UINT64_MAX;
+    ub_prog_key = p.key;   // (the Grass distance row: uniform_range)
     build_descriptors(s, p);
+    ub_prog_key = 0;
     grid_patch_want = false;
     dclock.t_desc = slow_dispatch_timing() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     if (dump_on())

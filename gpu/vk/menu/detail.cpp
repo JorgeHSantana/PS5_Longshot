@@ -12,6 +12,11 @@ const char* tx_anisotropy(int v) {
     static const char* t[] = {"Game's", "2x", "4x", "8x", "16x"};
     return (unsigned)v < 5 ? t[v] : t[4];
 }
+/// Grass distance: the game's reach for the short grass blades, or 2x to 4x (vk_draw.cpp grass_reach)
+const char* tx_grass_distance(int v) {
+    static const char* t[] = {"Game's", "2x", "3x", "4x"};
+    return (unsigned)v < 4 ? t[v] : t[0];
+}
 /// Shadow resolution: the sun's cascades at the game's own sizes (host/oot_shadow.c). Auto, the default, takes the size
 /// for the card's memory (menu_shadow_res)
 const char* tx_shadow_res(int v) {
@@ -38,6 +43,14 @@ MENU_MODULE(detail) {
               .lo = 0, .hi = 4,
               .preset_exempt = true,
               .text = [](int v) { return std::string(tx_anisotropy(v)); }})
+        .row({.key = "grass_distance",
+              .label = "Grass distance",
+              .help = "How far away short grass blades reach, such as Kokiri Forest's tufts and the moss on its stones. The game "
+                      "stops them at about 20 m. Higher extends their reach for some GPU time and applies at once.",
+              .value = &opts.grass_distance,
+              .lo = 0, .hi = 3,
+              .preset_exempt = true,
+              .text = [](int v) { return std::string(tx_grass_distance(v)); }})
         .row({.key = "shadow_resolution",
               .label = "Shadow resolution",
               .help = "The size of the sun's shadow maps: higher keeps the shadows of thin things near you, such as chains, fences and "

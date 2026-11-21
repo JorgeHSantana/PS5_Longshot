@@ -107,6 +107,7 @@ Keys whose numbers are not obvious from the row:
 
 | Key | Values |
 |---|---|
+| `grass_distance` | The short grass blades' reach: 0 Game's (default; radius 22 m, blades thinned from 12 m to about 20 m), 1 2x, 2 3x, 3 4x. The radius and both fades extend by that factor at once. Hyrule Field's main grass keeps the game's density to avoid overflowing its fixed blade list (`gpu/vk/vk_draw.cpp` `grass_reach`; `RX_VK_GRASS_DISTANCE` overrides the row) |
 | `hud_layout` | HUD layout. 0 Screen's edges (default), 1 Middle 16:9, 2 Custom. Read at each present (`host/hos_wide_ui.c`). `HOS_WIDE_UI` overrides it |
 | `hud_health_x/y/scale`, `hud_buttons_x/y/scale`, `hud_minimap_x/y/scale` | Custom HUD placement, with horizontal and vertical offsets in percent of the picture and scale in percent of the usual size |
 | `key_toggle_hud`, `pad_toggle_hud` | Session HUD shortcut, unbound by default. Uses the Controls page's normal binding format |

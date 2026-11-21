@@ -115,6 +115,7 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | User preset file | A ReShade INI from the profile's `reshade/presets` folder (with User selected). | No preset |
 | | Rescan ReShade presets | Refreshes the user preset list and reloads the selected file. | |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
+| | Grass distance | Game's, 2x, 3x, 4x: how far the short grass blades reach | Game's |
 | | Shadow resolution | Auto (for the card's memory), Game's (1600), High (2200), Highest (3072): the sun's shadow maps, applies at once; Highest also keeps the nearest shadows from shimmering as much | Auto |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
@@ -235,6 +236,11 @@ helper asks you to.
   to 6 GB, High at 8 GB, Highest from 12 GB). On Highest the nearest shadows shimmer less while the camera turns or
   Link walks: the map near Link stays put in the world instead of following the view. The steady fit is a little coarser
   than the game's own fit standing still, so below Highest the game's fit is kept ([developer switches](../dev/reference/switches.md)).
+- **Grass distance** sets how far the short grass blades reach: Kokiri Forest's tufts and the moss on its stones. The game
+  picks patches within 22 m of Link and thins blades by distance from the camera, from 12 m to about 20 m. 2x, 3x and 4x
+  extend their radius and fades by that factor. Game's, the default, keeps the console's reach. The change applies at once.
+  Hyrule Field's main grass keeps the game's density to avoid overflowing its fixed blade list. Saved as `grass_distance`;
+  `RX_VK_GRASS_DISTANCE=<n>` (1 to 8) overrides the row for one run.
 - **GPU device** matters on a PC with more than one graphics card: Auto prefers a dedicated one. The card you choose is
   remembered as that card, not its place in the list.
 - **Threaded rendering:** On draws the picture on threads of its own (a render thread and a recorder thread) while the
