@@ -136,6 +136,8 @@ uint64_t texture_destroy_generation();
 bool texture_alive(uint64_t gpu, const Texture* t, VkImage image);
 // (longshot, RX_VK_FRAME_TRACE: time no other column has; totals in ns, the trace takes their differences)
 int64_t texture_readback_wait_ns();   // (a read-back's submit and wait for the GPU: the write-backs before an eviction)
+void texture_step_times(int64_t out[8]);
+void texture_pool_counts(int64_t out[9]);   // (TEST, local: vk_texture.cpp)
 int64_t texture_frame_ns();           // (texture_frame as a whole: each present's eviction, compaction and sweeps)
 /// The texture an NVN texture's storage is (made and uploaded at first use, uploaded again when the CPU wrote its
 /// storage since). null for formats and targets that have no image (buffers, unknown formats).

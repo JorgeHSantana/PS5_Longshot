@@ -11,6 +11,8 @@ links to those public files.
 source hashes. All six launcher images are UI-only captures built from Launcher nightly-52-b1d9f7a9 source
 `b1d9f7a9b19fa99b91ec3e8cd24455d4703d6d25`; they replace the earlier official-AppImage and rc.3 fixture captures.
 The current Graphics image was captured from main `f1f2dc5bd2821cef061798ba40a043d281ac1707` (nightly 680).
+
+Source review against `5b8879040de15dfb3255cf4b6023f2cb9b8096b2`: `gpu/vk/vk_texture.h` adds two texture diagnostic declarations. They do not change the pictured Graphics controls or the guide, so the existing image is retained. No new capture was made.
 The [fullscreen-monitor source review](source-review-fullscreen-monitor.md) records the nightly 680 comparison and
 historical rc.8 comparisons. Earlier images remain in repository history.
 

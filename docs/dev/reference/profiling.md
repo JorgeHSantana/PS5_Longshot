@@ -89,6 +89,8 @@ Read the GPU numbers as shares, not as an unprofiled frame's time, and never tak
   core (`main_vcore_ms`); the rest is time runnable but off the CPU;
 - `at_ns` (the present on the host's clock) and `ab_side` ([an A/B within one run](../developing.md#an-ab-within-one-run)).
 
+Texture step columns `create_ms`, `reuse_ms`, `astc_stage_ms`, `astc_record_ms`, `astc_view_ms`, and `astc_flush_ms` are CPU wall-time deltas in milliseconds since the preceding present; `astc_flushes` and `create_n` are count deltas. View and flush time are excluded from record time. Pool columns `pool_reused` (exact images), `pool_resized` (new images on pooled memory), `pool_new` (new allocations for pool-eligible images), `pool_put`, `pool_idle`, and `pool_destroyed` are count deltas. `pool_holds` and `dead_waiting` are image-count snapshots, and `compact_pass` is a 0/1 snapshot.
+
 `RX_VK_FRAME_LOG=<csv>` is a lighter alternative: frame, seconds and frame time per present (it works headless too).
 
 ## Reading the renderer's log lines

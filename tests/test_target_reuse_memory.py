@@ -210,7 +210,7 @@ std::mutex pool_mu;
 std::list<Pooled> pool_by_age;
 std::unordered_map<uint64_t, std::deque<std::list<Pooled>::iterator>> target_pool, by_class;
 std::unordered_map<uint64_t, uint64_t> taken_by_size;
-uint64_t pool_bytes, pool_n, st_pool_reused, st_pool_resized, st_pool_stolen;
+uint64_t pool_bytes, pool_n, st_pool_reused, st_pool_resized, st_pool_stolen, st_pool_put, st_pool_idle_out;
 uint64_t st_miss[(int)target_pool::Miss::count], st_small_gap_pct;
 std::atomic<uint64_t> dead_pooled_n{0};
 uint64_t target_block_bytes() { return 16ull << 20; }
@@ -470,7 +470,8 @@ class ReuseMemoryTests(unittest.TestCase):
         self.assertIn("!x.sparse", rule)
         # (a reused memory is not counted as made new; the image is still put into GENERAL from UNDEFINED and cleared)
         taken = make.index("pool_take_memory(need, x.image, x.allocation)")
-        self.assertLess(taken, make.index("st_pool_made += pool_key != 0"))
+        self.assertLess(taken, make.index("st_pool_made++"))
+        self.assertIn("st_pool_resized == resized_before", make)
         after = make[taken:]
         self.assertIn("b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;", after)
         self.assertIn("vkCmdClearColorImage", after)
@@ -530,7 +531,7 @@ class ReuseMemoryTests(unittest.TestCase):
         classed = make.index("pool_key && reuse_memory_level() >= 2 && pool_pressure == 0 &&")
         self.assertEqual(make.count("create_image_in_class("), 1)
         self.assertLess(classed, make.index("create_image_in_class(need, x.image, x.allocation)"))
-        self.assertLess(make.index("st_pool_made += pool_key != 0"), classed)
+        self.assertLess(classed, make.index("st_pool_made++"))
         self.assertLess(classed, make.index("!create_image(ci, x.image, x.allocation, false, as_target"))
         cls = block(self.vma, "bool create_image_in_class(ImageNeed& need, VkImage& image, VmaAllocation& allocation)")
         for part in ("target_images_pool()", "const VkMemoryRequirements* mr = need.get();",

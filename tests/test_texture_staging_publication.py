@@ -29,6 +29,7 @@ def main():
     marker = "thread_local const char* astc_fail ="
     start = tex.index(marker)
     actual += "\n" + tex[start:tex.index(";", start) + 1] + "\n"
+    actual += "std::atomic<int64_t> step_ns[8];\nint64_t step_now() { return 0; }\n"
     # The actual gather, publication and command-buffer request. Decoder shaders are outside this cache fixture.
     stop = astc.index("    const uint64_t limit =", astc.index("    const uint64_t staged ="))
     actual += "\n" + astc[:stop] + "    consume(cmd); return true;\n}\n"
