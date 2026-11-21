@@ -438,6 +438,8 @@ RULES = [
     ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0xE20B, 101u << 14 | 9153u)", 0),
     ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0xB080, 101u << 14 | 9150u)", 1),
     ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0xB080, 101u << 14 | 9149u)", 0),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x64A0, 101u << 14 | 8991u)", 1),
+    ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x64A0, 101u << 14 | 8990u)", 0),
     ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x56A1, 101u << 14 | 9999u)", 0),
     ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA, 0x7D55, 0xFFFFFFFFu)", 0),
     ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_AMD_PROPRIETARY, 0x7550, 0xFFFFFFFFu)", 0),
