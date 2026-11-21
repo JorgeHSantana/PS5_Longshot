@@ -415,7 +415,7 @@ bool reaper_on() {
 }
 /// The most the queue holds: an 8th of the driver's VRAM allowance, 128 MB to 1 GB (256 MB when the allowance is unknown)
 uint64_t reap_cap() {
-    static const uint64_t cap = [] {
+    static const uint64_t cap = []() -> uint64_t {
         uint64_t used = 0, allowed = 0;
         if (!vram_usage(&used, &allowed) || !allowed) return 256ull << 20;
         return std::clamp<uint64_t>(allowed / 8, 128ull << 20, 1024ull << 20);
