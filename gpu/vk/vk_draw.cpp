@@ -4014,7 +4014,7 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
             const int nw = index == 3 && ub_prog_key ? grass_words(ub_prog_key, words, power) : 0;
             const float reach = nw ? grass_reach() : 1.0f;
             if (nw && reach != 1.0f && stream_reserve(n, align)) {
-                uint64_t at = ub_overlay(u.addr, n, cur->mapped, [&](uint64_t bytes) { return stream_alloc(bytes, align); });
+                uint64_t at = ub_overlay(u.addr, n, cur->mapped, stream_alloc, align);
                 if (at == UINT64_MAX) {
                     at = stream_alloc(n, align);
                     if (at == UINT64_MAX) return bi;
