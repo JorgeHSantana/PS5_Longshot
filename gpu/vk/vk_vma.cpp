@@ -594,6 +594,15 @@ bool create_aliasing_image(const VkImageCreateInfo& ci, VmaAllocation allocation
     image = VK_NULL_HANDLE;
     return vmaCreateAliasingImage(vma, allocation, &ci, &image) == VK_SUCCESS;
 }
+// (longshot, #1879) RX_VK_BUFFER_BUDGET=0: a host-visible buffer made where VMA prefers it whatever its heap's budget, as before
+static bool buffer_budget_on() {
+    static const bool on = [] {
+        const bool v = env_on_or("RX_VK_BUFFER_BUDGET", 1);   // (longshot_env.h: unset is on)
+        if (!v) logf("vk: host-visible buffers made where VMA prefers them whatever their heap's budget, as before (RX_VK_BUFFER_BUDGET=0)");
+        return v;
+    }();
+    return on;
+}
 bool create_buffer(uint64_t size, VkBufferUsageFlags usage, bool host_visible, VkBuffer& buffer,
                    VmaAllocation& allocation, void** mapped, bool dedicated) {
     VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
@@ -607,7 +616,20 @@ bool create_buffer(uint64_t size, VkBufferUsageFlags usage, bool host_visible, V
     // vma_init sets VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT)
     if (dedicated) ai.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
     VmaAllocationInfo info{};
-    if (vmaCreateBuffer(vma, &bi, &ai, &buffer, &allocation, &info) != VK_SUCCESS) return false;
+    // (longshot, #1879) a host-visible buffer first where its heap's budget has room: asked to stay within the budgets, VMA takes
+    // the next memory type the buffer can use when the heap of the one it prefers is full. Not asked, it put a host-visible buffer
+    // the GPU reads (the staging arenas: STORAGE, for the ASTC decoder) in DEVICE_LOCAL | HOST_VISIBLE whatever that heap held. On
+    // a Legion Go (Radeon 780M, 8 GB UMA, no resizable BAR) that heap is the carve-out's 256 MB window, of which AMD's Windows
+    // driver allows 243 MB; a save load's or an area's staging took it to 252-277 MB while VRAM as a whole stood at 1.9 of 7.8 GB,
+    // and the driver refused every submit after (VK_ERROR_OUT_OF_DEVICE_MEMORY): a black screen, the sound going on. Now such an
+    // arena goes to system memory, which the GPU reads as well (the same RAM on an APU). Where no heap has room, made as before
+    VkResult made = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    if (host_visible && dev.memory_budget && buffer_budget_on()) {
+        VmaAllocationCreateInfo within = ai;
+        within.flags |= VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
+        made = vmaCreateBuffer(vma, &bi, &within, &buffer, &allocation, &info);
+    }
+    if (made != VK_SUCCESS && vmaCreateBuffer(vma, &bi, &ai, &buffer, &allocation, &info) != VK_SUCCESS) return false;
     buffer_count(allocation, true);
     if (mapped) *mapped = info.pMappedData;
     return true;

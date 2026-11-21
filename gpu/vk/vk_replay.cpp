@@ -65,6 +65,7 @@
 #include "readback_late.h"
 #include "hold_gpu.h"   // (longshot: sync_watch's rule for queues stopped past hold_ms)
 #include "frame_overlap.h"   // (longshot: when the game's frame wait is answered, and where the presents are made)
+#include "submit_retry.h"    // (longshot, #1879: a submit refused for want of memory made again)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
@@ -99,6 +100,55 @@ std::atomic<uint64_t> timeline_sent{0};   // (the highest value a submission alr
 void note_timeline_sent(uint64_t v) {
     uint64_t was = timeline_sent.load(std::memory_order_relaxed);
     while (v > was && !timeline_sent.compare_exchange_weak(was, v, std::memory_order_relaxed)) {}
+}
+// ---- (longshot, #1879) a submit the driver refused for want of memory: memory given back and the submit made again
+// (submit_retry.h). The replay's vkQueueSubmit2 calls go through submit_or_retry, each under dev.present_mu ----
+bool submit_retry_on() {
+    static const bool on = [] {
+        const bool v = env_on_or("RX_VK_SUBMIT_RETRY", 1);   // (longshot_env.h: unset is on)
+        if (!v) logf("vk: a submit refused for want of memory is dropped, as before (RX_VK_SUBMIT_RETRY=0)");
+        return v;
+    }();
+    return on;
+}
+/// (a test: RX_VK_TEST_SUBMIT_REFUSE=<n> answers the first try of every n-th submit with VK_ERROR_OUT_OF_DEVICE_MEMORY without
+/// making it, as AMD's Windows driver answered a Legion Go's, so any card plays the refusal and what follows it. Unset: never)
+bool test_submit_refused() {
+    static const uint64_t every = getenv("RX_VK_TEST_SUBMIT_REFUSE") ? (uint64_t)std::max(0, atoi(getenv("RX_VK_TEST_SUBMIT_REFUSE"))) : 0;
+    static uint64_t submits = 0;   // (dev.present_mu)
+    return every && ++submits % every == 0;
+}
+/// What a refused submit does before it is made again (dev.present_mu held, so the queue is this thread's): it waits for the
+/// GPU's work before it, so nothing in flight holds memory resident, and tells the next present (texture_memory_refused) to
+/// free the idle staging arenas and the reaper's queue. Not here: under the queue's lock nothing may be destroyed (a destroy's
+/// rec::boundary can wait for the recorder, whose part's submit waits for this lock), and the arenas are the replay thread's
+void submit_give_back(int tried, VkResult res) {
+    const auto t0 = std::chrono::steady_clock::now();
+    vkQueueWaitIdle(dev.queue);
+    texture_memory_refused();
+    static std::atomic<int> told{0};
+    if (told.fetch_add(1, std::memory_order_relaxed) < 16)
+        logf("vk: a submit refused for want of memory (%d): the GPU's work before it waited for (%.1f ms), the idle staging and "
+             "the reaper's queue freed at the next present; made again (try %d of %d)", (int)res,
+             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), tried + 1, submit_retry::kTries);
+}
+/// vkQueueSubmit2 of one submit (dev.present_mu held), made again after submit_give_back while the driver refuses it for want
+/// of memory (submit_retry.h)
+VkResult submit_or_retry(const VkSubmitInfo2& si, VkFence fence) {
+    int tries = 0;
+    VkResult last = VK_SUCCESS;
+    const VkResult res = submit_retry::submit(
+        [&] {
+            const bool refuse = !tries++ && test_submit_refused();
+            return last = refuse ? VK_ERROR_OUT_OF_DEVICE_MEMORY : vkQueueSubmit2(dev.queue, 1, &si, fence);
+        },
+        [&](int tried) { submit_give_back(tried, last); }, [] { return submit_retry_on(); });
+    if (tries > 1) {
+        static std::atomic<int> told{0};
+        if (told.fetch_add(1, std::memory_order_relaxed) < 16)
+            logf("vk: the refused submit %s on try %d", res == VK_SUCCESS ? "was taken" : "was refused again, dropped", tries);
+    }
+    return res;
 }
 // ---- (longshot) recordings by number: a second timeline, signalled at the end of every recording with its number, and the
 // recording each submission was finished in. The timeline above is signalled only as far as no older submission is stopped
@@ -332,7 +382,7 @@ void queue_flush_locked() {   // (dev.present_mu held)
     si.pNext = reflex_submit_id(nullptr, pend.reflex);   // (NVIDIA Reflex: the game frame of the batch's first command buffer)
     VkSemaphoreSubmitInfo sparse_wait;   // (longshot: after the sparse mirrors' binds, RX_VK_MIRROR_SPARSE)
     if (memory_sparse_wait(&sparse_wait)) si.waitSemaphoreInfoCount = 1, si.pWaitSemaphoreInfos = &sparse_wait;
-    const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, VK_NULL_HANDLE);
+    const VkResult res = submit_or_retry(si, VK_NULL_HANDLE);
     static int failures;
     if (res != VK_SUCCESS && failures++ < 8) logf("vk: batched submit %llu failed (%d)", (unsigned long long)batch_next, (int)res);
     if (res == VK_ERROR_DEVICE_LOST) device_lost();
@@ -1060,7 +1110,7 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
     si.pNext = reflex_submit_id(nullptr);   // (NVIDIA Reflex: the frame being made)
     VkSemaphoreSubmitInfo sparse_wait;   // (longshot: after the sparse mirrors' binds, RX_VK_MIRROR_SPARSE)
     if (memory_sparse_wait(&sparse_wait)) si.waitSemaphoreInfoCount = 1, si.pWaitSemaphoreInfos = &sparse_wait;
-    const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, r.fence);
+    const VkResult res = submit_or_retry(si, r.fence);
     r.submitted = res == VK_SUCCESS;
     static int failures;
     if (res != VK_SUCCESS && failures++ < 8) logf("vk: submit %llu failed (%d)", (unsigned long long)r.value, (int)res);
@@ -1115,7 +1165,7 @@ void part_submit(const PartSubmit& s) {
             si.pNext = reflex_submit_id(nullptr, s.reflex);   // (NVIDIA Reflex: the frame it was recorded in)
             VkSemaphoreSubmitInfo sparse_wait;   // (longshot: after the sparse mirrors' binds, RX_VK_MIRROR_SPARSE)
             if (memory_sparse_wait(&sparse_wait)) si.waitSemaphoreInfoCount = 1, si.pWaitSemaphoreInfos = &sparse_wait;
-            const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, r.fence);
+            const VkResult res = submit_or_retry(si, r.fence);
             r.submitted = res == VK_SUCCESS;
             static std::atomic<int> failures{0};
             if (res != VK_SUCCESS && failures++ < 8) logf("vk: submit %llu failed (%d)", (unsigned long long)r.value, (int)res);
@@ -6517,7 +6567,7 @@ void present_image_with_trial(VkImage src, uint32_t sw, uint32_t sh, const int c
     reflex_submit_ends();
     // (NVIDIA Reflex: the frame this present shows; with frame generation the set's game frame, none for a made frame)
     si.pNext = reflex_submit_id(nullptr, reflex_present_frame);
-    res = vkQueueSubmit2(dev.queue, 1, &si, f.done);
+    res = submit_or_retry(si, f.done);
     if (res == VK_ERROR_DEVICE_LOST) device_lost();
     if (present_defer_into) {   // (present ahead: the copy is queued; present_commit shows it at its time)
         present_defer_into->used = true;
@@ -8002,7 +8052,7 @@ bool replay_flush_upload(VkCommandBuffer cur) {
             si.pNext = reflex_submit_id(nullptr);
             VkSemaphoreSubmitInfo sparse_wait;
             if (memory_sparse_wait(&sparse_wait)) si.waitSemaphoreInfoCount = 1, si.pWaitSemaphoreInfos = &sparse_wait;
-            sub_res = vkQueueSubmit2(dev.queue, 1, &si, r->fence);
+            sub_res = submit_or_retry(si, r->fence);
         }
         if (sub_res != VK_SUCCESS) {
             static int failures;

@@ -213,6 +213,23 @@ off the 90% rule's excess, not the 97% rule's. Mirrors, shadows, imports and cap
 asked. Mirrors keep their own budget instead (`gpu/vk/mirror_budget.h`). Each return is logged as
 `vk: budget: gave back`.
 
+### Each heap's budget
+
+The allowance above is the sum over the device-local heaps, and one heap can be full while the sum has room. A card
+without resizable BAR, and an AMD APU on Windows, has a second device-local heap of 256 MB that the CPU can write: the
+window of VRAM (or of the UMA carve-out) behind the BAR. VMA puts a host-visible buffer the GPU reads there, the staging
+arenas among them. On a Legion Go (8 GB UMA) a save load's staging took that heap to 252-277 MB of the 243 MB AMD's
+driver allows while VRAM as a whole stood at 1.9 of 7.8 GB, and the driver refused every submit after
+(`vk: submit ... failed (-2)`, VK_ERROR_OUT_OF_DEVICE_MEMORY): a black screen with the sound going on (#1879).
+
+- `create_buffer` makes a host-visible buffer within its heap's budget first, so VMA takes the next memory type the
+  buffer can use (system memory) when that heap is full, and makes it as before where no heap has room
+  (`RX_VK_BUFFER_BUDGET=0`: as before). The `vk: memory heaps:` line shows each heap's use and budget.
+- A submit the driver refuses for want of memory is made again, up to three tries, after the GPU's earlier work has
+  finished, and the next present frees the idle staging arenas and the image reaper's queue (`gpu/vk/submit_retry.h`,
+  `vk_replay.cpp`'s `submit_or_retry`; `RX_VK_SUBMIT_RETRY=0`: dropped, as before). Nothing is destroyed under the
+  queue's lock. `RX_VK_TEST_SUBMIT_REFUSE=<n>` refuses the first try of every n-th submit, so any card plays the path.
+
 ## The memory check
 
 `RX_VK_MEM_CHECK=1` counts breaks of the memory-sync rules. It never changes what the renderer does, and with it unset

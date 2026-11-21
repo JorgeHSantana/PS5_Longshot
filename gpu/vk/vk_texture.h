@@ -212,6 +212,9 @@ Texture* texture_for_present(const nvn_tex* t);
 void texture_complete_writes(uint64_t completed);
 /// Ages the cache by one present; images nothing used for a while go, after the work that last read them
 void texture_frame(uint64_t completed_value);
+/// (longshot, #1879: vk_replay.cpp submit_give_back, any thread) The driver refused a submit for want of memory: the next
+/// texture_frame frees every idle staging arena and the reaper's whole queue
+void texture_memory_refused();
 void texture_released(const nvn_tex* t);
 /// (diagnostics: what guest memory holds of a texture's storage now, level by level, logged)
 void texture_log_guest(const Texture* t);
