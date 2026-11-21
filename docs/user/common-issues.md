@@ -119,6 +119,19 @@ startup errors and its exit status. Started from a terminal, the game prints the
 
 [Search memory reports](https://longshot.magicbean.dev/progress/#problem-search?q=memory)
 
+### Windows: an out-of-memory notice, or a crash with `0xc00000fd` (stack overflow)
+
+Windows has run out of memory: RAM plus the page file. The log has `mem: ... at the commit limit` lines before it. The
+game waits up to 5 seconds for memory to come back; when it doesn't, it shows the notice and closes. A crash report that
+says `0xc00000fd` with those lines is the same thing, from a version before the wait.
+
+1. **Let Windows manage the page file.** In System > About > Advanced system settings > Performance > Advanced >
+   Virtual memory, choose "Automatically manage paging file size for all drives", or give it at least 16 GB.
+2. **Close other large programs**, such as browsers and other games, while you play.
+3. **Choose a lower Quality preset** in the Insert menu: it uses less memory.
+
+[Search memory reports](https://longshot.magicbean.dev/progress/#problem-search?q=memory)
+
 ## In game: graphics
 
 ### Parts of the picture are missing, or a message says your card has no mesh shader support
