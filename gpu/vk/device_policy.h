@@ -483,6 +483,14 @@ struct DevicePolicy {
     // NVIDIA's own cache is warm and programs load at create (pcache_load.h decides with those). RX_VK_PCACHE_LOAD. Site
     // (vk_draw.cpp pcache_load_off), step 4
     bool pcache_small_pc = false;
+    // RADV and NVIDIA's driver: an ASTC array kept as BC re-encodes its levels of 1024 or less 8 layers a run, through the
+    // small scratch (vk_texture.cpp bc_small_layers; 51 ms an array at one layer a run, 15 at 8, on an RX 9070 XT, RADV).
+    // Every other driver one layer a run, as before #1843: on AMD's Windows driver the layers after a run's first came out
+    // wrong at those levels, Hyrule Field's ground in a grid of dark lines (RX 6600, ec89f92e; RX 6700 XT and RX 6750 XT,
+    // 26.10.1 and 26.11.2: #2006, #2107, #2110), also with the copy's layer pitch given (#2015). Runs of 8 were seen clean
+    // on RADV (RX 9070 XT, RX 6750 XT) and NVIDIA's Windows driver (RTX 3080); AMDVLK, Intel's, NVK and the rest are
+    // unrun. RX_VK_BC_SMALL_LAYERS (1-8, read at the site; set, it replaces this). Read (vk_texture.cpp bc_small_layers)
+    bool bc_small_runs = false;
 
     // ---- sizes ----
     // The hardware half of the smaller top levels (policy_rule::small_vram_textures); the site adds Minimum's settings.
@@ -636,6 +644,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
     p.readback_late_newest = f.handheld();
     p.acquire_ahead = true;   // (every driver; not under frame generation or FIFO: vk_replay.cpp acquire_ahead_wanted)
     p.pcache_small_pc = !f.windows && f.driver_id == VK_DRIVER_ID_NVIDIA_PROPRIETARY && (f.ram >> 20) && (f.ram >> 20) <= 20480;
+    p.bc_small_runs = f.radv() || f.driver_id == VK_DRIVER_ID_NVIDIA_PROPRIETARY;
 
     // sizes
     p.small_vram_textures = small_vram_textures(allowed, integrated, f.ram);
@@ -859,6 +868,7 @@ template <class Line> void device_policy_log(const DevicePolicy& p, const Device
         l.flag("readback_late_newest", p.readback_late_newest);
         l.flag("acquire_ahead", p.acquire_ahead, p.set(Sw::acquire_ahead));
         l.flag("pcache_small_pc", p.pcache_small_pc);
+        l.flag("bc_small_runs", p.bc_small_runs);
         line(l.text);
     }
     {

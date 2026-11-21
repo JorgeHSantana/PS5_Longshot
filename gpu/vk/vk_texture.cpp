@@ -875,10 +875,12 @@ uint32_t bc_layers() {
 /// three full barriers: an array of 90 layers and 11 levels made ~990 of them, and the GPU spent most of the time between
 /// them (Hyrule Field's entry on an RX 9070 XT: 51 ms an array at one layer a run, 15 ms at 8; #1720). 36 MB (32 for the
 /// image, 4 more of the output buffer), beside the 2048 x 2048 scratch's 20; on a card of small VRAM
-/// (low_vram_texture_mips) it is kBcTinyDim a side; not made where it would land in system memory.
-/// RX_VK_BC_SMALL_LAYERS=<n>: its layers (8; 1: no small scratch, every run one layer). One layer a run (ec89f92e) was for grid lines on the far ground, layers after a
-/// run's first wrong at the small levels on an RX 6600, and they came back with this scratch on AMD's Windows driver
-/// (#2006): the copy out of the encoder's buffer left the layers' pitch to the driver, and now gives it (bc_encode_into).
+/// (low_vram_texture_mips) it is kBcTinyDim a side; not made where it would land in system memory. Its layers: 8 on
+/// RADV and NVIDIA's driver, 1 (no small scratch, every run one layer, and no groups of levels) on every other
+/// (device_policy.h bc_small_runs); RX_VK_BC_SMALL_LAYERS=<n> over that. One layer a run (ec89f92e) was for grid lines
+/// on the far ground, layers after a run's first wrong at the small levels on an RX 6600, and they came back with this
+/// scratch on AMD's Windows driver (#2006); they stayed with the copy out of the encoder's buffer giving the layers'
+/// pitch (#2015, bc_encode_into; #2107). The cause is still not found.
 /// Runs still never hold a repacked level (upload_astc_gpu)
 constexpr uint32_t kBcSmallDim = 1024;
 /// (longshot) The small scratch on a card of small VRAM (low_vram_texture_mips), where the 1024 x 1024 one (36 MB) was not
@@ -889,7 +891,8 @@ constexpr uint32_t kBcSmallDim = 1024;
 constexpr uint32_t kBcTinyDim = 256;
 uint32_t bc_small_px = kBcSmallDim;   // (the small scratch's side as it was made: bc_scratch_make, bc_mu held)
 uint32_t bc_small_layers() {
-    static const uint32_t n = getenv("RX_VK_BC_SMALL_LAYERS") ? std::clamp<uint32_t>((uint32_t)atoi(getenv("RX_VK_BC_SMALL_LAYERS")), 1u, kBcLayers) : kBcLayers;
+    static const uint32_t n = getenv("RX_VK_BC_SMALL_LAYERS") ? std::clamp<uint32_t>((uint32_t)atoi(getenv("RX_VK_BC_SMALL_LAYERS")), 1u, kBcLayers)
+                                                              : dev.policy.bc_small_runs ? kBcLayers : 1u;
     return n;
 }
 bool bc7_enabled() {

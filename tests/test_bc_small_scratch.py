@@ -7,9 +7,12 @@ material arrays (1365 x 1365 x 90, 11 levels) made ~990 runs, and at Hyrule Fiel
 bc_small_layers() layers (8; RX_VK_BC_SMALL_LAYERS=1: none): 15 ms an array, for 36 MB more, not made out of VRAM. On a
 small-VRAM card, where 36 MB were too much and every level was a run of its own, it is 256 x 256 (2 MB), for one thing only: a
 single-layer texture's levels go one into each of its layers, a group a run (on every card). A small-VRAM card's layer arrays go
-one layer a run as before. RX_VK_BC_LEVELS=0: no groups and no 256 x 256 scratch, as before. One layer a run (ec89f92e) was for Hyrule Field's grid lines on an RX 6600, which came back on AMD's
-Windows driver with this scratch (#2006; the copy's layer pitch, tests/test_bc_copy_layer_pitch.py); runs still never
-hold a repacked level (`!repack`), and a run is no longer than the upload chunk holds.
+one layer a run as before. RX_VK_BC_LEVELS=0: no groups and no 256 x 256 scratch, as before. One layer a run (ec89f92e)
+was for Hyrule Field's grid lines on an RX 6600, which came back on AMD's Windows driver with this scratch (#2006), and
+stayed with the copy's layer pitch given (#2015; #2107, #2110 on an RX 6750 XT). So bc_small_layers() is 8 only on the
+drivers whose runs of 8 were seen clean, RADV and NVIDIA's (device_policy.h's bc_small_runs), and 1 on every other: no
+small scratch there, so no groups either. The check runs it on both, with and without RX_VK_BC_SMALL_LAYERS. Runs still
+never hold a repacked level (`!repack`), and a run is no longer than the upload chunk holds.
 
 python -I -B tests/test_bc_small_scratch.py [--cxx g++]
 """
@@ -31,8 +34,11 @@ FIXTURE = r"""
 #include <cstdio>
 #include <cstdlib>
 constexpr uint32_t kBcLayers = 8;
+struct Policy { bool bc_small_runs = false; };
+struct Dev { Policy policy; } dev;   // (device_policy.h's field, as create_device fills it: argv[1] 1 or 0)
 #include "small.inc"
-int main() {
+int main(int argc, char** argv) {
+    dev.policy.bc_small_runs = argc > 1 && argv[1][0] == '1';
     std::printf("%u %d\n", bc_small_layers(), (int)bc_levels_on());
     return 0;
 }
@@ -103,21 +109,25 @@ def main():
         src, exe = Path(temp) / "small.cpp", Path(temp) / "small.exe"
         src.write_text(FIXTURE, encoding="utf-8")
         subprocess.run([cxx, "-std=c++20", "-O1", "-Wall", "-Wextra", "-Werror", "-I", temp, str(src), "-o", str(exe)], check=True)
-        for value, want in ((None, "8"), ("1", "1"), ("4", "4"), ("99", "8"), ("0", "1")):
+        # (runs of 8: RADV or NVIDIA's driver, "1"; any other, AMD's Windows driver among them, "0")
+        for runs, value, want in (("1", None, "8"), ("0", None, "1"), ("1", "1", "1"), ("1", "4", "4"), ("1", "99", "8"),
+                                  ("1", "0", "1"), ("0", "8", "8"), ("0", "4", "4"), ("0", "1", "1")):
             env = {k: v for k, v in os.environ.items() if k != "RX_VK_BC_SMALL_LAYERS"}
             if value is not None:
                 env["RX_VK_BC_SMALL_LAYERS"] = value
-            got = subprocess.run([str(exe)], text=True, capture_output=True, timeout=20, env=env, check=True).stdout.split()[0]
-            need(got == want, f"RX_VK_BC_SMALL_LAYERS={value}: {got} layers, wanted {want}")
+            got = subprocess.run([str(exe), runs], text=True, capture_output=True, timeout=20, env=env, check=True).stdout.split()[0]
+            pc = "RADV or NVIDIA's driver" if runs == "1" else "another driver (AMD's Windows driver: Hyrule Field's grid lines)"
+            need(got == want, f"{pc}, RX_VK_BC_SMALL_LAYERS={value}: {got} layers a run, wanted {want}")
         # (the groups, and a small-VRAM card's 256 x 256 scratch with them: on unless 0)
         for name, at, cases in (("RX_VK_BC_LEVELS", 1, ((None, "1"), ("1", "1"), ("0", "0"))),):
             for value, want in cases:
                 env = {k: v for k, v in os.environ.items() if k != name}
                 if value is not None:
                     env[name] = value
-                got = subprocess.run([str(exe)], text=True, capture_output=True, timeout=20, env=env, check=True).stdout.split()[at]
+                got = subprocess.run([str(exe), "1"], text=True, capture_output=True, timeout=20, env=env, check=True).stdout.split()[at]
                 need(got == want, f"{name}={value}: {got}, wanted {want}")
-    print("PASS: levels of 1024 or less re-encode to BC 8 layers a run, through a small scratch of their own (256 on a small-VRAM card)")
+    print("PASS: levels of 1024 or less re-encode to BC 8 layers a run, through a small scratch of their own (256 on a small-VRAM "
+          "card), on RADV and NVIDIA's driver; one layer a run, with no small scratch and no groups, on every other")
 
 
 if __name__ == "__main__":
