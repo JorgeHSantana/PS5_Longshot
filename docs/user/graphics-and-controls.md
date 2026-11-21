@@ -21,7 +21,7 @@ A and B on. Beside the rows, the help says what the row does and what the chosen
 
 </a>
 
-*UI-only example from main f1f2dc5b (nightly 680) on Linux. The Custom values shown are illustrative, not recommended defaults.*
+*UI-only example in the Modern dark theme, from 124e4a4d (after nightly 695) on Linux. The Custom values shown are illustrative, not recommended defaults.*
 
 Your choices are saved as you go, in `longshot_options.ini`: in `%APPDATA%\Longshot` when the launcher starts the game
 on Windows, so every version shares them, otherwise in the game folder ([where the files go](updates-and-saves.md#where-the-files-go)).
@@ -78,7 +78,7 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | Custom output size | A size of your own, typed as `<width>x<height>` (most changes apply after a restart) | None |
 | | Profile | Docked, Handheld (after a restart) | Docked; a quality preset sets it |
 | | Upscaler | Game's own, NVIDIA DLSS (only in builds with NVIDIA's DLSS SDK, on NVIDIA RTX GPUs), AMD FSR 3.1 (every build, on GPUs it runs on), AMD FSR 4 (only in builds with FSR 4, on GPUs AMD's files cover), Off (no upscaling), Intel XeSS (Windows, with Intel's `libxess.dll` beside the game). NVIDIA DLAA, AMD FSR 4 Native AA and Intel XeSS Native AA are DLSS's, FSR 4's and XeSS's Native, chosen on the Render resolution row | Game's own; Auto (this PC) chooses DLSS or FSR 4 where they run, never XeSS |
-| | DLSS model | Transformer (K) (CNN (E) in its place on cards with less than 7 GB of video memory), Transformer 2 (M), Transformer 2 (L), NVIDIA default, CNN (E), CNN (F) (shown where DLSS runs; used by DLSS and DLAA) | Transformer (K); CNN (E) under 7 GB |
+| | DLSS model | Transformer (K) (CNN (E) in its place on cards with less than 7 GB of video memory), Transformer 2 (M), Transformer 2 (L), NVIDIA default, CNN (E), CNN (F) (shown with DLSS or DLAA chosen as the Upscaler, where DLSS runs) | Transformer (K); CNN (E) under 7 GB |
 | | FSR 4 model | Auto (AMD's), Lite (INT8). Forcing Lite requires a supported Windows runtime with a verified provider; currently forcing is disabled. Linux retains a saved Lite value but uses Auto. | Auto (AMD's) |
 | | DLAA before the bloom | Off, On: where NVIDIA DLAA smooths the picture, after the game's bloom and tone map or before them (shown with NVIDIA DLSS; changeable with Render resolution Native (DLAA) only; changes at once; `RX_VK_DLSS_PRE_BLOOM` over it for one run) | Off |
 | | Render resolution | Auto (the game's own dynamic resolution), 100%, 75%, 67%, 50% (each with its size). With DLSS or FSR 4: Auto, Native (DLAA or FSR 4 Native AA: the 3D at full size), 92%, 83%, 75%, Quality (67%), Balanced (58%), Performance (50%), Ultra Performance (33%). With Intel XeSS the same stops, named by the XeSS mode each runs under: Native (XeSS Native AA), Ultra Quality Plus (92%, 83%), 75%, Ultra Quality (67%), Balanced (58%, 50%), Ultra Performance (33%). With FSR 3.1: Auto, 100% (its native AA), then the same as DLSS from 92%. With Off: Auto, 100%, 75%, 67%, 50%, 33% | Auto; a quality preset sets it |
@@ -132,6 +132,7 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | FPS counter size | Auto, Small, Medium, Large | Auto |
 | | FPS counter details | Opens the FPS counter details page: Version and hardware at every level (Off, On; Off), then a line each of the Dev level (VRAM, Textures, Draws, Dispatches, Render passes, Draws skipped, Texture uploads, Pipelines built, GPU slot waits, Queue submits, Write-backs) and the footer's CPU and GPU lines and its render lines: the resolution the 3D is drawn at and what upscales it (Off, On; On each) | Version and hardware off, every line on |
 | | Menu size | Small, Medium, Large | Medium |
+| | Menu theme | Modern dark, Classic (the game's own tan and gold); the menu, the FPS counter and the start-up screen | Modern dark |
 | | Game speed | Per frame, Real time | Real time |
 | | Field of view | 50% to 150%, in steps of 5; applies immediately during gameplay | 100% (original) |
 | | Text speed | Normal, 2x, 4x, Instant | Normal |

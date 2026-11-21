@@ -90,6 +90,7 @@ FROZEN = {   # (a key: the value its row saves, as players' files hold them)
     "menu_language": "&opts.menu_lang",
     "menu_shortcut": "&opts.menu_shortcut",
     "menu_size": "&opts.menu_size",
+    "menu_theme": "&opts.menu_theme",
     "microphone": "&opts.mic",
     "microphone_gain": "&opts.microphone_gain",
     "motion_controls": "&opts.gyro",

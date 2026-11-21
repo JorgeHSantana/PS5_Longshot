@@ -165,7 +165,7 @@ void draw_comparison(ui::Ctx& c, menu_hit::Map& hits) {
     const float height = (row + gap) * (comparison.has_user_row() ? 3 : 2) + gap;
     const float x = (c.w - width) * 0.5f, y = c.h - c.safe - height;
     const ImVec2 start(x, y), end(x + width, y + height);
-    c.d->AddRectFilled(start, end, ui::rgba(30, 24, 17, 238), 4 * s);
+    c.d->AddRectFilled(start, end, ui::kBox, 4 * s);
     c.d->AddRect(start, end, ui::kEdge, 4 * s);
     hits.clear(start.x, start.y, end.x, end.y);
     c.d->PushClipRect(start, end, true);
@@ -206,7 +206,7 @@ void draw_comparison(ui::Ctx& c, menu_hit::Map& hits) {
         const auto status = reshade::status();
         if (!status.empty() && !status.starts_with("Ready")) {
             const ImVec2 a(x, y - 28 * s), b(end.x, y - gap);
-            c.d->AddRectFilled(a, b, ui::rgba(30, 24, 17, 238), 4 * s);
+            c.d->AddRectFilled(a, b, ui::kBox, 4 * s);
             c.d->PushClipRect(a, b, true);
             ui::text_mid_centre(c, c.f.body, 13 * s, middle, (a.y + b.y) * 0.5f, ui::kSoft, status.c_str());
             c.d->PopClipRect();

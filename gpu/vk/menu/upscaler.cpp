@@ -283,7 +283,7 @@ MENU_MODULE(upscaler) {
               .value = &opts.dlss_model,
               .lo = 0, .hi = ur::kModels - 1,
               .preset_exempt = true,
-              .shown = MENU_HOOK([] { return ur::model_shown(dlss_why() == DLSS_OK); }),
+              .shown = MENU_HOOK([] { return ur::model_shown(dlss_why() == DLSS_OK, upscaler()); }),
               .locked = MENU_HOOK([] {
                   return fixed_by_line(ur::model_fixed(upscaler(), dlss_preset_env() != nullptr), hn_dlss_model(opts.dlss_model, -1));
               }),

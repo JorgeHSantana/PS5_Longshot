@@ -80,6 +80,7 @@ struct Options {
     int menu_shortcut = 2;   // 0 Insert or F1, 1 F1 only, 2 Insert, F1 or Esc (F1 always opens the menu). 2 by default, as a PC
                              // game's pause menu; an older file's 0, the default it then was, moves to 2 (options_version 5)
     int compact_menu_key = 0; // 0 Right Shift, 1 Right Ctrl (key to switch to or open the compact menu)
+    int menu_theme = 0;   // (longshot) the overlays' look: 0 Modern dark, 1 Classic (the game's tan and gold; gpu/vk/vk_ui.h set_theme)
     int menu_size = 2;   // (longshot) the overlays' size: 1 Small, 2 Medium, 3 Large (gpu/vk/vk_ui.h unit; an older file's 0 Auto: Medium)
     int fullscreen = 0;   // borderless, at the monitor's size: F11 is the same setting
     int gpu_device = 0;   // graphics card index: 0 Auto, 1..N device 0..N-1 (gpu/vk/vk_main.cpp; RX_VK_DEVICE)

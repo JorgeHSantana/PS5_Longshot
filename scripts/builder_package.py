@@ -10,7 +10,7 @@ data is involved. Python's standard library only.
         the builder's folder, LongshotBuilder\\ in the zip: the published builder, the setup (a game folder's longshot.exe:
         make_game.py copies it there), LICENSE,
         the tracked gpu, host, nx2, scripts and third_party under tools\\, the play profiles (assets/profiles/: the hot list
-        and the renderer's profile, which make_game.py builds with), and the pipeline state list's sources
+        and the renderer's profile, which make_game.py builds with), the logo (assets/longshot.png), and the pipeline state list's sources
         (assets/pipeline_states/, which must be there and read). None of tools.lock's tools: the setup or the launcher adds
         those on the player's PC. --third-party-objects: the third-party code's objects (nx2/third_party_objects.py make, with
         llvm-mingw and tools.lock's cpm), as tools\\third_party_objects, which a player's build links instead
@@ -80,8 +80,10 @@ def package(a):
     copy(os.path.join(ROOT, "LICENSE"), os.path.join(out, "LICENSE"))
     dest = os.path.join(out, "tools")
     # (assets/profiles/: the hot list and the renderer's play profile, which nx2/make_game.py looks for under tools/ as in a
-    # checkout: without them a player's build compiles every lifted function at -O1 and the renderer without its profile)
-    for f in tracked("gpu", "host", "nx2", "scripts", "third_party", "assets/profiles"):
+    # checkout: without them a player's build compiles every lifted function at -O1 and the renderer without its profile).
+    # assets/longshot.png: the logo the renderer compiles in (nx2/logo_rgba.py); without it a player's build drew the start-up
+    # screen and the menu's banner with no logo, the wordmark alone
+    for f in tracked("gpu", "host", "nx2", "scripts", "third_party", "assets/profiles", "assets/longshot.png"):
         copy(os.path.join(ROOT, f), os.path.join(dest, *f.split("/")))
     if state_list(dest) != 0:
         return 1

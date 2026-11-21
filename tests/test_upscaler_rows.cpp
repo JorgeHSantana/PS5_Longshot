@@ -234,7 +234,9 @@ int main() {
                                                                ur::dlss_preset(ur::MODEL_K, "", gb6) == 5 &&
                                                                ur::dlss_preset(ur::MODEL_K, "05", gb6) == 5);
     }
-    CHECK("model row shown only where DLSS runs", ur::model_shown(true) && !ur::model_shown(false));
+    CHECK("model row shown only with DLSS chosen where it runs", ur::model_shown(true, DLSS) && ur::model_shown(true, DLAA) &&
+                                                                 !ur::model_shown(false, DLSS) && !ur::model_shown(true, GAME) &&
+                                                                 !ur::model_shown(true, ur::OFF) && !ur::model_shown(true, ur::FSR4));
     CHECK("model row fixed with the game's own or the switch", ur::model_fixed(GAME, false) && !ur::model_fixed(DLSS, false) &&
                                                                !ur::model_fixed(DLAA, false) && ur::model_fixed(DLSS, true));
     // the FSR 4 model row: Auto or Lite, shown only where FSR 4 and its Lite provider run, fixed with another upscaler or

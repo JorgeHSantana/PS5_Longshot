@@ -1,6 +1,7 @@
 // Game-free documentation capture. Compile the maintained menu in this translation unit;
 // never initialize the game, the Vulkan renderer, menu persistence or game-provided fonts.
 #include "gpu/vk/vk_menu.cpp"
+#include "gpu/vk/vk_fsr4.h"   // (Fsr4Model, for the FSR 4 model row's stand-ins below)
 #include <SDL.h>
 #include <png.h>
 #include <imgui_internal.h>
@@ -38,6 +39,21 @@ int dlss_fg_unavailable() { return FG_SKIP_NOT_BUILT; }
 bool dlss_fg_forced() { return false; }
 int dlss_fg_most() { return 0; }   // (no DLSS FG top: the Frame generation row's own values)
 int framegen_capped(int framegen, int) { return framegen; }
+// No FSR 4 (the FSR 4 model row): no switch over it, no Lite, nothing to set
+int fsr4_model_env() { return -1; }
+bool fsr4_lite_available() { return false; }
+void fsr4_set_model(Fsr4Model) {}
+// No ReShade runtime (gpu/vk/menu/reshade.cpp's rows): Off, no user presets, nothing to preview
+namespace reshade {
+void select(int) {}
+void preview_bypass(bool) {}
+void preview_select(int, std::string) {}
+void preview_end(int) {}
+void select_user(std::string) {}
+std::vector<std::string> user_presets() { return {}; }
+std::string user_selection() { return {}; }
+std::string status() { return {}; }
+}   // namespace reshade
 bool fsr4_built() { return false; }
 FsrWhy fsr4_why() { return FSR_NOT_BUILT; }
 bool xess_built() { return false; }
@@ -152,10 +168,16 @@ static void render(SDL_Renderer* renderer, ImDrawData* data) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 5) { fprintf(stderr, "usage: menu-capture FONT_DIRECTORY LOGO.png graphics|graphics-screen|audio|controls OUTPUT.png\n"); return 2; }
+    if (argc != 5) {
+        fprintf(stderr, "usage: menu-capture FONT_DIRECTORY LOGO.png graphics|graphics-screen|audio|controls|startup[-classic] OUTPUT.png\n");
+        return 2;
+    }
     try {
-        const std::string tab = argv[3];
-        if (tab != "graphics" && tab != "graphics-screen" && tab != "audio" && tab != "controls") throw std::runtime_error("unsupported view");
+        std::string tab = argv[3];
+        const bool classic = tab.size() > 8 && tab.compare(tab.size() - 8, 8, "-classic") == 0;   // (the Classic Menu theme)
+        if (classic) tab.resize(tab.size() - 8);
+        if (tab != "graphics" && tab != "graphics-screen" && tab != "audio" && tab != "controls" && tab != "startup")
+            throw std::runtime_error("unsupported view");
         constexpr int width = 1280, height = 720;
         check(SDL_Init(0) == 0, "SDL initialization");
         const SdlSession sdl;
@@ -213,12 +235,18 @@ int main(int argc, char** argv) {
         // Match the renderer's first unscrolled menu view; no real options file is opened.
         float safe = 0;
         float scale = mkwvk::ui::unit(height, mkwvk::opts.menu_size, &safe);
+        if (classic) mkwvk::opts.menu_theme = mkwvk::ui::kClassic;
+        mkwvk::ui::set_theme(mkwvk::opts.menu_theme);
+        if (tab == "startup")   // (the start-up screen part way through its first step, with illustrative counts)
+            mkwvk::startup = {mkwvk::version_text(LONGSHOT_VERSION), "STEP 1 OF 2", "Preparing shaders", "32%", "12,345 / 38,809 shaders",
+                              "about 40 s left", "", 0.32};   // (the Menu theme's palette, the Options default, as ui_ctx sets it)
         for (int frame = 0; frame < 3; ++frame) {
             SDL_SetRenderDrawColor(renderer, 16, 18, 21, 255);
             SDL_RenderClear(renderer);
             ImGui::NewFrame();
             mkwvk::ui::Ctx c{ImGui::GetBackgroundDrawList(), fonts, scale, width, height, safe, false};
-            mkwvk::draw_menu(c);
+            if (tab == "startup") mkwvk::draw_startup(c);
+            else mkwvk::draw_menu(c);
             ImGui::Render();
             render(renderer, ImGui::GetDrawData());
         }

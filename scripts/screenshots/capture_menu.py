@@ -25,7 +25,7 @@ def main():
     parser.add_argument('--vulkan-headers', type=Path, default=Path('/usr/include'), help='include directory containing vulkan/vulkan.h')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--cxx', default='clang++')
-    parser.add_argument('--views', nargs='+', choices=['graphics', 'graphics-screen', 'audio', 'controls'],
+    parser.add_argument('--views', nargs='+', choices=[v + theme for v in ('graphics', 'graphics-screen', 'audio', 'controls', 'startup') for theme in ('', '-classic')],
                         default=['graphics', 'audio', 'controls'], help='maintained views to capture; graphics-screen selects Fullscreen')
     args = parser.parse_args()
     source, output = args.source.resolve(), args.output.resolve()

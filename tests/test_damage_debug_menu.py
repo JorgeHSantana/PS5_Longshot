@@ -62,7 +62,7 @@ constexpr int DLSS_OK = 0;
 int dlss_why() { return 1; }
 namespace ur {
 bool upscaler_shown(int n) { return n > 1; }
-bool model_shown(bool available) { return available; }
+bool model_shown(bool available, int) { return available; }
 }
 '''
     for name in ("bool cheats_on(", "bool row_shown(", "int tab_row_count(", "int tab_row_to_global(",

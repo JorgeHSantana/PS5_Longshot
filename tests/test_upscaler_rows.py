@@ -61,7 +61,7 @@ def main():
     # (the Upscaler by engine, Native on the Render resolution row: render_fixed, step_engine, step_render)
     uses = {
         "row_fixed": ("ur::upscaler_fixed(", "ur::render_fixed(", "ur::model_fixed("),
-        "row_shown": ("ur::upscaler_shown(upscalers_available())", "ur::model_shown(dlss_why() == DLSS_OK)"),
+        "row_shown": ("ur::upscaler_shown(upscalers_available())", "ur::model_shown(dlss_why() == DLSS_OK, upscaler())"),
         "set_row": ("ur::step_engine(", "ur::step_render(", "ur::snap_render(", "row_fixed("),
     }
     for name, calls in uses.items():
