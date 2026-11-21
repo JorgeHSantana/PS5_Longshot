@@ -954,7 +954,7 @@
       },
       "reviewed_source": {
         "repository": "https://git.magicbean.dev/MagicBeanDev/Longshot",
-        "revision": "27a16d06cced8f5d03af212aa20541844e964f5e",
+        "revision": "eee321b64a0ad410ef8b17d564e2c75414586724",
         "files": {
           "assets/longshot.png": "9186c5ea9c3c5d4b22725d3dbffd4eb81a8965f66cebbcfa1c492423b9defb2b",
           "gpu/render/nvn_api.h": "f40e44b4b63aa20892399547167d367a652c1ed0793ca4a0f9299a8988289b82",
@@ -962,7 +962,7 @@
           "gpu/vk/astc_bc_policy.h": "a6e0dd80a463e2ab6a8d7029bee303dc278e0fac2590bb3622f191b81ff8b5be",
           "gpu/vk/auto_settings.h": "a71f31cd0061f1d0af7fec591db702262785c14db337fb5f1bca79eea26026f4",
           "gpu/vk/compat/longshot_env.h": "c94ec5b5dbf99b0e365e1efc6cab3306db99d7c12a872b049630b0035d9b7bbc",
-          "gpu/vk/device_policy.h": "4655454d4ad2b48eabfc05ae645518d8e7e31ba6c74fdaec9e1f7325d9422dc5",
+          "gpu/vk/device_policy.h": "f877e8ee5db3a06b1f28850e775d0820010405fbc4a838f120fb1c923b059c28",
           "gpu/vk/display_modes.h": "beea7b04494ed72b564eb462be979029c4aa81cc661154ec88c28b7050149c3f",
           "gpu/vk/fallback_size_policy.h": "c64e49b0786cd9b4964e803f628e2296c70b7249887dfd0aeb8ffa00dee78ed4",
           "gpu/vk/fps_stats.h": "306cfb01489d4e793dbc1174b59d65fa79b699caeab16c29e092f9b037787da9",
@@ -1104,7 +1104,7 @@
         "contains_save_data": false,
         "contains_private_paths": false,
         "font_source": "Bundled Libertinus Sans Regular/Bold and Serif Semibold; third_party/fonts/libertinus/OFL.txt.",
-        "notes": "Recaptured from main f1f2dc5b using the updated game-free fixture. The banner, six tabs, visible Graphics rows, Quality preset help and keyboard prompts were compared with the previous proposed rc.8 capture. The version, scrollbar and layout pixels changed. No game, live monitor probe, save, private path or game-derived asset is used. The first Graphics view remains a Quality preset illustration with illustrative Custom values. For Sprint Toggle, the 1280×720 RGB render at 2a74b3f2 matched the retained Graphics image and the same render on main 40bfceb0 outside the version text at the upper right. The only intervening change to the capture inputs at 27a16d06 is in the Controls binding grid help for the left stick. Graphics does not draw that grid. The captured image is retained."
+        "notes": "Recaptured from main f1f2dc5b using the updated game-free fixture. The banner, six tabs, visible Graphics rows, Quality preset help and keyboard prompts were compared with the previous proposed rc.8 capture. The version, scrollbar and layout pixels changed. No game, live monitor probe, save, private path or game-derived asset is used. The first Graphics view remains a Quality preset illustration with illustrative Custom values. For Sprint Toggle, the 1280×720 RGB render at 2a74b3f2 matched the retained Graphics image and the same render on main 40bfceb0 outside the version text at the upper right. The only intervening change to the capture inputs at 27a16d06 is in the Controls binding grid help for the left stick. Graphics does not draw that grid. The captured image is retained. At eee321b6 (#1801) the only change to the capture inputs is gpu/vk/device_policy.h's equal_depth_bias default on Intel's Windows driver for Battlemage (0xE2xx), a draw-time depth margin: the menu fixture has no GPU and draws no policy value, so the Graphics image is retained (not re-rendered)."
       }
     },
     {

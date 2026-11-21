@@ -119,6 +119,17 @@ inline bool native_fadd_listed(VkDriverId driver, uint32_t device, uint32_t vers
            ((device & 0xFF00u) == 0x6400u && version >= (101u << 14 | 8991u));
 }
 
+/// Default depth-bias margin for EQUAL colour passes after a Z-prepass (vk_draw.cpp dynamic_state).
+/// Intel's Windows driver needs 64 units on older/integrated families where depth and colour programs do not match to the
+/// last bit (issue 17, Arc B390). On discrete Battlemage (0xE2xx, e.g. Arc B570 / B580) the margin's LESS_OR_EQUAL lets
+/// alpha-tested Z-prepass cutouts (fallen leaves, Link's hair, distant tree cards) pass depth where the prepass
+/// discarded them, rendering opaque rectangles (issue #1413); keep it 0 there.
+inline float equal_depth_bias(VkDriverId driver, uint32_t device) {
+    if (driver != VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS) return 0.0f;
+    if ((device & 0xFF00u) == 0xE200u) return 0.0f;
+    return 64.0f;
+}
+
 /// The mirrors' budget (vk_memory.cpp mirror_budget): a third of the card, at most 1700 MB, on a card of 6.5 GB or less,
 /// to hold open-area peaks without falling back to PCIe reads; else mirror_budget.h's rule
 inline uint64_t mirror_budget(uint64_t vram) {
@@ -294,12 +305,12 @@ struct DevicePolicy {
     // pass the same position. By the vendor, so NVK goes without them as NVIDIA's own compiler does: whether Mesa's
     // compiler needs them wants a run on NVK. RX_VK_NO_INVARIANT turns them off. Read (vk_coopmat.cpp coopmat_init)
     bool position_invariant = false;
-    // Intel's Windows driver: a colour pass tests EQUAL against what another program wrote, and its compiler does not give
-    // the two the same position to the last bit (holes in the ground, issue 17, Arc B390); 64 units towards the camera.
-    // Not Mesa's: the game's EQUAL holds there (Iris Xe, Mesa 26.2.7: Kakariko, the Death Mountain gate and trail
-    // without a hole), and the margin's LESS_OR_EQUAL passes everything in front, not only the last bits: the terrain
-    // drew over the canyon's rocks on Death Mountain Trail, a flat wall where its depth pass had none. RX_VK_EQ_BIAS=<units>,
-    // 0 off. Read (vk_draw.cpp dynamic_state)
+    // Intel's Windows driver (except discrete Battlemage, 0xE2xx): a colour pass tests EQUAL against what another
+    // program wrote, and its compiler does not give the two the same position to the last bit (holes in the ground,
+    // issue 17, Arc B390); 64 units towards the camera. Not Mesa's (Iris Xe, Mesa 26.2.7: Kakariko, the Death Mountain
+    // gate and trail without a hole) and not Battlemage (Arc B570, 101.9175: Castle Town Market and Hyrule Field without
+    // a hole), where the margin's LESS_OR_EQUAL passes discarded alpha-tested Z-prepass cutouts as opaque rectangles
+    // (issue #1413) or draws terrain in front of rocks. RX_VK_EQ_BIAS=<units>, 0 off. Read (vk_draw.cpp dynamic_state)
     float equal_depth_bias = 0;
     // AMD but RADV: task and mesh programs built without the driver's optimizer, which hangs the GPU; on RADV they
     // reset it built without. RX_VK_MESH_OPT. Site (vk_draw.cpp), step 4
@@ -548,7 +559,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
     }
     p.frag_shuffle_fallback = f.driver_id == VK_DRIVER_ID_AMD_PROPRIETARY;
     p.position_invariant = !f.nvidia();
-    p.equal_depth_bias = f.driver_id == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS ? 64.0f : 0.0f;
+    p.equal_depth_bias = policy_rule::equal_depth_bias(f.driver_id, f.device_id);
     p.mesh_no_optimizer = f.amd() && !f.radv();
     // (corrected: the driver the deadlock is in, RADV, and not "AMD off Windows", which also took AMDVLK. To go back:
     // !f.windows && f.amd(), here and in create_device)

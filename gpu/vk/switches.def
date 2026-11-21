@@ -371,7 +371,7 @@ SW(RX_VK_DUMP_SSBO, diag, string, "empty: none dumped", "In a dump, writes the l
 SW(RX_VK_DUMP_STAGES, diag, string, "unset: nothing written", "Folder that receives each shader stage's control and code as the game has them, <key>.bin.")
 SW(RX_VK_DUMP_STEPS, diag, string, "every step dumped", "Narrows a frame dump to the steps lo-hi.")
 SW(RX_VK_DUMP_W, diag, int, "320 pixels (16 to 4096)", "Width of the scaled pictures a frame dump writes.")
-SW(RX_VK_EQ_BIAS, hw, float, "64 on Intel's Windows driver, 0 (off) elsewhere (Mesa's Intel driver too)", "Sets the margin that turns EQUAL depth tests into LESS_OR_EQUAL with a bias; 0 is as the game asks.")
+SW(RX_VK_EQ_BIAS, hw, float, "64 on Intel's Windows driver except discrete Battlemage (0xE2xx), 0 (off) there and elsewhere (Mesa's Intel driver too)", "Sets the margin that turns EQUAL depth tests into LESS_OR_EQUAL with a bias; 0 is as the game asks.")
 SW(RX_VK_EVICT_MIN_UNUSED, tune, int, "60 frames (8 before)", "Sets how many frames a texture must go unused before an over-budget eviction may take it.")
 SW(RX_VK_EVICT_UNFLUSHABLE, kill, bool, "off: live GPU-drawn textures under 256 MB that cannot be written back are kept", "Evicts live GPU-drawn textures whose texels cannot be written back to guest memory, as before.")
 SW(RX_VK_EXPOSURE_LOG, diag, enum, "unset: off", "Keeps the exposure word of the last 32 frames for a white-frame dump; 2 logs it every frame.")

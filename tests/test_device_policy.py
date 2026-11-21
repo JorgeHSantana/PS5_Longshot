@@ -3,7 +3,7 @@
 device_policy() is compiled with the Vulkan headers and run on the facts of PCs players have: NVIDIA's driver on Linux
 and Windows (4, 6, 8 and 24 GB cards), NVK, AMD's Windows driver in its two compiler branches, on a Navi 22 card and on
 the graphics in a Ryzen 7000 desktop CPU, RADV on an RDNA 2 card, on a GCN card and on the Steam Deck, AMDVLK, Intel's
-Windows driver on an integrated GPU with 4 threads and on two Arc cards, ANV, llvmpipe. For each PC the check names
+Windows driver on an integrated GPU with 4 threads and on three Arc cards, ANV, llvmpipe. For each PC the check names
 every field of DevicePolicy: the yes/no fields that are on (every other one must be off) and every number. A rule that
 leaks to a PC it is not for, or a new field no PC here expects, fails by name.
 
@@ -217,15 +217,24 @@ PCS = [
             "split_before_draw allowance_at_count_rule ub_snapshot small_vram_textures astc_bc_all squeeze_damped "
             "auto_render_third native_zstd_keep_core",
          num=(64, 0, 0, 2, 0, 16, 2560, 2025, 616, 462, 512, -1, 256, 0, 32, 16, 90, 1, 2, 2, 2, 2, 2)),
-    # (Battlemage from 101.9154: side by side, so no gate, and the float add. Compute builds stay one at a time though
-    # the gate is open, which the study doubts and a B580 would have to say)
+    # (Battlemage from 101.9154: side by side, so no gate, and the float add; equal_depth_bias stays 0 so alpha-tested
+    # Z-prepass cutouts do not render opaque. Compute builds stay one at a time though the gate is open, which the study
+    # doubts and a B580 would have to say)
     dict(name="Arc B580, Intel's Windows driver 101.9154",
          facts=(0x8086, 0xE20B, "INTEL_PROPRIETARY_WINDOWS", INTEL | 9154, "DISCRETE_GPU", "101.9154", "Intel(R) Arc(TM) B580 Graphics",
                 1, 0, 12216, 11600, 32500, 20, 20, 14, 1, 1, 1, 0, 0, 1, 1, 32, 32, 0xFF),
          on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant compute_builds_serial pcache_fetch_lock split_before_draw "
             "allowance_at_count_rule mirrors ub_snapshot split_ub_flush native_float_add occ_copy intel_side_by_side_auto "
             "room_in_blocks_rule threaded_auto_render threaded_auto_recorder",
-         num=(64, 0, 0, 2, 0, 4, 7126, 2048, 768, 512, 1450, -1, 256, 24, 64, 32, 97, 4, 6, 4, 8, 6, 4)),
+         num=(0, 0, 0, 2, 0, 4, 7126, 2048, 768, 512, 1450, -1, 256, 24, 64, 32, 97, 4, 6, 4, 8, 6, 4)),
+    # (Battlemage Arc B570 on Windows 101.9175: equal_depth_bias stays 0 so Z-prepass alpha cutouts do not render opaque)
+    dict(name="Arc B570, Intel's Windows driver 101.9175",
+         facts=(0x8086, 0xE20C, "INTEL_PROPRIETARY_WINDOWS", INTEL | 9175, "DISCRETE_GPU", "101.9175", "Intel(R) Arc(TM) B570 Graphics",
+                1, 0, 10074, 9305, 16311, 12, 12, 6, 1, 1, 1, 0, 0, 1, 1, 32, 32, 0xFF),
+         on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant compute_builds_serial pcache_fetch_lock split_before_draw "
+            "allowance_at_count_rule mirrors ub_snapshot split_ub_flush native_float_add occ_copy intel_side_by_side_auto "
+            "room_in_blocks_rule threaded_auto_render threaded_auto_recorder",
+         num=(0, 0, 0, 2, 0, 4, 5876, 2048, 768, 512, 1163, -1, 256, 24, 64, 32, 97, 3, 4, 4, 6, 6, 3)),
     # (an Arc A card: the gate, and the loop for float adds, which the study doubts on Intel's Windows driver)
     dict(name="Arc A750, Intel's Windows driver 101.9175",
          facts=(0x8086, 0x56A1, "INTEL_PROPRIETARY_WINDOWS", INTEL | 9175, "DISCRETE_GPU", "101.9175", "Intel(R) Arc(TM) A750 Graphics",
@@ -466,6 +475,14 @@ RULES = [
     ("(long long)policy_rule::native_fadd_listed(VK_DRIVER_ID_AMD_PROPRIETARY, 0x7550, 0xFFFFFFFFu, true)", 0),
     ("(long long)[] { DeviceFacts f{}; f.driver_id = VK_DRIVER_ID_AMD_PROPRIETARY; f.device_id = 0x1114; f.driver_version = 0x8001a0; f.float32_atomic_add = true; f.windows = false; return device_policy(f).native_float_add; }()", 0),
     ("(long long)[] { DeviceFacts f{}; f.driver_id = VK_DRIVER_ID_AMD_PROPRIETARY; f.device_id = 0x1114; f.driver_version = 0x8001a0; f.float32_atomic_add = true; f.windows = true; return device_policy(f).native_float_add; }()", 1),
+    # (equal_depth_bias: 0 on discrete Battlemage 0xE2xx and Mesa ANV; 64 on older/integrated Intel Windows families)
+    ("(long long)policy_rule::equal_depth_bias(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0xE20Cu)", 0),
+    ("(long long)policy_rule::equal_depth_bias(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0xE20Bu)", 0),
+    ("(long long)policy_rule::equal_depth_bias(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x56A1u)", 64),
+    ("(long long)policy_rule::equal_depth_bias(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0x9A78u)", 64),
+    ("(long long)policy_rule::equal_depth_bias(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0xB080u)", 64),
+    ("(long long)policy_rule::equal_depth_bias(VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA, 0x9A49u)", 0),
+    ("(long long)policy_rule::equal_depth_bias(VK_DRIVER_ID_NVIDIA_PROPRIETARY, 0x2204u)", 0),
 ]
 
 FIXTURE = r"""
