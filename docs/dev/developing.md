@@ -106,6 +106,44 @@ python -I scripts/dev.py packs warm ../base-main --run "<command that plays {run
 - **For numbers**, compare the change's runtime with one made by `rt` from no pack: same base, same caches, one
   difference. Warm the base for your scenes first, so neither side compiles pipelines while it is measured.
 
+## Keep a game on main
+
+To play or test what `main` has right now, without waiting for Nightly, keep a game folder of your own on its newest
+commit:
+
+```
+python -I scripts/dev.py update --game <folder>     # once: names the folder (remembered), and builds it
+python -I scripts/dev.py update                     # later: builds again only when main moved
+python -I scripts/dev.py update --pick 1874,1880    # your folder's commit plus only those merged pull requests
+python -I scripts/dev.py update --with 1913,1925    # open pull requests merged on top, to try them before they land
+python -I scripts/dev.py update --logs              # its logs, crash records and settings in one zip, for a report
+python -I scripts/dev.py update --gui               # all of it in a window: merged and open PRs to tick, searchable
+```
+
+- **What it builds:** main's newest commit, from a worktree of its own (`update/tree` in your development folder): your
+  checkouts and branches are not touched. The build runs with that commit's own `dev.py`, in the player's build
+  environment, through the [job queue](#share-a-pc-the-job-queue), sharing the stores
+  ([what is kept between builds](#what-is-kept-between-builds)): when the translation didn't change, only what changed
+  compiles.
+- **The game files:** a folder that keeps them (`romfs/`, `.longshot_exefs/`, as a launcher or `make_game.py` build
+  does) is built again from them (`make_game.py --update`); a new folder takes the files `dev.py` finds (`"romfs"` and
+  `"exefs"` in `dev_build.json`).
+- **What it keeps:** saves, mods, `longshot_options.ini` and `longshot_env.txt`, as a launcher update does. Before each
+  build it backs up the folder's build files into `update/backups/` (the last three); a failed or stopped build is put
+  back. `--rollback` puts the last backup back.
+- **Picking:** `--pick` (or unticking pull requests in the window) builds the folder's commit with only the picked
+  pull requests merged since, cherry-picked in their order. One that needs a pull request you left out is refused and
+  named; pick that too, or update to everything.
+- **Open pull requests:** `--with` (or ticking them in the window) merges each one's head onto the build, after the
+  main commit or your picks; one that conflicts is refused and named before your folder is touched. The list comes from
+  the forge without signing in. An update without `--with` leaves out the open ones your build had, and says so.
+- **Logs:** `--logs` zips `logs/`, `bug-reports/` (never `bug-reports/local-only/`: its minidumps hold game and private
+  data), the settings files and the last build's log into `update/logs/`. Logs can name your user folder: read them
+  before you share them.
+- **Other options:** `--check` says what's new since the folder's build and builds nothing; `--force` builds even when
+  the folder is on the newest commit; `--remote` and `--branch` follow another remote or branch (remembered). Each
+  update's new commits go into `update/history.md`. It refuses while the game in that folder is running.
+
 ## Share a PC: the job queue
 
 On a PC that several people or agents share, every build and game run goes through `scripts/dev.py queue`. It runs each
@@ -503,6 +541,7 @@ The same steps for people and agents. Forge commands are Tooling's `forge.py`
 | `scripts/dev.py base`, `pack`, `rt`, `bases`, `game`, `vk`, `env` | Shared bases, packs, runtimes and builds through the queue; `env` prints a player's build environment |
 | `scripts/dev.py ab` | A switch or this checkout's change against main in the game, written up ([measure a change](#measure-a-change)) |
 | `scripts/dev.py queue` | The PC's job queue: `run`, `status`, `history`, `cancel` |
+| `scripts/dev.py update` | A game folder you play kept on main's newest commit, `--gui` in a window ([keep a game on main](#keep-a-game-on-main)) |
 | `scripts/dev.py packs` | A base folder of your own: `base`, `pack`, `rt`, `warm` |
 | `scripts/dev.py paths`, `migrate` | The development folder and its parts; the once-per-PC move into it ([where dev data lives](reference/build.md#where-dev-data-lives)) |
 | `tests/run_all.py` (`mise run test`) | Every game-free check; `tests/srccut.py` cuts source for a check |

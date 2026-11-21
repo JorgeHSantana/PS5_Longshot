@@ -54,6 +54,7 @@ LAYOUT = (
     ("work", "`mise run build`'s work folder (work-windows: the Windows game built on Linux)"),
     ("sdk", "the vendors' SDKs scripts/fetch.py downloads: ngx-linux, ngx-windows, ffx, xess"),
     ("runs", "game runs' output: longshot_ctl.py's control runs, memtour.py's, cover.py's"),
+    ("update", "`dev.py update`'s worktree, work folder, backups of the game folder and history"),
     ("tools", "tools the checks and profiling use: glslang, Tracy's capture tools"),
 )
 

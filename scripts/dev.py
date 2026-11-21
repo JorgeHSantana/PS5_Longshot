@@ -22,6 +22,9 @@ A base folder you name, without the queue: what base, pack and rt run, and what 
     dev.py packs pack DIR NAME [--tree T]
     dev.py packs rt DIR RUNTIME [PACK...]
     dev.py packs warm DIR --run "CMD with {runtime}" [--run ...]
+A game folder you play, kept on the newest commit of main (scripts/devtools/update.py):
+    dev.py update [--game DIR] [--check | --rollback | --gui] [--force]
+                                            built from main's newest commit as soon as it lands, backed up first
 This PC's development folder (scripts/devtools/home.py):
     dev.py paths [NAME]                     where it is and what it holds (~/.local/share/longshot-dev,
                                             %LOCALAPPDATA%\\longshot-dev, or LONGSHOT_DEV_HOME)
@@ -34,13 +37,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # (python -I leaves the script's folder off the path)
-from devtools import ab, build, home, jobqueue, packs  # noqa: E402
+from devtools import ab, build, home, jobqueue, packs, update  # noqa: E402
 
 
 def parser():
     p = argparse.ArgumentParser(prog="dev.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="group", required=True, metavar="COMMAND")
-    for m in (build, ab, jobqueue, packs, home):
+    for m in (build, ab, jobqueue, packs, home, update):
         m.add_commands(sub)
     return p
 

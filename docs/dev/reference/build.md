@@ -113,6 +113,7 @@ part; `dev.py paths <part>` prints one, for scripts.
 | `work/` | `mise run build`'s work folder (`work-windows/`: `RX_TARGET=windows`) | `~/.cache/longshot-builder`, the player builder's | `--work` |
 | `sdk/` | `scripts/fetch.py`'s SDKs: `ngx-linux/`, `ngx-windows/`, `ffx/`, `xess/` | `build-linux/ngx-sdk`, `work/*-sdk` | `LONGSHOT_NGX_SDK` |
 | `runs/` | Game runs: `control/` (`longshot_ctl.py`), `memtour-*`, `cover-*` | `work/control-runs`, `work/memtour-*` | `--root`, `--out` |
+| `update/` | `dev.py update`'s worktree `tree/`, `work/`, the game folder's `backups/`, `history.md` | | |
 | `tools/` | glslang (`mise run setup`) and Tracy's capture tools (`mise run tracy-tools`) | `~/glslang-16.6.0`, `_deps/tracy-0.15.0` | |
 
 On Windows the old places were `%LOCALAPPDATA%\Longshot\{dev,objects,lifts,queue}` and `%APPDATA%\Longshot\` for the
