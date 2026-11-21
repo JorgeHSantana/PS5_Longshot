@@ -1533,7 +1533,8 @@ void fsr4_prepare_shaders() {
         const char* label = mode ? "Native HDR" : "SDR";
         logf("vk: AMD FSR 4: preparing %s pipelines before gameplay (%ux%u)", label, width, height);
         State& s = st();
-        s.context = make_context(width, height, mode != 0);
+        // (the model the player picked, as prepare asks for each frame: its pipelines are the ones the game will use)
+        s.context = make_context(width, height, mode != 0, fsr4_model());
         const bool ok = s.context && prepare_frame(width, height);
         // The preparation process is about to exit. Let the existing workers finish and save their variants first.
         auto& jobs = tune::jobs();
