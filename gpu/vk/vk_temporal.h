@@ -190,6 +190,8 @@ struct TemporalEngine {
     /// (longshot) An evaluation that fails is for that frame only (the network draws it, and the next frame starts a new
     /// history), not for good: FSR 3.1, whose constants come from the frame's stream
     bool retry = false;
+    /// Whether the most recent failed evaluation can be retried on the next frame.
+    bool (*retry_evaluation)() = nullptr;
 };
 /// Runs f a few frames on, to free what work in flight may still use. Called by the engines with the chain's lock held
 void temporal_later(std::function<void()> f);

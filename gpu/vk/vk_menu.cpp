@@ -4021,6 +4021,10 @@ void menu_init() {
         player_custom_output = custom_output;   // (parse_output replaces the player's own size with the environment's)
         env_override(&opts.output_res, parse_output(e));
     }
+    // (the FSR 4 model for this run: RX_VK_FSR4_MODEL over the saved row; the engine's live value follows the row)
+    const int fsr4_env = fsr4_model_env();
+    if (fsr4_env >= 0) env_override(&opts.fsr4_model, fsr4_env);
+    fsr4_set_model(opts.fsr4_model ? FSR4_MODEL_LITE : FSR4_MODEL_AUTO);
     outputs_sync();   // (the Aspect ratio follows the size read)
     restart_init();   // (what this run started with: the rows that take a restart differ from it once changed)
 }

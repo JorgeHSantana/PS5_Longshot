@@ -252,6 +252,13 @@ inline float upscale_lod_bias_for(int upscaler, int share, float offset) {
     return std::min(0.0f, std::log2((float)share / 7500.0f));
 }
 
+/// The FSR 4 model row (opts.fsr4_model, saved as fsr4_model): 0 Auto (AMD's own pick for this GPU), 1 Lite (the faster
+/// INT8 network, ffxProvider_FSR4Lite_Int8). The row is shown only where FSR 4 runs and the loaded library has a Lite
+/// provider with the hook installed; it has nothing to choose while the Upscaler is not FSR 4, or RX_VK_FSR4_MODEL is set
+enum { FSR4_MODEL_AUTO = 0, FSR4_MODEL_LITE = 1, kFsr4Models = 2 };
+inline bool fsr4_model_shown(bool fsr4_ok, bool lite_available) { return fsr4_ok && lite_available; }
+inline bool fsr4_model_fixed(int upscaler, bool env_set) { return !is_fsr4(upscaler) || env_set; }
+
 /// The DLSS model row (opts.dlss_model, saved as dlss_model): which of NVIDIA's networks DLSS and DLAA draw with, by its
 /// preset (NVSDK_NGX_DLSS_Hint_Render_Preset_*). 0 the transformer, preset K (the default here, the one tested), or on a
 /// card with less than 7 GB of video memory the CNN, preset E (cnn_for_vram); 1 the second generation transformer, preset M

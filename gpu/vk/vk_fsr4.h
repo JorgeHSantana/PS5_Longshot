@@ -9,6 +9,17 @@ namespace mkwvk {
 
 struct TemporalEngine;
 
+/// FSR 4's network model: Auto lets AMD pick (the default), Lite forces ffxProvider_FSR4Lite_Int8
+enum Fsr4Model { FSR4_MODEL_AUTO = 0, FSR4_MODEL_LITE = 1 };
+/// The model the engine asks for next: the env switch when set, else the menu's live value
+Fsr4Model fsr4_model();
+/// RX_VK_FSR4_MODEL as parsed: -1 unset, else FSR4_MODEL_AUTO/LITE (an invalid value logs once and is Auto)
+int fsr4_model_env();
+/// Whether this GPU/library has a Lite provider and its vtables are hooked (the menu row)
+bool fsr4_lite_available();
+/// The menu's live value; the env switch still wins for the run
+void fsr4_set_model(Fsr4Model model);
+
 /// Whether this build has FSR in it (LONGSHOT_FSR)
 bool fsr4_built();
 /// Why FSR 4 cannot be chosen here (the Upscaler row says it), FSR_OK when it can or is not known yet

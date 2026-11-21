@@ -182,7 +182,7 @@ def check_fsr4():
     prepare = function(fsr4, "int prepare(")
     if "const bool hdr = hdr_allowed && present_native_pq.load(std::memory_order_relaxed);" not in prepare or \
             'env_switch("RX_VK_FSR4_HDR")' not in prepare or "opts.hdr" in prepare or \
-            "s.context->hdr != hdr" not in prepare or "make_context(ow, oh, hdr)" not in prepare:
+            "s.context->hdr != hdr" not in prepare or "make_context(ow, oh, hdr, want)" not in prepare:
         sys.exit("FAIL: FSR 4's context is not made for HDR colour while the game presents PQ (and again when that changes)")
     make = function(fsr4, "std::shared_ptr<Context> make_context(")
     if "FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_AUTO_EXPOSURE" not in make or \

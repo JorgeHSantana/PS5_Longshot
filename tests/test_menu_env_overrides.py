@@ -62,7 +62,16 @@ FIXTURE = r"""
 #include "longshot_env.h"   // (gpu/vk/compat: env_value_off, the switches' rule)
 #include "hos_wide_size.h"   // (host/: the output sizes the menu accepts, hos_output_size_valid)
 #include "display_modes.h"   // (gpu/vk/: the sizes the Output resolution offers)
+#include "vk_fsr4.h"
 using namespace mkwvk;
+namespace mkwvk {
+int fsr4_model_env() {
+    const char* value = std::getenv("RX_VK_FSR4_MODEL");
+    return value && std::strcmp(value, "lite") == 0 ? 1 : -1;
+}
+Fsr4Model live_model = FSR4_MODEL_AUTO;
+void fsr4_set_model(Fsr4Model model) { live_model = model; }
+}
 // (the screen's display modes: HOS_DISPLAY_MODES names them here)
 std::vector<display_modes::Size> screen_modes() { return {}; }
 void outputs_sync() {}   // (the rows' ends and the Aspect ratio from the sizes read: not what this checks)
@@ -91,6 +100,7 @@ Row rows[] = {
     {TAB_GRAPHICS, "Render resolution", &opts.resolution, 0, 6, 1, tx, ""},
     {TAB_GRAPHICS, "Window scaling filter", &opts.upscale, 0, 2, 1, tx, ""},
     {TAB_GRAPHICS, "Sharpness", &opts.sharpness, 0, 100, 10, tx, ""},
+    {TAB_GRAPHICS, "FSR 4 model", &opts.fsr4_model, 0, 1, 1, tx, ""},
     {TAB_GAMEPLAY, "Game speed", &opts.realtime, 0, 1, 1, tx, ""},
 };
 std::string ini_file;
@@ -149,7 +159,10 @@ int main(int argc, char** argv) {
     setenv("RX_VK_FRAMEGEN_MULT", "4", 1);
     setenv("HOS_OUTPUT_RES", "2400x1350", 1);
     setenv("RX_VK_ASTC_RGBA8", "1", 1);
+    opts.fsr4_model = 0;
+    setenv("RX_VK_FSR4_MODEL", "lite", 1);
     env_part();
+    CHECK(live_model == FSR4_MODEL_LITE);
     CHECK(opts.astc_rgba8 == 1);
     // This run follows the environment
     CHECK(opts.pace == 1 && opts.realtime == 1 && opts.resolution == 0 && opts.upscale == 2 && opts.framegen == 4);
@@ -158,6 +171,7 @@ int main(int argc, char** argv) {
     opts.sharpness = 40;
     save();
     CHECK(has("sharpness=40\n"));
+    CHECK(has("fsr4_model=0\n"));
     CHECK(has("pad_a=1,17\n") && has("key_a=69,0\n") && has("toggle_a=1\n"));
     CHECK(has("frame_pacing=0\n"));
     CHECK(has("game_speed=0\n"));
@@ -195,6 +209,11 @@ int main(int argc, char** argv) {
     opts.hold_toggle = 1;
     save();
     CHECK(has("toggle_a=1\n") && !has("toggle_a=0\n"));
+    setenv("RX_VK_FSR4_MODEL", "", 1);
+    opts.fsr4_model = 1;
+    live_model = FSR4_MODEL_AUTO;
+    env_part();
+    CHECK(live_model == FSR4_MODEL_LITE);
     std::puts("PASS: the environment's rows last for the run; the options file keeps the player's");
 }
 """

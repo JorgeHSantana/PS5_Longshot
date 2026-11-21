@@ -55,6 +55,7 @@ FROZEN = {   # (a key: the value its row saves, as players' files hold them)
     "frame_generation_by": "&opts.framegen_by",
     "frame_pacing": "&opts.pace",
     "frame_rate_cap": "&opts.fps_cap",
+    "fsr4_model": "&opts.fsr4_model",
     "fullscreen": "&opts.fullscreen",
     "fullscreen_monitor": "&monitor_pick",
     "game_language": "&opts.game_lang",

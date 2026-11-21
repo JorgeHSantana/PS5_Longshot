@@ -46,6 +46,8 @@ struct Options {
     int dlss_model = 0;   // DLSS's network, by its preset: 0 K (transformer; E, the CNN, under 7 GB of video memory), 1 M, 2 L
                           // (second-generation transformer), 3 NVIDIA's default (upscaler_rows.h model_preset; vk_dlss.cpp).
                           // RX_VK_DLSS_PRESET over it
+    int fsr4_model = 0;   // (longshot) AMD FSR 4's network: 0 Auto (AMD's own pick for this GPU), 1 Lite (the faster INT8
+                          // network; upscaler_rows.h FSR4_MODEL_LITE; vk_fsr4.cpp). RX_VK_FSR4_MODEL over it
     int dlss_pre_bloom = 0;   // (longshot) DLAA before the bloom: 0 off (DLAA after the game's bloom and tone map), 1 on
                               // (vk_temporal.cpp pre_bloom_wanted; DLAA only). Saved as dlss_pre_bloom; RX_VK_DLSS_PRE_BLOOM over it
     int sharpness = 0;    // 0 to 100

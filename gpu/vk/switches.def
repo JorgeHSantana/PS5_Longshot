@@ -409,6 +409,7 @@ SW(RX_VK_FSR, player, int, "unset: the menu's Upscaler row decides", "0 never ru
 SW(RX_VK_FSR3_CHAIN, kill, bool, "on: FSR 3.1 draws on the temporal chain", "=0 runs FSR 3.1 with its own inputs (vk_fsr3_inputs.cpp), as before.")
 SW(RX_VK_FSR4, player, int, "unset: the menu's Upscaler row decides", "0 never runs AMD FSR 4, 1 runs FSR 4 and 2 its Native AA over the Upscaler row.")
 SW(RX_VK_FSR4_HDR, kill, bool, "on: FSR 4 takes the game's HDR colour while it presents PQ", "=0 keeps FSR 4's LDR context and clamped colour with native HDR too.")
+SW(RX_VK_FSR4_MODEL, player, enum, "unset: the menu's FSR 4 model row (Auto)", "auto|lite (or 0|1) overrides the FSR 4 model row for one run: Auto lets AMD pick, Lite forces INT8 Lite.")
 SW(RX_VK_FSR4_TUNE, hw, bool, "on for AMD GPUs, off elsewhere", "=0 runs AMD's FSR 4 passes as AMD made them instead of the tuned rebuilds.")
 SW(RX_VK_FSR_DIR, diag, string, "AMD's DLLs looked for beside the executable and in the game folder", "Another folder AMD's FSR 4 library is looked for in first.")
 SW(RX_VK_FSR_FG, player, int, "unset: the menu's Frame generation and Frame generation by rows decide", "0 never asks for FSR 3.1 frame generation, 1 asks for it over the row.")

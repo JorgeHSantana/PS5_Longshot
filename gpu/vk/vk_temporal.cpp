@@ -1754,7 +1754,7 @@ bool draw_engine(VkCommandBuffer cmd, State& s, int mode, const Camera& cam, uin
              cam.far_z, cam.fov_y * 57.29578f);
     }
     if (!engine.e->evaluate(cmd, f)) {
-        if (engine.e->retry) {   // (longshot: this frame only, TemporalEngine::retry; a new history next)
+        if (engine.e->retry || (engine.e->retry_evaluation && engine.e->retry_evaluation())) {
             s.last_frame = 0;
             return no("its evaluation failed this frame");
         }
