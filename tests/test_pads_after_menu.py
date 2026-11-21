@@ -70,6 +70,7 @@ static void player_used(void) {}
 static void binds_load(void) {}
 static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
 static int pad_bind[HOS_KEY_N][2] = {[HOS_KEY_TOGGLE_HUD] = {-1, -1}};
+static int sampled_pad(int i, int k) { return pad_bind[i][k]; }
 static LONG hud_bind_generation;
 static uint64_t oc_consumed_pads;
 static volatile LONG pad_count_now;

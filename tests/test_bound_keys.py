@@ -222,6 +222,13 @@ int main(int argc, char **argv) {
     hos_bind(HOS_BIND_KEY, HOS_KEY_TOGGLE_HUD, 0, 0);
     held['E'] = 1;
     CHECK(bound_down(HOS_SW_A, 0));
+    for (int i = 0; i < HOS_KEY_N; i++)
+        for (int k = 0; k < 2; k++) input_keys[i][k] = key_bind[i][k], input_pads[i][k] = pad_bind[i][k];
+    input_snapshot_active = 1;
+    hos_bind(HOS_BIND_KEY, HOS_SW_A, 0, 'T');
+    CHECK(bound_down(HOS_SW_A, 0));   /* this read keeps the old binding */
+    input_snapshot_active = 0;
+    CHECK(!bound_down(HOS_SW_A, 0));
     if (!fails) printf("PASS\n");
     return fails != 0;
 }
@@ -235,7 +242,7 @@ class BoundKeysTests(unittest.TestCase):
             self.skipTest("no C compiler")
         hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
         code = [block(hid, "static int kmap_down("),
-                between(hid, "static const char *const bind_names[HOS_KEY_N]", "\nvoid hos_bind("),   # (its definition)
+                between(hid, "static const char *const bind_names[HOS_KEY_N]", "void hos_bind(int set, int button, int slot, int code) {"),
                 block(hid, "static uint64_t hud_pad_mask("), block(hid, "static uint64_t bound_pad_buttons("),
                 between(hid, "static int mouse_vk_slot(", "static int bound_down("), block(hid, "static void hud_shortcut(")]
         code = "\n".join(code).replace("GetModuleFileNameA(NULL,", "GetModuleFileNameA(0,")

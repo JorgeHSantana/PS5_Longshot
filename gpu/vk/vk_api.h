@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 37   /* (37: HOS_KEY_SPRINT, a control past the Switch's buttons with gamepad inputs) */
+#define MKWVK_API_VERSION 39   /* (37: HOS_KEY_SPRINT; 38: HOS_BIND_SPRINT_ON; 39: HOS_BIND_SPRINT_BEGIN) */
 enum { HOS_MONITOR_CURRENT = 1, HOS_MONITOR_PRIMARY = 2 };
 typedef struct MkwVkMonitor {
     char id[512];             /* opaque persistent preference; never a runtime handle or list index */
@@ -68,7 +68,7 @@ enum { HOS_OPT_FPS_CAP = 53 };
 enum { HOS_OPT_HOLD_TOGGLE = 54 };
 /* Audio output: 0 Auto, 1 Stereo, 2 5.1, 3 Mono. Only Mono averages final stereo output live. */
 enum { HOS_OPT_AUDIO_OUTPUT = 57 };
-/* (HOS_OPT_SPRINT, 97: the Gameplay tab's Sprint row, host/nn_hid.c sprint_step: 1 on, 0 Sprint's key and button do
+/* (HOS_OPT_SPRINT, 97: the Controls tab's Sprint row, host/nn_hid.c sprint_step: 1 on, 0 Sprint's key and button do
    nothing) */
 enum { HOS_OPT_SPRINT = 97 };
 /* Damage taken: 0 Half, 1 Normal (unchanged), 2 Double, 3 Quadruple. */
@@ -125,8 +125,10 @@ enum { HOS_PAD_ART_N = HOS_PAD_RTRIGGER + 1 };
 /* (longshot) a DualShock 4's or DualSense's touchpad click, which opens the Insert menu as F1 does (host/pad_sdl.c,
    gpu/vk/vk_menu.cpp): its own bit past HOS_PAD_N, so it is not one of the inputs the Controls page binds */
 enum { HOS_PAD_TOUCHPAD = 31 };
-/* HOS_BIND_SPRINT_AUTO gets/sets the packed provenance of Sprint's automatic bindings (button and slot unused). */
-enum { HOS_BIND_PAD, HOS_BIND_KEY, HOS_BIND_SPRINT_AUTO };
+/* HOS_BIND_SPRINT_AUTO gets/sets the packed provenance of Sprint's automatic bindings (button and slot unused).
+   HOS_BIND_SPRINT_BEGIN starts a layout update, finished by HOS_BIND_SPRINT_ON setting Sprint to 1 or 0.
+   Input reads the value and bindings together (button and slot unused). */
+enum { HOS_BIND_PAD, HOS_BIND_KEY, HOS_BIND_SPRINT_AUTO, HOS_BIND_SPRINT_ON, HOS_BIND_SPRINT_BEGIN };
 enum { HOS_SPRINT_AUTO_KEY = 1, HOS_SPRINT_AUTO_B = 2, HOS_SPRINT_AUTO_PAD = 4, HOS_SPRINT_AUTO_LS_SHIFT = 3 };
 /* (longshot) the controller faces of the button prompts (host/prompts.c): the Switch, then nx2/prompt_faces.py FACES' order,
    then the keyboard's (nx2/prompt_keys.py: the keys bound, not the pad inputs); the Button prompts row's value is one more (0

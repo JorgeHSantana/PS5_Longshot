@@ -138,6 +138,10 @@ checkout must include bundled ImGui and Libertinus. This optional local capture 
 and the lightweight CI guard. It outputs Graphics, Audio and Controls PNGs plus `menu-capture.json`; currently only
 the Graphics image is published. Inspect the output before copying a selected image into this directory.
 
+For the Sprint change, compare the published Graphics image with a capture from the updated head, including the
+visible labels, values, selected help and navigation. Record the comparison and reviewed source hashes in the
+manifest if it still matches; otherwise replace the image and record the new capture provenance.
+
 The helper derives repository input hashes from the compiler's dependency list and rejects dirty or untracked
 capture inputs. It records the source revision, fixture hashes, compiler/library versions and explicit display
 state. Preserve those records in the manifest when replacing an image. Recheck the dependency set when menu code

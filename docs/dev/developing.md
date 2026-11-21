@@ -331,7 +331,7 @@ start. The newest 15 are kept. A helper then shows the [crash window](reference/
 
 Presses are `<seconds>:<button>[+<button>...][/<ms>]`, comma-separated: `2:A,5.5:LUP/1500,9:ZL+R`. Buttons:
 `A B X Y L R ZL ZR PLUS MINUS LS RS LEFT UP RIGHT DOWN`, and sticks at their edge `LUP LDOWN LLEFT LRIGHT RUP RDOWN
-RLEFT RRIGHT`. `SPRINT` holds the Sprint control's key (it runs only with the Gameplay tab's Sprint row on); the game
+RLEFT RRIGHT`. `SPRINT` holds the Sprint control's key (it runs only with the Controls tab's Sprint row on); the game
 never sees it as a button. A press is held 200 ms unless `/<ms>` says otherwise; names are case-sensitive. Scripted and bridge
 presses count while the window is in the background; the game still has to be in a state that reads the controller.
 Switches that name a file or press buttons are taken only from the environment or `HOS_ENV_FILE`, never from

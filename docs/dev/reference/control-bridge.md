@@ -120,7 +120,7 @@ read after its request, plus `at` frames, and is held for `frames` frames (1 to 
 
 - **Names** are `HOS_INPUT_SCRIPT`'s: buttons `A B X Y L R ZL ZR PLUS MINUS LS RS LEFT UP RIGHT DOWN`; stick directions
   `LUP LDOWN LLEFT LRIGHT RUP RDOWN RLEFT RRIGHT`; axes `LX= LY= RX= RY=` from -32767 to 32767 (positive y is up);
-  `SPRINT`, the Sprint control's key held (with the Gameplay tab's Sprint row on; never a button the game sees). Give
+  `SPRINT`, the Sprint control's key held (with the Controls tab's Sprint row on; never a button the game sees). Give
   them as `"A+B"` or `["A", "B"]`, any case.
 - **Mixing:** the bridge's buttons add to the player's. On the axes it sets, its sticks replace an input script's; the
   player's pad, keys and mouse still count (larger deflection wins) unless `"exclusive": true`, which shuts them out
@@ -128,6 +128,12 @@ read after its request, plus `at` frames, and is held for `frames` frames (1 to 
 - **Reply:** once the input is over, with `start` and `end` (the first frame without it). With `"wait": false`, at once:
   `{"queued": 1, "frames": 8}` (`frames`: the longest step's `at` plus its frames). A no-wait input outlives its client; a waited-on one is let go when its client leaves.
 - **Default `timeout`:** 30 s plus the inputs' frames at 10 fps.
+
+For a Sprint change, record the exact revision and build used for any bridge run. Compare the base and updated head
+using a physical Xbox controller and keyboard on Windows, and a controller on Linux or Steam Deck. With Sprint Off and
+On, check release while steering and the handoff to the player's A press; capture the menu before and after. Report the
+Linux build, applicable Tier 1 coverage, lint and CI on the updated head, and identify any suite failures also present
+on the baseline. A bridge input does not replace the physical-device comparison.
 
 ## Commands
 

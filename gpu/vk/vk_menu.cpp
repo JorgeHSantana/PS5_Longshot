@@ -2545,8 +2545,8 @@ void draw_controls(ui::Ctx& c) {
     const char* help = listening ? (listening == 1 ? "Press the gamepad button to use. Esc cancels." : "Press the key to use. Esc cancels.")
                        : page_row ? page_row->help
                        : sel_i < kControls && controls[sel_i].button == HOS_KEY_SPRINT
-                           ? "Link runs while you move: the key while it is held, the gamepad button pressed once until you "
-                             "stop, without rolling, talking or picking things up. Only with the Gameplay tab's Sprint row on, "
+                           ? "Link runs while you move and hold the key or the gamepad button, without rolling, talking or "
+                             "picking things up. Only with the Controls tab's Sprint row on, "
                              "which gives it Shift and the "
                              "left stick's press. Enter binds; Delete clears it."
                        : sel_i < kControls && controls[sel_i].button < HOS_SW_N && controls[sel_i].button != HOS_SW_PLUS &&

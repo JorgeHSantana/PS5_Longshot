@@ -1,4 +1,4 @@
-"""Sprint (host/nn_hid.c, the Controls page's line, the Gameplay tab's Sprint row, gpu/vk/menu/sprint.cpp): a control past the Switch's buttons with
+"""Sprint (host/nn_hid.c, the Controls page's line, the Controls tab's Sprint row, gpu/vk/menu/sprint.cpp): a control past the Switch's buttons with
 keys and gamepad inputs that, while the left stick is pushed, holds A, the game's own run. Off by default.
 
 The bindings: host/nn_hid.c's binding table is compiled alone (C), as tests/test_bound_keys.py does, and linked with the
@@ -7,15 +7,22 @@ install's defaults are the ones from before Sprint (Shift B, the left stick's pr
 turned on gives it Shift and the press (B to V, LS keeping its other input) and turned off puts them back; a player who
 rebound B, Shift or the press, or whose V is taken, or who bound Sprint, keeps theirs. The sources are checked for the
 rest: read_input reads Sprint's key and gamepad input (and a test run's SPRINT, which never reaches the game), npad_states hands sprint_step the stick only with the row on, the
-module's row is on the Gameplay tab and lays the controls out as it changes, the Controls page has Sprint's line, writes
+module's row is on the Controls tab and lays the controls out as it changes, the Controls page has Sprint's line, writes
 its pad_ line and lays them out again as it resets.
-sprint_step is compiled alone: A only while steered, the key held, the gamepad input a toggle that ends when Link stops and
-wants a new press while he moves, hos_sprint_press_mask A's bit while it is Sprint's A (not the player's own), the
-player's own A mid-sprint a gap and then a press of theirs (a tap shorter than the gap too). nx2/oot_patches.py patch_sprint_press runs on lifted text: the mask goes
+sprint_step is compiled alone: A only while steered and the key or the gamepad input held (let go, the plain run again),
+hos_sprint_press_mask A's bit while it is Sprint's A (not the player's own), the
+player's own A mid-sprint a gap and then a press of theirs (a tap shorter than the gap too). nx2/oot_patches.py patch_sprint_press runs on synthetic matcher input: the mask goes
 between the pair that makes "pressed" and its store, in the two controllers' updates only, once.
+
+Physical review: compare ae8e78b0910d with the updated head using an Xbox controller and keyboard on Windows and a
+controller on Linux or Steam Deck. With Sprint Off and On, release Sprint while steering and press A during Sprint;
+capture menu screenshots before and after. Report the Linux build, applicable Tier 1 coverage, lint and CI, and name
+any suite failures also present on the baseline. This fixture does not exercise physical L3 or either platform's input.
 python -I -B tests/test_sprint.py   (needs a C and a C++ compiler)
 """
+import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -27,8 +34,56 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
 import test_bound_keys  # noqa: E402  (its PRELUDE and the helpers that cut code out of a source)
 
+
+def windows_arguments(line):
+    """Split compiler arguments using Windows backslash and double-quote rules."""
+    out, cur, quoted, have, i = [], [], False, False, 0
+    while i < len(line):
+        if line[i] == "\\":
+            start = i
+            while i < len(line) and line[i] == "\\":
+                i += 1
+            n = i - start
+            if i < len(line) and line[i] == '"':
+                cur.append("\\" * (n // 2))
+                if n % 2:
+                    cur.append('"')
+                    i += 1
+            else:
+                cur.append("\\" * n)
+            have = True
+        elif line[i] == '"':
+            if quoted and i + 1 < len(line) and line[i + 1] == '"':
+                cur.append('"')
+                i += 2
+            else:
+                quoted, i = not quoted, i + 1
+            have = True
+        elif line[i] in " \t" and not quoted:
+            if have:
+                out.append("".join(cur))
+            cur, have, i = [], False, i + 1
+        else:
+            cur.append(line[i])
+            have, i = True, i + 1
+    if have:
+        out.append("".join(cur))
+    return out
+
+
+def compiler_command(variable, *fallbacks):
+    """Accept a bare executable path or a compiler command with flags."""
+    configured = os.environ.get(variable)
+    if configured:
+        if os.path.isfile(configured) or shutil.which(configured):
+            return [configured]
+        return windows_arguments(configured) if sys.platform == "win32" else shlex.split(configured)
+    return [next((path for name in fallbacks if (path := shutil.which(name))), None)]
+
+
 MAIN = r"""
 void sprint_layout(int on);   /* (the Sprint module's apply_sprint_layout, layout.cpp) */
+int sprint_moved_while_on(void);   /* (layout.cpp: bindings it moved while the input could see Sprint on) */
 static int fails;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s line %d: %s\n", which, __LINE__, #c); fails++; } } while (0)
 #define KEY(b) hos_binding(HOS_BIND_KEY, b, 0)
@@ -38,20 +93,22 @@ static int fails;
 #define S HOS_KEY_SPRINT
 int main(int argc, char **argv) {
     (void)argc;
-    ini_dir = argv[1];
-    const char *which = argv[2];
+    const char *which = argv[1];
     binds_load();
     if (!strcmp(which, "new")) {
         /* the defaults are those from before Sprint: it has nothing */
         CHECK(KEY(S) == 0 && KEY2(S) == 0 && PAD(S) == -1 && PAD2(S) == -1);
         CHECK(KEY(HOS_SW_B) == VK_SHIFT && PAD(HOS_SW_LS) == HOS_PAD_LSTICK);
+        CHECK(hos_binding(HOS_BIND_SPRINT_ON, 0, 0) == 0);   /* (no sprint= line: off) */
         sprint_layout(1);
         CHECK(KEY(S) == VK_SHIFT && PAD(S) == HOS_PAD_LSTICK);
         CHECK(KEY(HOS_SW_B) == 'V' && PAD(HOS_SW_B) == HOS_PAD_SOUTH);
         CHECK(PAD(HOS_SW_LS) == -1 && PAD2(HOS_SW_LS) == -1 && KEY(HOS_SW_LS) == VK_CONTROL);
+        CHECK(hos_binding(HOS_BIND_SPRINT_ON, 0, 0) == 1);   /* (on, the layout whole) */
         sprint_layout(1);   /* (on again: nothing moves) */
         CHECK(KEY(S) == VK_SHIFT && KEY(HOS_SW_B) == 'V' && PAD(S) == HOS_PAD_LSTICK && PAD(HOS_SW_LS) == -1);
         sprint_layout(0);
+        CHECK(hos_binding(HOS_BIND_SPRINT_ON, 0, 0) == 0);
         CHECK(KEY(S) == 0 && KEY2(S) == 0 && PAD(S) == -1 && PAD2(S) == -1);
         CHECK(KEY(HOS_SW_B) == VK_SHIFT && PAD(HOS_SW_LS) == HOS_PAD_LSTICK);
         CHECK(!KEY2(HOS_SW_B));   /* (V gone with it) */
@@ -95,9 +152,7 @@ int main(int argc, char **argv) {
             hos_bind(HOS_BIND_KEY, S, 0, VK_SHIFT);
             hos_bind(HOS_BIND_PAD, S, 0, HOS_PAD_LSTICK);
         }
-        char path[1024];
-        snprintf(path, sizeof path, "%s/longshot_options.ini", ini_dir);
-        FILE *out = fopen(path, "w");
+        FILE *out = fopen("longshot_options.ini", "w");
         CHECK(out != NULL);
         if (!out) return 1;
         fprintf(out, "sprint_auto_bind=%d\nkey_b=%d,0\nkey_sprint=%d,0\npad_ls=%d,%d\npad_sprint=%d\n",
@@ -133,6 +188,9 @@ int main(int argc, char **argv) {
         hos_bind(HOS_BIND_KEY, HOS_SW_X, 1, VK_SHIFT);
         sprint_layout(0);
         CHECK(KEY(S) == 'G' && KEY(HOS_SW_B) == 'V' && KEY2(HOS_SW_X) == VK_SHIFT);
+    } else if (!strcmp(which, "saved-positive") || !strcmp(which, "saved-negative")) {
+        CHECK(hos_binding(HOS_BIND_SPRINT_ON, 0, 0) == !strcmp(which, "saved-positive"));
+        CHECK(KEY(S) == 'G');
     } else if (!strcmp(which, "own-defaults")) {
         sprint_layout(1);
         sprint_layout(0);
@@ -140,6 +198,7 @@ int main(int argc, char **argv) {
     } else {
         CHECK(!"no such case");
     }
+    CHECK(sprint_moved_while_on() == 0);   /* (every layout move was inside the update) */
     if (!fails) printf("PASS %s\n", which);
     return fails != 0;
 }
@@ -150,7 +209,17 @@ LAYOUT = r"""
 #include "vk_api.h"
 extern "C" int hos_binding(int set, int button, int slot);
 extern "C" void hos_bind(int set, int button, int slot, int code);
-struct Host { int (*binding)(int, int, int); void (*bind)(int, int, int, int); } host_value{hos_binding, hos_bind},
+/* Every binding the layout moves must be inside the update. */
+static int moved_while_on;
+static bool updating;
+static void bind_checked(int set, int button, int slot, int code) {
+    if (set == HOS_BIND_SPRINT_BEGIN) updating = true;
+    if ((set == HOS_BIND_KEY || set == HOS_BIND_PAD) && !updating) moved_while_on++;
+    hos_bind(set, button, slot, code);
+    if (set == HOS_BIND_SPRINT_ON) updating = false;
+}
+extern "C" int sprint_moved_while_on(void) { return moved_while_on; }
+struct Host { int version; int (*binding)(int, int, int); void (*bind)(int, int, int, int); } host_value{39, hos_binding, bind_checked},
     *host = &host_value;
 static bool can_bind() { return true; }
 %s
@@ -160,6 +229,8 @@ extern "C" void sprint_layout(int on) { apply_sprint_layout(on != 0); }
 CASES = {
     "own-defaults": "key_sprint=16,0\npad_sprint=7\n",
     "new": None,
+    "saved-positive": "sprint=2\nkey_sprint=71,0\n",
+    "saved-negative": "sprint=-1\nkey_sprint=71,0\n",
     "ls-two": "pad_ls=7,17\n",
     "rebind-source": "pad_ls=7,17\n",
     "rebound": "key_b=66,0\nkey_x=16,0\npad_ls=8\npad_rs=7\n",
@@ -170,6 +241,14 @@ CASES = {
 }
 
 class SprintTests(unittest.TestCase):
+    def test_windows_compiler_arguments(self):
+        self.assertEqual(windows_arguments(r'clang -I"C:\Program Files\SDK"'),
+                         ["clang", r"-IC:\Program Files\SDK"])
+        self.assertEqual(windows_arguments(r'"C:\Program Files\LLVM\clang.exe" -DNAME="a b"'),
+                         [r"C:\Program Files\LLVM\clang.exe", "-DNAME=a b"])
+        self.assertEqual(windows_arguments(r'clang "C:\dir\\" "a\"b"'),
+                         ["clang", "C:\\dir\\", 'a"b'])
+
     def test_sources(self):
         hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
         read = test_bound_keys.block(hid, "static void read_input(")
@@ -177,7 +256,14 @@ class SprintTests(unittest.TestCase):
         self.assertEqual(read.count("sprint_now = pad_sprint_down();"), 2,
                          "read_input does not read Sprint's gamepad input, in front and behind another window")
         npad = test_bound_keys.block(hid, "static void npad_states(")
-        self.assertIn("const int sprint_held = rx_option(HOS_OPT_SPRINT, 0) ? sprint_now : 0;", npad,
+        enabled = "sprint_frame = (int)__atomic_load_n(&sprint_on, __ATOMIC_ACQUIRE);"
+        self.assertLess(read.index("binds_load();"), read.index("AcquireSRWLockShared(&input_bind_lock);"))
+        self.assertLess(read.index("AcquireSRWLockShared(&input_bind_lock);"), read.index(enabled))
+        self.assertLess(read.index(enabled), read.index("bound_down(HOS_KEY_SPRINT, captured)"))
+        self.assertLess(read.index("ReleaseSRWLockShared(&input_bind_lock);"), read.index("hos_oot_autoload_input();"))
+        self.assertLess(read.index("input_pads[i][k] = pad_bind[i][k]"), read.index("ReleaseSRWLockShared(&input_bind_lock);"))
+        self.assertLess(npad.index("read_input(&buttons, &taps, stick);"), npad.index("const int sprint_enabled = sprint_frame;"))
+        self.assertIn("const int sprint_held = sprint_enabled ? sprint_now : 0;", npad,
                       "Sprint runs without the Controls tab's Sprint row on")
         self.assertIn("sprint_step(&buttons, sprint_held, steered, menu_open || hos_oc_wait == 1, hos_now_ns());", npad,
                       "npad_states does not give Sprint the buttons as the game will get them")
@@ -199,7 +285,7 @@ class SprintTests(unittest.TestCase):
         menu = (ROOT / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
         module = (ROOT / "gpu" / "vk" / "menu" / "sprint.cpp").read_text(encoding="utf-8")
         row = test_bound_keys.block(module, "MENU_MODULE(sprint)")
-        self.assertIn('menu::tab("gameplay")', row, "the Sprint row is not on the Gameplay tab")
+        self.assertIn('menu::tab("controls")', row, "the Sprint row is not on the Controls tab")
         self.assertIn('.key = "sprint"', row, "the Sprint row does not save as sprint=")
         self.assertIn("changes your controls", row, "the Sprint row does not warn that it changes the controls")
         self.assertNotIn('"Sprint", &opts.sprint', menu, "the Sprint row is in vk_menu.cpp's table, not its module")
@@ -223,26 +309,30 @@ class SprintTests(unittest.TestCase):
                       "Sprint is not the control after the HUD shortcut")
 
     def test_bindings(self):
-        cc = shutil.which("gcc") or shutil.which("clang")
-        cxx = shutil.which("g++") or shutil.which("clang++")
-        if not cc or not cxx:
+        cc = compiler_command("CC", "gcc", "clang")
+        cxx = compiler_command("CXX", "g++", "clang++")
+        if not cc or not cxx or not cc[0] or not cxx[0]:
             self.skipTest("no C and C++ compiler")
         hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
-        code = test_bound_keys.between(hid, "static const char *const bind_names[HOS_KEY_N]", "\nvoid hos_bind(")
+        code = test_bound_keys.between(hid, "static const char *const bind_names[HOS_KEY_N]", "void hos_bind(int set, int button, int slot, int code) {")
         code = code.replace("GetModuleFileNameA(NULL,", "GetModuleFileNameA(0,")
         module = (ROOT / "gpu" / "vk" / "menu" / "sprint.cpp").read_text(encoding="utf-8")
         layout = test_bound_keys.block(module, "void apply_sprint_layout(")
         include = ["-I", str(ROOT / "gpu" / "vk"), "-I", str(ROOT / "gpu")]
         with tempfile.TemporaryDirectory(prefix="longshot-sprint-") as tmp:
             tmp = Path(tmp)
-            (tmp / "t.c").write_text(test_bound_keys.PRELUDE + code + MAIN, encoding="utf-8")
+            prelude = test_bound_keys.PRELUDE
+            start = prelude.index("static const char *hos_options_file(void)")
+            end = prelude.index("static int held[256];", start)
+            prelude = prelude[:start] + 'static const char *hos_options_file(void) { return "longshot_options.ini"; }\n' + prelude[end:]
+            (tmp / "t.c").write_text(prelude + code + MAIN, encoding="utf-8")
             (tmp / "layout.cpp").write_text(LAYOUT % layout, encoding="utf-8")
             binary = tmp / ("t.exe" if sys.platform == "win32" else "t")
-            for command in ([cc, "-std=gnu11", "-Wall", "-Wno-unused-function", *include, "-c", str(tmp / "t.c"),
+            for command in ([*cc, "-std=gnu11", "-Wall", "-Wno-unused-function", *include, "-c", str(tmp / "t.c"),
                              "-o", str(tmp / "t.o")],
-                            [cxx, "-std=c++17", "-Wall", "-Wextra", *include, "-c", str(tmp / "layout.cpp"),
+                            [*cxx, "-std=c++17", "-Wall", "-Wextra", *include, "-c", str(tmp / "layout.cpp"),
                              "-o", str(tmp / "layout.o")],
-                            [cxx, str(tmp / "t.o"), str(tmp / "layout.o"), "-o", str(binary)]):
+                            [*cxx, str(tmp / "t.o"), str(tmp / "layout.o"), "-o", str(binary)]):
                 build = subprocess.run(command, text=True, capture_output=True)
                 self.assertEqual(build.returncode, 0, build.stderr)
             for name, ini in CASES.items():
@@ -251,7 +341,7 @@ class SprintTests(unittest.TestCase):
                     folder.mkdir()
                     if ini is not None:
                         (folder / "longshot_options.ini").write_text(ini, encoding="utf-8")
-                    run = subprocess.run([str(binary), str(folder), name], text=True, capture_output=True, timeout=30)
+                    run = subprocess.run([str(binary), name], cwd=folder, text=True, capture_output=True, timeout=30)
                     self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
             for case in ("auto", "user"):
                 with self.subTest(restart=case):
@@ -259,7 +349,7 @@ class SprintTests(unittest.TestCase):
                     folder.mkdir()
                     (folder / "longshot_options.ini").write_text(CASES["ls-two"], encoding="utf-8")
                     for action in ("save", "restore"):
-                        run = subprocess.run([str(binary), str(folder), f"{action}-{case}"],
+                        run = subprocess.run([str(binary), f"{action}-{case}"], cwd=folder,
                                              text=True, capture_output=True, timeout=30)
                         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
@@ -297,12 +387,18 @@ int main(void) {
     step(SPRINT_KEY, 1, 0, 1320);        CHECK(!RUNS);
     step(SPRINT_KEY, 1, 0, 1360);        CHECK(RUNS && MASK == 0);
     step(SPRINT_KEY, 1, 0, 1420);        CHECK(RUNS && MASK == 1);
+
     step(0, 1, 0, 1450);             CHECK(!RUNS && !MASK);   /* let go: walks */
     /* their A down before Sprint starts: theirs, no gap */
     step_a(0, 1, 0, 1460, 1);        CHECK(RUNS && !MASK);    /* (the player's own A: not Sprint's) */
     step_a(SPRINT_KEY, 1, 0, 1470, 1);   CHECK(RUNS && MASK == 0);
     step(0, 1, 0, 1480);
     step(SPRINT_KEY, 1, 1, 1500);    CHECK(!RUNS && !MASK);   /* not with the menu open */
+    /* Releasing Sprint and tapping A in the same sample still creates the gap and delivers the tap. */
+    step(SPRINT_PAD, 1, 0, 1510);         CHECK(RUNS && MASK == 1);
+    step_a(0, 1, 0, 1520, 1);           CHECK(!RUNS && !MASK);
+    step(0, 1, 0, 1530);                 CHECK(!RUNS && !MASK);
+    step(0, 1, 0, 1571);                 CHECK(RUNS && !MASK);
     step(0, 1, 0, 1600);
     /* a tap remains owed when Sprint is released or movement stops during the gap */
     step(SPRINT_KEY, 1, 0, 1650);
@@ -321,17 +417,23 @@ int main(void) {
     step(SPRINT_KEY, 1, 0, 2192);      CHECK(RUNS && !MASK);
     step(SPRINT_KEY, 1, 0, 2252);      CHECK(RUNS && MASK == 1);
     step(0, 0, 0, 2260);
-    /* the gamepad input: a toggle while steered */
+    /* the gamepad input: only while held, as the key */
     step(SPRINT_PAD, 1, 0, 2300);    CHECK(RUNS && MASK == 1);
-    step(0, 1, 0, 2350);             CHECK(RUNS && MASK == 1);   /* let go: still runs */
-    step(SPRINT_PAD, 1, 0, 2400);    CHECK(RUNS);              /* held on: no change */
-    step(0, 1, 0, 2500);             CHECK(RUNS);
-    step(0, 0, 0, 2600);             CHECK(!RUNS && !MASK);    /* stopped: off */
-    step(0, 1, 0, 2700);             CHECK(!RUNS);             /* moving again: wants a new press */
-    step(SPRINT_PAD, 0, 0, 2800);    CHECK(!RUNS);             /* pressed standing: nothing */
-    step(SPRINT_PAD, 1, 0, 2900);    CHECK(!RUNS);             /* (still the same press) */
-    step(0, 1, 0, 3000);
-    step(SPRINT_PAD, 1, 0, 3100);    CHECK(RUNS && MASK == 1);   /* a new press while moving */
+    step(SPRINT_PAD, 1, 0, 2350);    CHECK(RUNS && MASK == 1);   /* held: runs */
+    step(0, 1, 0, 2400);             CHECK(!RUNS && !MASK);    /* let go while moving: back to the plain run */
+    step(0, 1, 0, 2500);             CHECK(!RUNS);             /* (and stays so) */
+    step(SPRINT_PAD, 0, 0, 2600);    CHECK(!RUNS && !MASK);    /* held standing: nothing */
+    step(SPRINT_PAD, 1, 0, 2700);    CHECK(RUNS && MASK == 1);   /* still held, moving again: runs, no new press needed */
+    step(0, 0, 0, 2800);             CHECK(!RUNS && !MASK);    /* stopped and let go: off */
+    /* A second tap during the first tap's owed interval needs its own gap. */
+    step(SPRINT_KEY, 1, 0, 2900);        CHECK(RUNS && MASK == 1);
+    step_a(SPRINT_KEY, 1, 0, 2910, 1);  CHECK(!RUNS && !MASK);
+    step(SPRINT_KEY, 1, 0, 2920);      CHECK(!RUNS && !MASK);
+    step(SPRINT_KEY, 1, 0, 2961);      CHECK(RUNS && !MASK);
+    step_a(SPRINT_KEY, 1, 0, 2970, 1); CHECK(!RUNS && !MASK);
+    step(SPRINT_KEY, 1, 0, 2980);      CHECK(!RUNS && !MASK);
+    step(SPRINT_KEY, 1, 0, 3021);      CHECK(RUNS && !MASK);
+    step(SPRINT_KEY, 1, 0, 3072);      CHECK(RUNS && MASK == 1);
     if (!fails) printf("PASS\n");
     return fails != 0;
 }
@@ -340,8 +442,8 @@ int main(void) {
 
 class SprintStepTests(unittest.TestCase):
     def test_step(self):
-        compiler = shutil.which("gcc") or shutil.which("clang")
-        if not compiler:
+        compiler = compiler_command("CC", "gcc", "clang")
+        if not compiler or not compiler[0]:
             self.skipTest("no C compiler")
         hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
         gap = re.search(r"^#define SPRINT_ROLL_GAP_MS [^\n]*", hid, re.M).group(0)
@@ -352,51 +454,39 @@ class SprintStepTests(unittest.TestCase):
             tmp = Path(tmp)
             (tmp / "t.c").write_text(head + code + "\nstatic int fails;" + body, encoding="utf-8")
             binary = tmp / ("t.exe" if sys.platform == "win32" else "t")
-            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-Werror", str(tmp / "t.c"), "-o", str(binary)],
+            build = subprocess.run([*compiler, "-std=gnu11", "-Wall", "-Werror", str(tmp / "t.c"), "-o", str(binary)],
                                    text=True, capture_output=True)
             self.assertEqual(build.returncode, 0, build.stderr)
             run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
 
-# (the controllers' update as the lifter writes it, cut down: the pair that makes "pressed" and "released", then the store)
-LIFTED = '''#include "a64.h"
-void f_8038a220(Ctx *__restrict A64_NOESC c) {
-    c->x[8]=recomp_load32(c,c->x[19] + 276);
-    { uint64_t _r = (c->x[8] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[28])) << 0))); _r &= 0xFFFFFFFFULL; c->x[9] = _r; }
-    { uint64_t _r = (c->x[28] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[8])) << 0))); _r &= 0xFFFFFFFFULL; c->x[8] = _r; }
-    { uint64_t _b=c->x[19]; int64_t _o=8; recomp_stp32(c,(_b+_o),c->x[9],c->x[8]); }
-}
-void f_834a3680(Ctx *__restrict A64_NOESC c) {
-    { uint64_t _r = (c->x[8] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[21])) << 0))); _r &= 0xFFFFFFFFULL; c->x[9] = _r; }
-    { uint64_t _r = (c->x[21] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[8])) << 0))); _r &= 0xFFFFFFFFULL; c->x[8] = _r; }
-    { uint64_t _b=c->x[19]; int64_t _o=8; recomp_stp32(c,(_b+_o),c->x[9],c->x[8]); }
-}
-void f_80000000(Ctx *__restrict A64_NOESC c) {
-    { uint64_t _r = (c->x[8] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[28])) << 0))); _r &= 0xFFFFFFFFULL; c->x[9] = _r; }
-    { uint64_t _r = (c->x[28] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[8])) << 0))); _r &= 0xFFFFFFFFULL; c->x[8] = _r; }
-}
-'''
-
-
 class SprintPressPatchTests(unittest.TestCase):
-    """nx2/oot_patches.py patch_sprint_press on lifted text: the mask after the pair in the two functions, nowhere else"""
+    """Exercise the matcher with independently authored synthetic functions."""
 
     def setUp(self):
         sys.path.insert(0, str(ROOT / "nx2"))
         import oot_patches
         self.p = oot_patches
+        pair = lambda reg: (
+            '    { uint64_t _r = (c->x[8] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[%d])) << 0))); _r &= 0xFFFFFFFFULL; c->x[9] = _r; }\n'
+            '    { uint64_t _r = (c->x[%d] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[8])) << 0))); _r &= 0xFFFFFFFFULL; c->x[8] = _r; }\n' % (reg, reg))
+        self.heads = ('void f_8038a220(Ctx *__restrict A64_NOESC c) {',
+                      'void f_834a3680(Ctx *__restrict A64_NOESC c) {')
+        self.sample = ('#include "a64.h"\n' + self.heads[0] + '\n    synthetic_before();\n' + pair(28) +
+                       '    synthetic_store();\n}\n' + self.heads[1] + '\n' + pair(21) +
+                       '    synthetic_store();\n}\nvoid f_80000000(Ctx *c) {\n' + pair(28) + '}\n')
 
     def test_patch(self):
-        out, n = self.p.patch_sprint_press(LIFTED)
+        out, n = self.p.patch_sprint_press(self.sample)
         self.assertEqual(n, 2)
         self.assertEqual(out.count(self.p.SPRINT_MASK), 2, "the mask is not in both controllers' update")
         self.assertEqual(out.count(self.p.SPRINT_DECL), 1)
-        for head in self.p.SPRINT_HEADS:
+        for head in self.heads:
             body = out[out.index(head):]
             body = body[:body.index("\n}\n")]
             self.assertLess(body.index("c->x[9] = _r; }"), body.index(self.p.SPRINT_MASK), "the mask before pressed is made")
-            self.assertLess(body.index(self.p.SPRINT_MASK), body.index("recomp_stp32"), "the mask after the store")
+            self.assertLess(body.index(self.p.SPRINT_MASK), body.index("synthetic_store"), "the mask after the store")
         other = out[out.index("void f_80000000"):]
         self.assertNotIn("hos_sprint_press_mask", other, "a function that is not the controllers' update was patched")
         again, n2 = self.p.patch_sprint_press(out)
@@ -404,17 +494,16 @@ class SprintPressPatchTests(unittest.TestCase):
 
     def test_drifted(self):
         """an anchor that is not there leaves the code as it was, and the count says so (report() warns)"""
-        drifted = LIFTED.replace("c->x[28]", "c->x[27]")
+        drifted = self.sample.replace("c->x[28]", "c->x[27]")
         out, n = self.p.patch_sprint_press(drifted)
         self.assertEqual(n, 1)
-        self.assertNotIn("f_8038a220(Ctx *__restrict A64_NOESC c) {\n    c->x[8]=recomp_load32(c,c->x[19] + 276);\n" +
-                         self.p.SPRINT_MASK, out)
+        self.assertNotIn(self.p.SPRINT_MASK, out[out.index(self.heads[0]):out.index(self.heads[1])])
         self.assertEqual(self.p.patch_sprint_press("#include \"a64.h\"\n"), ("#include \"a64.h\"\n", 0))
 
     def test_body_ends_at_its_brace(self):
         """f_8038a220 without its pair, followed by a function that is not a `void f_` with one: that pair is not
         counted as f_8038a220's (the body ends at its own closing brace), and is left alone"""
-        lines = LIFTED.split("\n")
+        lines = self.sample.split("\n")
         start = lines.index("void f_8038a220(Ctx *__restrict A64_NOESC c) {")
         pair, store = lines[start + 2:start + 4], lines[start + 4]
         helper = ["static void helper(Ctx *__restrict A64_NOESC c) {"] + pair + [store, "}"]

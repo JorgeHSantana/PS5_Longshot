@@ -50,6 +50,11 @@ static void ReleaseSRWLockExclusive(SRWLOCK *p) { (void)p; }
 static int pad_bind[HOS_KEY_N][2] = { [HOS_KEY_TOGGLE_HUD] = {-1, -1}, [HOS_KEY_SPRINT] = {-1, -1} };
 static LONG hud_bind_generation;
 static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
+static SRWLOCK input_bind_lock = SRWLOCK_INIT;
+static _Thread_local int sprint_frame, input_snapshot_active;
+static _Thread_local int input_keys[HOS_KEY_N][2], input_pads[HOS_KEY_N][2];
+static int sampled_key(int i, int k) { return input_snapshot_active ? input_keys[i][k] : key_bind[i][k]; }
+static int sampled_pad(int i, int k) { return input_snapshot_active ? input_pads[i][k] : pad_bind[i][k]; }
 static uint64_t pad_after_menu, pad_raw_game;   /* (pad_raw_now stays 0 here: no pad input waits after the menu) */
 static uint64_t bound_pad_buttons(uint64_t raw) { (void)raw; CHECK(!"a pad input waited after the menu"); return 0; }
 static LONG oc_consumed_keys[256];

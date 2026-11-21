@@ -53,7 +53,7 @@ def main():
 
     read = block(hid, "static void read_input(")
     behind = read[read.index("if (!game_in_front()"):]   # (with or without PR 545's scripted-background test)
-    behind = behind[:behind.index("return;") + len("return;")]
+    behind = behind[:behind.index("goto done;") + len("goto done;")]
     if "pads_in_background(" not in behind or "pads_read(" not in behind:
         raise SystemExit("behind another window the pads are never read")
     if "key(" in behind or "mouse" in behind:
@@ -86,6 +86,8 @@ def main():
                             r"static int move_stick_held;[^\n]*\nstatic int sprint_now;", hid, re.M).group(0)
     cheat_state += "\n" + block(hid, "enum { SPRINT_KEY") + ";\n"   # (Sprint; its gamepad input leaves the HUD shortcut's out)
     cheat_state += "static uint64_t hud_pad_mask(void);\n" + block(hid, "static int pad_sprint_down(")
+    # (Sprint on for the input, as the row's layout publishes it: the fixture's rx_option says the row is on)
+    cheat_state += "\nstatic volatile LONG sprint_on = 1;\n"
     cheat_state += "\nvolatile uint32_t hos_sprint_press_mask;\n"
     cheat_state += re.search(r"^#define SPRINT_ROLL_GAP_MS [^\n]*", hid, re.M).group(0) + "\n"
     cheat_state += block(hid, "static void sprint_step(")   # (npad_states': A held, without the roll)

@@ -76,7 +76,7 @@ def main():
     hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
     fn = block(hid, "static int kmap_down(")
     bound = block(hid, "static int bound_down(")
-    if "const int vk = (int)key_bind[i][k];" not in bound or "kmap_down(vk, key)" not in bound:
+    if "const int vk = sampled_key(i, k);" not in bound or "kmap_down(vk, key)" not in bound:
         raise SystemExit("nn_hid.c: the bound keys no longer go through kmap_down")
     with tempfile.TemporaryDirectory(prefix="alt-enter-") as tmp:
         c = Path(tmp) / "fixture.c"

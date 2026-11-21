@@ -337,7 +337,7 @@ class WalkKeyTests(unittest.TestCase):
             self.skipTest("no C compiler")
         hid = read("host", "nn_hid.c")
         code = [block(hid, "enum { B_A"), block(hid, "static int key("), block(hid, "static int kmap_down("),
-                between(hid, "static const char *const bind_names[HOS_KEY_N]", "void hos_bind("),
+                between(hid, "static const char *const bind_names[HOS_KEY_N]", "void hos_bind(int set, int button, int slot, int code) {"),
                 between(hid, "static int mouse_vk_slot(", "static int bound_down("), block(hid, "static void stick_max("),
                 block(hid, "static uint64_t hud_pad_mask("), block(hid, "static uint64_t bound_pad_buttons("),
                 block(hid, "static void hud_shortcut("), block(hid, "static void oc_notes("),
