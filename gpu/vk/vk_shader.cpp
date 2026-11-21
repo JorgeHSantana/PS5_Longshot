@@ -1398,7 +1398,9 @@ uint64_t translator_stamp() {
                                (mma_software ? mma_software_form << 8 | (mma_software_form && mma_software_quad ? 1024u : 0u) : 0u) |
                                (mesh_fallback_pages ? 2048u : 0u) | (mesh_fallback_global_attributes ? 4096u : 0u) |
                                (mesh_fallback_shared_warp ? 8192u : 0u) | (mesh_fallback_shared_warp_check ? 16384u : 0u) |
-                               (mesh_fallback_strict_fmul ? 32768u : 0u);
+                               (mesh_fallback_strict_fmul ? 32768u : 0u) |
+                               (mma_wmma16 ? 65536u : 0u) | (mma_wmma16_fast ? 131072u : 0u) |
+                               (mma_wmma16 && mma_wmma16_fused ? 262144u : 0u);
         add(&flags, sizeof flags);
         add(mma_order_a.data(), sizeof(uint32_t) * mma_order_a.size());
         add(mma_order_b.data(), sizeof(uint32_t) * mma_order_b.size());
@@ -1533,8 +1535,10 @@ void translate_into(Program& p, const NvnState& s, const Code* vsc, const Code* 
                     kept_one = !k.empty() && !strncmp(hex, k.c_str(), k.size());
                     at = e == std::string::npos ? keep.size() : e + 1;
                 }
-                // (device_policy.h networks_left_out: every vendor but NVIDIA; and where the multiplies run in software, whoever made the GPU)
-                if ((!kept_one && (Shader::Backend::SPIRV::mma_software || dev.policy.networks_left_out)) || env_on("RX_VK_NO_F16") || !dev.vk12.shaderFloat16)
+                // (device_policy.h networks_left_out: every vendor but NVIDIA; and where the multiplies run in software, whoever made the GPU;
+                // kept where the WMMA 16x16x16 tiles run them: Wmma16Fits, or EmitSPIRV would compile the software multiply)
+                const auto& wg = t->program.workgroup_size;
+                if ((!kept_one && (Shader::Backend::SPIRV::mma_software || (dev.policy.networks_left_out && !(Shader::Backend::SPIRV::mma_wmma16 && Shader::Backend::SPIRV::Wmma16Fits(profile_pinned(uint64_t(wg[0]) * wg[1] * wg[2]), t->program))))) || env_on("RX_VK_NO_F16") || !dev.vk12.shaderFloat16)
                     throw std::runtime_error(network_left_out);
             }
             // (pinned to 32 lanes only where 32-lane subgroups cover its workgroup, as its pipeline is: pin_subgroup, pins_32)

@@ -54,6 +54,32 @@ inline bool is_rdna4(uint32_t vendor_id, uint32_t device_id, const char* device_
     return device_name && (std::strstr(device_name, "RX 9") || std::strstr(device_name, "GFX12"));
 }
 
+// AMD RDNA 3 (GFX11.0) and RDNA 3.5 (GFX11.5), excluding RDNA 4 / RDNA 2 / Vega.
+inline bool is_rdna3(uint32_t vendor_id, uint32_t device_id, const char* device_name) {
+    if (vendor_id != 0x1002) return false;
+    if (is_rdna4(vendor_id, device_id, device_name)) return false;
+    switch (device_id) {
+    case 0x7448: case 0x7449: case 0x744A: case 0x744B: case 0x744C: case 0x745E:
+    case 0x7460: case 0x7461: case 0x7470: case 0x747E:
+    case 0x7480: case 0x7481: case 0x7483: case 0x7487: case 0x7489: case 0x748B: case 0x7499: case 0x749F:
+    case 0x15BF: case 0x15C8: case 0x1900: case 0x1901:
+    case 0x150E: case 0x1586: case 0x1114: case 0x1902:
+        return true;
+    case 0x164E: case 0x13C0: case 0x1681: case 0x1506: case 0x1638: case 0x163F: case 0x15E7: case 0x1435:
+        return false;
+    default:
+        break;
+    }
+    return device_name && (std::strstr(device_name, "GFX11") || std::strstr(device_name, "RX 7") ||
+                           std::strstr(device_name, "PRO W7") || std::strstr(device_name, "Pro W7") ||
+                           std::strstr(device_name, "PRO V710") || std::strstr(device_name, "Pro V710") ||
+                           std::strstr(device_name, "740M") || std::strstr(device_name, "760M") ||
+                           std::strstr(device_name, "780M") || std::strstr(device_name, "820M") ||
+                           std::strstr(device_name, "840M") || std::strstr(device_name, "860M") ||
+                           std::strstr(device_name, "880M") || std::strstr(device_name, "890M") ||
+                           std::strstr(device_name, "8040S") || std::strstr(device_name, "8050S") ||
+                           std::strstr(device_name, "8060S") || std::strstr(device_name, "8065S"));
+}
 struct DeviceFacts {
     // who
     uint32_t vendor_id = 0, device_id = 0, driver_version = 0;
@@ -94,6 +120,7 @@ struct DeviceFacts {
     bool radv_gcn() const { return radv() && !storage_io16; }
     bool deck_apu() const { return gpu_clock::deck_apu(device_name); }
     bool handheld() const { return (steam_deck_env && integrated()) || deck_apu(); }   // (auto_profile's hw.handheld)
+    bool rdna3() const { return is_rdna3(vendor_id, device_id, device_name); }
     bool rdna4() const { return is_rdna4(vendor_id, device_id, device_name); }
 };
 

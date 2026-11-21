@@ -211,6 +211,8 @@ helper asks you to.
   window, and **Sharpness** sharpens it. For the sharpest picture, set the Output resolution to your screen's size: the
   filter row then shows "Not needed (window = output)". NVIDIA DLSS, AMD FSR 4 and Intel XeSS need files of their
   makers' ([optional upscalers](advanced.md#optional-upscalers)); AMD FSR 3.1 is in every build.
+  For a non-AI alternative to the game's own upscaler, choose **Off** on the Upscaler row and select a smaller Render
+  resolution. This stretches the picture with a linear filter; its appearance and performance differ from the game's network.
 - **Aspect ratio** lists the shapes of your screen's resolutions, your monitor's own marked "(monitor's)", and **Output
   resolution** that shape's sizes, your screen's own marked "(native)". A size larger than your screen is drawn at that
   size and scaled down. For a size the menu doesn't offer, type it in **Custom output size** (`<width>x<height>`, each
