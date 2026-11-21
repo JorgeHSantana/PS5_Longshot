@@ -116,7 +116,7 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | Gameplay | FPS counter | Off, FPS, Frame time, Graph, Breakdown, Dev | Off |
 | | FPS counter position | Top right, Top left, Bottom right, Bottom left | Top right |
 | | FPS counter size | Auto, Small, Medium, Large | Auto |
-| | FPS counter details | Opens the FPS counter details page: Version and hardware at every level (Off, On; Off), then a line each of the Dev level (VRAM, Textures, Draws, Dispatches, Render passes, Draws skipped, Texture uploads, Pipelines built, GPU slot waits, Queue submits, Write-backs) and the CPU and GPU lines (Off, On; On) | Version and hardware off, every line on |
+| | FPS counter details | Opens the FPS counter details page: Version and hardware at every level (Off, On; Off), then a line each of the Dev level (VRAM, Textures, Draws, Dispatches, Render passes, Draws skipped, Texture uploads, Pipelines built, GPU slot waits, Queue submits, Write-backs) and the footer's CPU and GPU lines and its render lines: the resolution the 3D is drawn at and what upscales it (Off, On; On each) | Version and hardware off, every line on |
 | | Menu size | Small, Medium, Large | Medium |
 | | Game speed | Per frame, Real time | Real time |
 | | Field of view | 50% to 150%, in steps of 5; applies immediately during gameplay | 100% (original) |
@@ -237,7 +237,9 @@ helper asks you to.
 - **FPS counter** has five levels: **FPS**; **Frame time** (with the 1% low, green at the cap's rate, amber under it,
   red under two thirds of it); **Graph** (the last 4 seconds, red marks over frames that took twice the cap's time);
   **Breakdown** (where each frame's time went: the game, the renderer, the waits); **Dev** (the renderer's own numbers,
-  for bug reports). **FPS counter details** turns the Dev level's lines on or off.
+  for bug reports). Its footer shows the version, CPU, GPU and driver, then the resolution the 3D was drawn at and what
+  upscaled and anti-aliased it, as the last frame drew them. **FPS counter details** turns the Dev level's lines on or off
+  and can show the footer at every level.
 - **Game speed:** Per frame slows the game whenever it is below 60 fps; Real time keeps normal speed down to 15 fps.
 - **Field of view** changes the gameplay camera's angle: 100% is the game's. Cutscenes, the HUD and movies keep theirs.
 - **Skip title screen** loads your most recent save at the start, once you have saved once.

@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "vk_fsr3.h"
+#include "upscale_route.h"   // (the FPS counter footer's record of the gameplay upscale as drawn)
 #include "vk_fsr3_inputs.h"
 #include "vk_draw.h"      // (descriptors_disturbed)
 #include "vk_gprof.h"     // (RX_VK_PASS_TIMING: a span per pass, so the report names them)
@@ -948,6 +949,12 @@ bool fsr3_upscale(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in, Vk
         logf("vk: fsr3 %ux%u -> %ux%u with assembled depth and camera motion (network %016llx; jitter %+.3f %+.3f px, "
              "%u phases)",
              f.width, f.height, ow, oh, (unsigned long long)key, f.jitter[0], f.jitter[1], ai.jitter_phases);
+    }
+    if (upscale_route::wanted()) {   // (the FPS counter's footer, upscale_route.h: FSR 3.1 drew the picture)
+        upscale_route::Sample r;
+        r.route = upscale_route::Route::Engine, r.engine = upscaler_rows::FSR3;
+        r.in_w = in->width, r.in_h = in->height, r.out_w = ow, r.out_h = oh;
+        upscale_route::publish(r);
     }
     return true;
 }

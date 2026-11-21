@@ -55,6 +55,7 @@
 #include "vk_fsr4.h"
 #include "vk_xess.h"
 #include "vk_temporal.h"
+#include "upscale_route.h"   // (the FPS counter footer's record of the gameplay upscale as drawn)
 #include "vk_reflex.h"
 #include "vk_antilag.h"
 #include "upscaler_rows.h"
@@ -3149,8 +3150,18 @@ static std::string hardware_gpu_name(std::string t) {
     return t;
 }
 
-static_assert(sizeof opts.fps_dev_show / sizeof *opts.fps_dev_show == fps_stats::kDevLines + 1,
-              "a details page toggle for each Dev line and the CPU and GPU lines");
+static_assert(sizeof opts.fps_dev_show / sizeof *opts.fps_dev_show == fps_stats::kDevLines + 2,
+              "a details page toggle for each Dev line and the footer's CPU, GPU and driver, and render lines");
+
+/// Whether the FPS counter's footer shows its render lines (Dev, or the version and hardware at every level, with the Render
+/// lines row on): vk_temporal.cpp and vk_draw.cpp note the gameplay upscale's sizes only then
+/// The FPS counter's footer lines under the driver: the gameplay upscale as it was last drawn (upscale_route.h, published by
+/// whichever path drew it, within the last half second), with the Upscaler and Render resolution rows for what was asked for
+static void fps_render_lines(std::string out[2]) {
+    upscale_route::Sample r;
+    const bool drawn = upscale_route::latest(&r, fps_stats::kSecond / 2);
+    upscale_route::footer_lines(drawn ? &r : nullptr, std::clamp(upscaler(), 0, ur::kUpscalers - 1), opts.resolution, out);
+}
 
 /// The FPS counter's scale (pixels per point): the menu's with Auto; else a fixed one, Small, Medium and Large the counter's
 /// size in a 720p, 1080p and 1440p window at the Medium menu size, at most what Auto gives at the Large menu size
@@ -3215,11 +3226,21 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     }
     if (level >= fs::kDev && dev_shown) h += 6 * s + dev_rows * lh;
     // (the footer, under everything: the version, the CPU, the GPU and its driver, what the counter ran on: at Dev, or at every
-    // level with Version and hardware at every level; the CPU and GPU lines row turns the last three off)
+    // level with Version and hardware at every level; the CPU, GPU and driver, and render rows turn theirs off)
     const bool footer = level >= fs::kDev || opts.fps_version_always;
-    const bool hw_lines = footer && opts.fps_dev_show[fs::kDevLines];
-    const int foot = (footer ? 1 : 0) + (hw_lines ? 3 : 0);
+    // (the footer's lines, by their toggles: 0 the version, 1 the CPU, 2-3 the GPU and its driver, 4-5 the render size and the
+    // upscaler (fps_render_lines))
+    int foot_lines[6], foot = 0;
+    if (footer) {
+        foot_lines[foot++] = 0;
+        if (opts.fps_dev_show[fs::kDevLines]) foot_lines[foot++] = 1, foot_lines[foot++] = 2, foot_lines[foot++] = 3;
+        if (opts.fps_dev_show[fs::kDevLines + 1]) foot_lines[foot++] = 4, foot_lines[foot++] = 5;
+    }
     if (foot) h += 6 * s + foot * lh;
+    // (a column taller than the window gives up the footer's last lines first, the render lines, then the hardware's: the
+    // counter's own numbers keep their place at either anchor)
+    while (foot > 1 && h > c.h - 2 * c.safe) foot--, h -= lh;
+    const bool render_lines = std::find(foot_lines, foot_lines + foot, 4) != foot_lines + foot;
     const float edge = left ? c.safe : c.w - c.safe;
     const float top = bottom ? c.h - c.safe - h : under_banner && !tune_mode && page != 5 && !beside ? banner_h(c) + 10 * s : c.safe;
     // (x for a width at the column's edge)
@@ -3266,28 +3287,44 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     }
     if (foot) {   // (the footer, at the column's foot: the version, as the banner says it; at Dev the CPU, the GPU, its driver. A line
         // too long for the column's width loses its end)
-        static std::string cpu, gpu, drv, fit[4];
+        static std::string cpu, gpu, drv, fit[6], fit_lines[2];
         static const std::string ver = std::string("Longshot ") + version_text(LONGSHOT_VERSION);
         static float fit_w = 0;
         if (gpu.empty()) cpu = hardware_cpu_name(bug_report::cpu_name()), gpu = hardware_gpu_name(device_name_text()), drv = driver_text(), fit_w = 0;
+        const auto shorten = [&](std::string t, float room) {
+            if (lab.width(t.c_str()) <= room) return t;
+            while (!t.empty() && lab.width((t + "...").c_str()) > room) {
+                t.pop_back();
+                while (!t.empty() && ((unsigned char)t.back() & 0xC0) == 0x80) t.pop_back();
+            }
+            while (!t.empty() && t.back() == ' ') t.pop_back();
+            return t + "...";
+        };
         if (fit_w != gw) {
             fit_w = gw;
-            const auto shorten = [&](std::string t, float room) {
-                if (lab.width(t.c_str()) <= room) return t;
-                while (!t.empty() && lab.width((t + "...").c_str()) > room) {
-                    t.pop_back();
-                    while (!t.empty() && ((unsigned char)t.back() & 0xC0) == 0x80) t.pop_back();
-                }
-                while (!t.empty() && t.back() == ' ') t.pop_back();
-                return t + "...";
-            };
             fit[0] = shorten(ver, gw);
             fit[1] = shorten(cpu.empty() ? "-" : cpu, gw);
             fit[2] = shorten(gpu.empty() ? "-" : gpu, gw);
             fit[3] = shorten(drv.empty() ? "-" : drv, gw);
+            fit[4] = shorten(fit_lines[0], gw), fit[5] = shorten(fit_lines[1], gw);
+        }
+        if (render_lines) {   // (the render size and the upscaler change in play: made again when their text does)
+            upscale_route::want();   // (the drawing paths publish what they drew while this shows)
+            static int64_t render_at = 0;
+            const int64_t now_at = fps_clock();
+            if (!render_at || now_at < render_at || now_at - render_at >= fs::kSecond / 4) {
+                render_at = now_at;
+                std::string now[2];
+                fps_render_lines(now);
+                if (now[0] != fit_lines[0] || now[1] != fit_lines[1])
+                    fit_lines[0] = now[0], fit_lines[1] = now[1], fit[4] = shorten(now[0], gw), fit[5] = shorten(now[1], gw);
+            }
         }
         float fy = top + h - foot * lh;
-        for (int i = 0; i < foot; i++) lab.draw(c.d, at(lab.width(fit[i].c_str())), fy + 1 * s, soft, fit[i].c_str(), s), fy += lh;
+        for (int i = 0; i < foot; i++) {
+            const std::string& t = fit[foot_lines[i]];
+            lab.draw(c.d, at(lab.width(t.c_str())), fy + 1 * s, soft, t.c_str(), s), fy += lh;
+        }
     }
     if (level < fs::kGraph) return;
     // (the graph)
@@ -3517,8 +3554,8 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     c.d->AddLine(ImVec2(x0, std::floor(by + 3 * s) + 0.5f), ImVec2(x1, std::floor(by + 3 * s) + 0.5f), ui::rgba(255, 255, 255, 40), std::max(1.0f, s));
     by += 6 * s;
     const ImU32 red = ui::rgba(240, 100, 85);
-    cell(0, 0, false, "Shaders built (4 s)", fps_built_text, strcmp(fps_built_text, "0") ? red : dim);
-    cell(1, 0, false, "Draws left out (4 s)", fps_left_text, strcmp(fps_left_text, "0") ? red : dim);
+    cell(0, 0, false, i18n::tr("Shaders built"), fps_built_text, strcmp(fps_built_text, "0") ? red : dim);
+    cell(1, 0, false, i18n::tr("Draws left out"), fps_left_text, strcmp(fps_left_text, "0") ? red : dim);
     by += lh;
     if (level < fs::kDev || !dev_shown) return;
     // (Dev: the renderer's own numbers, for debugging; those the details page leaves on)

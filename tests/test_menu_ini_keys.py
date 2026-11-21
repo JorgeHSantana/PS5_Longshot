@@ -32,6 +32,7 @@ FROZEN = {   # (a key: the value its row saves, as players' files hold them)
     "controller_in_background": "&opts.pad_background",
     "controller_menu_button": "&opts.pad_menu",
     "cpu_and_gpu_lines": "&opts.fps_dev_show[11]",
+    "render_lines": "&opts.fps_dev_show[12]",
     "crt_filter": "&opts.crt_filter",
     "crt_lines": "&opts.crt_lines",
     "damage_taken": "&opts.damage_taken",

@@ -50,6 +50,7 @@
 // in it); =alternate: every other frame the game's own upscale (a test's reference beside the engine's). (The names are
 // DLSS's from before FSR came: they apply to every engine of the chain, FSR 3.1 on it too.)
 #include "vk_temporal.h"
+#include "upscale_route.h"   // (the FPS counter footer's record of the gameplay upscale as drawn)
 
 #include <algorithm>
 #include <atomic>
@@ -1308,6 +1309,14 @@ bool stretch_record(VkCommandBuffer cmd, VkImageView in_view, const Texture* out
     return true;
 }
 
+/// (the FPS counter's footer, upscale_route.h) An engine or Off's stretch recorded the picture: rw x rh of the 3D into ow x oh
+static void route_drawn(upscale_route::Route route, int engine, uint32_t rw, uint32_t rh, uint32_t ow, uint32_t oh) {
+    if (!upscale_route::wanted()) return;
+    upscale_route::Sample r;
+    r.route = route, r.engine = engine, r.in_w = rw, r.in_h = rh, r.out_w = ow, r.out_h = oh;
+    upscale_route::publish(r);
+}
+
 /// The Upscaler's Off: the gameplay upscale's input stretched into its output, in place of the network (temporal_upscale's
 /// dispatches, found the same way). known: one of the gameplay networks by its key; else a network of that shape, taken only
 /// when its input is this frame's scene (the camera temporal_note_scene_draw took) and its output the picture. true: written
@@ -1343,6 +1352,7 @@ bool stretch(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in, VkImage
         logf("vk: upscaler: Off: network %016llx left out, its input stretched linearly (%ux%u -> %ux%u), %s output",
              (unsigned long long)key, in->width, in->height, ow, oh, rgba ? "RGBA16F" : "packed");
     }
+    route_drawn(upscale_route::Route::Stretch, ur::OFF, in->width, in->height, ow, oh);
     return true;
 }
 
@@ -1722,6 +1732,7 @@ bool draw_engine(VkCommandBuffer cmd, State& s, int mode, const Camera& cam, uin
         if (route_told(s, engine.e, true))
             logf("vk: NVIDIA DLAA draws before the game's bloom and tone map: %ux%u, at program %016llx", rw, rh,
                  (unsigned long long)key);
+        route_drawn(upscale_route::Route::Engine, mode, rw, rh, rw, rh);
         return true;
     }
     if (s.reason) logf("vk: %s draws the upscale again (frame %llu)", engine.e->name, (unsigned long long)now);
@@ -1733,6 +1744,7 @@ bool draw_engine(VkCommandBuffer cmd, State& s, int mode, const Camera& cam, uin
     if (route_told(s, engine.e, false))
         logf("vk: %s draws OoT's upscale: %ux%u -> %ux%u%s", name_of(mode), rw, rh, ow, oh,
              show_motion ? " (its motion shown)" : "");
+    route_drawn(upscale_route::Route::Engine, mode, rw, rh, ow, oh);
     return true;
 }
 }  // namespace

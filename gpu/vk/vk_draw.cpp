@@ -51,6 +51,7 @@
 #include "dlss_actor.h"
 #include "hidden_mesh.h"      // (longshot: a hidden mesh's depth draws left out, hidden_depth_draw)
 #include "vk_temporal.h"
+#include "upscale_route.h"   // (the FPS counter footer's record of the gameplay upscale as drawn)
 #include "vk_framegen.h"   // (framegen_hud_before: a gameplay upscale's picture, for FSR 3.1 frame interpolation's HUD mark)
 #include "vk_fsr3fi.h"     // (frames_wanted)
 #include "vk_fsr3.h"          // (AMD FSR 3.1 in the gameplay upscale's place)
@@ -104,6 +105,7 @@
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
+static bool route_scene_format(VkFormat f);   // (the FPS counter footer's, below upscale_stub)
 // (EvilOOT, RX_VK_DRAW_STATS: the pointer table's regions, vk_bank.cpp)
 struct PointerEntry { uint64_t addr, size; };
 const PointerEntry* pointer_table(const NvnState& s, int stage);
@@ -8300,6 +8302,8 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     if (at.n && at.color[0] && at.depth) {
         temporal_note_scene_draw(at.color[0], at.width, at.height, at.depth, s.ubo[0][0].addr, s.ubo[0][0].size);
         fsr3_inputs::note_scene_draw(at.color[0], at.width, at.height, at.depth, s.ubo[0][0].addr, s.ubo[0][0].size);
+        if (upscale_route::wanted() && s.ubo[0][0].addr && s.ubo[0][0].size >= 0x230 && route_scene_format(at.color[0]->format))
+            upscale_route::note_scene(at.width, at.height);
     }
     uint8_t types[8];
     color_types_of(at, types);
@@ -9219,6 +9223,24 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
 static bool temporal_rejected_network(VkCommandBuffer cmd, uint64_t key, Texture* src, const nvn_tex* in, Texture* dst,
                                       const nvn_tex* out);
 
+/// (the FPS counter's footer, upscale_route.h) The gameplay upscale's formats: the scene's B10G11R11, or with the scene tone
+/// map the PsychoV35 RGBA16F
+static bool route_scene_format(VkFormat f) {
+    return f == VK_FORMAT_B10G11R11_UFLOAT_PACK32 || (f == VK_FORMAT_R16G16B16A16_SFLOAT && scene_tonemap_on());
+}
+/// What a path recorded into the picture, if it is the gameplay upscale's: one of its networks by key, or an upscale of the
+/// 3D scene (its size, upscale_route::note_scene) into a larger picture of the same format. Only while the footer wants it
+static void route_publish(upscale_route::Route route, bool known, const Texture* in, const Texture* out, uint32_t out_level,
+                          int engine = upscaler_rows::GAME, bool fxaa = false) {
+    if (!in || !out || !upscale_route::wanted()) return;
+    upscale_route::Sample r;
+    r.route = route, r.engine = engine, r.fxaa = fxaa;
+    r.in_w = in->width, r.in_h = in->height;
+    r.out_w = std::max(1u, out->width >> out_level), r.out_h = std::max(1u, out->height >> out_level);
+    if (r.out_w < r.in_w || r.out_h < r.in_h) return;
+    if (!known && (r.out_w == r.in_w || !route_scene_format(in->format) || !upscale_route::is_scene(r.in_w, r.in_h))) return;
+    upscale_route::publish(r);
+}
 thread_local Texture* stub_picture = nullptr;   // (upscale_stub's output, when it is the scene's format: framegen_hud_before)
 bool upscale_stub(VkCommandBuffer cmd, const NvnState& s, uint64_t key) {
     stub_picture = nullptr;
@@ -9320,6 +9342,7 @@ bool upscale_stub(VkCommandBuffer cmd, const NvnState& s, uint64_t key) {
                 typed_upscale(cmd, input_view, output_view, dst, 0, key, "PsychoV35 TAAU fallback", true)) {
                 full_barrier(cmd);
                 texture_written(dst);
+                route_publish(upscale_route::Route::StandIn, gameplay_network(key), src, dst, 0, upscaler_rows::GAME, true);
                 return true;
             }
         }
@@ -9351,6 +9374,7 @@ bool upscale_stub(VkCommandBuffer cmd, const NvnState& s, uint64_t key) {
                 typed_upscale(cmd, input_view, output_view, dst, 0, key, "generic RGB9E5 fallback", false)) {
                 full_barrier(cmd);
                 texture_written(dst);
+                route_publish(upscale_route::Route::StandIn, gameplay_network(key), src, dst, 0);
                 if (gameplay_taau) {
                     static std::atomic<bool> logged_gameplay_upscale{false};
                     if (!logged_gameplay_upscale.exchange(true, std::memory_order_relaxed))
@@ -9380,6 +9404,7 @@ bool upscale_stub(VkCommandBuffer cmd, const NvnState& s, uint64_t key) {
     vkCmdBlitImage(cmd, src->image, VK_IMAGE_LAYOUT_GENERAL, dst->image, VK_IMAGE_LAYOUT_GENERAL, 1, &bl, VK_FILTER_LINEAR);
     full_barrier(cmd);
     texture_written(dst);
+    route_publish(upscale_route::Route::Blit, gameplay_network(key), src, dst, 0);
     if (dump_on()) {   // (in a frame dump: what it read and what it made)
         dump_image(cmd, src, 0, 0, "upscale stub source");
         dump_image(cmd, dst, 0, 0, "upscale stub result");
@@ -9637,6 +9662,26 @@ static Texture* upscale_picture(const NvnState& s, const Program& p, uint32_t* l
     if (width <= in->width && !(known && width == in->width && (out->height >> *level) == in->height)) return nullptr;
     return out;
 }
+/// (the FPS counter's footer, upscale_route.h) The game's own gameplay upscale network drew as itself: its input and output, as
+/// temporal_stand_in finds them. Only while the footer wants it
+static void route_network_drawn(const NvnState& s, const Program& p) {
+    if (p.stages.empty() || !upscale_route::wanted()) return;
+    const Stage& st = p.stages[0];
+    const bool known = gameplay_network(p.key);
+    if (!known && !(st.info.uses_cooperative_matrix && st.info.texture_descriptors.size() == 1 &&
+                    st.info.image_descriptors.size() == 1))
+        return;
+    if (st.info.texture_descriptors.empty() || st.info.image_descriptors.empty()) return;
+    Texture* in = nullptr;
+    Texture* out = nullptr;
+    uint32_t level = 0;
+    const auto& od = st.info.image_descriptors[0];
+    if (const uint32_t h = handle_of(s, st, st.info.texture_descriptors[0], 0))
+        texture_view_of(h, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_UNDEFINED, &in);
+    if (const uint32_t h = handle_of(s, st, od, 0))
+        texture_view_of(h, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, &level);
+    if (in && out && (known || in->format == out->format)) route_publish(upscale_route::Route::Network, known, in, out, level);
+}
 /// (longshot) The same for an upscale network that did not translate on this GPU (upscale_stub found its input, the largest
 /// texture it samples, and its output, the largest image it writes): the Render resolution row's fixed shares (67%
 /// 6676619641320ba7, 58%, 50% 72ba090c70fe2614, 33%) are cooperative-matrix networks, left out on a GPU that is not NVIDIA's or multiplies in
@@ -9707,7 +9752,14 @@ bool taau_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p) {
         return false;
     }
     const char* keys = getenv("RX_VK_TAAU_KEYS") ? getenv("RX_VK_TAAU_KEYS") : "fd029a317a9a4b94";
-    return typed_upscale(cmd, input_view, output_view, out, level, p.key, keys, true);
+    if (!typed_upscale(cmd, input_view, output_view, out, level, p.key, keys, true)) return false;
+    if (upscale_route::wanted()) {   // (its input's size, for the footer: FXAA over a linear upscale, in the network's place)
+        Texture* input = nullptr;
+        if (const uint32_t h = handle_of(s, st, st.info.texture_descriptors[0], 0))
+            texture_view_of(h, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_UNDEFINED, &input);
+        route_publish(upscale_route::Route::StandIn, gameplay_network(p.key), input, out, level, upscaler_rows::GAME, true);
+    }
+    return true;
 }
 
 bool precompile_wanted() {
@@ -11937,6 +11989,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         }
     }
     framegen_hud_before(cmd, picture, picture_level);   // (the game's own network drew the gameplay upscale)
+    route_network_drawn(s, p);
     if (dump_on() && dump_ssbo_wanted(p.key)) dump_ssbos(cmd, p, "after");
     if (gprof_on()) {
         char label[96];
