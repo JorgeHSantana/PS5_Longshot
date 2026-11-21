@@ -1,5 +1,6 @@
 // RX_VK_MESH_CONV (gpu/vk/mesh_conv.h) on a model of the replay: no Vulkan, no game data. tests/test_mesh_conv.py builds it
-// with the replay's own list of the ops a batch scans past (vk_replay.cpp mesh_conv_at_barrier, cut into PASS_OPS).
+// with the replay's own list of the ops a batch scans past and the way the replay makes its Ops from it (vk_replay.cpp
+// mesh_conv_at_barrier, cut into PASS_OPS and REPLAY_OPS(pass_ops)).
 //
 // The model replays made-up command streams in order, as the GPU runs one queue: the game's indirect argument buffers, which
 // dispatches, buffer clears and draws whose programs store to memory write; the ring of {x, y, z} records; and each indirect
@@ -12,11 +13,17 @@
 // Variants that must fail (argv[1]): align16 (slots at 16 bytes, as before: a later draw's x words land on y or z), no_drop
 // (a draw that stores to memory does not drop the batch), clearbuf_passes (the scan steps over buffer clears, which drop
 // nothing), no_hold (a slot the ring came round onto is used), rescan_before (the draws after the op a scan ended at converted
-// before the op is recorded).
+// before the op is recorded), table_shift (each op answered as the op after it), past_pass (an op past the table
+// answered Pass).
+//
+// The op kinds first: kind_of, on the Ops made as the replay makes them, answers as a walk of the list (kind_of before the
+// table) for every opcode up to 4096 and a few huge ones, and still does once the list it was made from is overwritten (a
+// table made once; kind_of walking the list at each op fails there).
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <random>
 #include <string>
 #include <vector>
@@ -24,7 +31,7 @@
 #define _Static_assert static_assert   // (rx_nvn.h is C)
 #include "gpu/render/rx_nvn.h"
 #include "gpu/vk/mesh_conv.h"
-#include "mesh_conv_pass_ops.inc"   // (#define PASS_OPS: tests/test_mesh_conv.py, from vk_replay.cpp)
+#include "mesh_conv_pass_ops.inc"   // (#define PASS_OPS, REPLAY_OPS(pass_ops): tests/test_mesh_conv.py, from vk_replay.cpp)
 
 namespace {
 std::string variant;
@@ -153,15 +160,14 @@ struct Model {
     }
     const uint8_t* rescan = nullptr;   // (vk_replay.cpp mesh_rescan_at)
     /// right after a barrier of the game's, or right after the op the last scan ended at (vk_replay.cpp mesh_conv_at_barrier)
-    void at_barrier(const uint8_t* next, const mesh_conv::Ops& ops, const mesh_conv::Ops& any) {
+    void at_barrier(const uint8_t* next, const mesh_conv::Ops& ops) {
         batch.clear();
         rescan = nullptr;
         if (mode < 2) return;
-        std::vector<mesh_conv::Item> items, after;
+        std::vector<mesh_conv::Item> items;
         uint32_t stop = 0;
         const uint8_t* at = nullptr;
         if (mesh_conv::scan(ops, next, nullptr, items, ring_bytes / 4, 256, &stop, &at) == mesh_conv::kStopOp) rescan = at;
-        (void)any, (void)after;
         for (const auto& it : items) {
             nvn_p_draw_mesh d{};
             d.max = it.max, d.stride = it.stride, d.indirect = it.indirect;
@@ -210,7 +216,7 @@ struct Model {
     }
 };
 
-int run_one(uint32_t seed, uint64_t ring, const mesh_conv::Ops& ops, const mesh_conv::Ops& any, Model& m) {
+int run_one(uint32_t seed, uint64_t ring, const mesh_conv::Ops& ops, Model& m) {
     std::mt19937 rng(seed);
     const Stream s = make_stream(rng, 4000);
     const uint8_t* p = s.b.data();
@@ -224,9 +230,9 @@ int run_one(uint32_t seed, uint64_t ring, const mesh_conv::Ops& ops, const mesh_
         if (h[0] == NOP_END) break;
         const uint8_t* a = p + 8;
         // (rescan_before: the draws after the op that ended a scan converted before that op, not after it)
-        if (variant == "rescan_before" && p == m.rescan) m.at_barrier(p + h[1], ops, any);
+        if (variant == "rescan_before" && p == m.rescan) m.at_barrier(p + h[1], ops);
         switch (h[0]) {
-        case NOP_BARRIER: m.at_barrier(p + h[1], ops, any); break;
+        case NOP_BARRIER: m.at_barrier(p + h[1], ops); break;
         case NOP_WAIT_EVENT:   // (met: the CPU's data taken for what follows it, vk_replay.cpp resume_queue's capture)
         case NOP_DISPATCH: case NOP_CLEAR_BUF: {   // (the GPU writes the buffer; a dispatch drops the batch, vk_draw.cpp dispatch())
             Write w;
@@ -257,24 +263,79 @@ int run_one(uint32_t seed, uint64_t ring, const mesh_conv::Ops& ops, const mesh_
         }
         default: break;
         }
-        if (variant != "rescan_before" && p == m.rescan) m.at_barrier(p + h[1], ops, any);   // (replay(): after the op)
+        if (variant != "rescan_before" && p == m.rescan) m.at_barrier(p + h[1], ops);   // (replay(): after the op)
         p += h[1];
     }
     (void)ring;
     return m.wrong ? 1 : 0;
 }
+
+// ---- the op kinds ----
+// (the walk kind_of was before the table: the reference)
+mesh_conv::OpKind walk(const uint32_t* pass, size_t npass, uint32_t op) {
+    if (op == NOP_DRAW_MESH) return mesh_conv::OpKind::Draw;
+    for (size_t i = 0; i < npass; i++)
+        if (pass[i] == op) return mesh_conv::OpKind::Pass;
+    return mesh_conv::OpKind::Stop;
+}
+// (kind_of, or a broken one: table_shift, past_pass)
+mesh_conv::OpKind kind_tested(const mesh_conv::Ops& ops, uint32_t op) {
+    if (variant == "table_shift") return mesh_conv::kind_of(ops, op + 1);
+    if (variant == "past_pass" && op >= mesh_conv::kOpTable) return mesh_conv::OpKind::Pass;
+    return mesh_conv::kind_of(ops, op);
+}
+/// kind_of on ops answers as the walk of pass for every opcode up to 4096, each of rx_nvn.h's with one high bit set (an
+/// opcode cut to fewer bits on the way answers as the op it was cut to) and the huge ones; what: which Ops, for the message
+bool kinds_match(const mesh_conv::Ops& ops, const uint32_t* pass, size_t npass, const char* what) {
+    std::vector<uint32_t> codes;
+    for (uint32_t o = 0; o <= 4096; o++) codes.push_back(o);
+    for (uint32_t o = 0; o < NOP_COUNT_; o++)
+        for (int bit = 8; bit < 32; bit++) codes.push_back(o | 1u << bit);
+    for (uint32_t o : {0xFFFFu, 0x10000u, 0x7FFFFFFFu, 0x80000000u, 0xFFFFFFFEu, 0xFFFFFFFFu}) codes.push_back(o);
+    for (uint32_t o : codes)
+        if (kind_tested(ops, o) != walk(pass, npass, o)) {
+            printf("FAIL: %s: op %u is %d, the list's walk says %d\n", what, o, (int)kind_tested(ops, o),
+                   (int)walk(pass, npass, o));
+            return false;
+        }
+    return true;
+}
+// (made in a constant expression, as the replay's `static constexpr` Ops is: the model fails to build if it cannot be)
+constexpr uint32_t const_ops_list[] = {PASS_OPS};
+constexpr mesh_conv::Ops const_ops = REPLAY_OPS(const_ops_list);
+constexpr uint32_t boundary_pass[] = {mesh_conv::kOpTable, NOP_BEGIN};
+constexpr mesh_conv::Ops boundary_pass_ops = mesh_conv::make_ops(NOP_END, NOP_BARRIER, NOP_DRAW_MESH, boundary_pass, 2);
+constexpr mesh_conv::Ops boundary_draw_ops = mesh_conv::make_ops(NOP_END, NOP_BARRIER, mesh_conv::kOpTable, boundary_pass + 1, 1);
+static_assert(boundary_pass_ops.kind[NOP_BEGIN] == mesh_conv::OpKind::Pass);
+static_assert(boundary_pass_ops.kind[NOP_DRAW_MESH] == mesh_conv::OpKind::Draw);
+static_assert(boundary_draw_ops.kind[NOP_BEGIN] == mesh_conv::OpKind::Pass);
 } // namespace
 
 int main(int argc, char** argv) {
     variant = argc > 1 ? argv[1] : "";
-    // (the replay's list, from vk_replay.cpp; clearbuf_passes adds buffer clears to it)
-    std::vector<uint32_t> pass = {PASS_OPS};
-    if (variant == "clearbuf_passes") pass.push_back(NOP_CLEAR_BUF);
-    const mesh_conv::Ops ops{NOP_END, NOP_BARRIER, NOP_DRAW_MESH, pass.data(), pass.size()};
-    std::vector<uint32_t> all;
-    for (uint32_t o = 0; o < NOP_COUNT_; o++)
-        if (o != NOP_END && o != NOP_BARRIER && o != NOP_DRAW_MESH) all.push_back(o);
-    const mesh_conv::Ops any{NOP_END, NOP_BARRIER, NOP_DRAW_MESH, all.data(), all.size()};
+    if (mesh_conv::kind_of(boundary_pass_ops, mesh_conv::kOpTable) != mesh_conv::OpKind::Stop ||
+        mesh_conv::kind_of(boundary_draw_ops, mesh_conv::kOpTable) != mesh_conv::OpKind::Stop) {
+        printf("FAIL: out-of-range pass or draw opcode was not Stop\n");
+        return 1;
+    }
+    // (the replay's list, from vk_replay.cpp, and its Ops made as the replay makes them; clearbuf_passes adds buffer clears)
+    static const uint32_t plain_ops[] = {PASS_OPS}, clear_ops[] = {PASS_OPS, NOP_CLEAR_BUF};
+    const mesh_conv::Ops plain = REPLAY_OPS(plain_ops), clear = REPLAY_OPS(clear_ops);
+    const bool clearbuf = variant == "clearbuf_passes";
+    const mesh_conv::Ops& ops = clearbuf ? clear : plain;
+    // (the op kinds: as the list's walk, and still so once the list the Ops was made from is overwritten)
+    if (!kinds_match(plain, plain_ops, std::size(plain_ops), "the replay's Ops") ||
+        !kinds_match(clear, clear_ops, std::size(clear_ops), "the Ops with buffer clears added") ||
+        !kinds_match(const_ops, plain_ops, std::size(plain_ops), "the Ops made in a constant expression"))
+        return 1;
+    {
+        static uint32_t list[] = {PASS_OPS};
+        const mesh_conv::Ops made = REPLAY_OPS(list);
+        for (uint32_t& o : list) o = NOP_DISPATCH;
+        if (!kinds_match(made, plain_ops, std::size(plain_ops), "the Ops after its list was overwritten (kind_of walks the list "
+                                                                "at each op: no table)"))
+            return 1;
+    }
     // (the scan: what it stops at and what it passes, against rx_nvn.h's ops)
     for (uint32_t o : {(uint32_t)NOP_DISPATCH, (uint32_t)NOP_DISPATCH_INDIRECT, (uint32_t)NOP_COPY_B2B, (uint32_t)NOP_CLEAR_BUF,
                        (uint32_t)NOP_SIGNAL_EVENT, (uint32_t)NOP_WAIT_EVENT, (uint32_t)NOP_COPY_B2T, (uint32_t)NOP_COPY_T2B,
@@ -300,7 +361,7 @@ int main(int argc, char** argv) {
         const uint64_t ring = seed % 3 == 0 ? (64u << 10) : seed % 3 == 1 ? (256u << 10) : (4u << 20);
         Model m(ring);
         m.mode = (int)(seed % 3);
-        run_one(seed, ring, ops, any, m);
+        run_one(seed, ring, ops, m);
         draws += m.draws, batched += m.batched, single += m.single, stale += m.stale, dropped += m.dropped, wrong += m.wrong;
         if (m.wrong && first.empty()) first = "seed " + std::to_string(seed) + ": " + m.first_wrong;
     }

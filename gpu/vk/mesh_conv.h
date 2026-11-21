@@ -53,25 +53,35 @@ struct Item {
     int32_t max = 0, stride = 0;
 };
 
-/// What a stream op does to the batch's arguments read early, at the barrier, instead of at the draw.
-enum class OpKind {
-    Pass,   // records no GPU write to buffers in stream order: state, binds, draws, attachment clears, uniform updates (below)
-    Draw,   // an indirect mesh draw (if it has an indirect address): converted with the batch
+/// What a stream op does to the batch's arguments read early, at the barrier, instead of at the draw. (Stop is 0, so that a
+/// table entry nobody set is Stop)
+enum class OpKind : uint8_t {
     Stop,   // may write buffer memory on the GPU, or ends the stretch: a barrier, a dispatch, a copy, a buffer or texture clear,
             // an event's signal or wait, a counter's report, the stream's end; and any op not known here
+    Pass,   // records no GPU write to buffers in stream order: state, binds, draws, attachment clears, uniform updates (below)
+    Draw,   // an indirect mesh draw (if it has an indirect address): converted with the batch
 };
-/// opcodes: rx_nvn.h's NOP_* (passed in so that the header needs no NVN types; vk_replay.cpp and the test give the real ones)
+/// The opcodes the table answers: rx_nvn.h's NOP_COUNT_ must not pass it (vk_replay.cpp asserts it); an op at or past it is Stop
+constexpr uint32_t kOpTable = 256;
+/// opcodes: rx_nvn.h's NOP_* (passed in so that the header needs no NVN types; vk_replay.cpp and the test give the real ones),
+/// and each op's kind by opcode. The scan asks for every op of a frame (~1,200 scans a frame), so the kind is one load, not a
+/// walk of the list of Pass ops. Made by make_ops only
 struct Ops {
     uint32_t end, barrier, draw_mesh;
-    const uint32_t* pass;   // the ops that are Pass
-    size_t npass;
+    OpKind kind[kOpTable];
 };
-inline OpKind kind_of(const Ops& ops, uint32_t op) {
-    if (op == ops.draw_mesh) return OpKind::Draw;
-    for (size_t i = 0; i < ops.npass; i++)
-        if (ops.pass[i] == op) return OpKind::Pass;
-    return OpKind::Stop;
+/// The table from the list of the ops that are Pass (vk_replay.cpp's, the one place they are named): draw_mesh is Draw, every
+/// other op Stop. constexpr, so the replay's is made at compile time. A listed op at or past kOpTable stays Stop (the safe side:
+/// a rescan, never a draw converted before a write)
+constexpr Ops make_ops(uint32_t end, uint32_t barrier, uint32_t draw_mesh, const uint32_t* pass, size_t npass) {
+    Ops o{end, barrier, draw_mesh, {}};
+    for (OpKind& k : o.kind) k = OpKind::Stop;
+    for (size_t i = 0; i < npass; i++)
+        if (pass[i] < kOpTable) o.kind[pass[i]] = OpKind::Pass;
+    if (draw_mesh < kOpTable) o.kind[draw_mesh] = OpKind::Draw;   // (after the list: Draw wins, as the walk asked it first)
+    return o;
 }
+inline OpKind kind_of(const Ops& ops, uint32_t op) { return op < kOpTable ? ops.kind[op] : OpKind::Stop; }
 
 /// Why a scan ended (the replay's counts of them, a log line every 120 frames)
 enum Stop { kStopEnd, kStopBarrier, kStopOp, kStopFull, kStops };

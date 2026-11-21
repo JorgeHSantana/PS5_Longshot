@@ -1649,14 +1649,18 @@ void mesh_conv_at_barrier(VkCommandBuffer cmd, const uint8_t* next, const uint8_
     // (records no GPU write to buffer memory in stream order: state, binds, draws (one whose program writes memory drops the
     // batch as it is drawn: vk_draw.cpp), attachment clears (images), uniform updates (kept in the replay's list, written to
     // memory at the recording's end), counters' resets, render conditions (read on the CPU))
-    static const uint32_t pass_ops[] = {NOP_BEGIN, NOP_JUMP, NOP_CALL, NOP_UPDATE_UB, NOP_SET_RT, NOP_CLEAR_COLOR, NOP_CLEAR_DS,
-                                        NOP_VIEWPORTS, NOP_SCISSOR, NOP_DEPTH_RANGE, NOP_BIND_PROGRAM, NOP_BIND_STATE,
-                                        NOP_BIND_VATTR, NOP_BIND_VSTREAM, NOP_BIND_VBUF, NOP_BIND_UBO, NOP_BIND_SSBO, NOP_BIND_TEX,
-                                        NOP_BIND_SAMP, NOP_STENCIL, NOP_POLY_OFFSET, NOP_DRAW, NOP_DRAW_IDX, NOP_SET_TEX_POOL,
-                                        NOP_SET_SAMP_POOL, NOP_COPY_STRIDE, NOP_BLEND_COLOR, NOP_BIND_IMG, NOP_RESET_COUNTER,
-                                        NOP_DEPTH_CLAMP, NOP_RENDER_ENABLE, NOP_RASTER_DISCARD, NOP_RENDER_COND,
-                                        NOP_PRIMITIVE_RESTART, NOP_BIND_BUFS, NOP_DRAW_INDIRECT, NOP_PUSH_CONST};
-    static const mesh_conv::Ops ops{NOP_END, NOP_BARRIER, NOP_DRAW_MESH, pass_ops, sizeof pass_ops / sizeof pass_ops[0]};
+    static constexpr uint32_t pass_ops[] = {NOP_BEGIN, NOP_JUMP, NOP_CALL, NOP_UPDATE_UB, NOP_SET_RT, NOP_CLEAR_COLOR,
+                                            NOP_CLEAR_DS, NOP_VIEWPORTS, NOP_SCISSOR, NOP_DEPTH_RANGE, NOP_BIND_PROGRAM,
+                                            NOP_BIND_STATE, NOP_BIND_VATTR, NOP_BIND_VSTREAM, NOP_BIND_VBUF, NOP_BIND_UBO,
+                                            NOP_BIND_SSBO, NOP_BIND_TEX, NOP_BIND_SAMP, NOP_STENCIL, NOP_POLY_OFFSET, NOP_DRAW,
+                                            NOP_DRAW_IDX, NOP_SET_TEX_POOL, NOP_SET_SAMP_POOL, NOP_COPY_STRIDE, NOP_BLEND_COLOR,
+                                            NOP_BIND_IMG, NOP_RESET_COUNTER, NOP_DEPTH_CLAMP, NOP_RENDER_ENABLE,
+                                            NOP_RASTER_DISCARD, NOP_RENDER_COND, NOP_PRIMITIVE_RESTART, NOP_BIND_BUFS,
+                                            NOP_DRAW_INDIRECT, NOP_PUSH_CONST};
+    // (each op's kind in a table made from the list at compile time: the scan looks an op up, it does not walk the list)
+    static_assert(NOP_COUNT_ <= mesh_conv::kOpTable, "mesh_conv.h kOpTable: an op past it would be Stop");
+    static constexpr mesh_conv::Ops ops =
+        mesh_conv::make_ops(NOP_END, NOP_BARRIER, NOP_DRAW_MESH, pass_ops, sizeof pass_ops / sizeof pass_ops[0]);
     thread_local std::vector<mesh_conv::Item> items;
     thread_local uint32_t cut_by = 0;   // (the op the scan before this one ended at, for the log)
     uint32_t stop_op = 0;
