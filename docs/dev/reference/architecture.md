@@ -213,6 +213,12 @@ off the 90% rule's excess, not the 97% rule's. Mirrors, shadows, imports and cap
 asked. Mirrors keep their own budget instead (`gpu/vk/mirror_budget.h`). Each return is logged as
 `vk: budget: gave back`.
 
+What the pools leave comes off the texture cache's budget. Within the allowance that budget never falls below a floor
+(`gpu/vk/vram_compact.h`: 1800 MB on a card the driver allows under 8 GB, a quarter of the allowance above, and on the
+smaller cards a floor that rises with an idle card up to half the allowance), so a full card does not evict the textures
+in use one pass after another. Past the allowance there is no floor (`floor_within`): the driver pages VRAM out to system
+memory there, and only the textures used in the last 60 presents stay.
+
 ### Each heap's budget
 
 The allowance above is the sum over the device-local heaps, and one heap can be full while the sum has room. A card

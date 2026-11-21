@@ -5535,7 +5535,8 @@ void texture_frame(uint64_t completed) {
             dynamic_floor = vram_compact::update_dynamic_floor(dynamic_floor, total_bytes, used, pressure, allowed);
         }
     }
-    const uint64_t active_floor = known ? dynamic_floor : 0;
+    // (and none past the allowance: vram_compact::floor_within)
+    const uint64_t active_floor = known ? vram_compact::floor_within(dynamic_floor, used, allowed) : 0;
     // (mem_account.h, the arbiter: one look at the lines for every pool. They are the ones read here before: pressure past 90%
     // of the allowance, level 1, the 90% rule's below and the target pool's "halve"; the count past 97% of it, level 2, the
     // pool's "flush". At level 0, a card with room, nothing more happens here than before)
@@ -5597,7 +5598,7 @@ void texture_frame(uint64_t completed) {
     // count as it is, the same ratchet, past the allowance too: there no eviction can bring the count down)
     if (known && !kept_only && used > count_line && !room_in_blocks) {
         const uint64_t over = used - count_line;
-        const uint64_t floor = vram_compact::texture_min_floor(allowed);
+        const uint64_t floor = vram_compact::count_line_floor(used, allowed);   // (none past the allowance)
         uint64_t cut = total_bytes > over ? total_bytes - over : 0;
         if (floor && cut < floor) cut = floor;
         budget = std::min(budget, cut);
