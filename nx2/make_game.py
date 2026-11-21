@@ -3559,6 +3559,9 @@ def main(a=None):
     print("\n".join(PHASES.table()), flush=True)
     print("the build took %s, compiled in %s%s" % (clock(total_seconds), clock(compile_seconds),
                                                     "" if previous is None else " (the last one %s)" % clock(previous)), flush=True)
+    executable = os.path.join(game_dir, BESIDE[0])
+    if os.path.isfile(executable):
+        print("executable size: %d bytes" % os.path.getsize(executable), flush=True)
     say("times", "%.0f" % total_seconds, "%.0f" % compile_seconds, "-1" if previous is None else "%.0f" % previous)
     # (after the times: they stay comparable from build to build, without a GPU's minutes that can be switched off)
     if getattr(a, "compile_shaders", None):   # (the choice kept in the folder: the game's own preparations at a start follow it)

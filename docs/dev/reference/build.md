@@ -19,6 +19,9 @@ game folder are drawn in [architecture](architecture.md#from-dump-to-game-folder
 
 `OOT_DUMP` (or `OOT_EXEFS` / `OOT_ROMFS`) and `OOT_WORK` override `work/dump.txt` and the work folder.
 
+Changing translator code changes the lift key: an update with a cached base translation must lift again. Unchanged
+generated objects can still be reused from the object cache.
+
 ## What the build compiles
 
 - **Lifted chunks** compile at `-O1`. The **hot list** (`assets/profiles/hot_funcs.txt`, the functions the game spends
@@ -68,6 +71,7 @@ Read by the build, not the game, so they are not in `switches.def`.
 | `LONGSHOT_TRACY=1` | A Tracy build ([profiling](profiling.md#tracy)) |
 | `LONGSHOT_NGX_SDK=<dir>`, `LONGSHOT_FSR=1` | Build with NVIDIA DLSS, AMD FSR 4 ([setup](../setup.md#upscaler-sdks-optional)) |
 | `A64_FASTFP`, `A64_LOCAL_REGS`, `A64_LOCAL_FLAGS`, `A64_LOCAL_FUNCS` | Lift-time switches (`nx2/fastfp.py`, `nx2/guest_locals.py`); they change the lift key |
+| `A64_CAMERA_DIAGNOSTICS=1` | Lift-time camera-clearance counters and trace; changes the lift key. In the game's working directory, create `camera-clearance.trace` to log up to 256 hits per site, then remove it and allow a hit before creating it again. Counters continue between traces. Diagnostic builds check for the marker on every hit. |
 | `A64_FASTFP_STORES=0`, `A64_FASTFP_VMOVES=0` | Fast float regions (`nx2/fastfp.py`) stop at a guest store, or at a vector move or shuffle (`nx2/fastvec.py`'s `a64_vld16`, `a64_vdup`, `A64_EXT16`, `A64_EXT8`, `a64_tbl1`), as before. Both on by default: a region may hold stores but no load after one, and its fast copy keeps their addresses and values and stores them, in order, once its MXCSR check passed (its exact copy is unchanged). Lift-time switches: they change the lift key |
 | `A64_VECFP=0` or a list of `elem`, `vec`, `minmax`, `fcvt` | The SSE fast paths for the float forms the translator otherwise does lane by lane (`nx2/vecfp.py`); each keeps a result only where it is provably Arm's, else the instruction's own C runs. All on by default; `0` lifts exactly as without them. A lift-time switch: it changes the lift key |
 
