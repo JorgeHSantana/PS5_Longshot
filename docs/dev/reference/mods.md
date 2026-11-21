@@ -58,7 +58,9 @@ from a mod.
 - **Once.** Mods are indexed at start. A change, on the tab or on disk, applies at the next start.
 
 A path no mod supplies falls back to the game's file; a folder cannot replace a file. `HOS_FS_OVERLAY` (a test switch)
-is looked at after mods and wins over them.
+is looked at after mods and wins over them. Last, a texture an incomplete dump damages (zeros where its zstd frame
+starts) is read as the stand-in the builder would have put there (`host/oot_damaged_files.c`), whether a mod, the
+overlay or the game's romfs supplied it.
 
 ## Resource size table
 

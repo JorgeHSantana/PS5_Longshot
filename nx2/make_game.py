@@ -700,7 +700,8 @@ def link_problem(src_romfs, probe):
 def stand_in_damaged_files(out, romfs):
     """An incomplete dump's damaged textures replaced by whole ones of the same kind, and said: without them the game
     leaves out the walls and floors that use them (the Water Temple). Only in a romfs this builder unpacked (its
-    .longshot_romfs stamp), and once per unpack: .longshot_romfs_checked holds the stamp it was checked under"""
+    .longshot_romfs stamp), and once per unpack: .longshot_romfs_checked holds the stamp it was checked under. A romfs it
+    did not unpack keeps them: the game reads the same stand-ins in their place (host/oot_damaged_files.c)"""
     good = os.path.join(out, ".longshot_romfs")
     checked = os.path.join(out, ".longshot_romfs_checked")
     if not os.path.isfile(good) or not os.path.isdir(romfs):
