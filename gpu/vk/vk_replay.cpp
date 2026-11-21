@@ -6546,7 +6546,6 @@ bool present_thread_drain() {
     logf("vk: presenter thread: its present not made in 5 s; going on without it");
     return false;
 }
-}
 
 /// (the one rule, so every path that would retire the chain agrees) may this swapchain be let go
 /// and made again now? The presenter thread copies the image index and the chain at the hand-off
