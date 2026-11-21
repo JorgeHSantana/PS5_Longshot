@@ -8,6 +8,7 @@ are those positions (press[7], press[5]), RX_VK_MENU_SCRIPT's PADS/PADE/PADW/PAD
 link answers to confirm (Enter, A, a click) and back (Esc, B): Motion, Controls, and the debug tools' rows on the Debug tab,
 whose Teleport and Inventory open the map list and the inventory, which go back to the tab. The prompts light the same buttons.
 The real keyboard polling block is also compiled to exercise both shortcut keys with queued presses and with polling.
+The Controls confirmation block and its rebind helper run against test bindings and the real toggle and save helpers.
 With it, menu_tick's Esc block, gpu/vk/vk_menu.h's real Options and the Menu shortcut row's names: out of the box (no
 options file, or one without menu_shortcut=) the shortcut is "Insert, F1 or Esc", and Esc opens a closed menu, as a PC
 game's pause menu, without that press also going back a page; open, the press is left to go back or close it. And
@@ -33,8 +34,8 @@ RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 ROOT = Path(__file__).resolve().parents[1]
 
 FIXTURE = r'''#include "gpu/vk/vk_menu_keys.h"
+#include "gpu/vk/vk_menu_hit.h"
 #include "gpu/vk/monitor_choice.h"
-// API_ENUMS
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -51,6 +52,7 @@ FIXTURE = r'''#include "gpu/vk/vk_menu_keys.h"
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
+// API_ENUMS
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); std::exit(1); } } while (0)
 using namespace mkwvk::menu_keys;
 namespace monitor_choice = mkwvk::monitor_choice;
@@ -63,12 +65,105 @@ static void expect(int a, int b, int confirm, int back, int line) {
     }
 }
 // KEYBOARD_FIXTURE
+using enum mkwvk::menu_hit::CtlColumn;
+namespace menu_hit = mkwvk::menu_hit;
+constexpr int kControls = 6;
+static int top_rows() { return 2; }
+static unsigned reset_rows = 0b100001;
+static bool control_column_enabled(int row, int col) {
+    if (col == kCtlReset) return (reset_rows >> row) & 1;
+    if (col == kCtlToggle) return row != 2 && row != 3;
+    return true;
+}
+// CONTROL_NAVIGATION
+// CONFIRMATION_STATE
+static struct { int button; } controls[kControls] = {{HOS_SW_A}, {HOS_SW_B}};
+static int blocked_reset_row = -1;
+// REBIND_CONTROL
+
+static bool answer_controls(bool back = false, bool confirm = false, bool select = false, int click = -1) {
+    [[maybe_unused]] bool press[18] = {};
+    press[5] = back;
+    press[7] = confirm;
+    press[4] = select;
+    bool changed = false;
+    const bool mouse = click >= 0, moved = false;
+    const float mx = click == 1 ? 30 : 10, my = 10;
+    MkwVkPointer ptr{};
+    menu_hit::Map hits;
+    if (mouse) {
+        hits.clear(0, 0, 40, 20);
+        hits.add(0, 0, 20, 20, menu_hit::kButton, 0);
+        hits.add(20, 0, 40, 20, menu_hit::kButton, 1);
+        ptr.pressed = HOS_MOUSE_LEFT;
+    }
+    // CONFIRMATION_BRANCH
+    return changed;
+}
+
+static void test_confirmations() {
+    host = &queue_host;
+    host->version = 44;
+    opts = Options{};
+    reset_rows = 0b11;
+    binding_a = 'T';
+    binding_b = 'X';
+    toggle_set(HOS_SW_A, true);
+    toggle_set(HOS_SW_B, true);
+    control_confirmation = {ControlAction::ResetRow, 0};
+    CHECK(!answer_controls());
+    CHECK(control_confirmation.action == ControlAction::ResetRow);
+    CHECK(answer_controls(false, true));   // Enter on the default Cancel.
+    CHECK(control_confirmation.action == ControlAction::None && binding_a == 'T' && toggle_on(HOS_SW_A));
+    control_confirmation = {ControlAction::ResetRow, 0};
+    CHECK(answer_controls(false, false, true));
+    CHECK(control_confirmation.choice == 1 && binding_a == 'T');
+    CHECK(answer_controls(false, true));
+    CHECK(binding_a == 'E' && !toggle_on(HOS_SW_A) && binding_b == 'X' && toggle_on(HOS_SW_B));
+
+    binding_a = 'T';
+    binding_b = 'E';
+    toggle_set(HOS_SW_A, true);
+    control_confirmation = {ControlAction::ResetRow, 0};
+    CHECK(answer_controls(false, false, false, 1));
+    CHECK(blocked_reset_row == 0 && binding_a == 'T' && binding_b == 'E' && toggle_on(HOS_SW_A));
+
+    toggle_set(HOS_KEY_SPRINT, true);
+    control_confirmation = {ControlAction::ResetAll};
+    CHECK(answer_controls(false, false, false, 0));   // Click Cancel.
+    CHECK(binding_a == 'T' && binding_b == 'E' && toggle_on(HOS_SW_A) && toggle_on(HOS_KEY_SPRINT));
+    control_confirmation = {ControlAction::ResetAll};
+    CHECK(answer_controls(false, false, false, 1));
+    CHECK(binding_a == 'E' && binding_b == 'V' && !opts.hold_toggle && !host_sprint_toggle && !opts.sprint_toggle);
+
+    rebind_control(0, HOS_BIND_KEY, 0, 'V');
+    CHECK(control_confirmation.action == ControlAction::Rebind);
+    CHECK(control_confirmation.conflicts == (UINT64_C(1) << HOS_SW_B) && binding_a == 'E' && binding_b == 'V');
+    CHECK(answer_controls(false, false, true));   // Esc cancels even with Rebind selected.
+    CHECK(answer_controls(true));
+    CHECK(control_confirmation.action == ControlAction::None && binding_a == 'E' && binding_b == 'V');
+    rebind_control(0, HOS_BIND_KEY, 0, 'V');
+    CHECK(answer_controls(false, false, false, 1));
+    CHECK(control_confirmation.action == ControlAction::None && binding_a == 'V' && binding_b == 0);
+    std::puts("PASS: row reset, Reset All and conflict rebind obey the dialog's answer");
+}
+
 int main(int argc, char** argv) {
     CHECK(argc == 2);   // (the options file to write: in the test's own folder)
     ini_file = argv[1];
     test_keyboard();
     test_esc();
     test_saved();
+    CHECK(next_control_selection(3, kCtlToggle, 1) == 6);   // two disabled Toggle cells
+    CHECK(next_control_selection(6, kCtlToggle, -1) == 3);
+    CHECK(next_control_selection(2, kCtlReset, 1) == 7);    // four disabled Reset cells
+    CHECK(next_control_selection(7, kCtlReset, -1) == 2);
+    CHECK(next_control_selection(7, kCtlReset, 1) == 2);    // wrap in the same column
+    reset_rows = 1;
+    CHECK(next_control_selection(2, kCtlReset, 1) == 2);    // no other enabled cell
+    CHECK(next_control_selection(7, kCtlKeyboard, 1) == 8); // Reset to defaults still reachable
+    CHECK(next_control_selection(8, kCtlKeyboard, 1) == 0); // Layout preset still reachable
+    test_confirmations();
     expect(kEast, kSouth, kEast, kSouth, __LINE__);    // (Nintendo, the default: A right, B bottom)
     expect(kSouth, kEast, kSouth, kEast, __LINE__);    // (Xbox / PC)
     expect(kWest, kNorth, kWest, kNorth, __LINE__);    // (bound by hand elsewhere on the face)
@@ -82,7 +177,12 @@ int main(int argc, char** argv) {
             int c, k;
             confirm_back(a, b, &c, &k);
             CHECK(c >= kSouth && c <= kNorth && k >= kSouth && k <= kNorth && c != k);
+            const int clear = paste(c, k);
+            CHECK(clear >= kSouth && clear <= kNorth && clear != c && clear != k);
         }
+    CHECK(paste(kEast, kSouth) == kNorth);
+    CHECK(paste(kNorth, kEast) == kWest);
+    CHECK(paste(kNorth, kWest) == kEast);
     CHECK(dot(kSouth) == 3 && dot(kEast) == 1 && dot(kWest) == 2 && dot(kNorth) == 0);
     std::printf("PASS: confirm and back follow A and B\n");
 }
@@ -122,8 +222,30 @@ static bool take_key_press(int key) {
     return true;
 }
 static int host_sprint_toggle;
-static void bind_test(int set, int, int, int value) { if (set == HOS_BIND_SPRINT_TOGGLE) host_sprint_toggle = value; }
-static int binding_test(int set, int, int) { return set == HOS_BIND_SPRINT_TOGGLE ? host_sprint_toggle : -1; }
+static int binding_a = 'E', binding_b = 'V';
+static void bind_test(int set, int button, int, int value) {
+    if (set == HOS_BIND_SPRINT_TOGGLE) host_sprint_toggle = value;
+    if (set == HOS_BIND_PAD && button == -1) binding_a = 'E', binding_b = 'V';
+}
+static int binding_test(int set, int button, int slot) {
+    if (set == HOS_BIND_SPRINT_TOGGLE) return host_sprint_toggle;
+    if (set == HOS_BIND_KEY && slot == 0) return button == HOS_SW_A ? binding_a : button == HOS_SW_B ? binding_b : 0;
+    return -1;
+}
+static int reset_binding_test(int button) {
+    CHECK(button == HOS_SW_A);
+    if (binding_b == 'E') return 0;
+    binding_a = 'E';
+    return 1;
+}
+static int rebind_test(int set, int button, int slot, int code, uint64_t approved, uint64_t* conflicts) {
+    CHECK(set == HOS_BIND_KEY && button == HOS_SW_A && slot == 0 && code == 'V');
+    const uint64_t owner = UINT64_C(1) << HOS_SW_B;
+    if (binding_b == code && approved != owner) { *conflicts = owner; return 0; }
+    binding_a = code;
+    binding_b = 0;
+    return 1;
+}
 static struct {
     int version;
     void (*bind)(int, int, int, int);
@@ -133,7 +255,10 @@ static struct {
     void (*audio_output_select)(const char*);
     void (*monitor_select)(const char*);
     int (*binding)(int, int, int);
-} queue_host{40, bind_test, take_key_press, nullptr, nullptr, nullptr, nullptr, binding_test}, *host;
+    int (*reset_binding)(int);
+    int (*rebind_control)(int, int, int, int, uint64_t, uint64_t*);
+} queue_host{40, bind_test, take_key_press, nullptr, nullptr, nullptr, nullptr, binding_test,
+             reset_binding_test, rebind_test}, *host;
 
 static bool keyboard_toggle(int mode, int key, bool queued, bool has_focus = true) {
     opts.menu_shortcut = mode;
@@ -179,6 +304,7 @@ static int cur_tab, tab_selected[2];
 [[maybe_unused]] static int warp_warning_action;
 static bool changed, tune_mode;   // (tune_mode: the compact bar, open; it opens when its key is held as the menu opens)
 static bool compact_key_held;     // (menu_tick's tune_down: Right Shift, or Right Ctrl, held)
+static std::mutex options_save_mu;
 struct { unsigned w; } output_preview_target{};
 int output_preview_countdown;
 void answer_native_preview(bool) { CHECK(false); }   // This fixture opens and closes the normal menu.
@@ -208,6 +334,7 @@ static bool tick_key(const Options& o, int key, bool queued, bool open_before, b
     open_now = open_before;
     page = 0, listening = 0, changed = false, tune_mode = false;
     const bool tune_down = compact_key_held;
+    MkwVkPointer ptr{};
     auto later = [] {};
     // ESC_BLOCK
     CHECK(changed == (open_now.load() != open_before) && page == 0 && listening == 0);
@@ -375,12 +502,14 @@ def main():
     api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
     # The public header pulls in C-only NVN assertions; use its real enums as test_pad_layout does.
     enums = [re.search(r"enum \{ " + first + r"\b.*?\};", api, re.S).group(0)
-             for first in ("HOS_SW_A", "HOS_KEY_MOVE_UP", "HOS_OPT_HOLD_TOGGLE", "HOS_OPT_SPRINT_TOGGLE", "HOS_BIND_PAD")]
+             for first in ("HOS_SW_A", "HOS_KEY_MOVE_UP", "HOS_OPT_HOLD_TOGGLE", "HOS_OPT_SPRINT_TOGGLE", "HOS_BIND_PAD",
+                           "HOS_MOUSE_LEFT")]
+    enums.append(re.search(r"typedef struct MkwVkPointer \{.*?\} MkwVkPointer;", api, re.S).group(0))
     tick = menu[menu.index("void menu_tick() {"):]
     key_poll = tick[tick.index("    enum { K_N ="):tick.index("    // (longshot) the gamepads")]
     esc_at = tick.index("    const bool esc_opens")
-    # (the Esc block ends where the keys' branches begin: the text field's first, as the Insert menu's text fields have it)
-    esc_block = tick[esc_at:tick.index("    if (comparing) {", esc_at)]
+    # The shortcut fixture stops before the Controls confirmation's cleanup.
+    esc_block = tick[esc_at:tick.index("    if (control_confirmation.action", esc_at)]
     tx_at = menu.index("const char* tx_menu_shortcut(int v) {")
     tx = menu[tx_at:menu.index("\n}\n", tx_at) + 3]
     header = (ROOT / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")
@@ -416,7 +545,11 @@ def main():
                 .replace("    // RESET_CONTROLS", reset_controls)
                 .replace("// TOGGLE_OPTION", toggle_option).replace("    // LOAD_OPTIONS", load)
                 .replace("SAVED_VERSION", saved_version.group(1)).replace("ESC_FROM", esc_from.group(1)))
-    fixture = FIXTURE.replace("// API_ENUMS", "\n".join(enums)).replace("// KEYBOARD_FIXTURE", keyboard)
+    fixture = (FIXTURE.replace("// API_ENUMS", "\n".join(enums)).replace("// KEYBOARD_FIXTURE", keyboard)
+               .replace("// CONTROL_NAVIGATION", block(menu, "int next_control_selection("))
+               .replace("// CONFIRMATION_STATE", menu[menu.index("enum class ControlAction"):menu.index("bool control_column_enabled(")])
+               .replace("// REBIND_CONTROL", block(menu, "void rebind_control(int row,"))
+               .replace("// CONFIRMATION_BRANCH", block(tick, "else if (control_confirmation.action != ControlAction::None)").removeprefix("else ")))
     with tempfile.TemporaryDirectory(prefix="menu-keys-") as tmp:
         cpp, exe = Path(tmp) / "fixture.cpp", Path(tmp) / "fixture"
         cpp.write_text(menu_model_prelude() + fixture.replace("// MODEL_MEMBER", menu_model_member()), encoding="utf-8")
@@ -427,10 +560,26 @@ def main():
 
     need(menu, r'\{TAB_CONTROLS, "Menu shortcut", &opts\.menu_shortcut, 0, 2, 1, tx_menu_shortcut,[^}]*nullptr, false, true\}',
          "the shortcut choice must be saved in Controls and exempt from presets")
-    need(menu, r"const bool disabled = .*toggle && !has_toggle\(ctl.button\)",
+    need(block(menu, "bool control_column_enabled("),
+         r"if \(col == kCtlToggle\) return has_toggle\(controls\[row\]\.button\);",
          "Plus and Minus must have disabled Toggle cells")
-    need(tick, r"const int columns = .*?has_toggle\(controls\[i\].button\)",
+    need(menu, r"const bool disabled = !control_column_enabled\(i, col\);",
+         "Controls cells must use the same enabled columns as keyboard navigation")
+    need(block(menu, "bool control_column_enabled("),
+         r"\(has_toggle\(button\) && toggle_on\(button\)\) \|\| !host->binding_is_default\(button\)",
+         "a row at its binding defaults must be resettable only if its supported Toggle is on")
+    need(block(menu, "void draw_controls("), r"if \(!disabled\) hits.add\([^;]+kCtlCell",
+         "disabled Toggle and Reset cells must not appear in the hit map")
+    need(tick, r"const bool cell = hit.part == menu_hit::kCtlCell && control_column_enabled\(hit.index, hit.side\);",
+         "mouse hit handling must recheck already-rendered cells")
+    need(tick, r"next_control_selection\(csel, ccol, press\[1\] \? -1 : 1\)",
+         "vertical navigation must use the column-aware row selection")
+    need(tick, r"while \(!control_column_enabled\(i, ccol\)\);",
          "keyboard navigation must skip Plus and Minus Toggle cells")
+    need(tick, r"if \(i == kControls\) control_confirmation = \{ControlAction::ResetAll\};",
+         "Reset to defaults must ask first")
+    need(tick, r"else if \(col == kCtlReset\) control_confirmation = \{ControlAction::ResetRow, i\};",
+         "Reset for a single row must ask first")
     # (Insert, F1 or Esc: Esc on a closed menu opens it, and that press does not also go back a page)
     need(tick, r"const bool esc_opens = opts\.menu_shortcut == 2 && press\[5\] && !open_now\.load\(\);\s*"
                r"if \(esc_opens\) press\[5\] = false;", "Esc does not open a closed menu with the Esc shortcut")
@@ -445,6 +594,12 @@ def main():
         raise SystemExit("FAIL: vk_menu.cpp: a fixed face button still confirms or goes back")
     need(tick, r'"PADS", "PADE", "PADW", "PADN".*?press\[5\] \|= p == pad_back, press\[7\] \|= p == pad_confirm',
          "RX_VK_MENU_SCRIPT's pad presses do not go through the same mapping")
+    need(tick, r"const bool can_clear_control = page == 1 && listening == 0 && control_confirmation\.action == ControlAction::None;",
+         "controller Clear must be limited to the idle Controls grid")
+    need(tick, r"press\[8\] \|= can_clear_control && pad\(pad_paste\);", "controller Clear must use the spare face button")
+    need(tick, r"press\[8\] \|= can_clear_control && p == pad_paste;", "scripted controller Clear must use the same mapping")
+    need(menu, r'\{ui::kClear, "Clear"\}', "the Controls footer must show the controller Clear prompt")
+    need(menu, r"c\.paste_dot = menu_keys::dot\(pad_paste\)", "the Clear glyph must use the mapped face button")
     # (the page links on the tabs: confirm opens them)
     need(tick, r"else if \(r\.cheat >= 0\) cheat_press\(r\.cheat, press, changed\)", "the debug tools' rows do not act on the Debug tab")
     need(tick, r"press\[7\] && is_motion_row\(r\)\) cur_tab = TAB_MOTION", "Motion does not open on confirm")

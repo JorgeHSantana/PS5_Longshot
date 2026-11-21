@@ -76,6 +76,9 @@ const char *hos_nfc_dir(void);
 int hos_nfc_scan(int start);
 const char *hos_nfc_scan_name(void);
 void hos_bind(int set, int button, int slot, int code);
+int hos_reset_binding(int button);
+int hos_binding_is_default(int button);
+int hos_rebind_control(int set, int button, int slot, int code, uint64_t approved, uint64_t *conflicts);
 int hos_prompts_face(void);         /* prompts.c */
 int hos_prompts_live_parts(void);   /* prompts.c */
 const char *hos_perf_info(char *map, int cap, int64_t movie[5], float pose[5], int *has_pose);   /* hos_main.c */
@@ -506,6 +509,9 @@ static const MkwVkHost vk_host = {
     nvn_output_preview_request,
     host_input_record, host_input_play, host_input_status,   /* (version 42, longshot: input recordings, host/input_movie.c) */
     hos_input_recording_at,
+    hos_reset_binding,
+    hos_rebind_control,
+    hos_binding_is_default,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */

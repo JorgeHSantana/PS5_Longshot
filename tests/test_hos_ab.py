@@ -375,7 +375,7 @@ def wiring_checks():
     if "hos_ab_frame" not in names or names[names.index("hos_ab_frame") + 1:] != [
             "hos_mod_info", "hos_mod_edit", "hos_mods_changed", "hos_cheat_info", "hos_cheat_set",
             "host_ab_value", "nvn_output_preview_request", "host_input_record", "host_input_play", "host_input_status",
-            "hos_input_recording_at"]:
+            "hos_input_recording_at", "hos_reset_binding", "hos_rebind_control", "hos_binding_is_default"]:
         fail("host/rx_backend.c: vk_host does not have hos_ab_frame (MkwVkHost.ab_frame, version 34) right before the "
              "Mods tab's functions, and host_ab_value (ab_value, version 36) after them")
     if "static int host_ab_value(const char *name, int normal) { return hos_ab_value(name, normal); }" not in backend:
@@ -390,7 +390,8 @@ def wiring_checks():
             not re.search(r"int \(\*output_preview_request\)\(uint32_t width, uint32_t height\);\n    /\* \(version 42, longshot\)"
                           r".*?\*/\n    int \(\*input_record\)\(int start\);\n    int \(\*input_play\)\(int start, int sync, const char \*path\);\n"
                           r"    void \(\*input_status\)\(MkwVkInputStatus \*out\);\n"
-                          r"    int \(\*input_recording\)\(int i, char \*out, size_t cap\);\n\} MkwVkHost;", api, re.S):
+                          r"    int \(\*input_recording\)\(int i, char \*out, size_t cap\);\n"
+                          r"    /\* Version 43: restore one control's default bindings", api, re.S):
         fail("gpu/vk/vk_api.h: MkwVkHost does not have ab_frame at version 34 right before the Mods tab's functions, and "
              "ab_value (version 36) before the output preview callback")
     replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")

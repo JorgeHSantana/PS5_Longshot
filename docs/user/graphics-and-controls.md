@@ -345,8 +345,14 @@ over any gameplay action on the same key or button.
 
 **Change a binding** on the Controls tab's **Controls** page: choose a row and a column (Gamepad or Keyboard), press
 <kbd>Enter</kbd> (or the bottom face button), then the new button or key. <kbd>Esc</kbd> cancels, <kbd>Delete</kbd>
-clears it, and **Reset to defaults** puts them all back. A gamepad button taken from another Switch button swaps with
-it. The **Toggle** column makes a Switch button stay held from one press to the next, and Sprint run from one press to
+clears it. With a controller, use the face button shown next to **Clear**. Use the curved arrow at the end of a row
+to restore that control's default gamepad and keyboard
+bindings and turn off its Toggle. The arrow is disabled when the row already matches its defaults. Up and Down skip
+unavailable Toggle cells and reset buttons. If another control already uses a required input, free it
+first. **Reset to defaults** at the bottom
+restores all controls together. Both resets ask for confirmation. If a new binding is already in use, the menu names
+the input and the affected control. Confirm to remove the old assignment and apply the new one. The **Toggle** column
+makes a Switch button stay held from one press to the next, and Sprint run from one press to
 the next instead of while held, when the Controls tab's Sprint setting is On. The five note rows (the
 instrument's notes) are unset until you bind them to inputs of your own.
 

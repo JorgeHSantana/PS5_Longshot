@@ -815,6 +815,133 @@ void hos_bind(int set, int button, int slot, int code) {
     } else ReleaseSRWLockExclusive(&input_bind_lock);
 }
 
+int hos_rebind_control(int set, int button, int slot, int code, uint64_t approved, uint64_t *conflicts) {
+    *conflicts = 0;
+    if (button < 0 || button >= HOS_KEY_N || slot < 0 || slot > 1) return 0;
+    if (set == HOS_BIND_PAD) {
+        if (!has_pad(button) || code < 0 || code >= HOS_PAD_N) return 0;
+    } else if (set != HOS_BIND_KEY || code <= 0 || code > 255 || (is_note_row(button) && is_mouse_vk(code))) return 0;
+
+    binds_load();
+    AcquireSRWLockExclusive(&input_bind_lock);
+    /* Match the normal sharing rules. The Controls dialog authorizes removal, not a gamepad swap. */
+    const int shared = set == HOS_BIND_PAD ? !pad_swaps(button) : is_note_row(button) || button == HOS_KEY_TOGGLE_HUD;
+    if (!shared) {
+        for (int i = 0; i < HOS_KEY_N; i++) {
+            if (i == button) continue;
+            if (set == HOS_BIND_PAD ? pad_swaps(i) && (pad_bind[i][0] == code || pad_bind[i][1] == code)
+                                    : !is_note_row(i) && i != HOS_KEY_TOGGLE_HUD &&
+                                      (key_bind[i][0] == code || key_bind[i][1] == code))
+                *conflicts |= UINT64_C(1) << i;
+        }
+    }
+    if (*conflicts && *conflicts != approved) {
+        ReleaseSRWLockExclusive(&input_bind_lock);
+        return 0;
+    }
+    if (set == HOS_BIND_PAD) {
+        for (int i = 0; i < HOS_KEY_N; i++) {
+            if (!(*conflicts >> i & 1)) continue;
+            if (pad_bind[i][0] == code) {
+                const int alternate = pad_bind[i][1];
+                bind_one(HOS_BIND_PAD, i, 0, -1);
+                bind_one(HOS_BIND_PAD, i, 1, -1);
+                if (alternate >= 0 && alternate != code) {
+                    AcquireSRWLockExclusive(&pad_bind_lock);
+                    pad_bind[i][0] = alternate;
+                    ReleaseSRWLockExclusive(&pad_bind_lock);
+                }
+            } else bind_one(HOS_BIND_PAD, i, 1, -1);
+        }
+        /* Moving between slots of the same row also leaves only one copy. */
+        if (!shared && pad_bind[button][1 - slot] == code)
+            bind_one(HOS_BIND_PAD, button, 1 - slot, -1);
+        bind_one(set, button, slot, code);
+    } else {
+        bind_one(set, button, 0, code);
+        bind_one(set, button, 1, 0);
+    }
+    ReleaseSRWLockExclusive(&input_bind_lock);
+    return 1;
+}
+
+/* Call with the input and pad binding locks held. */
+static void binding_defaults(int button, int flags, int *pad, int *key_first, int *key_second) {
+    const int sprint = HOS_KEY_SPRINT, enabled = (int)sprint_on;
+    int primary = button < HOS_SW_N ? pad_default[button] : -1;
+    int first = key_default[button][0], second = key_default[button][1];
+    if (enabled && button == sprint) primary = HOS_PAD_LSTICK, first = VK_SHIFT;
+    if (enabled && button == HOS_SW_B &&
+        ((flags & HOS_SPRINT_AUTO_B) || key_bind[sprint][0] == VK_SHIFT || key_bind[sprint][1] == VK_SHIFT))
+        first = 'V';
+    if (enabled && button == HOS_SW_LS &&
+        (pad_bind[sprint][0] == HOS_PAD_LSTICK || pad_bind[sprint][1] == HOS_PAD_LSTICK))
+        primary = -1;
+    *pad = primary;
+    *key_first = first;
+    *key_second = second;
+}
+
+int hos_binding_is_default(int button) {
+    if (button < 0 || button >= HOS_KEY_N) return 1;
+    binds_load();
+    AcquireSRWLockShared(&input_bind_lock);
+    const int flags = button == HOS_SW_B && sprint_on ? sprint_auto_valid((int)sprint_auto) : 0;
+    AcquireSRWLockShared(&pad_bind_lock);
+    int primary, first, second;
+    binding_defaults(button, flags, &primary, &first, &second);
+    const int is_default = pad_bind[button][0] == primary && pad_bind[button][1] == -1 &&
+                           key_bind[button][0] == first && key_bind[button][1] == second;
+    ReleaseSRWLockShared(&pad_bind_lock);
+    ReleaseSRWLockShared(&input_bind_lock);
+    return is_default;
+}
+
+int hos_reset_binding(int button) {
+    if (button < 0 || button >= HOS_KEY_N) return 0;
+    binds_load();
+    AcquireSRWLockExclusive(&input_bind_lock);
+    int flags = sprint_auto_valid((int)sprint_auto);
+    AcquireSRWLockExclusive(&pad_bind_lock);
+    int primary, first, second;
+    binding_defaults(button, flags, &primary, &first, &second);
+
+    /* A reset owns just this row. Check all defaults before writing any slot. Notes and HUD shortcuts intentionally share inputs. */
+    for (int i = 0; i < HOS_KEY_N; i++) {
+        if (i == button) continue;
+        for (int slot = 0; slot < 2; slot++) {
+            const int key = key_bind[i][slot];
+            if ((primary >= 0 && pad_swaps(i) && pad_bind[i][slot] == primary) ||
+                (key && (key == first || key == second) && !is_note_row(i) && i != HOS_KEY_TOGGLE_HUD)) {
+                ReleaseSRWLockExclusive(&pad_bind_lock);
+                ReleaseSRWLockExclusive(&input_bind_lock);
+                return 0;
+            }
+        }
+    }
+    pad_bind[button][0] = primary;
+    pad_bind[button][1] = -1;
+    InterlockedExchange(&key_bind[button][0], first);
+    InterlockedExchange(&key_bind[button][1], second);
+    if (button == HOS_SW_LS && (flags & HOS_SPRINT_AUTO_PAD))
+        flags &= HOS_SPRINT_AUTO_KEY | HOS_SPRINT_AUTO_B | HOS_SPRINT_AUTO_PAD;   /* LS no longer has an alternate to restore */
+    if (button == HOS_KEY_SPRINT) {
+        flags &= HOS_SPRINT_AUTO_B;
+        if (sprint_on) {
+            flags |= HOS_SPRINT_AUTO_KEY;
+            if (pad_bind[HOS_SW_LS][1] < 0)
+                flags |= HOS_SPRINT_AUTO_PAD | ((pad_bind[HOS_SW_LS][0] + 1) << HOS_SPRINT_AUTO_LS_SHIFT);
+        }
+        InterlockedExchange(&sprint_reset_pending, 1);
+    }
+    ReleaseSRWLockExclusive(&pad_bind_lock);
+    InterlockedExchange(&sprint_auto, sprint_auto_valid(flags));
+    if (button == HOS_KEY_TOGGLE_HUD) __atomic_add_fetch(&hud_bind_generation, 1, __ATOMIC_RELEASE);
+    hos_input_clear_toggles();
+    ReleaseSRWLockExclusive(&input_bind_lock);
+    return 1;
+}
+
 /* The shortcut owns its physical inputs. Keep the other assignments so clearing the shortcut restores them.
    Call with pad_bind_lock held. */
 static uint64_t hud_pad_mask(void) {

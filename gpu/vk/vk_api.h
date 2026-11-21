@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 42   /* (40: HOS_BIND_SPRINT_TOGGLE; 41: live output preview; 42: input recordings) */
+#define MKWVK_API_VERSION 44   /* (42: input recordings; 43: reset and rebind; 44: binding_is_default) */
 
 enum { OUTPUT_TRIAL_EXPIRED, OUTPUT_TRIAL_PREPARING, OUTPUT_TRIAL_READY, OUTPUT_TRIAL_ACTIVE, OUTPUT_TRIAL_SHOWN };
 enum { HOS_MONITOR_CURRENT = 1, HOS_MONITOR_PRIMARY = 2 };
@@ -404,6 +404,13 @@ typedef struct MkwVkHost {
     int (*input_play)(int start, int sync, const char *path);
     void (*input_status)(MkwVkInputStatus *out);
     int (*input_recording)(int i, char *out, size_t cap);
+    /* Version 43: restore one control's default bindings. Returns 0 if another row owns a needed input. */
+    int (*reset_binding)(int button);
+    /* Version 43: apply the Controls menu's rebind only if the conflicting rows match approved.
+       On conflict, return 0 and report a bit per affected HOS_KEY_* or HOS_SW_* row. */
+    int (*rebind_control)(int set, int button, int slot, int code, uint64_t approved, uint64_t *conflicts);
+    /* Version 44: whether the row's bindings match its current reset defaults. */
+    int (*binding_is_default)(int button);
 } MkwVkHost;
 /* (version 35) a cheat's kind: a heading (no opcodes), a data cheat (switched), a master cheat (always on), not supported (note) */
 enum { MKWVK_CHEAT_HEADING, MKWVK_CHEAT_DATA, MKWVK_CHEAT_MASTER, MKWVK_CHEAT_UNSUPPORTED };

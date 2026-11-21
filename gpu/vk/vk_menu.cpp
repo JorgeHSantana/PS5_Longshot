@@ -1644,11 +1644,46 @@ const std::vector<int>& bindable_keys() {
 int page = 0;          // 0 the options, 1 the controls, 3 the teleport list, 4 the inventory, 5 the restart question (2: was the
                        // debug tools' own page, now on the Debug tab)
 int csel = 0, ccol = menu_hit::kCtlPrimary;   // the page's row (options, then bindings and reset) and binding column
+int blocked_reset_row = -1;
+
+enum class ControlAction { None, Rebind, ResetRow, ResetAll };
+struct ControlConfirmation {
+    ControlAction action = ControlAction::None;
+    int row = -1, set = 0, slot = 0, code = 0, choice = 0;
+    uint64_t conflicts = 0;
+};
+ControlConfirmation control_confirmation;
+
+bool control_column_enabled(int row, int col) {
+    using enum menu_hit::CtlColumn;
+    if (col == kCtlReset) {
+        const int button = controls[row].button;
+        return host && host->version >= 44 && host->reset_binding && host->binding_is_default &&
+               ((has_toggle(button) && toggle_on(button)) || !host->binding_is_default(button));
+    }
+    if (col == kCtlToggle) return has_toggle(controls[row].button);
+    return col == kCtlKeyboard || !keys_only(row);
+}
 // (Layout preset and Button prompts: a preset shows in the grid at once. Counted the first time it is asked, not while the
 // DLL starts: the rows are built then, after every module registered)
 int top_rows() {
     static const int n = tab_row_count(TAB_PAGE);
     return n;
+}
+int next_control_selection(int selection, int col, int direction) {
+    using enum menu_hit::CtlColumn;
+    const int first = top_rows(), row = selection - first;
+    if (row < 0 || row >= kControls || (col != kCtlToggle && col != kCtlReset)) {
+        const int count = first + kControls + 1;
+        return (selection + count + direction) % count;
+    }
+    // Stay in this column on binding rows, wrapping past the ends of the grid.
+    int next = row;
+    for (int step = 1; step < kControls; ++step) {
+        next = (next + kControls + direction) % kControls;
+        if (control_column_enabled(next, col)) return first + next;
+    }
+    return selection;
 }
 int listening = 0;     // waiting for the new input: 1 a gamepad's, 2 a key
 bool listen_armed = false;   // (once what started it was let go)
@@ -2761,6 +2796,19 @@ void draw_tune_bar(ui::Ctx& c) {
     ui::prompts(c, ImVec2(px0, by1 - 32 * s), tune_prompts, 4, true);
 }
 
+void draw_reset_arrow(ui::Ctx& c, ImVec2 centre, ImU32 ink) {
+    const float start = 4.06f, end = -0.92f;   // screen angles, leaving a gap at the top
+    const float radius = 7.5f * c.s;
+    const ImVec2 radial(std::cos(end), std::sin(end));
+    const ImVec2 tangent(radial.y, -radial.x);
+    const ImVec2 head = centre + radial * radius;
+    c.d->PathArcTo(centre, radius, start, end, 20);
+    c.d->PathStroke(ink, ImDrawFlags_None, std::max(1.0f, 1.8f * c.s));
+    const ImVec2 base = head - tangent * (3.0f * c.s);
+    const ImVec2 wing = radial * (3.3f * c.s);
+    c.d->AddTriangleFilled(head + tangent * (3.3f * c.s), base + wing, base - wing, ink);
+}
+
 void draw_controls(ui::Ctx& c) {
     using enum menu_hit::CtlColumn;
     // (the page's own rows first, top_rows() of them (the layout preset, the button prompts), then a row per control and Reset to
@@ -2771,10 +2819,13 @@ void draw_controls(ui::Ctx& c) {
     columns(c, &cx0, &cx1, &hx0, &hx1, &narrow);
     column(c, cx0, cx1, hh);
     const int n = top_rows() + kControls + 1, sel_i = csel - top_rows();   // (sel_i: the control's, kControls Reset; negative: a page row)
-    const ui::Prompt idle[] = {{ui::kUpDown, "Choose"}, {ui::kLeftRight, "Column"}, {ui::kConfirm, "Bind"}, {ui::kKey, "Clear", "Del"},
+    const int selected_col = sel_i >= 0 && sel_i < kControls && !control_column_enabled(sel_i, ccol) ? kCtlKeyboard : ccol;
+    const ui::Prompt idle[] = {{ui::kUpDown, "Choose"}, {ui::kLeftRight, "Column"}, {ui::kConfirm, "Bind"}, {ui::kClear, "Clear"},
                                {ui::kBack, "Back"}};
     const ui::Prompt option[] = {{ui::kUpDown, "Choose"}, {ui::kLeftRight, "Change"}, {ui::kBack, "Back"}};
     const ui::Prompt wait[] = {{ui::kBack, "Cancel"}};
+    const ui::Prompt reset[] = {{ui::kUpDown, "Choose"}, {ui::kLeftRight, "Column"}, {ui::kConfirm, "Reset"},
+                                {ui::kBack, "Back"}};
     const float bar_top = ui::prompt_bar_top(c);   // (the strip itself drawn last, over all: below)
     const Row* page_row = sel_i < 0 ? &rows[tab_row_to_global(TAB_PAGE, csel)] : nullptr;
     const bool l3_sprints = opts.sprint && sel_i >= 0 && sel_i < kControls && controls[sel_i].button == HOS_SW_LS &&
@@ -2785,7 +2836,11 @@ void draw_controls(ui::Ctx& c) {
     const char* title = page_row ? page_row->name : sel_i < kControls ? controls[sel_i].name : "Reset to defaults";
     const char* help = listening ? (listening == 1 ? "Press the gamepad button to use. Esc cancels." : "Press the key to use. Esc cancels.")
                        : page_row ? page_row->help
-                       : sel_i < kControls && controls[sel_i].button == HOS_KEY_SPRINT && ccol == kCtlToggle
+                       : sel_i < kControls && selected_col == kCtlReset
+                           ? (blocked_reset_row == sel_i
+                                  ? "Another control uses one of these defaults. Clear that binding first."
+                                  : "Restore this control's default gamepad and keyboard bindings and turn off its Toggle.")
+                       : sel_i < kControls && controls[sel_i].button == HOS_KEY_SPRINT && selected_col == kCtlToggle
                            ? "Toggle for Sprint: On, a press of its key or button starts Sprint and the next ends it; Off, Link "
                              "sprints only while you hold it. Opening Insert, pressing Plus or Minus or focus loss ends it. Off by "
                              "default."
@@ -2801,8 +2856,8 @@ void draw_controls(ui::Ctx& c) {
                            ? "L3 is assigned to Sprint. Use the inputs shown on this row to press the Switch left stick. "
                              "Enter binds the selected input and Delete clears it."
                        : "Either gamepad input or an assigned key presses the selected Switch button. Enter binds the "
-                             "selected input and Delete clears it. A button's only gamepad input stays with it: it does not move into "
-                             "another's empty Input 2. The game's button icons follow after a restart.";
+                             "selected input and Delete clears it. Confirming a conflict removes the previous binding. "
+                             "The game's button icons follow after a restart.";
     const char* hint = page_row ? (page_row->hint ? page_row->hint(*page_row->value, -1) : nullptr)
                                 : "Gamepad: the D-pad moves, A binds, B goes back. Ocarina note keys are only notes while "
                                   "the ocarina waits for one; away from it they do their other jobs.";
@@ -2816,26 +2871,39 @@ void draw_controls(ui::Ctx& c) {
                  hh + 18 * s, bar_top - 12 * s);
     }
     const float rx0 = cx0 + 44 * s, rx1 = cx1 - 44 * s, width = rx1 - rx0;
-    const float pad_x = rx0 + width * 0.28f, key_x = rx0 + width * 0.64f, toggle_x = rx0 + width * 0.87f;
-    const float col_x[] = {pad_x, (pad_x + key_x) * 0.5f, key_x, toggle_x, rx1};
-    float top = hh + 22 * s;
-    ui::text_mid_centre(c, c.f.body, 15 * s, col_x[kCtlAlternate], top + 8 * s, ui::kDim, "Gamepad");
-    ui::text_mid(c, c.f.body, 15 * s, rx0 + 20 * s, top + 27 * s, ui::kDim, "Button");
-    const char* titles[kCtlColumns] = {"Input 1", "Input 2", "Keyboard", "Toggle"};
-    for (int col = kCtlPrimary; col < kCtlColumns; col++)
-        ui::text_mid_centre(c, c.f.body, 15 * s, (col_x[col] + col_x[col + 1]) * 0.5f, top + 27 * s, ui::kDim, titles[col]);
-    top += 43 * s;
-    const float rh = 36 * s, pitch = 42 * s;
+    const float rh = 36 * s, pitch = 42 * s, gutter = 3 * s;
+    const float action_gap = std::min(8 * s, width * 0.015f);
+    const float reset_side = std::min(rh, width * 0.105f);
+    const float reset_x = rx1 - reset_side;
+    const float bindings_width = reset_x - gutter - action_gap - rx0;
+    const float pad_x = rx0 + bindings_width * (0.27f / 0.895f);
+    const float key_x = rx0 + bindings_width * (0.59f / 0.895f);
+    const float toggle_x = rx0 + bindings_width * (0.79f / 0.895f) + action_gap;
+    const float col_x[] = {pad_x, (pad_x + key_x) * 0.5f, key_x, toggle_x, reset_x - gutter, rx1};
+    const float top = hh + 22 * s, header_height = 43 * s;
     int shown = 0;
-    const float first = scroll_rows(kControlsSlot, n, csel, top, bottom, pitch, &shown);
-    scroll_bar(c, cx0 + 20 * s, top, top + shown * pitch - (pitch - rh), n, shown, first);
+    const float first = scroll_rows(kControlsSlot, n, csel, top + header_height, bottom, pitch, &shown);
+    const float header_top = top + std::max(0.0f, top_rows() - first) * pitch;
+    const float bindings_clip_top = header_top + header_height - 8 * s;
+    scroll_bar(c, cx0 + 20 * s, top, top + header_height + shown * pitch - (pitch - rh), n, shown, first);
     c.d->PushClipRect(ImVec2(cx0, top - 8 * s), ImVec2(cx1, bottom + 8 * s));
+    ui::text_mid_centre(c, c.f.body, 15 * s, col_x[kCtlAlternate], header_top + 8 * s, ui::kDim, "Gamepad");
+    ui::text_mid(c, c.f.body, 15 * s, rx0 + 20 * s, header_top + 27 * s, ui::kDim, "Button");
+    const char* titles[kCtlReset] = {"Input 1", "Input 2", "Keyboard", "Toggle"};
+    for (int col = kCtlPrimary; col < kCtlReset; col++) {
+        const float left = col_x[col];
+        const float right = col_x[col + 1] - (col == kCtlKeyboard ? action_gap : 0.0f);
+        const auto title = fit(c, c.f.body, 15 * s, right - left - 2 * gutter, i18n::tr(titles[col]), false);
+        ui::text_mid_centre(c, c.f.body, 15 * s, (left + right) * 0.5f, header_top + 27 * s, ui::kDim, title.c_str());
+    }
     for (int j = 0; j < n; j++) {
-        const float y = top + (j - first) * pitch;
-        if (y + rh < top - 8 * s || y > bottom + 8 * s) continue;
-        const bool sel = j == csel;
         const int i = j - top_rows();
-        const float y0 = std::max(y, top - 8 * s), y1 = std::min(y + rh, bottom + 8 * s);
+        if (i == 0) c.d->PushClipRect(ImVec2(cx0, bindings_clip_top), ImVec2(cx1, bottom + 8 * s), true);
+        const float clip_top = i < 0 ? top - 8 * s : bindings_clip_top;
+        const float y = top + (j - first) * pitch + (i < 0 ? 0.0f : header_height);
+        if (y + rh <= clip_top || y >= bottom + 8 * s) continue;
+        const bool sel = j == csel;
+        const float y0 = std::max(y, clip_top), y1 = std::min(y + rh, bottom + 8 * s);
         if (i < 0) {   // (one of the page's own rows: a name and a choice, as on the tabs)
             const Row& r = rows[tab_row_to_global(TAB_PAGE, j)];
             // (their names wider than a control's, as wide as the tabs' rows': "Button prompts" whole at any size)
@@ -2846,21 +2914,33 @@ void draw_controls(ui::Ctx& c) {
             continue;
         }
         if (i == kControls) {
-            ui::button(c, ImVec2(rx0, y), ImVec2(pad_x - 8 * s, y + rh), "Reset to defaults", sel);
-            hits.add(rx0, y0, pad_x - 8 * s, y1, menu_hit::kCtlRow, i);
+            const float end = col_x[kCtlKeyboard] - 3 * s;
+            choice_cell(c, ImVec2(rx0, y), ImVec2(end, y + rh), i18n::tr("Reset to defaults"), sel, false, false);
+            hits.add(rx0, y0, end, y1, menu_hit::kCtlRow, i);
             continue;
         }
         const Control& ctl = controls[i];
         name_cell(c, ImVec2(rx0, y), ImVec2(pad_x, y + rh), ctl.name, sel, false, 17, false);   // (its cells stand apart)
         hits.add(rx0, y0, pad_x, y1, menu_hit::kCtlRow, i);
-        const bool keys = keys_only(i);
         for (int col = kCtlPrimary; col < kCtlColumns; col++) {
             const bool keyboard = col == kCtlKeyboard, toggle = col == kCtlToggle;
-            const bool disabled = (keys && !keyboard) || (toggle && !has_toggle(ctl.button));
-            const float a = col_x[col] + (col == kCtlPrimary ? 0 : 3 * s), b = col_x[col + 1] - (toggle ? 0 : 3 * s);
+            const bool disabled = !control_column_enabled(i, col);
+            if (col == kCtlReset) {
+                const float reset_y = y + (rh - reset_side) * 0.5f;
+                const ImVec2 va(reset_x, reset_y), vb(rx1, reset_y + reset_side);
+                const bool here = sel && !disabled && selected_col == kCtlReset;
+                choice_cell(c, va, vb, "", here, false, false, disabled);
+                draw_reset_arrow(c, (va + vb) * 0.5f, here ? ui::kGoldInk : disabled ? ui::kDim : ui::kInk);
+                const float hit_top = std::max(y0, va.y), hit_bottom = std::min(y1, vb.y);
+                if (!disabled && hit_top < hit_bottom)
+                    hits.add(va.x, hit_top, vb.x, hit_bottom, menu_hit::kCtlCell, i, 0, 0, 0, 0, col);
+                continue;
+            }
+            const float a = col_x[col] + (col == kCtlPrimary ? 0 : gutter);
+            const float b = col_x[col + 1] - gutter - (keyboard ? action_gap : 0.0f);
             const std::string v = disabled ? "-" : keyboard ? keys_text(ctl.button) : toggle
                 ? tx_onoff(toggle_on(ctl.button)) : pad_name(host->binding(HOS_BIND_PAD, ctl.button, col));
-            const bool here = sel && col == (keys ? kCtlKeyboard : ccol);
+            const bool here = sel && !disabled && col == selected_col;
             const ImVec2 va(a, y), vb(b, y + rh);
             if (here && listening) {   // (waiting for the new input: amber, the outline as a selected value's)
                 const float in = 4 * s;
@@ -2877,7 +2957,9 @@ void draw_controls(ui::Ctx& c) {
         }
     }
     c.d->PopClipRect();
-    (void)(listening ? ui::prompt_bar(c, wait, 1) : sel_i < 0 ? ui::prompt_bar(c, option, 3) : ui::prompt_bar(c, idle, 5));   // (the prompts, on top of the help and the rows)
+    c.d->PopClipRect();
+    (void)(listening ? ui::prompt_bar(c, wait, 1) : sel_i < 0 ? ui::prompt_bar(c, option, 3) :
+           sel_i == kControls || selected_col == kCtlReset ? ui::prompt_bar(c, reset, 4) : ui::prompt_bar(c, idle, 5));
 }
 
 /// A small square page arrow at a (its size side): dir 0 back, 1 on; dim when it cannot go that way
@@ -3164,24 +3246,70 @@ void draw_quick_debug(ui::Ctx& c) {
     ui::prompt_bar(c, prompts, 4);
 }
 
-void draw_debug_warning(ui::Ctx& c) {
-    const float s = c.s, width = std::min(600 * s, c.w - 2 * c.safe), height = 234 * s;
+void draw_confirmation(ui::Ctx& c, const char* title, const char* message, const char* accept, int choice) {
+    const float s = c.s, width = std::min(600 * s, c.w - 2 * c.safe);
+    const float body = ui::para(c, c.f.body, 18 * s, {}, ui::kInk, message, width - 48 * s, false);
+    const float height = std::max(234 * s, body + 142 * s);
     const ImVec2 a((c.w - width) * .5f, (c.h - height) * .5f), b = a + ImVec2(width, height);
     c.d->AddRectFilled(a, b, ui::kCellDark);
     c.d->AddRect(a, b, ui::kEdge, 0, 2 * s);
     c.d->AddRectFilled(a, ImVec2(b.x, a.y + 48 * s), ui::kBanner);
-    ui::text_mid_centre(c, c.f.heading, 23 * s, (a.x + b.x) * .5f, a.y + 24 * s, ui::kBannerInk, "Enable Debug Tools?");
-    ui::para(c, c.f.body, 18 * s, a + ImVec2(24 * s, 62 * s), ui::kInk,
-             "Debug tools can change your progress. Use a backup save. Enabling Debug tools turns off autosave. "
-             "You can turn it back on in the Debug tab.", width - 48 * s);
-    const char* labels[] = {"Cancel", "Enable Debug Tools"};
+    ui::text_mid_centre(c, c.f.heading, 23 * s, (a.x + b.x) * .5f, a.y + 24 * s, ui::kBannerInk, title);
+    ui::para(c, c.f.body, 18 * s, a + ImVec2(24 * s, 62 * s), ui::kInk, message, width - 48 * s);
+    const char* labels[] = {"Cancel", accept};
     const float button_w = (width - 60 * s) / 2;
     for (int i = 0; i < 2; ++i) {
         const ImVec2 p(a.x + 24 * s + i * (button_w + 12 * s), b.y - 66 * s);
         const ImVec2 q = p + ImVec2(button_w, 42 * s);
-        ui::button(c, p, q, labels[i], i == debug_warning_choice);
+        ui::button(c, p, q, labels[i], i == choice);
         hits.add(p.x, p.y, q.x, q.y, menu_hit::kButton, i);
     }
+}
+
+void draw_debug_warning(ui::Ctx& c) {
+    draw_confirmation(c, "Enable Debug Tools?",
+                      "Debug tools can change your progress. Use a backup save. Enabling Debug tools turns off autosave. "
+                      "You can turn it back on in the Debug tab.", "Enable Debug Tools", debug_warning_choice);
+}
+
+void draw_control_confirmation(ui::Ctx& c) {
+    const auto& ask = control_confirmation;
+    const char* title = "Reset bindings?", *accept = "Reset";
+    std::string message;
+    if (ask.action == ControlAction::ResetAll) {
+        message = i18n::tr("Restore the default bindings and toggles for all controls?");
+    } else {
+        const char* target = i18n::tr(controls[ask.row].name);
+        char text[2048];
+        if (ask.action == ControlAction::ResetRow) {
+            snprintf(text, sizeof text, i18n::tr("Restore the default bindings and toggle for %s?"), target);
+        } else {
+            title = "Binding already in use";
+            accept = "Rebind";
+            const char* input = i18n::tr(ask.set == HOS_BIND_PAD ? pad_name(ask.code) : key_name(ask.code));
+            std::string names;
+            for (const auto& control : controls) {
+                if (!(ask.conflicts >> control.button & 1)) continue;
+                if (!names.empty()) names += ", ";
+                names += i18n::tr(control.name);
+            }
+            snprintf(text, sizeof text, i18n::tr("%s is already bound to %s. Remove that assignment and bind it to %s?"),
+                     input, names.c_str(), target);
+        }
+        message = text;
+    }
+    c.d->AddRectFilled(ImVec2(0, 0), ImVec2(c.w, c.h), ui::rgba(0, 0, 0, 150));
+    hits.clear(0, 0, c.w, c.h);
+    draw_confirmation(c, title, message.c_str(), accept, ask.choice);
+}
+
+void rebind_control(int row, int set, int slot, int code, uint64_t approved = 0) {
+    if (host->version < 43 || !host->rebind_control) return;
+    uint64_t conflicts = 0;
+    if (host->rebind_control(set, controls[row].button, slot, code, approved, &conflicts)) {
+        if (set == HOS_BIND_PAD) opts.pad_layout = detect_pad_layout();
+        save();
+    } else if (conflicts) control_confirmation = {ControlAction::Rebind, row, set, slot, code, 0, conflicts};
 }
 
 void draw_ask(ui::Ctx& c) {
@@ -3282,7 +3410,10 @@ void draw_menu(ui::Ctx& c) {
     hits.clear(0, 0, k.w, k.h);
     if (debug_warning) draw_debug_warning(k);
     else if (page == 5) draw_ask(k);
-    else if (page == 1) draw_controls(k);
+    else if (page == 1) {
+        draw_controls(k);
+        if (control_confirmation.action != ControlAction::None) draw_control_confirmation(k);
+    }
     else if (page == 3) draw_teleport(k);
     else if (page == 4) draw_inventory(k);
     else if (quick_debug && cur_tab == TAB_DEBUG) draw_quick_debug(k);
@@ -4922,9 +5053,11 @@ void menu_tick() {
             }
         }
     }
+    const bool can_clear_control = page == 1 && listening == 0 && control_confirmation.action == ControlAction::None;
     if (open_now.load() && listening != 1) {
         press[1] |= pad(HOS_PAD_UP), press[2] |= pad(HOS_PAD_DOWN), press[3] |= pad(HOS_PAD_LEFT);
         press[4] |= pad(HOS_PAD_RIGHT), press[5] |= pad(pad_back), press[7] |= pad(pad_confirm);
+        press[8] |= can_clear_control && pad(pad_paste);
     }
     std::vector<uint32_t> scripted;   // (longshot: RX_VK_MENU_SCRIPT's typing, for the text field that has the keyboard)
     {   // RX_VK_MENU_SCRIPT (test runs, which never have the focus): timed menu keys, "<seconds>:<INS|UP|DOWN|LEFT|RIGHT|ESC|ENTER|TABL|TABR>,...";
@@ -4958,6 +5091,7 @@ void menu_tick() {
             for (int p = 0; p < 4; p++)
                 if (!strcmp(key, pads[p]) && open_now.load() && listening != 1) {
                     press[5] |= p == pad_back, press[7] |= p == pad_confirm;
+                    press[8] |= can_clear_control && p == pad_paste;
                     if (editing && (p == pad_back || p == pad_confirm))
                         scripted.push_back(HOS_TEXT_KEY | (uint32_t)(p == pad_confirm ? VK_RETURN : VK_ESCAPE));
                     pad_last = true;
@@ -5063,6 +5197,10 @@ void menu_tick() {
         if (open_now.load()) refresh_monitors();
         if (open_now.load()) refresh_nfc();    // (and the NFC tags of the player's folder)
     }
+    if (control_confirmation.action != ControlAction::None && (!open_now.load() || page != 1 || !mine)) {
+        control_confirmation = {};
+        changed = true;
+    }
     if (comparing) {
         const auto click = mouse && (ptr.pressed & HOS_MOUSE_LEFT) ? hits.at((float)mx, (float)my) : menu_hit::Hit{};
         const int horizontal = int(press[4]) - int(press[3]);
@@ -5137,10 +5275,48 @@ void menu_tick() {
         }
     } else if (open_now.load() && page == 1) {   // (longshot) the Controls page
         using enum menu_hit::CtlColumn;
+        const int previous_row = csel, previous_column = ccol;
         if (!can_bind()) {
             static int warned;
             if (!warned) warned = 1, logf("menu: the Controls page asked for the host's bindings and got none");
             page = 0;
+        }
+        else if (control_confirmation.action != ControlAction::None) {
+            if (press[1] || press[2] || press[3] || press[4])
+                control_confirmation.choice ^= 1, changed = true;
+            if (mouse) {
+                const auto hit = hits.at((float)mx, (float)my);
+                if (hit.part == menu_hit::kButton) {
+                    if (moved || ptr.pressed) control_confirmation.choice = hit.index, changed = true;
+                    if (ptr.pressed & HOS_MOUSE_LEFT) press[7] = true;
+                }
+                if (ptr.pressed & HOS_MOUSE_RIGHT) press[5] = true;
+            }
+            if (press[5] || press[7]) {
+                const auto ask = control_confirmation;
+                control_confirmation = {};
+                changed = true;
+                if (!press[5] && ask.choice == 1) {
+                    if (ask.action == ControlAction::Rebind)
+                        rebind_control(ask.row, ask.set, ask.slot, ask.code, ask.conflicts);
+                    else if (ask.action == ControlAction::ResetAll) {
+                        host->bind(HOS_BIND_PAD, -1, 0, 0);
+                        opts.pad_layout = 0;
+                        opts.hold_toggle = 0;
+                        toggle_set(HOS_KEY_SPRINT, false);
+                        if (opts.sprint) apply_sprint_layout(true);
+                        save();
+                    } else if (control_column_enabled(ask.row, kCtlReset)) {
+                        const int button = controls[ask.row].button;
+                        if (host->reset_binding(button)) {
+                            blocked_reset_row = -1;
+                            if (has_toggle(button)) toggle_set(button, false);
+                            opts.pad_layout = detect_pad_layout();
+                            save();
+                        } else blocked_reset_row = ask.row;
+                    }
+                }
+            }
         }
         else if (listening) {
             if (press[5] || prof_now() > listen_end) listening = 0, changed = true;   // (Esc, or nothing for a while)
@@ -5149,10 +5325,8 @@ void menu_tick() {
                 else if (const uint32_t p = pad_press & ~(1u << HOS_PAD_GUIDE) & ~(1u << HOS_PAD_TOUCHPAD)) {
                     int bit = 0;
                     while (!(p >> bit & 1)) bit++;
-                    host->bind(HOS_BIND_PAD, controls[csel - top_rows()].button, ccol, bit);
+                    rebind_control(csel - top_rows(), HOS_BIND_PAD, ccol, bit);
                     listening = 0, changed = true;
-                    opts.pad_layout = detect_pad_layout();
-                    save();
                 }
             } else {
                 int down = 0;
@@ -5163,10 +5337,8 @@ void menu_tick() {
                     }
                 if (!listen_armed) listen_armed = !down;
                 else if (down) {
-                    host->bind(HOS_BIND_KEY, controls[csel - top_rows()].button, 0, down);
-                    host->bind(HOS_BIND_KEY, controls[csel - top_rows()].button, 1, 0);
+                    rebind_control(csel - top_rows(), HOS_BIND_KEY, 0, down);
                     listening = 0, changed = true;
-                    save();
                 }
             }
         } else {
@@ -5174,23 +5346,26 @@ void menu_tick() {
                            // Reset resets; the wheel scrolls the page, a right click goes back)
                 const menu_hit::Hit hit = hits.at((float)mx, (float)my);
                 const bool option = hit.part == menu_hit::kCtlOption;
-                const bool on = option || hit.part == menu_hit::kCtlRow || hit.part == menu_hit::kCtlCell;
+                const bool cell = hit.part == menu_hit::kCtlCell && control_column_enabled(hit.index, hit.side);
+                const bool on = option || hit.part == menu_hit::kCtlRow || cell;
                 const int at = option ? hit.index : top_rows() + hit.index;   // (the page's row: its own rows first)
                 if (on && (moved || ptr.pressed)) {
                     if (at != csel) csel = at, changed = true;
-                    if (hit.part == menu_hit::kCtlCell && !keys_only(hit.index) && ccol != hit.side) ccol = hit.side, changed = true;
+                    if (cell && ccol != hit.side) ccol = hit.side, changed = true;
                 }
                 if (ptr.pressed & HOS_MOUSE_LEFT) {
                     if (option) press[hit.side < 0 ? 3 : 4] = true;   // (a value's halves: Left and Right; the name: Right)
-                    else if (hit.part == menu_hit::kCtlCell || (hit.part == menu_hit::kCtlRow && hit.index == kControls))
+                    else if (cell || (hit.part == menu_hit::kCtlRow && hit.index == kControls))
                         press[7] = true;   // (as Enter)
                 }
                 if (ptr.pressed & HOS_MOUSE_RIGHT) press[5] = true;
                 if (ptr.wheel) wheel_rows[kControlsSlot] += ptr.wheel, changed = true;   // (scrolls; the selection stays)
             }
-            const int n = top_rows() + kControls + 1;
-            if (press[1]) csel = (csel + n - 1) % n, changed = true;
-            if (press[2]) csel = (csel + 1) % n, changed = true;
+            if (press[1] != press[2]) {
+                const int next = next_control_selection(csel, ccol, press[1] ? -1 : 1);
+                changed |= next != csel;
+                csel = next;
+            }
             const int i = csel - top_rows();   // (i: the control's, or reset's)
             if (press[5]) page = 0, changed = true;
             else if (i < 0 && (press[3] || press[4] || press[7])) {   // (the page's own rows: Enter as Right)
@@ -5198,30 +5373,25 @@ void menu_tick() {
                 set_row(r, *r.value + (press[3] ? -r.step : r.step), press[3] ? -1 : 1);
                 changed = true;
             } else if (i >= 0) {
-                const int columns = i < kControls && has_toggle(controls[i].button) ? kCtlColumns : kCtlToggle;
-                if (ccol >= columns) ccol = kCtlKeyboard;   // (no toggle on pause, map, stick directions or ocarina notes)
-                if ((press[3] || press[4]) && i < kControls && !keys_only(i)) {
-                    ccol = (ccol + columns + (press[3] ? -1 : 1)) % columns;
+                if (i < kControls && !control_column_enabled(i, ccol)) ccol = kCtlKeyboard, changed = true;
+                if ((press[3] || press[4]) && i < kControls) {
+                    do ccol = (ccol + kCtlColumns + (press[3] ? -1 : 1)) % kCtlColumns;
+                    while (!control_column_enabled(i, ccol));
                     changed = true;
                 }
-                const int col = keys_only(i) ? kCtlKeyboard : ccol;
+                if (csel != previous_row || ccol != previous_column) blocked_reset_row = -1;
+                const int col = ccol;
                 if (press[7]) {
-                    if (i == kControls) {
-                        host->bind(HOS_BIND_PAD, -1, 0, 0);
-                        opts.pad_layout = 0;
-                        opts.hold_toggle = 0;
-                        toggle_set(HOS_KEY_SPRINT, false);
-                        if (opts.sprint) apply_sprint_layout(true);   // (the defaults give Sprint nothing)
-                        save();
-                    }
+                    if (i == kControls) control_confirmation = {ControlAction::ResetAll};
                     else if (col == kCtlToggle) {
                         toggle_set(controls[i].button, !toggle_on(controls[i].button));
                         save();
                     }
+                    else if (col == kCtlReset) control_confirmation = {ControlAction::ResetRow, i};
                     else listening = col == kCtlKeyboard ? 2 : 1, listen_armed = false, listen_end = prof_now() + 6000000000LL;
                     changed = true;
                 }
-                if ((press[8] || press[9]) && i < kControls) {
+                if (!press[7] && (press[8] || press[9]) && i < kControls && col != kCtlReset) {
                     if (col == kCtlToggle) toggle_set(controls[i].button, false);
                     else if (col != kCtlKeyboard) {
                         host->bind(HOS_BIND_PAD, controls[i].button, col, -1);
