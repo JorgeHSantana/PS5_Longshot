@@ -36,8 +36,11 @@
 #endif
 
 #include "fsr4_tune.h"
+#include "menu/output.h"
+#include "upscaler_rows.h"
 #include "spirv_unroll.h"
 #include "vk_gprof.h"
+#include "vk_menu.h"
 #include "vk_paths.h"
 #include "vk_texture.h"
 
@@ -55,6 +58,8 @@ extern std::atomic<bool> present_native_pq;   // (vk_replay.cpp do_present: the 
 VkPipelineCache own_pipeline_cache(const char* name, size_t* read, bool* refused);
 bool own_pipeline_cache_save(VkPipelineCache cache, const char* name, size_t* saved);
 VkResult own_cache_compute_pipeline(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* out);
+VkResult own_cache_sdk_pipelines(PFN_vkCreateComputePipelines create, VkDevice device, VkPipelineCache cache, uint32_t count,
+                                 const VkComputePipelineCreateInfo* infos, const VkAllocationCallbacks* allocator, VkPipeline* pipelines);
 
 namespace {
 int env_switch(const char* name) {   // (-1: unset)
@@ -621,6 +626,7 @@ VkPipeline make_plain(const Plain& p) {
 /// driver may hand a layer over at once from its own disk cache, which a game folder of another path (an update's) does not
 /// share, so a quick build is no sign that the file holds it
 constexpr const char* kOwnCacheFile = "longshot_fsr4_pipelines.bin";
+std::mutex own_cache_save_mu;
 size_t own_cache_saved = 0;   // (the bytes last read or written: own_cache, build_unrolled)
 VkPipelineCache own_cache() {
     static std::mutex m;
@@ -635,6 +641,10 @@ VkPipelineCache own_cache() {
     own_cache_saved = read;
     logf("vk: AMD FSR 4: the unrolled layers' pipeline cache: %s", read ? "read" : refused ? "made by another driver or GPU: starts empty" : "starts empty");
     return cache;
+}
+bool save_own_cache() {
+    std::lock_guard lk(own_cache_save_mu);
+    return own_pipeline_cache_save(own_cache(), kOwnCacheFile, &own_cache_saved);
 }
 /// A job: the layer unrolled and built with copies of its layouts; bound in the library's pipeline's place when made. Its
 /// thread counted in jobs().running from before it starts (fsr4_close waits for it)
@@ -728,7 +738,7 @@ void build_unrolled(VkPipeline original, std::shared_ptr<const std::vector<uint3
         }
     }
     // (each one kept as soon as it is built, whether or not the game closes normally: a build of a minute is not done again)
-    if (made && own_cache() && !own_pipeline_cache_save(own_cache(), kOwnCacheFile, &own_cache_saved))
+    if (made && !save_own_cache())
         logf("vk: AMD FSR 4: %s: its unrolled pipeline could not be saved (the next start builds it again)", name.c_str());
     if (made) logf("vk: AMD FSR 4: tuned %s: its loops unrolled (%zu -> %zu words), bound in its place from now (%.1f s %s)",
                    name.c_str(), code->size(), unrolled.size(), s, cached ? "from the caches" : "to build");
@@ -792,7 +802,10 @@ VKAPI_ATTR VkResult VKAPI_CALL create_compute_pipelines(VkDevice d, VkPipelineCa
             layers64++;
         }
     }
-    const VkResult r = real_ccp(d, cache, n, v.data(), a, p);
+    // Keep the SDK's ordinary pipelines in the same cache as the optimized variants.
+    const VkPipelineCache pipeline_cache = cache ? cache : own_cache();
+    const VkResult r = own_cache_sdk_pipelines(real_ccp, d, pipeline_cache, n, v.data(), a, p);
+    if (r == VK_ERROR_DEVICE_LOST) device_lost("FSR 4 pipeline creation");
     for (VkShaderModule m : own)
         if (m) real_dsm(d, m, nullptr);
     if (r != VK_SUCCESS) return r;
@@ -1256,6 +1269,77 @@ bool hdr() {
     return s.context && s.context->hdr;
 }
 
+// Preparation runs before the game has a scene, so give the SDK cleared inputs in the usual formats.
+struct PrepareFrame {
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VmaAllocation allocations[4]{};
+    TemporalFrame frame;
+
+    ~PrepareFrame() {
+        if (pool) vkDestroyCommandPool(dev.device, pool, nullptr);
+        const TemporalImage* images[] = {&frame.color, &frame.depth, &frame.motion, &frame.output};
+        for (size_t i = 0; i < std::size(images); i++)
+            if (images[i]->image) destroy_image(images[i]->image, allocations[i]);
+    }
+
+    bool record(VkCommandBuffer cmd, uint32_t ow, uint32_t oh) {
+        TemporalImage* images[] = {&frame.color, &frame.depth, &frame.motion, &frame.output};
+        constexpr VkFormat formats[] = {VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R32_SFLOAT,
+                                        VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_R16G16B16A16_SFLOAT};
+        for (size_t i = 0; i < std::size(images); i++) {
+            TemporalImage& im = *images[i];
+            const bool output = i == 3;
+            VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+            ci.imageType = VK_IMAGE_TYPE_2D, ci.format = formats[i];
+            ci.extent = {output ? ow : frame.render_w, output ? oh : frame.render_h, 1};
+            ci.mipLevels = ci.arrayLayers = 1;
+            ci.samples = VK_SAMPLE_COUNT_1_BIT;
+            ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+            if (output) ci.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+            if (!create_image(ci, im.image, allocations[i])) return false;
+            im.format = ci.format, im.width = ci.extent.width, im.height = ci.extent.height;
+            const auto to_clear = barrier(im.image, 0, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+            barriers(cmd, &to_clear, 1);
+            const VkClearColorValue clear{{i == 1 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f}};
+            const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            vkCmdClearColorImage(cmd, im.image, VK_IMAGE_LAYOUT_GENERAL, &clear, 1, &range);
+        }
+        return true;
+    }
+};
+
+bool prepare_result(VkResult result) {
+    if (result == VK_ERROR_DEVICE_LOST) device_lost("FSR 4 preparation");
+    return result == VK_SUCCESS;
+}
+
+bool prepare_frame(uint32_t ow, uint32_t oh) {
+    PrepareFrame work;
+    const int scale = temporal_mode() == upscaler_rows::FSR4_AA ? 10000 : resolution_scale();
+    game_size(scale > 0 ? scale / 10000.0f : 2.0f / 3.0f, work.frame.render_w, work.frame.render_h);
+    work.frame.reset = true;
+    VkCommandPoolCreateInfo pi{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+    pi.queueFamilyIndex = dev.queue_family;
+    if (!prepare_result(vkCreateCommandPool(dev.device, &pi, nullptr, &work.pool))) return false;
+    VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    ai.commandPool = work.pool, ai.commandBufferCount = 1;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    if (!prepare_result(vkAllocateCommandBuffers(dev.device, &ai, &cmd))) return false;
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (!prepare_result(vkBeginCommandBuffer(cmd, &bi)) || !work.record(cmd, ow, oh) ||
+        !evaluate(cmd, work.frame) || !prepare_result(vkEndCommandBuffer(cmd))) return false;
+    VkCommandBufferSubmitInfo cb{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+    cb.commandBuffer = cmd;
+    VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+    si.commandBufferInfoCount = 1, si.pCommandBufferInfos = &cb;
+    if (!prepare_result(vkQueueSubmit2(dev.queue, 1, &si, VK_NULL_HANDLE))) return false;
+    // Without completion, neither the command pool nor the SDK context can be freed.
+    if (vkQueueWaitIdle(dev.queue) != VK_SUCCESS) device_lost("FSR 4 preparation queue did not complete");
+    return true;
+}
+
 const TemporalEngine kEngine{"AMD FSR 4", "FSR", start, prepare, evaluate, release, memory, hdr};
 
 }  // namespace
@@ -1266,6 +1350,35 @@ const TemporalEngine* fsr4_engine() { return &kEngine; }
 void fsr4_probe() {
     if (fsr4_why() != FSR_OK || g_why.load(std::memory_order_relaxed) >= 0 || !dev.device) return;
     load();
+}
+
+void fsr4_prepare_shaders() {
+    if (!load() || !tune::on()) return;
+    const auto [width, height] = shown_output();
+    if (!width || !height) return;
+    // Native HDR can still present SDR scenes. Warm both SDK contexts when that mode is selected.
+    const bool native_hdr = opts.hdr == 2 && env_switch("RX_VK_FSR4_HDR") != 0;
+    for (int mode = 0; mode <= (int)native_hdr; mode++) {
+        prepare_compiled();
+        const char* label = mode ? "Native HDR" : "SDR";
+        logf("vk: AMD FSR 4: preparing %s pipelines before gameplay (%ux%u)", label, width, height);
+        State& s = st();
+        s.context = make_context(width, height, mode != 0);
+        const bool ok = s.context && prepare_frame(width, height);
+        // The preparation process is about to exit. Let the existing workers finish and save their variants first.
+        auto& jobs = tune::jobs();
+        {
+            std::unique_lock lk(jobs.mu);
+            jobs.cv.wait(lk, [&jobs] { return jobs.running == 0; });
+        }
+        const int optimized = tune::better_count.load();
+        s.context.reset();
+        const bool saved = tune::save_own_cache();
+        if (ok && saved)
+            logf("vk: AMD FSR 4: %s pipeline preparation finished (%d optimized layers ready)", label, optimized);
+        else
+            logf("vk: AMD FSR 4: %s pipeline preparation could not %s", label, ok ? "save the cache" : "run the warm-up frame");
+    }
 }
 
 void fsr4_close() { tune::close(); }
@@ -1286,6 +1399,7 @@ bool fsr4_wants_descriptor_buffer() {
 bool fsr4_built() { return false; }
 const TemporalEngine* fsr4_engine() { return nullptr; }
 void fsr4_probe() {}
+void fsr4_prepare_shaders() {}
 void fsr4_close() {}
 bool fsr4_wants_descriptor_buffer() { return false; }
 

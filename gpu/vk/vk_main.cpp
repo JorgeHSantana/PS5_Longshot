@@ -1402,7 +1402,7 @@ void prepare_watchdog() {
     prepare_moved(0, 0, 0);
     std::thread([] {
         static const char* const parts[] = {"the shader programs", "the predicted pipelines", "the noted pipelines",
-                                            "the pipeline cache's save"};
+                                            "the pipeline cache's save", "the FSR 4 pipelines"};
         const int64_t limit_s = stall_s > 0 ? stall_s : 300;   // (the save's lines stop after this, whatever RX_VK_PREPARE_STALL_S)
         const int save_stall_s = stall_s * 2;   // (a risky save's stop: twice the parts', above)
         const int64_t compile_stall_s = stall_s * 3;   // (a compile with a CPU at work: three times, 900 s by default)
@@ -1430,12 +1430,13 @@ void prepare_watchdog() {
                 std::lock_guard lk(prepare_seen_mu);
                 at = prepare_seen;
             }
-            const char* what = at.part >= 0 && at.part < 4 ? parts[at.part] : "the preparation";
+            const char* what = at.part >= 0 && at.part < (int)std::size(parts) ? parts[at.part] : "the preparation";
             const int64_t still = (now - at.moved_ms) / 1000;
             const int faults = driver_faults();
             const bool left = prepare_left_workers();
             const bool risky = faults > 0 || left;   // (the driver may be stuck: the save too can wait for ever)
-            const bool compiling = at.part < 3 && cpu_busy && under_way;   // (a compile at work; one with no CPU is stuck)
+            const bool saving = at.part == 3;
+            const bool compiling = !saving && cpu_busy && under_way;   // (a compile at work; one with no CPU is stuck)
             const int64_t part_stall_s = !compiling ? stall_s : prepare_long_compiles() ? long_compile_stall_s : compile_stall_s;
             // (what it waits on: after a fault in the driver, most likely the driver; else the driver or the disk, a slow one
             // reading the caches)
@@ -1446,8 +1447,8 @@ void prepare_watchdog() {
             if (faults != driver_faults_seen.exchange(faults))
                 logf("vk: preparation: the GPU driver faulted %d time%s so far (above): a driver can stop responding after one, so a "
                      "stop here would be why", faults, faults == 1 ? "" : "s");
-            if (stall_s > 0 && (at.part < 3 ? still >= part_stall_s : risky && still >= save_stall_s)) {
-                if (at.part < 3)
+            if (stall_s > 0 && (!saving ? still >= part_stall_s : risky && still >= save_stall_s)) {
+                if (!saving)
                     logf("vk: preparation: STOPPED: nothing moved for %lld s in %s (%zu of %zu): the GPU driver stopped responding%s. "
                          "The rest is built in play, when first drawn; updating the GPU driver may help", (long long)part_stall_s, what,
                          at.done, at.total, faults ? " after it faulted (above)" : "");
@@ -1465,7 +1466,7 @@ void prepare_watchdog() {
             static int64_t said_ms = 0;
             if (now - said_ms < quiet_s * 1000) continue;
             const bool quiet = now - last_log_ms.load(std::memory_order_relaxed) >= quiet_s * 1000;
-            if (at.part >= 3) {
+            if (saving) {
                 if (!quiet) continue;
                 if (risky)
                     logf("vk: preparation: still writing %s (%lld s), %s. Stopped at %d s if it does not end", what,
@@ -1672,6 +1673,10 @@ bool started_up() {
         };
         printf("@@stage shaders Preparing shaders\n");
         fflush(stdout);
+        // The FSR driver may need several GB of commit before the game shader cache is loaded.
+        prepare_moved(4, 0, 0);
+        fsr4_prepare_shaders();
+        prepare_moved(0, 0, 0);
         {
             size_t guess[3];
             prepare_guess(guess);

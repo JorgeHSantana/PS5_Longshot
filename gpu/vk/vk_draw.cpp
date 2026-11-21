@@ -1537,9 +1537,10 @@ struct ComputeCompiling {
 };
 std::mutex compiling_mu;
 std::list<ComputeCompiling> compiling;
+std::atomic<unsigned> sdk_compiles{0};
 bool prepare_compiling_seen() {
     std::lock_guard lk(compiling_mu);
-    return !compiling.empty();
+    return !compiling.empty() || sdk_compiles.load(std::memory_order_acquire) != 0;
 }
 bool compute_pinned(const VkComputePipelineCreateInfo& ci) {
     for (auto n = (const VkBaseInStructure*)ci.stage.pNext; n; n = n->pNext)
@@ -4755,7 +4756,7 @@ VkResult shared_compute_pipeline(const VkComputePipelineCreateInfo* ci, VkPipeli
 /// driver can take it (pcache_file_read), else empty; *read: the bytes read, *refused: a file there that was not taken. Not read
 /// (nor saved, below) where the pipeline cache's file is not (RX_VK_PCACHE_LOAD=0 or its rule: pcache_no_save, pcache_init)
 VkPipelineCache own_pipeline_cache(const char* name, size_t* read, bool* refused) {
-    PipelineCacheFile data = pcache_no_save ? PipelineCacheFile{} : pcache_file_read(cache_path(name));
+    PipelineCacheFile data = pcache_load_off() ? PipelineCacheFile{} : pcache_file_read(cache_path(name));
     *read = data.size(), *refused = data.rejected();
     VkPipelineCacheCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     ci.initialDataSize = data.size(), ci.pInitialData = data.data();
@@ -4769,7 +4770,7 @@ VkPipelineCache own_pipeline_cache(const char* name, size_t* read, bool* refused
 /// size last read or written (*saved, updated): a pipeline the driver put in it since, whether it compiled it or took it from its
 /// own disk cache, which an update's folder (another path) does not share. false: it could not be written
 bool own_pipeline_cache_save(VkPipelineCache cache, const char* name, size_t* saved) {
-    if (!cache || pcache_no_save) return true;
+    if (!cache || pcache_load_off()) return true;
     size_t n = 0;
     {
         PcacheFetch fetch(-1, true);
@@ -4788,6 +4789,16 @@ VkResult own_cache_compute_pipeline(VkPipelineCache cache, const VkComputePipeli
     IntelDriverGate gate(compiles_nothing(ci->flags));
     if (gate.busy) return intel_gate_busy();
     return guarded_compute_held(cache, ci, out);
+}
+// Preserve the SDK's batch and allocator while using the same cache fetch lock as the renderer.
+VkResult own_cache_sdk_pipelines(PFN_vkCreateComputePipelines create, VkDevice device, VkPipelineCache cache, uint32_t count,
+                                 const VkComputePipelineCreateInfo* infos, const VkAllocationCallbacks* allocator, VkPipeline* pipelines) {
+    const PcacheUse use(cache);
+    sdk_compiles.fetch_add(1, std::memory_order_acq_rel);
+    const VkResult result = create(device, cache, count, infos, allocator, pipelines);
+    prepare_compiled();
+    sdk_compiles.fetch_sub(1, std::memory_order_release);
+    return result;
 }
 /// (longshot) The driver faults the pipeline compiles caught so far (guarded_graphics, guarded_compute): the preparation's
 /// watchdog says so (vk_main.cpp). Outside the unnamed namespace: vk_main.cpp links to it
