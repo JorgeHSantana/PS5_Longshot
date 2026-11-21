@@ -1323,7 +1323,7 @@ int MessageBoxA(HWND w, LPCSTR text, LPCSTR caption, UINT type) {
 
 /* ---- waveOut on SDL's audio (host/hos_sdl.c): a callback takes the written blocks in order and marks them done ---- */
 /* (the executable's: this file is in the Vulkan back end too, which plays no sound and has no hos_sdl.c) */
-void *hos_sdl_audio_open(unsigned device, int freq, int channels, int s16, void (*pull)(void *user, uint8_t *out, int len), void *user)
+void *hos_sdl_audio_open(unsigned device, int freq, int channels, int s16, int frames, void (*pull)(void *user, uint8_t *out, int len), void *user)
     __attribute__((weak));
 void hos_sdl_audio_close(void *audio) __attribute__((weak));
 int hos_sdl_audio_alive(void *audio) __attribute__((weak));
@@ -1358,7 +1358,7 @@ MMRESULT waveOutOpen(HWAVEOUT *out, UINT device, const WAVEFORMATEX *f, DWORD_PT
     WaveOut *w = (WaveOut *)calloc(1, sizeof *w);
     if (!w) return MMSYSERR_ERROR;
     if (pthread_mutex_init(&w->mu, NULL)) { free(w); return MMSYSERR_ERROR; }
-    w->audio = hos_sdl_audio_open(device, (int)f->nSamplesPerSec, (int)f->nChannels, f->wBitsPerSample == 16, wave_pull, w);
+    w->audio = hos_sdl_audio_open(device, (int)f->nSamplesPerSec, (int)f->nChannels, f->wBitsPerSample == 16, 0, wave_pull, w);
     if (!w->audio) {
         pthread_mutex_destroy(&w->mu);
         free(w);

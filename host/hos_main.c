@@ -2462,6 +2462,8 @@ static int game_main(int argc, char **argv) {
     void hos_sdl_vibration_shutdown(void);
     hos_sdl_vibration_shutdown();
     hos_log("nnMain returned");
+    void hos_pad_speaker_shutdown(void);   /* (longshot) host/pad_speaker.c */
+    hos_pad_speaker_shutdown();
     void hos_crash_clean_end(void);
     hos_crash_clean_end();
     return 0;

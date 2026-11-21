@@ -23,6 +23,7 @@
 #include "hd_rumble.h"
 #include "vibration.h"
 #include "rumble_renhdrum.h"
+#include "pad_speaker.h"
 #include "hos_motion.h"
 #include "steam_pads.h"
 #include "../gpu/vk/vk_api.h"   /* (HOS_PAD_*) */
@@ -52,6 +53,8 @@ static struct {
        that; a backend that would not open, and when to try it again; an Xbox pad's four motors as last sent */
     int8_t vib, vib_kind, wireless, vib_failed;
     int64_t vib_retry_ns, four_ns;
+    int usb_token;        /* its four-channel sound card at the last look, or -1 */
+    int64_t usb_next_look;
     uint16_t four[4];
     uint8_t hd_sent[HD_RUMBLE_PACKET_SIZE];
     int64_t hd_ns;
@@ -341,8 +344,6 @@ static void motion_only_used(int i, int64_t now) {
 
 /* ---- (longshot) what plays each pad's vibration (host/vibration.h); RenHDrum's backends are host/rumble_renhdrum.c ---- */
 static int vib_force = -1;   /* HOS_RUMBLE_BACKEND, read once */
-static int usb_found;        /* a DualSense's four-channel sound card was there at the last look */
-static int64_t usb_next_look;
 /* RenHDrum for a pad of this kind: loaded (once) only for a pad it would play */
 static int vib_rh_for(int kind) {
     if (vib_force == VIB_FORCE_HD || vib_force == VIB_FORCE_MOTORS || kind == VIB_PAD_OTHER) return 0;
@@ -376,7 +377,7 @@ static void vib_choose(int i, int mode, int64_t now) {
     if (pads[i].vib == VIB_RH_DS_USB && !rh_usb_alive()) {
         hos_log("vibration: the DualSense's sound card went away: its motors until it is back");
         vib_leave(i, now);
-        usb_found = 0, usb_next_look = now + 2000000000LL;
+        pads[i].usb_token = -1, pads[i].usb_next_look = now + 2000000000LL;
     } else if (pads[i].vib == VIB_RH_DS_BT && !rh_bt_alive()) {
         vib_leave(i, now);
         pads[i].vib_failed = VIB_RH_DS_BT, pads[i].vib_retry_ns = now + 30000000000LL;
@@ -390,8 +391,10 @@ static void vib_choose(int i, int mode, int64_t now) {
         void *owner = rh_usb_owner();
         if (owner == gc) ds_usb = 1;
         else if (!owner && pads[i].wireless != 1) {
-            if (now >= usb_next_look) usb_found = rh_usb_find(), usb_next_look = now + 2000000000LL;
-            ds_usb = usb_found;
+            if (now >= pads[i].usb_next_look) {
+                pads[i].usb_token = rh_usb_find(gc), pads[i].usb_next_look = now + 2000000000LL;
+            }
+            ds_usb = pads[i].usb_token >= 0;
         }
         owner = rh_bt_owner();
         ds_hid = owner == gc || (!owner && hos_sdl_hid_can() && *hos_sdl_pad_path(gc));
@@ -409,7 +412,7 @@ static void vib_choose(int i, int mode, int64_t now) {
     if (want == pads[i].vib) return;
     vib_leave(i, now);
     int ok = 1;
-    if (want == VIB_RH_DS_USB) ok = rh_usb_open(gc);
+    if (want == VIB_RH_DS_USB) ok = rh_usb_open(gc, pads[i].usb_token);
     else if (want == VIB_RH_DS_BT) ok = rh_bt_open(gc, hos_sdl_pad_path(gc));
     else if (want == VIB_RH_STEAM) ok = rh_steam_open(gc, hos_sdl_pad_path(gc), pads[i].product == VIB_STEAM_CABLE);
     else if (want == VIB_RH_XBOX || want == VIB_RH_SWITCH)
@@ -454,6 +457,7 @@ static void pads_poll(void) {
             for (int i = 0; i < MAX_PADS; i++)
                 if (pads[i].gc && !hos_sdl_pad_connected(pads[i].gc)) {
                     hos_log("hid: controller \"%s\" disconnected (SDL)", hos_sdl_pad_name(pads[i].gc));
+                    hos_pad_speaker_forget(pads[i].gc);
                     vib_leave(i, now);   /* (longshot) what played its vibration lets go of it first */
                     hos_sdl_pad_close(pads[i].gc);
                     pads[i].gc = NULL;
@@ -481,6 +485,7 @@ static void pads_poll(void) {
                 hd_open(slot, gc);
                 /* (longshot) what plays its vibration is chosen by the poll below (host/vibration.h) */
                 pads[slot].vib = -1, pads[slot].vib_failed = -1, pads[slot].vib_retry_ns = 0;
+                pads[slot].usb_token = -1, pads[slot].usb_next_look = 0;
                 pads[slot].product = hos_sdl_pad_product(gc);
                 pads[slot].vib_kind = (int8_t)vibration_pad_kind(hos_sdl_load(), hos_sdl_pad_type(gc), hos_sdl_pad_name(gc),
                                                                  hos_sdl_pad_vendor(gc), pads[slot].product);
@@ -499,6 +504,19 @@ static void pads_poll(void) {
                 pads[slot].motion_only = 0;   /* (the poll below decides, and says so) */
                 hos_sdl_pad_log_connection(gc, pads[slot].motion, pads[slot].steam != 0);
             }
+            {   /* (longshot) the controller speaker follows the DualSense that is open (host/pad_speaker.c) */
+                void *dualsense = NULL;
+                int wired = 0;
+                /* Prefer the first known wired pad; otherwise try the first with an unknown transport. */
+                for (int i = 0; i < MAX_PADS; i++) {
+                    const char *name = pads[i].gc ? hos_sdl_pad_name(pads[i].gc) : NULL;
+                    if (!name || pads[i].vendor != 0x054c || (!strstr(name, "DualSense") && !strstr(name, "PS5"))) continue;
+                    const int wireless = hos_sdl_pad_wireless(pads[i].gc);
+                    if (wireless == 0) { dualsense = pads[i].gc; wired = 1; break; }
+                    if (wireless < 0 && !dualsense) { dualsense = pads[i].gc; wired = 1; }
+                }
+                hos_pad_speaker_pad(dualsense, wired);
+            }
         }
         uint64_t b = 0;
         int32_t s[4] = {0};
@@ -514,9 +532,9 @@ static void pads_poll(void) {
         /* (Test vibration, or a strength just changed: three quarters of the motors, as the game's is scaled) */
         const int testing = now < __atomic_load_n(&rumble_test_until, __ATOMIC_RELAXED);
         /* (RenHDrum's backends: the test, a side gone quiet, the strength, and the Controls page's DualSense HD Haptics) */
-        rh_tick(now, testing, strength, rx_option(HOS_OPT_DS_HD_HAPTICS, 1) != 0);
+        rh_tick(now, testing, strength, strength * hos_pad_speaker_pad_rumble_percent(rh_usb_owner()) / 100,
+                rx_option(HOS_OPT_DS_HD_HAPTICS, 1) != 0);
         rumble_strength(testing ? 0xC000 : (uint16_t)rumble_low, testing ? 0xC000 : (uint16_t)rumble_high, strength, motors);
-        const uint16_t lo = motors[0], hi = motors[1];
         uint8_t side[3][4];   /* (the HD rumble pads': each side's bytes, then both merged for a single Joy-Con) */
         {
             float hv[2][4], felt[3][4];
@@ -634,6 +652,12 @@ static void pads_poll(void) {
                 if (rh_switch_poll(gc, now, packet)) hos_sdl_pad_effect(gc, packet, sizeof packet);
                 continue;
             }
+            uint16_t pad_motors[2] = {motors[0], motors[1]};
+            const int pad_percent = hos_pad_speaker_pad_rumble_percent(gc);
+            if (pad_percent != 100)
+                rumble_strength(testing ? 0xC000 : (uint16_t)rumble_low, testing ? 0xC000 : (uint16_t)rumble_high,
+                                strength * pad_percent / 100, pad_motors);
+            const uint16_t lo = pad_motors[0], hi = pad_motors[1];
             if (rumble_due(lo, hi, pads[i].rumble_lo, pads[i].rumble_hi, now, pads[i].rumble_ns)) {
                 hos_sdl_pad_rumble(gc, lo, hi, lo || hi ? 1000 : 0);
                 pads[i].rumble_lo = lo;

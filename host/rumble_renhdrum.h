@@ -18,17 +18,28 @@ const char *rh_why(void);          /* why it is not, when it is not */
 
 void rh_push(int side, const float value[4]);    /* (the game's thread) {amp_low, freq_low, amp_high, freq_high} */
 /* each poll: a test's values, a hand gone quiet, the strength, a DualSense's HD Haptics (1 on: the Controls page's) */
-void rh_tick(int64_t now, int testing, int percent, int hd_haptics);
+void rh_tick(int64_t now, int testing, int percent, int usb_percent, int hd_haptics);
 /* each poll, for the DualSense whose voice coils play (cable or Bluetooth): its triggers' pull (0 to 255) and whether
    another button is held, for HD Haptics' trigger kick-back. Sent from the pad thread only */
 void rh_ds_triggers(void *pad, int64_t now, int left_depth, int right_depth, int other_held);
 
-/* A DualSense on a cable: its four-channel sound card, found by name (rate-limited by the caller), opened for one pad */
-int rh_usb_find(void);             /* 1 when it is there */
-int rh_usb_open(void *pad);        /* 1 when it plays */
+/* A DualSense on a cable: its four-channel sound card, found by its name (as before the controller speaker, on every
+   system), opened for one pad */
+int rh_usb_find(void *pad);        /* endpoint token, or -1 */
+int rh_usb_open(void *pad, int token); /* 1 when it plays */
 int rh_usb_alive(void);
+int rh_usb_token(void);            /* the open stream's endpoint token, or -1 */
+/* (longshot) discard the shared stream's queued audio: closed and opened again, only on the endpoint matched to the pad
+   (hos_sdl_pad_audio_endpoint) at that moment; 0, the stream given up, when it no longer is */
+int rh_usb_restart_audio(void);
 void rh_usb_close(void);
 void *rh_usb_owner(void);
+/* (longshot) the controller speaker (host/pad_speaker.c) on the cable's stream: RH_SPEAKER_GAME, the game's sounds play on
+   the speaker too, so it is opened (RenHDrum's speaker block, with HD Haptics off as well) at that preamp gain (0 to 7);
+   RH_SPEAKER_JACK, they go to headphones in the jack, so the speaker is given back and HD Haptics' taps are silent;
+   RH_SPEAKER_NONE, as without it. The pads' poll thread; forgotten when the stream closes. */
+enum { RH_SPEAKER_NONE = 0, RH_SPEAKER_GAME = 1, RH_SPEAKER_JACK = 2 };
+int rh_usb_speaker(int want, int gain);
 
 /* A DualSense over Bluetooth: report 0x36 (or 0x32) every 10.7 ms through a second handle on its HID device */
 int rh_bt_open(void *pad, const char *hid_path);

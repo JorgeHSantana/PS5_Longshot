@@ -121,6 +121,14 @@ struct Options {
     int gyro_inv_x = 0;   // the motion aim's horizontal turned around
     int gyro_inv_y = 0;   // the motion aim's vertical turned around
     int gyro_deadzone = 1;   // the motion's deadzone: 0 tight, 1 standard (the console's default), 2 loose
+    // (longshot) the Controller speaker page: a DualSense's own speaker (host/pad_speaker.c; HOS_OPT_PAD_SPEAKER_*)
+    int pad_speaker_sync = 0;   // -100 to 150 ms: above 0 the controller waits (a later TV), below 0 the TV's copy of the Controller + TV sounds does
+    int pad_speaker_volume = 100;   // its volume in percent, 0 to 200: 100 is twice the mixer's level (a small speaker)
+    int pad_speaker_headphones = 2;   // headphones in its jack: 0 left out, 1 the controller's sounds there, 2 all sound there (the TV silent)
+    int pad_speaker_headphone_volume = 80;   // their volume in percent, 0 to 100 (the pad's own headphone volume)
+    // where each kind of sound plays, host/audio_source.h's classes in order from Navi's voice: 0 Off (the game's
+    // sound alone), 1 the controller only, 2 the controller and the TV
+    int pad_speaker[12] = {1, 2, 1, 2, 1, 2, 2, 1, 1, 1, 1, 1};
     int prompts = 0;      // the button icons: 0 Auto (the controller), 1 Switch, 2 Xbox, 3 PS4, 4 PS5, 5 Steam Deck (host/prompts.c)
     int robust = 0;       // bounds-checked buffer access: 0 Auto (on), 1 Off, 2 On (gpu/vk/vk_main.cpp; RX_VK_ROBUST)
     int present_queue = 0;   // (longshot) Present queue (Debug tab): 0 Off, 1 On, the presents on a compute family's queue of

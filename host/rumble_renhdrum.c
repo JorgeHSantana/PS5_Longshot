@@ -1,7 +1,9 @@
 /* (longshot) RenHDrum's backends: host/rumble_renhdrum.h says what they are and who calls what. */
 #include "hos.h"
 #include "rumble_renhdrum.h"
+#include "pad_speaker.h"   /* (the speaker's two channels on this stream) */
 #include "hos_sdl.h"
+#include "audio_output_devices.h"   /* (HOS_OUTPUT_ID_CAP, HOS_OUTPUT_NAME_CAP) */
 #include "vibration.h"
 #include <stdarg.h>
 #include <stdbool.h>
@@ -137,6 +139,7 @@ static int64_t at[2];                 /* when each side last sent (0 never) */
 static int quiet[2] = {1, 1};
 static int testing;
 static volatile LONG gain_percent = 100;
+static volatile LONG usb_gain_percent = 100;
 static RenHdcDualSenseDsp *usb_dsp, *bt_dsp, *sv_dsp;   /* (sv: a Steam Controller (2026)'s grips) */
 static void *usb_pad, *bt_pad, *sv_pad;
 /* (a DualSense's HD Haptics, the Controls page's row, on by default: its speaker taps and its L2/R2 kick back from the
@@ -189,9 +192,10 @@ void rh_push(int side, const float v[4]) {
 
 static void recreate_bt_dsp(int percent);
 static void usb_hd_set(int on);
-void rh_tick(int64_t now, int test, int percent, int hd) {
+void rh_tick(int64_t now, int test, int percent, int usb_percent, int hd) {
     if (!rh_ok) return;
     const int was_percent = (int)InterlockedExchange(&gain_percent, percent);
+    InterlockedExchange(&usb_gain_percent, usb_percent);
     const int was_hd = (int)InterlockedExchange(&hd_on, hd != 0);
     AcquireSRWLockExclusive(&lk);
     if (test) {   /* (the Test vibration row, or a strength just changed: both bands, half the game's top) */
@@ -233,6 +237,27 @@ static void bt_state_off(void) {   /* (lk held) both triggers Off, as 0x36 carri
         memcpy(bt_state + at, one + at, 11);
     }
 }
+/* (longshot) the controller speaker's wish for the cable's speaker (rh_usb_speaker), and what the pad was last told: the
+   speaker is opened and given back here only, by RenHDrum's speaker block, for HD Haptics and the game's sounds alike */
+static int usb_spk_want, usb_spk_gain;
+static int usb_spk_open, usb_spk_told_gain = -1;
+static int usb_speaker_sync(void) {   /* (life held) */
+    void *pad = usb_pad;
+    if (!pad) return 0;
+    const int jack = usb_spk_want == RH_SPEAKER_JACK, game = usb_spk_want == RH_SPEAKER_GAME;
+    const int open = !jack && (usb_hd || game);
+    const int gain = open && game ? usb_spk_gain : -1;   /* (-1: the block's own) */
+    AcquireSRWLockExclusive(&lk);   /* (HD Haptics' taps: silent while the jack has the sound) */
+    if (usb_dsp) rh.dualsense_dsp_set_speaker(usb_dsp, usb_hd && !jack ? RENHDRUM_HD_HAPTICS_SPEAKER_PERCENT : 0);
+    ReleaseSRWLockExclusive(&lk);
+    if (open == usb_spk_open && (!open || gain == usb_spk_told_gain)) return 1;
+    uint8_t block[RH_EFFECTS];
+    rh.hd_haptics_speaker_block(open, block);
+    if (gain >= 0) block[37] = (uint8_t)((block[37] & ~7) | (gain & 7));   /* (the preamp's gain: its low three bits) */
+    if (!hos_sdl_pad_has_effect() || !hos_sdl_pad_effect(pad, block, RH_EFFECTS)) return 0;
+    usb_spk_open = open, usb_spk_told_gain = gain;
+    return 1;
+}
 /* The cable's HD Haptics on or off: its speaker opened (or given back), the DSP's speaker level, and both triggers
    released when it goes off. Under life: the pad thread's (rh_tick, rh_usb_open, rh_usb_close) and the game's end */
 static void usb_hd_set(int on) {
@@ -240,15 +265,21 @@ static void usb_hd_set(int on) {
     if (!pad || on == usb_hd) return;
     uint8_t block[RH_EFFECTS];
     AcquireSRWLockExclusive(&lk);
-    if (usb_dsp) rh.dualsense_dsp_set_speaker(usb_dsp, on ? RENHDRUM_HD_HAPTICS_SPEAKER_PERCENT : 0);
     tri_pair(usb_tri, on);
     usb_seen[0] = fed[0], usb_seen[1] = fed[1];
     ReleaseSRWLockExclusive(&lk);
-    rh.hd_haptics_speaker_block(on, block);
-    send_effects(pad, block);
+    usb_hd = on;
+    usb_speaker_sync();   /* (its speaker level, and the speaker opened or given back) */
     if (!on)
         for (int s = 0; s < 2; s++) rh.hd_haptics_trigger_block(s, NULL, block), send_effects(pad, block);
-    usb_hd = on;
+}
+int rh_usb_speaker(int want, int gain) {
+    if (!rh_ok) return 0;
+    AcquireSRWLockExclusive(&life);
+    usb_spk_want = want, usb_spk_gain = gain;
+    int sent = usb_speaker_sync();
+    ReleaseSRWLockExclusive(&life);
+    return sent;
 }
 void rh_ds_triggers(void *pad, int64_t now, int left_depth, int right_depth, int other_held) {
     if (!rh_ok || !pad || !hd_on || (pad != usb_pad && pad != bt_pad)) return;
@@ -295,21 +326,29 @@ static void usb_pull(void *user, uint8_t *out, int len) {   /* (the sound card's
     ReleaseSRWLockExclusive(&lk);
     if (!filled) {
         memset(out, 0, (size_t)len);   /* (nothing to play: silence, never a held waveform) */
+        hos_pad_speaker_fill(f, frames);   /* (longshot) the game's sounds added to the speaker's, host/pad_speaker.c */
         return;
     }
     /* the Vibration strength, once, on the samples the DSP made: its law stays the core's (a gain before it would go
        through its curve, and past 100 % its normalising held the output still) */
-    const float g = vibration_gain((int)gain_percent);
+    const float g = vibration_gain((int)InterlockedCompareExchange(&usb_gain_percent, 0, 0));
     for (int i = 0; i < frames; i++)
         for (int ch = 1; ch < 4; ch++) {   /* (1: HD Haptics' speaker; 2 and 3: the voice coils) */
             const float v = f[i * 4 + ch] * g;
             f[i * 4 + ch] = v < -1.0f ? -1.0f : v > 1.0f ? 1.0f : v;
         }
+    /* (longshot) the game's sounds added to channels 0 and 1, HD Haptics' taps on 1 kept: host/pad_speaker.c, after the
+       strength above, which is the vibration's and not theirs */
+    hos_pad_speaker_fill(f, frames);
 }
-int rh_usb_find(void) {
-    if (!rh_ok) return 0;
+/* The vibration's endpoint, found by its name as before the controller speaker: on every system, Linux and the Steam Deck
+   too. Only the speaker's sharing of the stream asks more (host/pad_speaker.c: the endpoint matched to the pad itself,
+   hos_sdl_pad_audio_endpoint) */
+int rh_usb_find(void *pad) {
+    (void)pad;
+    if (!rh_ok) return -1;
     int found = -1, named = 0;
-    char id[512], name[256];
+    char id[HOS_OUTPUT_ID_CAP], name[HOS_OUTPUT_NAME_CAP];
     const int n = hos_sdl_output_count();
     for (int i = 0; i < n; i++) {
         if (!hos_sdl_output_info(i, id, (int)sizeof id, name, (int)sizeof name)) continue;
@@ -323,11 +362,10 @@ int rh_usb_find(void) {
         hos_log(found >= 0 ? "vibration: the DualSense's four-channel sound card is there"
                            : "vibration: %d playback devices, %d named for a DualSense, none with four channels", n, named);
     }
-    usb_token = found;
-    return found >= 0;
+    return found;
 }
-int rh_usb_open(void *pad) {
-    if (!rh_ok || usb_token < 0) return 0;
+int rh_usb_open(void *pad, int token) {
+    if (!rh_ok || token < 0) return 0;
     AcquireSRWLockExclusive(&life);
     int ok = 0;
     if (!closed && !usb_pad) {
@@ -336,10 +374,11 @@ int rh_usb_open(void *pad) {
             AcquireSRWLockExclusive(&lk);
             usb_dsp = dsp;
             ReleaseSRWLockExclusive(&lk);
-            usb_stream = hos_sdl_audio_open((unsigned)usb_token, 48000, 4, 0, usb_pull, NULL);
+            usb_stream = hos_sdl_audio_open((unsigned)token, 48000, 4, 0, hos_pad_speaker_share_frames(pad, token), usb_pull, NULL);
             if (usb_stream) {
-                usb_pad = pad, ok = 1;
+                usb_pad = pad, usb_token = token, ok = 1;
                 hos_log("vibration: the DualSense's voice coils on its cable (48 kHz, four channels)");
+                usb_spk_want = RH_SPEAKER_NONE, usb_spk_open = 0, usb_spk_told_gain = -1;   /* (the speaker asks again) */
                 if (hd_on) usb_hd_set(1);
             } else {
                 AcquireSRWLockExclusive(&lk);
@@ -354,10 +393,31 @@ int rh_usb_open(void *pad) {
     return ok;
 }
 int rh_usb_alive(void) { return usb_stream && hos_sdl_audio_alive(usb_stream); }
+static void usb_close_locked(void);
+int rh_usb_token(void) { return usb_stream ? usb_token : -1; }
+/* (the controller speaker's route change: the stream closed and opened again, its queued samples gone. The endpoint is
+   matched to the pad again first: one that changed under the same name is refused, and the stream given up, so the
+   pads' poll finds the pad's own again) */
+int rh_usb_restart_audio(void) {
+    AcquireSRWLockExclusive(&life);
+    int ok = 0;
+    if (usb_stream && usb_pad && hos_sdl_pad_audio_endpoint(usb_pad) == usb_token) {
+        hos_sdl_audio_close(usb_stream);
+        usb_stream = hos_sdl_audio_open((unsigned)usb_token, 48000, 4, 0, hos_pad_speaker_share_frames(usb_pad, usb_token), usb_pull, NULL);
+        ok = usb_stream != NULL;
+    } else if (usb_stream) {
+        hos_log("vibration: the DualSense's sound card no longer matches the pad: let go");
+    }
+    if (!ok && usb_pad) usb_close_locked();   /* (none open, or not the pad's: rh_usb_alive says so to the pads' poll) */
+    ReleaseSRWLockExclusive(&life);
+    return ok;
+}
 static void usb_close_locked(void) {   /* (life held) */
+    usb_spk_want = RH_SPEAKER_NONE;   /* (longshot: the controller speaker's wish ends with the stream) */
     usb_hd_set(0);   /* (the speaker given back and the triggers released, while the pad is still open) */
+    usb_speaker_sync();   /* (given back also when only the controller speaker had it open) */
     void *stream = usb_stream;
-    usb_stream = NULL, usb_pad = NULL;
+    usb_stream = NULL, usb_pad = NULL, usb_token = -1;
     if (stream) hos_sdl_audio_close(stream);   /* (waits for its callback, which takes lk: lk is not held here) */
     AcquireSRWLockExclusive(&lk);
     RenHdcDualSenseDsp *dsp = usb_dsp;

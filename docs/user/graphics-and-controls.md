@@ -124,6 +124,7 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | Mute in background | Off, On | Off |
 | | Output device | Default or a named Windows playback device; applies live | Default |
 | | Speaker layout | Auto, Stereo, 5.1, Mono (layout changes after a restart; Mono/Stereo live on stereo output) | Auto |
+| | Controller speaker | Opens the Controller speaker page, for a DualSense on a USB cable: Speaker volume (0% to 200%, in steps of 10; 100%), Controller sync (-100 ms to 150 ms, in steps of 10: below 0 the TV waits, above 0 the controller waits; 0 ms), Headphones on the controller (Off, Controller sounds, All sound; All sound), Headphone volume (0% to 100%, in steps of 10; 80%), then where each kind of sound plays (Off, Controller only, Controller + TV): Navi's voice (Controller only), Navi's flight sounds (Controller + TV), Z-targeting (Controller only), Ocarina (Controller + TV), Pick-ups (Controller only), Items (Controller + TV), Fairies (Controller + TV), Menu sounds (Controller only), Stone of Agony (Controller only), Low health alarm (Controller only), Fishing (Controller only), Bottles (Controller only) | |
 | | Microphone | Off, Default, or each microphone by name | Default |
 | | Microphone gain | Software input level, 0–400%; applies to new samples without changing system volume | 100% |
 | | Test microphone | Start/stop capture; live levels appear in the help box for Test microphone and Microphone gain | Stopped |
@@ -275,6 +276,19 @@ helper asks you to.
 - **Speaker layout:** Auto is 5.1 when the output device has 5.1 speakers, else stereo. Mono puts both channels in both
   ears. **Microphone** is what the game hears when its own microphone option is on; **Test microphone**
   shows its level.
+- **Controller speaker** (a page on the Audio tab) plays chosen kinds of the game's sounds on a DualSense's own speaker:
+  Navi's voice and her flight, Z-targeting, the ocarina, pick-ups, items, fairies, the menus' sounds, the Stone of Agony,
+  the low-health alarm, fishing and bottles, each Off, Controller only (no longer on the TV) or Controller + TV, with a
+  volume for the speaker. **Controller sync** lines the two up: below 0 the TV's copy of the Controller + TV sounds waits
+  for a controller that plays later, above 0 the controller waits for a TV that plays later. With headphones in the
+  controller's jack, **Headphones on the controller** decides: All sound (as on the console) plays the whole game on them
+  and the TV is silent, Controller sounds sends them only what would play on the speaker, Off leaves them out; they have
+  their own volume. While an ocarina sound plays on the speaker the vibration is at half, as the motors would shake it into
+  crackling. With **DualSense HD Haptics** on, its taps play on the speaker together with these sounds; off, the speaker
+  plays these sounds alone. On Windows, the controller must be on a USB cable and Windows must identify its sound card as
+  belonging to it. The speaker is unavailable when the two cannot be matched, including on Linux for now; the vibration
+  plays as before there (a wired DualSense's voice coils included). Its sound card is not there over Bluetooth. The sounds are told apart by the archives of your own copy of the game, read at
+  the start.
 - **Mouse camera:** Native turns the camera with the mouse one to one, as in a PC game; As the stick uses the mouse in
   the right stick's place (<kbd>-</kbd> and <kbd>=</kbd> change the sensitivity in game); Off leaves the mouse out.
   **Disable camera centering** stops the game turning the camera toward your movement.

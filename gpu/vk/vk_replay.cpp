@@ -8229,6 +8229,14 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id >= HOS_OPT_HUD_LAYOUT && id <= HOS_OPT_HUD_MINIMAP) return menu_hud_option(id);
         if (id == HOS_OPT_WIDE_MENUS) return opts.wide_menus;
         if (id == HOS_OPT_SKIP_TITLE) return opts.skip_title != 0;
+        if (id == HOS_OPT_PAD_SPEAKER_VOLUME) return opts.pad_speaker_volume;
+        if (id == HOS_OPT_PAD_SPEAKER_SYNC) return opts.pad_speaker_sync;
+        if (id == HOS_OPT_PAD_SPEAKER_HEADPHONES) return opts.pad_speaker_headphones;
+        if (id == HOS_OPT_PAD_SPEAKER_HEADPHONE_VOLUME) return opts.pad_speaker_headphone_volume;
+        if (id >= HOS_OPT_PAD_SPEAKER_CLASS && id < HOS_OPT_PAD_SPEAKER_CLASS + 9)   // (HOS_OPT_PAD_SPEAKER_OF: 141 to 149, then 150 to 152)
+            return opts.pad_speaker[id - HOS_OPT_PAD_SPEAKER_CLASS];
+        if (id >= HOS_OPT_PAD_SPEAKER_CLASS2 && id < HOS_OPT_PAD_SPEAKER_CLASS2 + HOS_PAD_SPEAKER_CLASS_OPTIONS - 9)
+            return opts.pad_speaker[9 + id - HOS_OPT_PAD_SPEAKER_CLASS2];
         if (id == HOS_OPT_RENDER_THREAD) return async_on();   // (host/nvn_native.c: the present poll answered at once)
         if (id == HOS_OPT_NATIVE_ZSTD) return native_zstd_default.load(std::memory_order_acquire);   // (host/hos_zstd.c)
         /* (longshot) Vibration (host/vibration.h), and what plays the controller used last as the host wrote it back */

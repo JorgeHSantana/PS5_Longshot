@@ -126,6 +126,25 @@ enum { HOS_OPT_DS_HD_HAPTICS = 93 };
 /* (HOS_OPT_WIDE_MENUS, 102: Graphics' Ultrawide menus, host/hos_wide_ui.c reads it at each present by its number: 3 is Extended,
    the menus at their 16:9 size with their side panes at the screen's edges. The existing option callback: no new member.) */
 enum { HOS_OPT_WIDE_MENUS = 102, HOS_WIDE_MENUS_EXTENDED = 3 };
+/* (longshot) the Controller speaker page (host/pad_speaker.c), a block of its own from 140 (the numbers below are taken by
+   main or by open pull requests). HOS_OPT_PAD_SPEAKER_VOLUME, 140: its volume in percent; HOS_OPT_PAD_SPEAKER_CLASS + n,
+   141 to 149: where the n-th kind of sound plays, host/audio_source.h's classes from Navi's voice (class n + 1): 0 Off,
+   1 the controller only, 2 the controller and the TV */
+enum { HOS_OPT_PAD_SPEAKER_VOLUME = 140 };
+enum { HOS_OPT_PAD_SPEAKER_CLASS = 141 };
+/* (HOS_OPT_PAD_SPEAKER_CLASS2 + n, 150 to 152: the classes after the first nine, from the low-health alarm, as above) */
+enum { HOS_OPT_PAD_SPEAKER_CLASS2 = 150 };
+enum { HOS_PAD_SPEAKER_CLASS_OPTIONS = 12 };   /* (141 to 152) */
+/* the option of the n-th class's row, n from 0 (Navi's voice) */
+#define HOS_OPT_PAD_SPEAKER_OF(n) ((n) < 9 ? HOS_OPT_PAD_SPEAKER_CLASS + (n) : HOS_OPT_PAD_SPEAKER_CLASS2 + (n) - 9)
+/* (HOS_OPT_PAD_SPEAKER_SYNC, 153: the Controller speaker page's Controller sync, -100 to 150 ms: above 0 the pad's sound
+   held back by that much more, for a TV that plays later than the pad; below 0 the TV's copy of the Controller + TV
+   sounds held back instead, for a pad that plays later than the TV. host/pad_speaker.c, host/nn_audio.c) */
+enum { HOS_OPT_PAD_SPEAKER_SYNC = 153 };
+/* (HOS_OPT_PAD_SPEAKER_HEADPHONES, 154: Headphones on the controller, 0 Off, 1 the controller's sounds, 2 all sound;
+   HOS_OPT_PAD_SPEAKER_HEADPHONE_VOLUME, 155: their volume in percent. host/pad_speaker.c) */
+enum { HOS_OPT_PAD_SPEAKER_HEADPHONES = 154 };
+enum { HOS_OPT_PAD_SPEAKER_HEADPHONE_VOLUME = 155 };
 
 /* (longshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of longshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:

@@ -244,7 +244,8 @@ def host():
     poll = definition(pads, "static void pads_poll")
     for need, why in (("rx_option(HOS_OPT_VIBRATION, VIB_MODE_AUTO)", "the Vibration row does not reach the pads"),
                       ("if (strength <= 0) mode = VIB_MODE_OFF", "an options file's Rumble strength Off is not Off"),
-                      ("rh_tick(now, testing, strength, rx_option(HOS_OPT_DS_HD_HAPTICS, 1) != 0);",
+                      ("rh_tick(now, testing, strength, strength * hos_pad_speaker_pad_rumble_percent(rh_usb_owner()) / 100,\n"
+                       "                rx_option(HOS_OPT_DS_HD_HAPTICS, 1) != 0);",
                        "RenHDrum's backends do not get the test, the strength and DualSense HD Haptics"),
                       ("vib_choose(i, mode, now);", "the pads' backends are not chosen each poll"),
                       ("if (pads[i].vib == VIB_NONE) continue;", "Off still plays"),

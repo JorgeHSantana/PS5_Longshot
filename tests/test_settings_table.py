@@ -93,7 +93,7 @@ class SettingsTableTests(unittest.TestCase):
             with self.subTest(option=cells[1]):
                 self.assertEqual(len(cells), 4)
                 self.assertTrue(cells[2])
-                self.assertTrue(cells[3] or cells[1] in ("Motion", "Controls", "Bug report", "Tap tag", "Remove tag",
+                self.assertTrue(cells[3] or cells[1] in ("Motion", "Controller speaker", "Controls", "Bug report", "Tap tag", "Remove tag",
                                           "Scan tag on controller", "Compare ReShade Preset",
                                           "Rescan ReShade presets"))  # actions have no default
 

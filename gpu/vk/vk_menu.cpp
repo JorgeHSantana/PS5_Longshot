@@ -120,7 +120,8 @@ enum MenuTab {
     TAB_COUNT = 7,
     TAB_MOTION = TAB_COUNT,   // (longshot: not a tab of the strip, the Motion page that the Controls tab's Motion row
                               // opens: one past the strip's tabs, so a tab added before TAB_COUNT moves it along)
-    TAB_FPS_DEV = TAB_MOTION + 1,   // (longshot: not a tab either, the FPS counter's Dev lines page, from the Gameplay tab)
+    TAB_SPEAKER = TAB_MOTION + 1,   // (longshot: not a tab either, the Controller speaker page, from the Audio tab)
+    TAB_FPS_DEV = TAB_SPEAKER + 1,   // (longshot: not a tab either, the FPS counter's Dev lines page, from the Gameplay tab)
     TAB_RECORDINGS = TAB_FPS_DEV + 1,   // (longshot: nor this, the input recordings to play, from the Debug tab: menu/input_recording.cpp)
     TAB_PAGE = TAB_RECORDINGS + 1   // (longshot: the Controls page's rows, above its grid; no tab shows them)
 };
@@ -405,9 +406,11 @@ constexpr int kCoreRows = sizeof core::rows / sizeof core::rows[0];
 const char* (ini_key)(const Row& r);   // (spelled apart from its definition: the checks cut that by its text)
 /// The model's page for each MenuTab: the strip's tabs, then the pages a row opens
 const char* const kTabIds[TAB_PAGE + 1] = {"graphics", "audio",  "gameplay",    "controls",     "nfc",
-                                           "mods",     "debug",  "motion",      "fps_details",  "recordings", "controls_page"};
+                                           "mods",     "debug",  "motion",      "controller_speaker", "fps_details",
+                                           "recordings", "controls_page"};
 const char* const kTabLabels[TAB_PAGE + 1] = {"Graphics", "Audio", "Gameplay", "Controls",            "NFC",
-                                              "Mods",     "Debug", "Motion",   "FPS counter details", "Play recording",
+                                              "Mods",     "Debug", "Motion",   "Controller speaker",  "FPS counter details",
+                                              "Play recording",
                                               "Controls"};
 int page_tab(const char* id);   // (a page's MenuTab by its id: below)
 // (rows modules describe, headings included; past it a row is left out, and logged. Every row is a module's: 110 of them
@@ -786,10 +789,11 @@ void outputs_sync() {
 }
 
 int cur_tab = TAB_GRAPHICS;
-int tab_selected[TAB_RECORDINGS + 1] = {};   // (and the pages' a row opens: Motion, the FPS counter's details, the recordings)
+int tab_selected[TAB_RECORDINGS + 1] = {};   // (and the pages' a row opens: Motion, the Controller speaker, the FPS counter's details, the recordings)
 bool is_motion_row(const Row& r) {
     return row_opens(r) == TAB_MOTION || (r.tab == TAB_CONTROLS && !r.value && !r.setting && !strcmp(r.name, "Motion"));
 }
+bool is_speaker_row(const Row& r) { return row_opens(r) == TAB_SPEAKER; }   // (longshot: the Audio tab's Controller speaker)
 bool is_fps_dev_row(const Row& r) {
     return row_opens(r) == TAB_FPS_DEV || (r.tab == TAB_GAMEPLAY && !r.value && !r.setting && !strcmp(r.name, "FPS counter details"));
 }
@@ -797,7 +801,7 @@ bool is_recordings_row(const Row& r) { return row_opens(r) == TAB_RECORDINGS; }
 /// (the page a page of the menu goes back to: Motion to Controls, the FPS counter's details to Gameplay, the recordings to
 /// Debug; -1 a tab of the strip)
 int page_parent(int tab) {
-    return tab == TAB_MOTION ? TAB_CONTROLS : tab == TAB_FPS_DEV ? TAB_GAMEPLAY : tab == TAB_RECORDINGS ? TAB_DEBUG : -1;
+    return tab == TAB_MOTION ? TAB_CONTROLS : tab == TAB_SPEAKER ? TAB_AUDIO : tab == TAB_FPS_DEV ? TAB_GAMEPLAY : tab == TAB_RECORDINGS ? TAB_DEBUG : -1;
 }
 
 // ---- the rows that take a restart: their values at the start (menu_init, the GPU's at menu_set_gpu_count) ----
@@ -1697,7 +1701,7 @@ float scroll_at[TAB_RECORDINGS + 2];   // (the first row shown, eased toward the
                                    // the Controls page: kControlsSlot)
 constexpr int kControlsSlot = TAB_RECORDINGS + 1;
 int wheel_rows[TAB_RECORDINGS + 2];   // (the mouse wheel's notches since the last drawing, a slot each: scroll_rows scrolls by them)
-int scrolled_to[TAB_RECORDINGS + 2] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};   // (the selection scroll_rows last brought into view)
+int scrolled_to[TAB_RECORDINGS + 2] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};   // (the selection scroll_rows last brought into view)
 float scroll_want[TAB_RECORDINGS + 2];   // (where scroll_at is going: the wheel moves it, a new selection too)
 float ease_step = 0;     // (this drawing's share of the way: the time since the last one)
 
@@ -2629,7 +2633,7 @@ void draw_options(ui::Ctx& c) {
         } else {
             prompt_list[prompts_n++] = {ui::kConfirm, confirms ? (pending == &selr ? "Confirm" : selr.name) : selr.setting && selr.setting->verb ? selr.setting->verb : "Open"};
         }
-        if (page_parent(cur_tab) >= 0) prompt_list[prompts_n++] = {ui::kBack, "Back"};   // (Esc: to Controls, Gameplay or Debug)
+        if (page_parent(cur_tab) >= 0) prompt_list[prompts_n++] = {ui::kBack, "Back"};   // (Esc: to Controls, Audio, Gameplay or Debug)
         else {
             prompt_list[prompts_n++] = {ui::kTabs, "Tabs"}, prompt_list[prompts_n++] = {ui::kBack, "Close"};
         }
@@ -2712,6 +2716,7 @@ void draw_tune_bar(ui::Ctx& c) {
     const char* cur_name = cur_tab == TAB_MOTION ? "Motion" : tab_title(cur_tab);
     if (cur_tab == TAB_FPS_DEV) cur_name = "FPS counter details";
     if (cur_tab == TAB_RECORDINGS) cur_name = "Play recording";
+    if (cur_tab == TAB_SPEAKER) cur_name = "Controller speaker";
     const float header_y = by0 + 13 * s;
     ui::text_mid(c, c.f.heading, 14 * s, bx0 + 16 * s, header_y, ui::kGoldHi, cur_name);
 
@@ -4482,7 +4487,7 @@ void menu_option_set(int id, int value) {
 bool bridge_row(int i) { return rows[i].value && !rows[i].heading && rows[i].cheat < 0 && row_shown(i); }
 void bridge_fill(int i, MkwVkSetting* out) {
     static const char* const tabs[] = {"graphics", "audio", "gameplay", "controls", "nfc", "mods", "debug", "motion",
-                                       "gameplay", "debug", "controls"};
+                                       "audio", "gameplay", "debug", "controls"};
     static_assert(sizeof tabs / sizeof tabs[0] == TAB_PAGE + 1, "a name for each MenuTab");
     const Row& r = rows[i];
     *out = MkwVkSetting{};
@@ -5337,17 +5342,20 @@ void menu_tick() {
         if (press[5] && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS, press[5] = false, changed = true;   // (back)
         if (press[5] && cur_tab == TAB_FPS_DEV) cur_tab = TAB_GAMEPLAY, press[5] = false, changed = true;   // (back)
         if (press[5] && cur_tab == TAB_RECORDINGS) cur_tab = TAB_DEBUG, press[5] = false, changed = true;   // (back)
+        if (press[5] && cur_tab == TAB_SPEAKER) cur_tab = TAB_AUDIO, press[5] = false, changed = true;   // (back)
         if (press[5] && cur_tab == TAB_MODS && mods_grab >= 0) mods_grab = -1, press[5] = false, changed = true;   // (puts the mod down)
         if (press[5] && pending) pending = nullptr, changed = true;   // (a Restart or Quit waiting for its second press: cancelled)
         else if (press[5] && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS, press[5] = false, changed = true;   // (back)
         else if (press[5] && cur_tab == TAB_FPS_DEV) cur_tab = TAB_GAMEPLAY, press[5] = false, changed = true;   // (back)
         else if (press[5] && cur_tab == TAB_RECORDINGS) cur_tab = TAB_DEBUG, press[5] = false, changed = true;   // (back)
+        else if (press[5] && cur_tab == TAB_SPEAKER) cur_tab = TAB_AUDIO, press[5] = false, changed = true;   // (back)
         else if (press[5] && restart_ask()) page = 5, ask_sel = 0, changed = true;   // (the restart question first)
         else if (press[5]) open_now = false, tune_mode = false, quick_debug = false;
         // (the tabs: LB and RB, Q and E, or Tab; from the Motion page, as from Controls)
         if ((tab_left || tab_right) && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS;
         if ((tab_left || tab_right) && cur_tab == TAB_FPS_DEV) cur_tab = TAB_GAMEPLAY;
         if ((tab_left || tab_right) && cur_tab == TAB_RECORDINGS) cur_tab = TAB_DEBUG;
+        if ((tab_left || tab_right) && cur_tab == TAB_SPEAKER) cur_tab = TAB_AUDIO;
         if (tab_left || tab_right) {   // (the tabs shown: the Mods tab only with mods)
             do cur_tab = (cur_tab + (tab_left ? TAB_COUNT - 1 : 1)) % TAB_COUNT;
             while (!tab_shown(cur_tab));
@@ -5402,6 +5410,7 @@ void menu_tick() {
             else if (press[7] && is_fps_dev_row(r)) cur_tab = TAB_FPS_DEV, tab_selected[TAB_FPS_DEV] = 0, press[7] = false, changed = true;
             else if (press[7] && is_recordings_row(r))
                 cur_tab = TAB_RECORDINGS, tab_selected[TAB_RECORDINGS] = 0, press[7] = false, changed = true;
+            else if (press[7] && is_speaker_row(r)) cur_tab = TAB_SPEAKER, tab_selected[TAB_SPEAKER] = 0, press[7] = false, changed = true;
             else if (press[7] && r.setting && r.setting->on_activate &&   // (#1633: a module's button, unless locked)
                      !(r.setting->locked && r.setting->locked()))
                 r.setting->on_activate(), press[7] = false, changed = true;

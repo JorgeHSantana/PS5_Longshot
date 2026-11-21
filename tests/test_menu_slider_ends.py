@@ -17,7 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves t
 from menu_model_fixture import module_rows  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-STOPS = {"microphone_gain", "ultrawide", "mouse_sensitivity", "rumble_strength", "motion_sensitivity_x",
+STOPS = {"microphone_gain", "pad_speaker_volume", "pad_speaker_sync", "pad_speaker_headphone_volume",
+         "ultrawide", "mouse_sensitivity", "rumble_strength", "motion_sensitivity_x",
          "motion_sensitivity_y", "volume", "camera_speed", "field_of_view",
          "hud_health_x", "hud_health_y", "hud_health_scale", "hud_buttons_x", "hud_buttons_y", "hud_buttons_scale",
          "hud_minimap_x", "hud_minimap_y", "hud_minimap_scale"}

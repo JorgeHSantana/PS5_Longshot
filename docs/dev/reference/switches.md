@@ -162,6 +162,7 @@ These override a menu row for the run only (kind `player`).
 | `HOS_DYNRES=0/1`, `HOS_REALTIME_STEP=0/1`, `HOS_TEXT_SPEED=0..3` | Resolution (Auto), Game speed, Text speed |
 | `HOS_FPS_MAX=<30 or 61..1000>` | Game frame rate cap |
 | `HOS_WIDE_UI=0/1` | HUD layout on a screen that is not 16:9 |
+| `HOS_PAD_SPEAKER_VOLUME=<0-200>`, `HOS_PAD_SPEAKER_HEADPHONE_MODE=<0-2>`, `HOS_PAD_SPEAKER_<CLASS>=<0-2>` | Controller speaker: Speaker volume, Headphones on the controller (0 Off, 1 Controller sounds, 2 All sound), a kind of sound's row (`NAVI_VOICE`, `NAVI_SOUND`, `TARGET`, `OCARINA`, `PICKUP`, `ITEM`, `FAIRY`, `UI`, `AGONY`, `LOW_HEALTH`, `FISHING`, `BOTTLE`: 0 Off, 1 Controller only, 2 Controller + TV) |
 | `RX_VK_DEVICE=<n>` | GPU device (the index of `vk: device <n>` in the log) |
 | `RX_VK_FIFO=1`, `RX_VK_IMMEDIATE=1` | V-Sync on, off |
 | `RX_VK_PACE=0/1`, `RX_VK_UPSCALE=0..2` | Frame pacing, upscaling filter |
@@ -172,6 +173,23 @@ These override a menu row for the run only (kind `player`).
 | `RX_VK_COMPILE_SHADERS=most\|all` | Compile shaders |
 | `RX_VK_NO_INTEL_SERIAL=1/0` | Intel shader compiles: Side by side, One at a time ([below](#intels-compiler-on-windows)) |
 | `RX_VK_ASTC_RGBA8=1` | ASTC as RGBA8 (Debug tab): ASTC textures decoded to RGBA8 instead of BC, which takes much more memory |
+
+### The controller speaker
+
+`host/pad_speaker.c`, `host/audio_source.c` (the Controller speaker page; its rows' own switches are under the next
+heading).
+
+| Switch | What it does |
+|---|---|
+| `HOS_PAD_SPEAKER=0` or `1` | `0` never opens a DualSense's audio endpoint (the pad keeps its sound); `1` opens it even with every kind of sound Off. `HOS_PAD_SPEAKER_TEST=1`: a tone on the pad when it opens |
+| `HOS_AUDIO_SOURCE=0`, `HOS_AUDIO_SOURCE_TRACE=1` | No sound classed (nothing read from the game's sound archives: every sound stays on the TV), or each classed sound logged as it plays, `audio: voice N plays <checksum>: <class>` |
+| `HOS_PAD_SPEAKER_GAIN=<0-7>`, `HOS_PAD_SPEAKER_PATH=<0-3>`, `HOS_PAD_SPEAKER_BUFFER_MS=<5-100>` | The pad's preamp gain (4), its output path for the speaker (3, the speaker alone; 2 speaker and jack; 0 the jack), the buffer before the sync (20 ms). While RenHDrum plays the pad on its cable, the game's sounds are added to its stream's first two channels (HD Haptics' taps on the second kept) and the speaker is opened and given back by RenHDrum's speaker block alone (`rh_usb_speaker`, with HD Haptics off too), at this gain while they play there; the path is then RenHDrum's (3) |
+| `HOS_PAD_SPEAKER_HPF=0`, `HOS_PAD_SPEAKER_LIMITER=0`, `HOS_PAD_SPEAKER_LOW_LATENCY=0` | Each of the speaker's sound fixes turned back for a run: the bass kept, the earlier sample-by-sample curve, the earlier 40 ms buffer |
+| `HOS_PAD_SPEAKER_TV_DELAY=0`, `HOS_PAD_SPEAKER_OCARINA_RUMBLE=<0-100>` | A Controller sync below 0 never holds the TV back (`host/nn_audio.c`); the vibration's strength while an ocarina sound plays on the speaker, in percent (50; 100 as it is) |
+| `HOS_PAD_SPEAKER_HEADPHONES=0` or `1` | Headphones out of or in the pad's jack for a run, over what its input report says (`hos_sdl_pad_headphones`): for a pad or bridge that does not say |
+
+On a cabled DualSense whose vibration plays its voice coils (`host/rumble_renhdrum.c`), the speaker's two channels ride on
+the vibration's stream (`hos_pad_speaker_fill`); otherwise the speaker opens its own, the voice coils' channels silent.
 
 ### GPU debugging
 

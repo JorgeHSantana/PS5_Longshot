@@ -22,7 +22,7 @@ RUN_ALL_ARGS = ["--cxx", "g++"]
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGES = {"TAB_GRAPHICS": "graphics", "TAB_AUDIO": "audio", "TAB_GAMEPLAY": "gameplay", "TAB_CONTROLS": "controls",
-         "TAB_NFC": "nfc", "TAB_MODS": "mods", "TAB_DEBUG": "debug", "TAB_MOTION": "motion", "TAB_FPS_DEV": "fps_details", "TAB_PAGE": "controls_page"}
+         "TAB_NFC": "nfc", "TAB_MODS": "mods", "TAB_DEBUG": "debug", "TAB_MOTION": "motion", "TAB_SPEAKER": "controller_speaker", "TAB_FPS_DEV": "fps_details", "TAB_PAGE": "controls_page"}
 
 GRAPHICS = [
     ("Resolution and upscaling", ["Aspect ratio", "Output resolution", "Profile", "Upscaler", "DLSS model", "Render resolution", "Sharpness"]),

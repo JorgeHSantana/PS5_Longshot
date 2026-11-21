@@ -68,7 +68,8 @@ int hos_sdl_output_count(void);
 int hos_sdl_output_info(int index, char *id, int id_capacity, char *name, int name_capacity);
 int hos_sdl_output_resolve(const char *id);
 int hos_sdl_output_channels(int index);   /* (longshot) the index'th device's channels, after hos_sdl_output_count; 0 unknown */
-void *hos_sdl_audio_open(unsigned device, int freq, int channels, int s16,
+int hos_sdl_pad_audio_endpoint(void *pad); /* token for this pad's four-channel endpoint, or -1 */
+void *hos_sdl_audio_open(unsigned device, int freq, int channels, int s16, int frames,
                          void (*pull)(void *user, uint8_t *out, int len), void *user);
 void hos_sdl_audio_close(void *audio);   /* stops callbacks before freeing their state */
 int hos_sdl_audio_alive(void *audio);   /* bounded polling for a removed named endpoint/stopped SDL2 device */
@@ -124,3 +125,4 @@ int hos_sdl_hid_can(void);
 void *hos_sdl_hid_open(const char *path);
 int hos_sdl_hid_write(void *hid, const void *data, int size);   /* the bytes written, -1 on failure */
 void hos_sdl_hid_close(void *hid);
+int hos_sdl_pad_headphones(void *pad);   /* (longshot) a DualSense's jack: 1 headphones in, 0 out, -1 when it cannot say */
