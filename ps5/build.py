@@ -94,13 +94,23 @@ def uses_rtti(path):
     return '"cxx_escape.h"' in text or '"renderer_guard.h"' in text
 
 
+# (the page marks' table for the console's 64 GiB guest window, HOS_GUEST_SPACE: 16 MB of static data instead of the
+# 512 GB window's 128, and the GPU pages' bitmap 2 MB instead of 16. The lifted game, its runtime and the host all take it)
+DIRTY_PAGES = ["-DA64_DIRTY_PAGES=(1ull<<24)"]
+# (the lifted stores mark their page only where it is a GPU page, by the bitmap (host/mark_bitmap.c): nx2/build.py's
+# RX_MARK_BITMAP, on by default there. RX_MARK_BITMAP=0: every store marks, as before. From ProsperoHookshot 3ed454af,
+# where it measured ~1.2 ms less of the game's own time a frame in Hyrule Field on a PS5; HOS_MARK_BITMAP_ALL=1 at a
+# start is the control: every bit set)
+MARK_BITMAP = [] if os.environ.get("RX_MARK_BITMAP", "").strip().lower() in ("0", "off", "false", "no") else ["-DA64_MARK_BITMAP"]
+
+
 def jobs_for(rt64, gen_dir):
     """(source, object, flags, header digest) of everything the title links"""
     out = []
     game_digest = tree_digest(GEN, rt64, os.path.join(kit.KIT, "rt"), os.path.join(ROOT, "nx2", "rt"))
     game_fl = COMMON + ["-I" + rt64, "-I" + GEN, "-I" + os.path.join(kit.KIT, "rt"), "-I" + os.path.join(ROOT, "nx2", "rt"),
                         "-fno-strict-aliasing", "-mcx16", "-O1", "-mllvm", "-rotation-max-header-size=0", "-mllvm",
-                        "-capture-tracking-max-uses-to-explore=5000", "-DA64_POLLING", "-DA64_WRITE_TRACK"]
+                        "-capture-tracking-max-uses-to-explore=5000", "-DA64_POLLING", "-DA64_WRITE_TRACK"] + DIRTY_PAGES + MARK_BITMAP
     # (no lifted game: --kit's build, which compiles none of it)
     chunks = sorted(f for f in os.listdir(GEN) if f.startswith("code_") and f.endswith(".c")) if os.path.isdir(GEN) else []
     game = [os.path.join(GEN, c) for c in chunks] + \
@@ -110,7 +120,7 @@ def jobs_for(rt64, gen_dir):
 
     # the runtime: host/ as Linux builds it, without SDL's loader (host/ps5/hos_sdl_ps5.c) and the Linux-only files
     host_digest = tree_digest(HOST, rt64, GEN) + tree_digest(os.path.join(VK), ext=("vk_api.h", "dlss_math.h"))
-    host_fl = COMMON + [MKDIR, "-I" + POSIX, "-D_GNU_SOURCE", "-I" + HOST, "-I" + rt64, "-I" + GEN, "-O2", "-mcx16", "-DA64_POLLING",
+    host_fl = COMMON + DIRTY_PAGES + [MKDIR, "-I" + POSIX, "-D_GNU_SOURCE", "-I" + HOST, "-I" + rt64, "-I" + GEN, "-O2", "-mcx16", "-DA64_POLLING",
                         "-DA64_WRITE_TRACK", "-I" + os.path.join(OPUS, "include"), "-I" + os.path.join(FFMPEG, "include"),
                         "-I" + os.path.join(DEPS, "zstd", "include"),
                         "-I" + os.path.join(pkg("vulkanheaders", "v1.4.345"), "include"),
