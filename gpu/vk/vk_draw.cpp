@@ -7768,8 +7768,9 @@ bool fallback_buffers_of(const Program& p, FallbackBuffers*& out) {
                                   ? Shader::Backend::SPIRV::MESH_FALLBACK_POOL_OFFSET + Shader::Backend::SPIRV::MESH_FALLBACK_POOL_BYTES
                                   : (uint64_t)(Shader::Backend::SPIRV::MESH_FALLBACK_HEADER_WORDS +
                                                Shader::Backend::SPIRV::MESH_FALLBACK_RECORD_WORDS) * 4) + warp_counters;
-    // (per thread, not per program: one program needing more than this is left out instead of taking the budget)
-    if (records > (128ull << 20)) return false;
+    // (the most a recording thread's records buffer takes: its size follows the switches only, and emit_spirv.h's static_assert
+    // keeps every layout under it)
+    if (records > Shader::Backend::SPIRV::MESH_FALLBACK_RECORDS_LIMIT) return false;
     // (the map, a slot a started mesh workgroup, and a payload a task workgroup, its threads' meshlets sharing it)
     const uint64_t threads = std::max(1u, p.fallback_task_threads);
     const uint64_t payload = p.fallback_task ? capacity * 4 + (capacity + threads - 1) / threads * (uint64_t)p.fallback_payload_words * 4 : 0;
@@ -7786,7 +7787,7 @@ bool fallback_buffers_of(const Program& p, FallbackBuffers*& out) {
     const VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | (warp_counters ? VK_BUFFER_USAGE_TRANSFER_SRC_BIT : 0);
     // (only the payload outgrown: the newest pair's records, which every program takes from, go with the bigger payload. Made
-    // again, each growth left another 64 MB arena on the thread for the session, that no draw used again)
+    // again, each growth left another records area on the thread for the session, that no draw used again)
     const bool shared = !sets.empty() && sets.back().records && sets.back().records_bytes >= records;
     const auto drop_records = [&] {
         if (!shared) destroy_buffer(f.records, f.records_mem);
