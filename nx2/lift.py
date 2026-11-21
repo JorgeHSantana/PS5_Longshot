@@ -41,6 +41,7 @@ import discover   # (longshot) the discovery's walks in new processes where ther
 import lift_fixes
 import entry_hooks
 import suyu_rt_fixes
+import fpxkeep   # (longshot) NaN and infinite operands, exact-zero multiply-adds kept off the software bodies (A64_FPXKEEP)
 import chunks
 import standalone
 import adr_entries  # noqa: E402
@@ -64,6 +65,7 @@ walk.install()
 lift_fixes.install()
 entry_hooks.install()   # (host/*.c's ENTRY_HOOK_SYM hooks at the entry of their SDK functions: add() below)
 suyu_rt_fixes.install()
+fpxkeep.install()   # (after fastvec's: it edits the kit's lane routes and wraps fpx_header around fastvec's)
 
 
 def module_of(img, pc):
