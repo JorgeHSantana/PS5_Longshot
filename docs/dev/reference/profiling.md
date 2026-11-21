@@ -254,7 +254,9 @@ user name, saves, logs, game files or IDs are sent.
 A summary goes every `RX_VK_PERF_INTERVAL` seconds of play (default 300, 60 to 840) and at exit, holds at most 16 maps,
 and stays under 60 KiB (`perf_report::kMaxBody`; samples are thinned to fit). The log says `vk: performance statistics
 on (...)` at the first frame. `RX_VK_PERF_TEST_CURL=<path>` (test builds only) replaces curl in the checks.
-The stand-in sender reads its own switches: `LONGSHOT_PERF_URL`, `LONGSHOT_PERF_TIMEOUT`, `LONGSHOT_PERF_MAX_SENDS`,
+The stand-in sender reads its own switches: `LONGSHOT_PERF_URL`, `LONGSHOT_PERF_TIMEOUT`, `LONGSHOT_PERF_MAX_SENDS`
+(at most 5 a start by default: the ingest route takes 6 a minute with a burst of 6 per address — the two numbers live together, if you
+raise one, raise the other; one sender at a time, holding `perf_pending/.sending`, a lease it renews while it sends),
 `LONGSHOT_PERF_BACKOFF`, `LONGSHOT_PERF_KEEP_SENT`.
 
 ## Tools
