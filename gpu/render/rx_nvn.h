@@ -70,6 +70,7 @@ typedef struct {
 } nvn_tex_builder;
 typedef struct {
     uint32_t magic; nvn_texdesc d; uint8_t has_layout, layout[8];
+    uint8_t output_preview;               /* 1–3 for preview slots, 0 for regular textures */
     nvn_texlayout L;
     uint64_t gpu;                         /* GPU address of the storage (pool gpu + offset) */
     const nvn_pool *pool; int64_t off;

@@ -19,12 +19,12 @@ a = p.parse_args()
 source = a.source.resolve()
 main = (source/'gpu/vk/vk_main.cpp').read_text()
 replay = (source/'gpu/vk/vk_replay.cpp').read_text()
-start = replay.index('void present_image(')
+start = replay.index('void present_image_with_trial(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view, bool source_srgb, bool allow_scale, OutputTrialSource trial) {')
 # Read the complete top-level function; capture dependencies can grow its text.
 present = replay[start:replay.index('\n}', start) + 2]
 # (present ahead, #1702: the present itself is present_image's end, present_out, which present_commit also runs; its wait
 # is read from there, the complete function as above)
-out_start = replay.index('static bool present_out(uint32_t index, std::unique_lock<decltype(dev.present_mu)>& qk) {')
+out_start = replay.index('static bool present_out(uint32_t index, std::unique_lock<decltype(dev.present_mu)>& qk, OutputTrialSource trial, bool preview_path) {')
 present_out = replay[out_start:replay.index('\n}', out_start) + 2]
 signal = re.search(r'    signal\.semaphore = [^;]+;', present)[0]
 wait = re.search(r'    pi\.pWaitSemaphores = [^;]+;', present_out)[0]
@@ -126,6 +126,7 @@ bool present_thread_drain() { return drain_says; }   // (RX_VK_PRESENT_THREAD of
 bool swapchain_made_ready() { return present_thread_drain(); }   // (vk_replay.cpp: the same rule, factored; the fixture answers through the drain)
 void fg_latency_swapchain_gone() {}   // (RX_VK_FG_LATENCY_LOG unset: no waits for presents)
 std::atomic<bool> presenter_surface_lost{false};   // (and nothing found lost by it)
+std::atomic<bool> output_preview_path{false};
 int vkCreateSwapchainKHR(int,const CreateInfo* ci,void*,uint64_t* out) {
     if(ci->oldSwapchain) {
         if(!chains.count(ci->oldSwapchain) || retired.count(ci->oldSwapchain))bad_chain=true;

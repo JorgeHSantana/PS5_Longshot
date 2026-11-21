@@ -78,6 +78,7 @@ Row rows[] = {{"Quality preset", &opts.preset}, {"Game frame rate cap", &opts.fp
               {"Output resolution", &opts.output_res}, {"Aspect ratio", &opts.ultrawide}, {"Game language", &opts.game_lang},
               {"Output device", &output_pick}};
 std::string dir;
+std::mutex options_save_mu;
 std::vector<std::string> logged;
 void logf(const char* fmt, ...) {
     char b[512];

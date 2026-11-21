@@ -2033,8 +2033,26 @@ const MkwVkRenderer* mkwvk_init(const MkwVkHost* h) {
         return nullptr;
     }
     std::memset(&host_storage, 0, sizeof(host_storage));
-    const size_t copy_size = (h->version == 14) ? (offsetof(MkwVkHost, wide_menus) + sizeof(h->wide_menus))
-                                                : sizeof(MkwVkHost);
+    const size_t copy_size =
+        h->version < 15 ? offsetof(MkwVkHost, slept_ns) :
+        h->version < 17 ? offsetof(MkwVkHost, prompts_live) :
+        h->version < 20 ? offsetof(MkwVkHost, screen_size) :
+        h->version < 22 ? offsetof(MkwVkHost, take_text) :
+        h->version < 23 ? offsetof(MkwVkHost, options_path) :
+        h->version < 24 ? offsetof(MkwVkHost, audio_output_count) :
+        h->version < 25 ? offsetof(MkwVkHost, mic_test) :
+        h->version < 26 ? offsetof(MkwVkHost, perf_info) :
+        h->version < 27 ? offsetof(MkwVkHost, main_thread_times) :
+        h->version < 28 ? offsetof(MkwVkHost, out_of_memory) :
+        h->version < 29 ? offsetof(MkwVkHost, monitor_count) :
+        h->version < 30 ? offsetof(MkwVkHost, perf_tracking) :
+        h->version < 32 ? offsetof(MkwVkHost, rumble_test) :
+        h->version < 33 ? offsetof(MkwVkHost, nfc_count) :
+        h->version < 34 ? offsetof(MkwVkHost, ab_frame) :
+        h->version < 35 ? offsetof(MkwVkHost, mod_info) :
+        h->version < 36 ? offsetof(MkwVkHost, ab_value) :
+        h->version < 41 ? offsetof(MkwVkHost, output_preview_request) :
+        sizeof(MkwVkHost);
     std::memcpy(&host_storage, h, std::min(sizeof(host_storage), copy_size));
     host = &host_storage;
     std::set_new_handler(new_refused);   // (a refused C++ allocation waits, then says out of memory)

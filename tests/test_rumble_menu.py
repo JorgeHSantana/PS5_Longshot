@@ -17,7 +17,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves the check's own folder off the path)
-from menu_model_fixture import menu_model_prelude, menu_model_member, menu_text  # noqa: E402
+from menu_model_fixture import menu_model_prelude, menu_text  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 MENU = ROOT / "gpu" / "vk" / "vk_menu.cpp"
@@ -115,6 +115,9 @@ void menu_debug_rows(bool, bool) {}
 // (set_row steps the Output row through vk_menu.cpp's step_output_choice (#1144): not what this checks)
 int step_output_choice(int id, int dir) { return id + dir; }
 // (the Aspect ratio row moves the Output resolution to one of its shape's sizes, output_for_aspect: not what this checks)
+struct Picture { unsigned w, h; };
+Picture picture_for(int) { return {}; }
+bool request_native_preview(Picture) { return false; }
 int output_for_aspect(int) { return opts.output_res; }
 // (the Frame generation rows in set_row: DLSS FG offered (framegen_by_dlss_offered); no DLSS FG top here (vk_dlss.cpp
 // dlss_fg_most, vk_framegen.cpp framegen_capped))

@@ -18,6 +18,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cerrno>
 #include <utility>
 #include <cstdio>
 #include <cstdlib>
@@ -34,6 +35,7 @@
 
 #include "vk_paths.h"
 #include "vk_menu.h"
+#include "../../host/hos_atomic_file.h"
 #include "vk_menu_hit.h"
 #include "vk_fps.h"    // (the FPS counter's levels and numbers)
 #include "vk_draw.h"   // (pipeline_cache_save: Restart now keeps what was built)
@@ -209,9 +211,15 @@ constexpr const char* kMicLevelHelp =
     "- Second percentage: peak after Microphone gain, also shown by the bar.\n\n"
     "At 100% gain they match. Increasing gain also raises noise and can clip the signal.";
 namespace dm = display_modes;
+Out output_preview_target{};
+bool output_preview_from_field = false;
 /// A row with nothing else to choose here: shown without its arrows, Left and Right leave it (and the saved value) alone
 bool module_locked(const int* value);   // (#1633: a module's row with this value, locked by its own locked(): below)
 bool row_fixed(const int* value) {
+    // Output and the settings that can change its shape or invalidate the preview path wait for the trial.
+    if (output_preview_target.w && (value == &opts.output_res || value == &opts.ultrawide ||
+        value == &opts.handheld || value == &opts.preset || value == &opts.vsync || value == &opts.framegen ||
+        value == &opts.hdr || value == &opts.reflex || value == &opts.dlss)) return true;
     return module_locked(value) || (value == &opts.upscale && !filter_needed()) ||
            (value == &opts.framegen_by && framegen_by_fixed()) ||   // (its line says why)
            (value == &opts.hud_layout && getenv("HOS_WIDE_UI") && *getenv("HOS_WIDE_UI"));   // (host/hos_wide_ui.c's, first)
@@ -844,7 +852,9 @@ const char* const* tr_names() {
 std::string restart_list(const char* last) {
     return mr::names(tr_names(), restart_state.n, restart_pending(), ", ", last);
 }
-int ask_sel = 0;   // (the restart question's choice: 0 Later, 1 Restart now)
+int ask_sel = 0;   // (the safe answer is first in both confirmation dialogs)
+int output_preview_countdown{};
+std::mutex options_save_mu;
 
 /// A row on its tab: the debug tools only with them on; a row for what this PC cannot run not at all (Reflex and Anti-Lag 2
 /// only where the driver has them, the Upscaler only where more than the game's own runs, the DLSS model only where DLSS
@@ -978,8 +988,7 @@ const char* const bind_names[HOS_KEY_N] = {"a", "b", "x", "y", "ls", "rs", "l", 
 bool toggle_on(int button);   // (the Controls page's Toggle column: below, with the page)
 void save() {
     // (one writer at a time: the present's thread, the game's (menu_option_set) and the control bridge's, menu_setting_set)
-    static std::mutex save_mu;
-    std::lock_guard lk(save_mu);
+    std::lock_guard lk(options_save_mu);
     // (longshot) the lines that are not the menu's are kept: the controls, pad_ and key_ (host/nn_hid.c), and their toggle_ flags
     // (and every other line the menu does not write, such as discord_app_id=: they were dropped at the next save)
     std::string kept, others;
@@ -1200,6 +1209,7 @@ namespace {   // (#1633: the anonymous namespace again, after what the modules a
 bool debug_warning = false;
 int debug_warning_choice = 0;
 
+static bool request_native_preview(Out target, bool from_field = false);
 void set_row(Row& r, int v, int dir, bool keep = true) {
     if (r.value == &opts.debug_tools && !opts.debug_tools && v > 0) {
         debug_warning = true;
@@ -1224,7 +1234,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
     }
     if (r.value == &opts.output_res) {   // (smallest to largest: step_output_choice)
         v = step_output_choice(*r.value, dir);
-        if (v == *r.value) return;
+        if (v == *r.value || (keep && request_native_preview(picture_for(v)))) return;
     }
     // (longshot) Frame generation by where DLSS FG cannot run: FSR 3.1 FG (0; a 2 is the same) and Built-in FG (1)
     if (r.value == &opts.framegen_by && !framegen_by_dlss_offered()) v = (v % 2 + 2) % 2;
@@ -1260,6 +1270,118 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
     if (keep) save();
 }
 
+static bool request_native_preview(Out target, bool from_field) {
+    if (output_preview_target.w || opts.handheld || env_holds(&opts.output_res) ||
+        target.w != 1024 || target.h != 576) return false;
+    // The preview needs an atomic save; linked settings keep the regular restart flow which writes through the link.
+    const std::string path = ini_path();
+    if (path.empty() || hos_af_is_link(path.c_str())) return false;
+    const Out original = shown_output();
+    if (original.w != 1280 || original.h != 720 || !output_preview_request(target.w, target.h)) return false;
+    output_preview_target = target;
+    output_preview_from_field = from_field;
+    return true;
+}
+
+// Replace only the resolution setting. Decline on a failed write so the old output remains effective.
+static bool save_preview_size(Out target) {
+    std::lock_guard lk(options_save_mu);
+    const std::string path = ini_path();
+    if (path.empty() || hos_af_is_link(path.c_str())) return false;
+    FILE* f = fopen(path.c_str(), "rb");
+    std::string old;
+    if (!f) {
+        if (errno != ENOENT) return false;
+    } else {
+        char buffer[4096];
+        while (const size_t n = fread(buffer, 1, sizeof buffer, f)) old.append(buffer, n);
+        const bool read = !ferror(f);
+        fclose(f);
+        if (!read) return false;
+    }
+    const std::string value = "output_res=" + std::to_string(target.w) + "x" + std::to_string(target.h);
+    std::string replaced;
+    bool written = false;
+    for (size_t from = 0; from < old.size();) {
+        const size_t newline = old.find('\n', from);
+        const size_t to = newline == std::string::npos ? old.size() : newline + 1;
+        if (old.compare(from, 11, "output_res=") == 0) {
+            replaced += value;
+            if (newline != std::string::npos) replaced += newline > from && old[newline - 1] == '\r' ? "\r\n" : "\n";
+            written = true;
+        } else {
+            replaced.append(old, from, to - from);
+        }
+        from = to;
+    }
+    if (!written) {
+        if (!replaced.empty() && replaced.back() != '\n') replaced += '\n';
+        replaced += value + "\n";
+    }
+    char temp[HOS_AF_PATH];
+    if (!hos_af_name(temp, sizeof temp, path.c_str(), HOS_AF_NEW)) return false;
+    const HANDLE out = hos_af_open_new(temp);
+    if (out == INVALID_HANDLE_VALUE) return false;
+    const bool wrote = hos_af_write_all(out, replaced.data(), replaced.size()) && FlushFileBuffers(out);
+    const bool closed = CloseHandle(out);
+    const bool moved = wrote && closed && hos_af_move(temp, path.c_str());
+    if (!moved) DeleteFileA(temp);
+    return moved;
+}
+
+extern int page;
+void output_field_show();
+static void answer_native_preview(bool keep) {
+    const Out selected = output_preview_target;
+    const bool accepted = keep && output_preview_answer(true);
+    if (accepted && save_preview_size(selected)) {
+        opts.output_res = output_started = output_choice_of(selected.w, selected.h);
+        for (Row& r : rows)
+            if (r.value == &opts.output_res) {
+                r.hi = last_choice();
+                const int index = restart_slot_of(r);
+                if (index >= 0) restart_state.restart_value(index, row_restart_value(r));
+            }
+        output_field_show();
+        int values[mr::kMax];
+        restart_values(values);
+        restart_state.note(values);
+    } else {
+        if (accepted) logf("menu: could not save the new output resolution; restoring the previous size");
+        output_preview_answer(false);
+    }
+    output_preview_target = {};
+    output_preview_countdown = 0;
+    page = 0;
+    menu_refresh = true;
+}
+
+// A preview refused before activation falls back to the normal restart setting.
+static void apply_custom_output(unsigned w, unsigned h, bool has_size);
+static void unavailable_native_preview() {
+    const Out selected = output_preview_target;
+    const bool from_field = output_preview_from_field;
+    answer_native_preview(false);
+    if (from_field) apply_custom_output(selected.w, selected.h, true);
+    else {
+        opts.output_res = output_choice_of(selected.w, selected.h);
+        for (Row& r : rows)
+            if (r.value == &opts.output_res) r.hi = last_choice();
+        output_field_show();
+        env_release(&opts.output_res);
+        int values[mr::kMax];
+        restart_values(values);
+        restart_state.note(values);
+        save();
+    }
+    if (restart_ask()) {
+        page = 5;
+        ask_sel = 0;
+        open_now = true;
+    }
+    menu_refresh = true;
+}
+
 // ---- (longshot) the rows that are text fields (text_edit): their fields, what Enter on each sets, the one being edited ----
 /// Custom output size: the Output resolution's size of the player's own (custom_output), typed, as output_res= in
 /// longshot_options.ini sets it (parse_output: the same rules)
@@ -1290,16 +1412,7 @@ bool size_text(const char* t, unsigned* w, unsigned* h) {
     }
     return true;
 }
-/// Enter on Custom output size: the Output resolution row on the size typed (one it offers, or the player's own), or, emptied,
-/// none of the player's own; saved. nullptr when taken, else why not
-const char* output_field_apply() {
-    unsigned w = 0, h = 0;
-    if (output_field.len) {
-        if (!size_text(output_field.text, &w, &h)) return "Type the width, an x, then the height: 3440x1440.";
-        w &= ~7u, h &= ~7u;
-        if (!hos_output_size_valid(w, h))
-            return "Not a size the game can draw: at least 640x360, at most 5120x2880's pixels, from 5:4 to 48:9 in shape.";
-    }
+static void apply_custom_output(unsigned w, unsigned h, bool has_size) {
     // (changing the custom size can reorder the shape list: keep the startup and Later choices by shape, not index)
     int aspect_slot = -1;
     for (const Row& r : rows)
@@ -1312,9 +1425,9 @@ const char* output_field_apply() {
     const std::string declined_shape = later ? aspect_shape(declined) : std::string();
     const bool start_custom = output_started == custom_index() && custom_output.w;
     const Out started = output_at(output_started);
-    if (output_field.len) opts.output_res = output_choice_of(w, h);
+    if (has_size) opts.output_res = output_choice_of(w, h);
     // (an offered size, including one found on a new screen, or an empty field: no separate custom choice)
-    if (opts.output_res != custom_index() || !output_field.len)
+    if (opts.output_res != custom_index() || !has_size)
         custom_output = {0, 0}, opts.output_res = output_choice(opts.output_res);
     // (the run's original custom size must still be reachable when returning to its starting shape)
     if (start_custom && (custom_output.w != started.w || custom_output.h != started.h)) {
@@ -1337,6 +1450,27 @@ const char* output_field_apply() {
     restart_values(now);
     restart_state.note(now);
     save();
+}
+
+/// Enter on Custom output size: the Output resolution row on the size typed (one it offers, or the player's own), or, emptied,
+/// none of the player's own; saved. nullptr when taken, else why not
+const char* output_field_apply() {
+    if (output_preview_target.w) {
+        output_field_show();
+        return nullptr;
+    }
+    unsigned w = 0, h = 0;
+    if (output_field.len) {
+        if (!size_text(output_field.text, &w, &h)) return "Type the width, an x, then the height: 3440x1440.";
+        w &= ~7u, h &= ~7u;
+        if (!hos_output_size_valid(w, h))
+            return "Not a size the game can draw: at least 640x360, at most 5120x2880's pixels, from 5:4 to 48:9 in shape.";
+    }
+    if (request_native_preview({w, h}, true)) {
+        output_field_show();
+        return nullptr;
+    }
+    apply_custom_output(w, h, output_field.len != 0);
     return nullptr;
 }
 struct FieldRow {
@@ -2973,18 +3107,26 @@ void draw_ask(ui::Ctx& c) {
     const float hb = 50 * s;   // (a tan title strip, as the banner, its title in dark ink)
     c.d->AddRectFilledMultiColor(p, ImVec2(q.x, p.y + hb), ui::kBannerTop, ui::kBannerTop, ui::kBanner, ui::kBanner);
     c.d->AddRectFilled(ImVec2(p.x, p.y + hb - 3 * s), ImVec2(q.x, p.y + hb), ui::kBannerEdge);
-    ui::text_mid_centre(c, c.f.heading, 23 * s, (p.x + q.x) * 0.5f, p.y + hb * 0.5f, ui::kBannerInk, "Restart Needed");
-    const std::string ask = i18n::tr("Restart to apply ") + restart_list(i18n::tr(" and ")) + "?";
-    ui::para(c, c.f.body, 19 * s, ImVec2(p.x + 28 * s, p.y + 64 * s), ui::kInk, ask.c_str(), W - 56 * s);
-    ui::text_mid(c, c.f.body, 16 * s, p.x + 28 * s, p.y + 124 * s, ui::kSoft, "Progress since your last save is lost.");
+    const bool preview = output_preview_countdown > 0;
+    ui::text_mid_centre(c, c.f.heading, 23 * s, (p.x + q.x) * 0.5f, p.y + hb * 0.5f, ui::kBannerInk,
+                       preview ? "Keep changes?" : "Restart Needed");
+    if (preview) {
+        char countdown[160];
+        snprintf(countdown, sizeof countdown, i18n::tr("Restoring in %d seconds."), output_preview_countdown);
+        ui::para(c, c.f.body, 19 * s, ImVec2(p.x + 28 * s, p.y + 64 * s), ui::kInk, countdown, W - 56 * s);
+    } else {
+        const std::string ask = i18n::tr("Restart to apply ") + restart_list(i18n::tr(" and ")) + "?";
+        ui::para(c, c.f.body, 19 * s, ImVec2(p.x + 28 * s, p.y + 64 * s), ui::kInk, ask.c_str(), W - 56 * s);
+        ui::text_mid(c, c.f.body, 16 * s, p.x + 28 * s, p.y + 124 * s, ui::kSoft, "Progress since your last save is lost.");
+    }
     const float bw = 210 * s, bh = 46 * s, gap = 24 * s, by = p.y + 160 * s, x0 = (p.x + q.x) * 0.5f - bw - gap * 0.5f;
-    const char* labels[2] = {"Later", "Restart Now"};
+    const char* labels[2] = {preview ? "No" : "Later", preview ? "Yes" : "Restart Now"};
     for (int i = 0; i < 2; i++) {
         const ImVec2 a(x0 + i * (bw + gap), by), b = a + ImVec2(bw, bh);
         ui::button(c, a, b, labels[i], i == ask_sel);
         hits.add(a.x, a.y, b.x, b.y, menu_hit::kButton, i);
     }
-    const ui::Prompt prompt_list[] = {{ui::kLeftRight, "Choose"}, {ui::kConfirm, "Confirm"}, {ui::kBack, "Later"}};
+    const ui::Prompt prompt_list[] = {{ui::kLeftRight, "Choose"}, {ui::kConfirm, "Confirm"}, {ui::kBack, preview ? "No" : "Later"}};
     ui::prompt_bar(c, prompt_list, 3);
 }
 
@@ -4129,6 +4271,28 @@ bool fps_take(int64_t now, int64_t shown, int64_t game, int64_t* next, int64_t* 
 // (the game's) and the control bridge's menu_setting and menu_setting_set (its own thread). Recursive: a setter reached from
 // inside menu_tick's frame on the same thread does not lock itself out
 std::recursive_mutex menu_mu;
+
+// The native window was rebuilt after Yes. The next valid stock frame supplies the running size.
+static void menu_output_rebuilt(uint32_t width, uint32_t height) {
+    const Out saved_custom = custom_output;
+    output_started = output_choice_of(width, height);
+    if (output_started == custom_index() && (saved_custom.w != width || saved_custom.h != height)) {
+        output_extras.push_back({width, height});
+        custom_output = saved_custom;
+        output_started = last_choice();
+    }
+    for (Row& r : rows) {
+        if (r.value != &opts.output_res) continue;
+        r.hi = last_choice();
+        const int slot = restart_slot_of(r);
+        const int running = (int)(width << 16 | height);
+        restart_state.restart_value(slot, running);
+        if (restart_changed(r)) restart_state.later = false;
+        break;
+    }
+    menu_refresh = true;
+}
+
 void menu_option_set(int id, int value) {
     if (id == OOT_CHEAT_AGE_ID) {   // (Link's age: the Switch age row shows it)
         if (link_age.exchange(value, std::memory_order_relaxed) != value && page == 0 && cur_tab == TAB_DEBUG) menu_refresh = true;
@@ -4490,6 +4654,29 @@ void menu_tick() {
     fullscreen_tick();
     game_lang_tick();
     outputs_follow_screen();
+    if (const uint64_t size = output_preview_take_rebuilt_size())
+        menu_output_rebuilt((uint32_t)(size >> 32), (uint32_t)size);
+    if (output_preview_target.w) {
+        const int remaining = output_preview_seconds();
+        if (remaining == -2) answer_native_preview(false);
+        else if (remaining == 0) {
+            edit_end(false);
+            listening = 0;
+            unavailable_native_preview();
+        }
+        else if (remaining > 0) {
+            if (!output_preview_countdown) {
+                edit_end(false);
+                listening = 0;
+                page = 5;
+                ask_sel = 0;
+                open_now = true;
+                logf("menu: live output confirmation opened");
+            }
+            output_preview_countdown = remaining;
+            menu_refresh = true;
+        }
+    }
     enum { K_N = 18 };
     static bool held[K_N];
     static const int keys[K_N] = {VK_INSERT, VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_ESCAPE, VK_F1,   // (F1: for keyboards without Insert)
@@ -4585,11 +4772,16 @@ void menu_tick() {
         // (longshot) TYPE:<text> types the text up to the next comma, as the keyboard would; while a text field has the
         // keyboard ENTER, ESC, LEFT, RIGHT, HOME, END, BACK (Backspace) and DEL are its keys, and the pad's confirm and back too
         static const char* next = getenv("RX_VK_MENU_SCRIPT");
-        static const int64_t start = prof_now();
+        static const bool at_confirmation = next && !strncmp(next, "confirm:", 8);
+        static int64_t start = at_confirmation ? 0 : prof_now();
+        if (at_confirmation && !start && output_preview_countdown) {
+            next += 8;
+            start = prof_now();
+        }
         double at;
         char key[8];
         int n = 0;
-        if (next && sscanf(next, "%lf:%7[A-Z]%n", &at, key, &n) == 2 && (prof_now() - start) / 1e9 >= at) {
+        if (next && start && sscanf(next, "%lf:%7[A-Z]%n", &at, key, &n) == 2 && (prof_now() - start) / 1e9 >= at) {
             static const char* names[] = {"INS", "UP", "DOWN", "LEFT", "RIGHT", "ESC", "", "ENTER", "", "", "TABL", "TABR"};
             static const struct { const char* name; int vk; } edit_keys[] = {
                 {"ENTER", VK_RETURN}, {"ESC", VK_ESCAPE}, {"LEFT", VK_LEFT}, {"RIGHT", VK_RIGHT}, {"HOME", VK_HOME},
@@ -4681,8 +4873,13 @@ void menu_tick() {
     if ((press[0] || press[6]) && debug_warning) {
         debug_warning = false;
         changed = true;
+    } else if (output_preview_target.w && !output_preview_countdown &&
+               (press[0] || press[5] || press[6] || (open_now.load() && page == 0 && (ptr.pressed & HOS_MOUSE_RIGHT)))) {
+        answer_native_preview(false);
+        if (ptr.pressed & HOS_MOUSE_RIGHT) ptr.pressed &= ~HOS_MOUSE_RIGHT;
     } else if ((press[0] || press[6]) && open_now.load() && page == 5) {
-        later();
+        if (output_preview_countdown) answer_native_preview(false);
+        else later();
     } else if ((press[0] || press[6]) && open_now.load() && restart_ask()) {
         page = 5, ask_sel = 0, listening = 0, changed = true;
     } else if (press[0] || press[6] || esc_opens) {
@@ -4756,7 +4953,9 @@ void menu_tick() {
             if (ptr.pressed & HOS_MOUSE_RIGHT) press[5] = true;
         }
         if (press[1] || press[2] || press[3] || press[4] || tab_left || tab_right) ask_sel ^= 1, changed = true;
-        if (press[5] || (press[7] && ask_sel == 0)) {
+        if (output_preview_countdown && (press[5] || press[7])) {
+            answer_native_preview(!press[5] && ask_sel != 0);
+        } else if (press[5] || (press[7] && ask_sel == 0)) {
             later();
         } else if (press[7]) {   // (Restart now: everything saved, then the window closes as the player would close it)
             logf("menu: restart now, to apply %s", restart_list(", ").c_str());

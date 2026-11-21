@@ -925,6 +925,11 @@ static void status_reply(int ci, const char *id, const char *sample, int64_t now
         buf_printf(&b, ",\"draws\":%.1f,\"replayed\":%lld,\"window\":{\"width\":%d,\"height\":%d}", G.draws,
                    (long long)G.replayed, G.width, G.height);
     else buf_puts(&b, ",\"draws\":null,\"replayed\":null,\"window\":null");
+    HosControlPicture picture;
+    if (G.game->picture && G.game->picture(&picture))
+        buf_printf(&b, ",\"game_picture\":{\"texture_width\":%u,\"texture_height\":%u,\"width\":%u,\"height\":%u}",
+                   picture.texture_width, picture.texture_height, picture.width, picture.height);
+    else buf_puts(&b, ",\"game_picture\":null");
     buf_printf(&b, ",\"uptime\":%.1f,\"clients\":%d,\"input\":{\"queued\":%d,\"exclusive\":%s}", (now - G.started_ns) / 1e9,
                clients, active, ex ? "true" : "false");
     buf_puts(&b, ",\"map\":");
@@ -2470,6 +2475,7 @@ void ExitProcess(unsigned int code);   /* (host/posix/win32_posix.c; Windows: wi
 extern volatile int64_t hos_present_count;   /* (display.c, posix/display_sdl.c: the game's presents; LONG64) */
 const char *rx_describe(void);
 int rx_control_frame_info(int64_t *presents, int64_t *draws, int *width, int *height);
+int rx_control_picture(HosControlPicture *out);
 int rx_control_shot(const char *path, int64_t after, void (*done)(void *ctx, int64_t present, int ok), void *ctx);
 int rx_control_setting(int index, HosControlSetting *out);   /* (rx_backend.c: MkwVkSetting's fields) */
 int rx_control_setting_set(const char *key, int value, HosControlSetting *out);
@@ -2531,7 +2537,7 @@ static HosControlGame game = {
     .teleport_cancel = hos_oot_teleport_cancel, .age = hos_oot_age_ask, .oot_state = hos_oot_state,
     .oot_sample_ask = hos_oot_sample_ask, .oot_sample_cancel = hos_oot_sample_cancel,
     .oot_sample = hos_oot_sample, .oot_watch = hos_oot_watch, .oot_poll = hos_oot_poll,
-    .relaunch = game_relaunch};
+    .relaunch = game_relaunch, .picture = rx_control_picture};
 
 void hos_control_start(const char *version) {
     const char *path = getenv("HOS_CONTROL");

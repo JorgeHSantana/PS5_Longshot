@@ -18,6 +18,12 @@ int hos_control_input(uint64_t *buttons, int32_t stick[4]);
 void hos_control_log(const char *line);
 extern volatile int hos_control_on;
 
+/* The source of the last native game present submitted to the renderer. */
+typedef struct HosControlPicture {
+    unsigned texture_width, texture_height;
+    unsigned width, height;   /* crop size, or the texture size when there is no crop */
+} HosControlPicture;
+
 /* One of the Insert menu's settings (gpu/vk/vk_api.h MkwVkSetting's fields) */
 typedef struct HosControlSetting {
     char key[32], name[48], text[64], tab[16];
@@ -39,7 +45,7 @@ typedef struct HosControlOotWatch {
 /* The game as the bridge sees it: control.c's own for the game, a fake one in tests/control_test.c */
 typedef struct HosControlGame {
     int64_t (*frame)(void);   /* the game's presents so far */
-    /* the presents replayed, the draws recorded so far, the picture's size: 0 when there is no such renderer */
+    /* the presents replayed, the draws recorded so far, the swapchain size: 0 when there is no such renderer */
     int (*frame_info)(int64_t *replayed, int64_t *draws, int *width, int *height);
     /* a PNG of the first present after `after`; done(ctx, present, ok) from any thread. 0: not taken */
     int (*shot)(const char *path, int64_t after, void (*done)(void *ctx, int64_t present, int ok), void *ctx);
@@ -95,6 +101,8 @@ typedef struct HosControlGame {
     /* the game started again as the Insert menu's Restart now does it (host/hos_relaunch.c: the same command and the
        environment it started with, so the bridge comes back on the same socket); does not return. NULL: no restart here */
     void (*relaunch)(void);
+    /* Copies the last observed source dimensions. 0 before a native game present. */
+    int (*picture)(HosControlPicture *out);
 } HosControlGame;
 
 /* Listens on path and serves on a thread of its own. 0 when it could not (logged) */

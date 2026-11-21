@@ -107,6 +107,9 @@ void temporal_reset_failure() { ++temporal_resets; }
 void prompts_at_once(const Row&) {}
 void menu_debug_rows(bool, bool) {}
 int step_output_choice(int id, int dir) { return id + dir; }
+struct Picture { unsigned w, h; };
+Picture picture_for(int) { return {}; }
+bool request_native_preview(Picture) { return false; }
 int output_for_aspect(int) { return opts.output_res; }
 %(set_row)s
 void arrow(Row& r, bool right) { %(arrow)s }

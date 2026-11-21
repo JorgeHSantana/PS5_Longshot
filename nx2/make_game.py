@@ -3261,9 +3261,11 @@ def main(a=None):
                     write_lift_key(work, key)
                 else:
                     inputs = lift_key(exefs, work, env, planning=False)   # (what the lift reads and does not write, as it starts)
+                    lift_started = time.monotonic()
                     run(PY + ["nx2/lift.py", "--standalone", "--write", "--exefs", exefs, "--work", work], env, lift_progress(work))
                     if os.path.isfile(os.path.join(work, "sa", "gen", "code_hot.c")):
                         run(PY + ["nx2/split_hot.py", os.path.join(work, "sa", "gen")], env)   # (eight files side by side: ~6 minutes, not 79)
+                    print("lift and split: %.1fs wall time" % (time.monotonic() - lift_started), flush=True)
                     # (the lift writes inputs of the next one: split_hot's kept pieces, image/hot_pieces.txt, which the key hashes. Its key is
                     # taken again now, from what the next build reads: taken before, in a fresh work folder (no hot_pieces.txt yet) it never
                     # matches the next build's, which translates the game again for nothing). Only when nothing else it reads changed while it ran: a

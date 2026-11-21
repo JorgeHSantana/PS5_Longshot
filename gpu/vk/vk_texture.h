@@ -10,6 +10,7 @@
 // with the Switch 2 GOB swizzle); other formats are unswizzled on the CPU straight into the staging memory.
 #pragma once
 
+#include <memory>
 #include <string>
 #include <cstdint>
 #include <unordered_map>
@@ -138,6 +139,25 @@ int64_t texture_readback_wait_ns();   // (a read-back's submit and wait for the 
 int64_t texture_frame_ns();           // (texture_frame as a whole: each present's eviction, compaction and sweeps)
 /// The texture an NVN texture's storage is (made and uploaded at first use, uploaded again when the CPU wrote its
 /// storage since). null for formats and targets that have no image (buffers, unknown formats).
+struct OutputTrialBacking {
+    struct Image {
+        VkImage image{};
+        VmaAllocation allocation{};
+        VkImageCreateInfo shape{};
+        VkImageView view{};
+        uint64_t serial{};
+        uint64_t gpu{};
+    };
+    Image images[3]{};
+    OutputTrialBacking() = default;
+    OutputTrialBacking(const OutputTrialBacking&) = delete;
+    OutputTrialBacking& operator=(const OutputTrialBacking&) = delete;
+    ~OutputTrialBacking();
+    bool matches(uint64_t serial, VkImage image) const;
+};
+std::unique_ptr<OutputTrialBacking> output_probe_backing(const nvn_tex* targets, bool fail_second,
+                                                        unsigned& made, uint64_t& bytes);
+void take_output_trial_image(const nvn_tex* t, const VkImageCreateInfo& shape, VkImage& image, VmaAllocation& allocation);
 Texture* texture_get(const nvn_tex* t, bool for_sampling);
 /// (longshot, RX_VK_TEX_AHEAD: texture_ahead.h) Textures made and uploaded before their first draw, while the frames are
 /// light. The host's announcements: a texture the game made, and one it released (any thread)

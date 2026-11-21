@@ -14,7 +14,9 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 40   /* (40: HOS_BIND_SPRINT_TOGGLE) */
+#define MKWVK_API_VERSION 41   /* (40: HOS_BIND_SPRINT_TOGGLE; 41: live output preview) */
+
+enum { OUTPUT_TRIAL_EXPIRED, OUTPUT_TRIAL_PREPARING, OUTPUT_TRIAL_READY, OUTPUT_TRIAL_ACTIVE, OUTPUT_TRIAL_SHOWN };
 enum { HOS_MONITOR_CURRENT = 1, HOS_MONITOR_PRIMARY = 2 };
 typedef struct MkwVkMonitor {
     char id[512];             /* opaque persistent preference; never a runtime handle or list index */
@@ -359,6 +361,8 @@ typedef struct MkwVkHost {
        keeps the names it has seen by their address). gpu/vk/vk_draw.cpp asks for RX_VK_MESH_CONV at each recording's start,
        so HOS_AB=RX_VK_MESH_CONV=<v> measures the indirect mesh draws' conversion one way against the other */
     int (*ab_value)(const char *name, int normal);
+    /* Version 41: request a live output preview. */
+    int (*output_preview_request)(uint32_t width, uint32_t height);
 } MkwVkHost;
 /* (version 35) a cheat's kind: a heading (no opcodes), a data cheat (switched), a master cheat (always on), not supported (note) */
 enum { MKWVK_CHEAT_HEADING, MKWVK_CHEAT_DATA, MKWVK_CHEAT_MASTER, MKWVK_CHEAT_UNSUPPORTED };
@@ -440,6 +444,12 @@ typedef struct MkwVkRenderer {
        game thread's virtual core for it); 0, call nvn_invalidate (with the core given up, as before). Never waits: no lock
        but a short one of its own (RX_VK_WB_MAX_KB's table), any thread */
     int (*nvn_invalidate_quick)(uint64_t gpu, uint64_t size);
+    /* Version 41: live output preview. */
+    int (*output_preview_stage)(const nvn_tex *targets);
+    int (*output_preview_retired)(uint64_t last_serial);
+    int (*output_trial_phase)(uint64_t serial, int cancel);
+    int (*output_trial_publish)(uint64_t serial, void (*apply)(void *state, uint64_t generation), void *state);
+    void (*nvn_present_trial)(const nvn_tex *t, const int crop[4], uint64_t generation);
 } MkwVkRenderer;
 
 /* the DLL's one export: null when Vulkan is not usable (the executable then draws nothing) */

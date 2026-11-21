@@ -90,6 +90,9 @@ struct VkSubmitInfo2 { int sType; const void* pNext = nullptr; int flags = 0; ui
     const VkSemaphoreSubmitInfo* pWaitSemaphoreInfos = nullptr; uint32_t commandBufferInfoCount = 0;
     const VkCommandBufferSubmitInfo* pCommandBufferInfos = nullptr; uint32_t signalSemaphoreInfoCount = 0;
     const VkSemaphoreSubmitInfo* pSignalSemaphoreInfos = nullptr; };
+struct OutputTrialFrame { uint64_t generation{}; };
+struct OutputTrialSource { uint64_t generation{}, native_generation{}; };
+bool output_trial_skip_present(std::nullptr_t, uint64_t generation) { return generation != 0; }
 struct Extent { uint32_t width = 1920, height = 1080; };
 struct QueueLock {   // (dev.present_mu, the queue's: the replay's submits take it; dev.presenter_queue_mu, the swapchain's)
     bool held = false;
@@ -262,6 +265,7 @@ void presenter_run() {   // (the presenter thread's turn: the present handed ove
     if (!presenter.busy) return;
 @@LOOP_HEAD@@
     (void)done, (void)reflex_id;
+    (void)trial;
     presenter_presented = false;
     const bool copied = true;
     VkResult res = model_present(index, sc);
@@ -269,11 +273,13 @@ void presenter_run() {   // (the presenter thread's turn: the present handed ove
     struct Off { ~Off() { presenter_lk = nullptr; } } off;
 @@LOOP_TAIL@@
 }
-bool present_out(uint32_t index, std::unique_lock<QueueLock>& qk) {   // (present_out's hand-over, present_image's present)
+bool present_out(uint32_t index, std::unique_lock<QueueLock>& qk, OutputTrialSource trial, bool preview_path) {   // (present_out's hand-over, present_image's present)
+    (void)preview_path;
     if (!qk.owns_lock()) problem("the present made without the queue's lock");
     if (!present_copy_done) problem("present_image's present without its copy's fence: not handed to the presenter");
     qk.unlock();
-    present_hand_off(index, present_copy_done, 0);
+    present_hand_off(index, present_copy_done, 0, {trial.generation});
+    if (presenter.trial.generation != trial.generation) problem("trial receipt lost at hand-over");
     return true;
 }
 
@@ -284,6 +290,8 @@ void present(Frame& f, bool game = true) {
         remake();
     }
     const uint64_t src = game ? 77 : 0;
+    const OutputTrialSource trial{game ? 42u : 0u};
+    const bool preview_path = game;
     const int log_slot = 0;
     (void)log_slot;
 @@ACQUIRE@@
@@ -558,8 +566,8 @@ int main() {
 
 BROKEN = [
     ("the ahead acquire made on the render thread at the hand-over, before the present",
-     "    present_out(index, qk);\n    present_copy_done = VK_NULL_HANDLE;\n    present_acquire_ahead = false;",
-     "    acquire_ahead(dev.swapchain, dev.swapchain_generation);\n    present_out(index, qk);\n    present_copy_done = VK_NULL_HANDLE;\n"
+     "    present_out(index, qk, trial, preview_path);\n    present_copy_done = VK_NULL_HANDLE;\n    present_acquire_ahead = false;",
+     "    acquire_ahead(dev.swapchain, dev.swapchain_generation);\n    present_out(index, qk, trial, preview_path);\n    present_copy_done = VK_NULL_HANDLE;\n"
      "    present_acquire_ahead = false;"),
     ("the hand-over not passing acquire ahead to the presenter",
      "presenter.ahead = present_acquire_ahead;",
@@ -642,7 +650,7 @@ def cut(text, start, end, what):
 
 
 def fixture(replay, windows, mode):
-    present = block(replay, "void present_image(VkImage src,")
+    present = block(replay, "void present_image_with_trial(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view, bool source_srgb, bool allow_scale, OutputTrialSource trial) {")
     acquire = cut(present, "    // (the presenter thread, RX_VK_PRESENT_THREAD: the present handed over",
                   "    if (vkResetCommandPool(dev.device, f.pool, 0)",
                   "present_image's drain and acquire")
@@ -652,12 +660,13 @@ def fixture(replay, windows, mode):
     tail = cut(present, start, "\n}", "present_image's hand-over (from %r)" % start)   # (main's: no acquire ahead)
     helpers = cut(replay, "static VkFence acquire_fence = VK_NULL_HANDLE;", "void present_image(VkImage src,", "the image's helpers")
     marker = "static bool acquire_ahead_wanted() {"   # (main has none: its presents then fail the checks)
-    ahead = between(replay, marker, "bool present_commit(const PendingPresent& p) {") if marker in replay else ""
+    ahead = "\n".join((block(replay, marker),
+                       block(replay, "static void acquire_ahead(VkSwapchainKHR sc, uint64_t generation) {")))
     state = cut(replay, "struct Presenter {", "/// The copy's fence, in 100 ms steps", "the presenter's state")
     idle = block(replay, "bool presenter_wait_idle(std::unique_lock<std::mutex>& lk, int limit_ms = 0) {")
     idle = (idle.replace("presenter.cv.wait_for(lk, std::chrono::milliseconds(limit_ms), idle)", "model_wait(lk, idle)")
                 .replace("presenter.cv.wait(lk, idle);", "if (!model_wait(lk, idle)) problem(\"a hand-over waits without end\");"))
-    hand = block(replay, "void present_hand_off(uint32_t index, VkFence done, uint64_t reflex_id) {")
+    hand = block(replay, "void present_hand_off(uint32_t index, VkFence done, uint64_t reflex_id, OutputTrialFrame trial) {")
     hand = hand.replace("std::thread(presenter_loop).detach();", "")
     drain = block(replay, "bool present_thread_drain() {")
     loop = block(replay, "void presenter_loop() {")

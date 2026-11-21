@@ -34,11 +34,10 @@ def main():
     globals_and_setup = source[start:source.index("void image_barrier(", start)]
     gate = "if (src && (dev.offscreen || shots) && offscreen_init())"
     assert gate in source
-    # (with the Colour vision correction row, #1832, the present also takes the view's encoding and whether to scale)
-    tails = ["if (dev.offscreen || interpolated) return;\n    present_image(src, sw, sh, crop, direct_view" + rest
-             for rest in (", source_srgb, direct_scale);", ");")]
-    tail = next((t for t in tails if t in source), None)
-    assert tail, "do_present's tail, present_image after the offscreen return, is not found"
+    begin = source.index("    const bool pending_preview =")
+    end = source.index("\n}", begin)
+    tail = source[begin:end]
+    assert "present_image_with_trial(src, sw, sh, crop, direct_view, source_srgb, direct_scale, trial);" in tail
     png = block(source, "uint32_t crc32(") + "\n" + block(source, "bool write_png(")
     template = (ROOT / "tests/capture_dimensions_test.cpp").read_text(encoding="utf-8")
     fixture = template.replace("/* SETUP */", globals_and_setup).replace("/* GATE */", gate)

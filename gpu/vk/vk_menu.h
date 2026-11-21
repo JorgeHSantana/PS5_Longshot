@@ -169,6 +169,10 @@ bool menu_recorder_thread();
 void menu_set_gpu_count(int count);
 std::string driver_text();   // (vk_main.cpp: the driver as it names itself, for the log and Save my pipeline list)
 std::string device_name_text();   // (vk_main.cpp: the GPU the game runs on, as its driver names it)
+bool output_preview_request(uint32_t width, uint32_t height);
+int output_preview_seconds();
+bool output_preview_answer(bool keep);
+uint64_t output_preview_take_rebuilt_size();
 void menu_tick();             // (each frame shown: the keys, while the game's window has the focus)
 bool menu_is_open();
 /// (longshot) The game's scene tone mapped by PsychoV35: HDR set to Native on an HDR display, and the Tone mapper row so

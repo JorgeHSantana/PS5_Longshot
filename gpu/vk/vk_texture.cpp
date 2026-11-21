@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "vk_texture.h"
+#include "vk_new.h"
 #ifdef TRACY_ENABLE
 #include "../../host/hos_tracy.h"   // (LONGSHOT_TRACY: the profiler's zones; nothing in any other build)
 #endif
@@ -2479,12 +2480,19 @@ bool low_vram_texture_mips() {
     return !disabled && (small || shared) && (opts.preset == 1 || menu_memory_tier() == 1);
 }
 
-Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw, int bh, int bpb, bool as_target) {
+static std::unique_ptr<Texture> probe_texture_metadata() {
+    const NewNothrow nothrow;
+    return std::unique_ptr<Texture>(new (std::nothrow) Texture);
+}
+
+Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw, int bh, int bpb, bool as_target,
+                OutputTrialBacking::Image* output_probe = nullptr) {
 #ifdef TRACY_ENABLE
     HT_SCOPE("texture create");
 #endif
     PROF_EXACT();   // (texture_get's slow path: PROF_TEXGET samples the rest)
-    auto tex = std::make_unique<Texture>();
+    auto tex = output_probe ? probe_texture_metadata() : std::make_unique<Texture>();
+    if (!tex) return nullptr;
     Texture& x = *tex;
     x.gpu = t->gpu, x.d = t->d, x.L = t->L, x.nvn_format = t->d.format;
     x.guest = host->gpu_guest(t->gpu);
@@ -2699,6 +2707,11 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
     ci.tiling = VK_IMAGE_TILING_OPTIMAL;
     ci.usage = x.usage;
     ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (output_probe) {
+        if (!x.sparse && create_image(ci, x.image, x.allocation, false, as_target))
+            *output_probe = {x.image, x.allocation, ci};
+        return nullptr;   // (no commands, tracking, or texture cache entry for this image)
+    }
     // (a render target's image, not compressed: from the pool when one of this create info waits there, above)
     const uint64_t pool_key = as_target && !x.sparse && pool_cap() && !is_bc(x.format) && !is_astc(x.format) &&
                                       (x.usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT))
@@ -2709,7 +2722,10 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
     ImageNeed need{&ci};   // (a render target's requirements, asked once: the take by size and the size class read them)
     // (longshot, RX_VK_COMPACT) an image that is not a render target's: from the textures' own pool, the one compacted
     const bool in_textures = compact_on() && !x.sparse && !(as_target && !is_bc(x.format) && !is_astc(x.format));
-    if (x.sparse) {
+    if (!x.sparse) take_output_trial_image(t, ci, x.image, x.allocation);
+    if (x.image) {
+        // A detached trial image has the same creation parameters and still needs normal layout and cache registration.
+    } else if (x.sparse) {
         ci.flags |= VK_IMAGE_CREATE_SPARSE_BINDING_BIT | VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT;
         // (the sparse flags and usage within the device's limits for them: extent, levels, layers, samples)
         const auto fits = [&] {
@@ -2991,6 +3007,56 @@ unsigned image_level(const Texture* tex, unsigned level) {
 }
 unsigned view_layer(const nvn_view* v) {
     return v && v->set_layers ? v->min_layer : 0;
+}
+
+OutputTrialBacking::~OutputTrialBacking() {
+    for (const Image& owned : images) {
+        if (owned.view) vkDestroyImageView(dev.device, owned.view, nullptr);
+        if (owned.allocation) destroy_image(owned.image, owned.allocation);
+    }
+}
+
+bool OutputTrialBacking::matches(uint64_t serial, VkImage image) const {
+    for (const Image& owned : images)
+        if (image && !owned.allocation && owned.image == image && owned.serial == serial) return true;
+    return false;
+}
+
+std::unique_ptr<OutputTrialBacking> output_probe_backing(const nvn_tex* targets, bool fail_second,
+                                                        unsigned& made, uint64_t& bytes) {
+    std::unique_ptr<OutputTrialBacking> backing;
+    {
+        const NewNothrow nothrow;
+        backing.reset(new (std::nothrow) OutputTrialBacking);
+    }
+    if (!backing) return {};
+    for (unsigned i = 0; i < 3; ++i) {
+        const nvn_tex& t = targets[i];
+        if ((i == 1 && fail_second) || t.d.width != 1024 || t.d.height != 576 || t.d.target != NVN_TEXTURE_TARGET_2D ||
+            t.d.format != NVN_FORMAT_RGBA8 || t.d.depth != 1 || t.d.levels != 1 || t.d.samples > 1 || !t.serial)
+            return {};
+        for (unsigned prior = 0; prior < i; ++prior)
+            if (targets[prior].serial == t.serial) return {};
+        const VkFormatInfo f = vk_format(t.d.format);
+        if (f.format == VK_FORMAT_UNDEFINED) return {};
+        auto& owned = backing->images[i];
+        create(Key{}, &t, f.format, false, 1, 1, 4, true, &owned);
+        if (!owned.image) return {};
+        ++made;
+        bytes += allocation_size(owned.allocation);
+        if (!(owned.shape.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)) return {};
+        VkImageViewCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        ci.image = owned.image;
+        ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        ci.format = owned.shape.format;
+        ci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        const VkResult result = vkCreateImageView(dev.device, &ci, nullptr, &owned.view);
+        if (result == VK_ERROR_DEVICE_LOST) device_lost();
+        if (result != VK_SUCCESS) return {};
+        owned.serial = t.serial;
+        owned.gpu = t.gpu;
+    }
+    return backing;
 }
 
 Texture* texture_get(const nvn_tex* t, bool for_sampling) {
@@ -4930,7 +4996,7 @@ void compact_step(uint64_t completed) {
 
 Texture* texture_for_present(const nvn_tex* t) {
     Texture* tex = texture_get(t, false);
-    if (tex && tex->gpu_written) return present_source = tex, tex;
+    if ((t && t->output_preview) || (tex && tex->gpu_written)) return present_source = tex, tex;
     Texture* best = nullptr;   // (one rendered at its storage in another description)
     auto [a, b] = by_gpu.equal_range(t ? t->gpu : 0);
     for (auto it = a; it != b; ++it)
@@ -6074,6 +6140,29 @@ void texture_log_guest(const Texture* t) {
 
 void texture_released(const nvn_tex* t) {
     if (!t) return;
+    if (t->output_preview) {
+        // The sorted replay release follows the last native submissions and present copy for this exclusive storage.
+        // Drop every cached view of the allocation before reusing its guest address; recorded descriptors can retain a serial.
+        const uint64_t fence = vk_retirement_value();
+        const uint64_t end = t->gpu + t->L.size;
+        for (auto it = gpu_owned.lower_bound(t->gpu); it != gpu_owned.end() && it->first < end;)
+            it = it->second.first <= end ? gpu_owned.erase(it) : std::next(it);
+        for (auto it = textures.begin(); it != textures.end();) {
+            if (it->first.gpu < t->gpu || it->first.gpu >= end) {
+                ++it;
+                continue;
+            }
+            Texture& texture = *it->second;
+            texture.pool_key = 0;
+            texture.last_value = fence ? std::max(texture.last_value, fence) : UINT64_MAX;
+            std::erase(rendered_targets, &texture);
+            if (present_source == &texture) present_source = nullptr;
+            destroy_later(texture, completed_value);
+            forget_gpu(&texture);
+            it = textures.erase(it);
+        }
+        return;
+    }
     auto [a, b] = by_gpu.equal_range(t->gpu);
     for (auto it = a; it != b; ++it)
         if (it->second->gpu_written && !it->second->released) {

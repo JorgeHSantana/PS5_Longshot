@@ -178,6 +178,9 @@ static int cur_tab, tab_selected[2];
 [[maybe_unused]] static int warp_warning_action;
 static bool changed, tune_mode;   // (tune_mode: the compact bar, open; it opens when its key is held as the menu opens)
 static bool compact_key_held;     // (menu_tick's tune_down: Right Shift, or Right Ctrl, held)
+struct { unsigned w; } output_preview_target{};
+int output_preview_countdown;
+void answer_native_preview(bool) { CHECK(false); }   // This fixture opens and closes the normal menu.
 static bool restart_ask() { return false; }
 static int detect_pad_layout() { return 0; }
 static void dlss_probe() {}

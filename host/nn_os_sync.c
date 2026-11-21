@@ -1270,7 +1270,11 @@ static int queue_put(Obj *q, uint64_t v, int jam, int try_only) {
     return 1;
 }
 /* take: remove it; timeout_ns: < 0 forever, 0 try, > 0 timed. Returns 1 if a value was read. */
-static int queue_get(Obj *q, uint64_t *out, int take, int64_t timeout_ns) {
+extern int nvn_detached_observe_present_wait(Ctx *c);
+extern void nvn_detached_present_wait(const int *length, SRWLOCK *queue_lock, const unsigned *life);
+extern void nvn_detached_present_received(SRWLOCK *queue_lock, unsigned instance);
+extern void nvn_detached_pre_acquire(Ctx *c);
+static int queue_get_impl(Obj *q, uint64_t *out, int take, int64_t timeout_ns, int observe_idle) {
     int64_t deadline = timeout_ns > 0 ? hos_now_ns() + timeout_ns : 0;
     const int was_set = __atomic_load_n(&q->qlen, __ATOMIC_RELAXED) > 0;
     const int chain = timeout_ns != 0 && !was_set && hos_chain_on;
@@ -1289,7 +1293,11 @@ static int queue_get(Obj *q, uint64_t *out, int take, int64_t timeout_ns) {
             if (chain) hos_chain_note(HOS_CHAIN_WOKE, q->key, 0);
             return 0;
         }
-        if (timeout_ns < 0) hos_cv_sleep(&q->cv, &q->lk, INFINITE);
+        if (timeout_ns < 0) {
+            if (observe_idle) nvn_detached_present_wait(&q->qlen, &q->lk, &q->life);
+            hos_cv_sleep(&q->cv, &q->lk, INFINITE);
+            if (observe_idle) nvn_detached_present_wait(NULL, NULL, NULL);
+        }
         slept = 1;
     }
     if (timeout_ns != 0 && wake_lat_on()) wake_lat_note(slept ? 2 : spun ? 1 : 0, slept ? hos_now_ns() - q->sig_ns : 0);
@@ -1297,6 +1305,7 @@ static int queue_get(Obj *q, uint64_t *out, int take, int64_t timeout_ns) {
     if (take) {
         q->qhead = (q->qhead + 1) % q->qcap;
         __atomic_store_n(&q->qlen, q->qlen - 1, __ATOMIC_RELEASE);
+        if (observe_idle) nvn_detached_present_received(&q->lk, __atomic_load_n(&q->life, __ATOMIC_RELAXED));
     }
     ReleaseSRWLockExclusive(&q->lk);
     if (chain) hos_chain_note(HOS_CHAIN_WOKE, q->key, 0);
@@ -1305,6 +1314,10 @@ static int queue_get(Obj *q, uint64_t *out, int take, int64_t timeout_ns) {
         poke_multiwait(q);
     }
     return 1;
+}
+
+static int queue_get(Obj *q, uint64_t *out, int take, int64_t timeout_ns) {
+    return queue_get_impl(q, out, take, timeout_ns, 0);
 }
 
 HLE(_ZN2nn2os22InitializeMessageQueueEPNS0_16MessageQueueTypeEPmm) { queue_init(ARG(0), (int)ARG(2)); }
@@ -1324,7 +1337,8 @@ HLE(_ZN2nn2os20JamLightMessageQueueEPNS0_21LightMessageQueueTypeEm) { queue_put(
 HLE(_ZN2nn2os23TryJamLightMessageQueueEPNS0_21LightMessageQueueTypeEm) { RET(queue_put(obj(ARG(0), K_QUEUE), ARG(1), 1, 1)); }
 HLE(_ZN2nn2os24ReceiveLightMessageQueueEPmPNS0_21LightMessageQueueTypeE) {
     uint64_t v;
-    queue_get(obj(ARG(1), K_QUEUE), &v, 1, -1);
+    const int observe_idle = c->x[30] == 0x834a3084 && nvn_detached_observe_present_wait(c);
+    queue_get_impl(obj(ARG(1), K_QUEUE), &v, 1, -1, observe_idle);
     G64(ARG(0)) = v;
 }
 HLE(_ZN2nn2os27TryReceiveLightMessageQueueEPmPNS0_21LightMessageQueueTypeE) {
@@ -1542,7 +1556,10 @@ HLE(_ZN2nn2os11SystemEventC2ENS0_14EventClearModeEb) { event_init(ARG(0), 0, (in
 HLE(_ZN2nn2os11SystemEventD2Ev) { drop(ARG(0)); }
 
 /* ---- the remaining waits on the HLE's objects ----------------------------------------------------------------- */
-HLE(_ZN2nn2os9WaitEventEPNS0_9EventTypeE) { event_wait(obj(ARG(0), K_EVENT), 0, 0); }
+HLE(_ZN2nn2os9WaitEventEPNS0_9EventTypeE) {
+    event_wait(obj(ARG(0), K_EVENT), 0, 0);
+    if (c->x[30] == 0x81207a6c) nvn_detached_pre_acquire(c);
+}
 HLE(_ZN2nn2os12TryWaitEventEPNS0_9EventTypeE) { RET(event_wait(obj(ARG(0), K_EVENT), 0, 1)); }
 HLE(_ZN2nn2os14TimedWaitEventEPNS0_9EventTypeENS_8TimeSpanE) {
     RET(event_wait(obj(ARG(0), K_EVENT), (int64_t)ARG(1) > 0 ? (int64_t)ARG(1) : 1, (int64_t)ARG(1) <= 0));

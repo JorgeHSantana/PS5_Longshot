@@ -14,7 +14,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves the check's own folder off the path)
-from menu_model_fixture import menu_model_prelude, menu_model_member, output_engine, unbroken  # noqa: E402
+from menu_model_fixture import menu_model_prelude, output_engine, unbroken  # noqa: E402
 
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 
@@ -79,6 +79,7 @@ static int setenv(const char* name, const char* value, int) { return _putenv_s(n
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL %d: %s\n", __LINE__, #x); return 1; } } while (0)
 /* OPTIONS */
 Options opts;
+std::mutex options_save_mu;
 /* TABS */
 /* ROW */
 /* OUTPUTS */

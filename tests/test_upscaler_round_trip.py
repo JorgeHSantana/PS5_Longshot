@@ -15,7 +15,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves the check's own folder off the path)
-from menu_model_fixture import menu_model_prelude, menu_model_member, menu_text, unbroken  # noqa: E402
+from menu_model_fixture import menu_model_prelude, menu_text, unbroken  # noqa: E402
 
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +74,7 @@ void menu_debug_rows(int, int) { CHECK(false); }
 /* OPTIONS */
 /* AUTO_PRESET */
 Options opts;
+std::mutex options_save_mu;
 bool debug_warning = false;
 int debug_warning_choice = 0;
 void sync_transition_autosave() {}
@@ -93,6 +94,10 @@ const std::vector<Out>& outputs() {
 }
 int custom_index() { return 0; }
 int output_choice(int v) { return v; }
+struct Picture { unsigned w, h; };
+Picture output_preview_target{};
+Picture picture_for(int) { return {}; }
+bool request_native_preview(Picture) { return false; }
 int parse_output(const char*) { return 0; }
 int step_output_choice(int v, int dir) { return v + dir; }
 int output_for_aspect(int) { return opts.output_res; }

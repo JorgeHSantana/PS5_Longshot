@@ -40,6 +40,13 @@ Output resolution starts at the game's own 2560x1440, or at your screen's size w
 1280x800, a 1080p monitor), in your screen's shape: a 2560x1080 ultrawide starts at 2560x1080 and a 2256x1504 laptop at
 2256x1504, pixel for pixel. 2048x1152, marked "(reduced)", is the game's own smaller picture, lighter on the GPU.
 
+On supported Windows Vulkan setups, switching from 1280x720 to 1024x576 at 16:9 can preview the new Output resolution
+in play. Set **V-Sync** to **On**, enable **Threaded rendering** (its change takes effect at the next launch), and set
+**Upscaler** to **Game's own**. Turn off HDR,
+frame generation, and NVIDIA Reflex. If 1024x576 is missing from the list, type it in **Custom output size**.
+Choose **Yes** within ten seconds to keep the change. **No**, Back, or letting the countdown finish restores the
+previous resolution. Other mode changes apply after a restart.
+
 | Your PC | Quality preset | Upscaler and render resolution | Frame rate cap | Frame generation |
 |---|---|---|---|---|
 | **Steam Deck, handheld, integrated GPU or a 4 to 6 GB card** | Auto (this PC) picks Minimum (4GB); Low (6GB) on a 6 GB card | Game's own, as the preset sets it, or AMD FSR 3.1 at Performance | 60 | Off |
@@ -66,8 +73,8 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 |---|---|---|---|
 | Graphics | Quality preset | Custom, Minimum (4GB), Low (6GB), Balanced (8GB), High (12GB), Ultra (16GB+), Auto (this PC) | Auto (this PC) on a first start; Custom in an options file from before it |
 | | Aspect ratio | The shapes your screen's resolutions have, narrowest first (5:4, 4:3, 16:10, 16:9, 21:9, 32:9, ...), your monitor's own marked "(monitor's)" (after a restart) | Your monitor's |
-| | Output resolution | The Aspect ratio's sizes: your screen's resolutions and the common ones (1440p, 4K, 5K at 16:9; 1920x1200, 2560x1600 at 16:10; 3440x1440 at 21:9; ...), and 2048x1152 (the game's own reduced size, 80% of its 2560x1440, marked "(reduced)") at 16:9; your screen's own size is marked "(native)" (after a restart) | 2560x1440, the game's own picture, or your screen's size where it is smaller (a Steam Deck's 1280x800, a 1080p monitor), at its own shape (a 2560x1080 ultrawide starts at 2560x1080, a 2256x1504 laptop at 2256x1504); Auto (this PC) leaves it as it is |
-| | Custom output size | A size of your own, typed as `<width>x<height>` (after a restart) | None |
+| | Output resolution | The Aspect ratio's sizes: your screen's resolutions and the common ones (1440p, 4K, 5K at 16:9; 1920x1200, 2560x1600 at 16:10; 3440x1440 at 21:9; ...), and 2048x1152 (the game's own reduced size, 80% of its 2560x1440, marked "(reduced)") at 16:9; your screen's own size is marked "(native)" (most changes apply after a restart) | 2560x1440, the game's own picture, or your screen's size where it is smaller (a Steam Deck's 1280x800, a 1080p monitor), at its own shape (a 2560x1080 ultrawide starts at 2560x1080, a 2256x1504 laptop at 2256x1504); Auto (this PC) leaves it as it is |
+| | Custom output size | A size of your own, typed as `<width>x<height>` (most changes apply after a restart) | None |
 | | Profile | Docked, Handheld (after a restart) | Docked; a quality preset sets it |
 | | Upscaler | Game's own, NVIDIA DLSS (only in builds with NVIDIA's DLSS SDK, on NVIDIA RTX GPUs), AMD FSR 3.1 (every build, on GPUs it runs on), AMD FSR 4 (only in builds with FSR 4, on GPUs AMD's files cover), Off (no upscaling), Intel XeSS (Windows, with Intel's `libxess.dll` beside the game). NVIDIA DLAA, AMD FSR 4 Native AA and Intel XeSS Native AA are DLSS's, FSR 4's and XeSS's Native, chosen on the Render resolution row | Game's own; Auto (this PC) chooses DLSS or FSR 4 where they run, never XeSS |
 | | DLSS model | Transformer (K) (CNN (E) in its place on cards with less than 7 GB of video memory), Transformer 2 (M), Transformer 2 (L), NVIDIA default, CNN (E), CNN (F) (shown where DLSS runs; used by DLSS and DLAA) | Transformer (K); CNN (E) under 7 GB |

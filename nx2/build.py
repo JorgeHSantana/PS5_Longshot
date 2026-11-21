@@ -2190,12 +2190,16 @@ def main():
         shown = shown.replace("-O1", "-" + chunk_level())
     print("%d files, %d jobs, %s" % (len(jobs), a.jobs, shown), flush=True)
     t0, failed = time.time(), []
+    vk_job_objects = {j[2] for j in vk_jobs}
+    compile_seconds = {"host and game": 0.0, "renderer": 0.0}
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
         # (as each ends, not in order: the builder app shows progress from these lines, and the biggest file comes first)
         submitted = {ex.submit(compile_one, job): job for job in jobs}
         try:
             for future in concurrent.futures.as_completed(submitted):
                 src, secs, err = future.result()
+                category = "renderer" if submitted[future][2] in vk_job_objects else "host and game"
+                compile_seconds[category] += secs
                 size = src_size(src) >> 20
                 if err:
                     failed.append(submitted[future])
@@ -2219,6 +2223,8 @@ def main():
     still = 0
     for job in failed:
         src, secs, err = compile_one(job)
+        category = "renderer" if job[2] in vk_job_objects else "host and game"
+        compile_seconds[category] += secs
         size = src_size(src) >> 20
         if err:
             still += 1
@@ -2231,6 +2237,8 @@ def main():
                 pending.remove(expected[src].pop())
                 print("@@eta %d" % eta_left(pending, eta_jobs), flush=True)
     print("compiled in %.0fs, %d failed" % (time.time() - t0, still), flush=True)
+    print("compiler time (summed across parallel jobs): host and game %.1fs, renderer %.1fs" %
+          (compile_seconds["host and game"], compile_seconds["renderer"]), flush=True)
     if still:
         return 1
     if a.third_party_objects:   # (the release's set: these objects and their keys, nothing linked)

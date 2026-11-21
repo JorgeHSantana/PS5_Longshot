@@ -168,7 +168,8 @@ listed.
 
 ```
 < {"id":1,"ok":true,"frame":5321,"protocol":1,"fps":59.8,"state":"play","stalled":false,"draws":2410.3,
-   "replayed":5320,"window":{"width":1280,"height":720},"uptime":95.2,"clients":1,
+   "replayed":5320,"window":{"width":1280,"height":720},
+   "game_picture":{"texture_width":2560,"texture_height":1440,"width":1920,"height":1080},"uptime":95.2,"clients":1,
    "input":{"queued":0,"exclusive":false},"map":"KokiriForest_Child",
    "game":{"event":false,"loading":false,"age":"child",...},"version":"...","renderer":"Vulkan: ..."}
 ```
@@ -181,6 +182,10 @@ listed.
 | `stalled` | No frame for a second |
 | `map` | The last map known (`Sequence_CurrentBanc`), read every 250 ms in Link's update; kept through loads; `null` until Link is first seen |
 | `game` | The game's snapshot from Link's update (below), or `null` |
+
+`game_picture` records the last native game's present texture dimensions and its crop dimensions. With no crop, both
+pairs are the texture extent. The value is `null` until the first valid sample. Interpolated frames leave it unchanged.
+`window` gives the swapchain extent. Confirming that a specific frame reached the screen requires a presentation receipt.
 
 `state` is a guess from draws a frame; a new state must hold 300 ms before it is taken (leaving `boot` or `unknown`
 happens at once):

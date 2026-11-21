@@ -55,9 +55,18 @@ static void pages_mark_used_locked(uint64_t addr, uint64_t size) { (void)addr, (
 /* what hos_region_alloc needs besides: the window, and the heap below the regions (no holes under it) */
 #define HOS_SPACE_END 0x8000000000ULL
 #define HOS_HEAP_BASE 0x1000000000ULL
+#define OUTPUT_BOOT_BYTES 7929856ULL
+static uint64_t hos_program_size, hos_total_memory, mapped_bytes, output_boot_addr, output_boot_bytes;
+static int output_boot_enabled = 1;
+static unsigned output_page_changes;
 static uint64_t hos_heap_size = 0x100000000ULL, region_floor = ~0ULL, low_hole[2][2];
 static int hos_commit(uint64_t addr, uint64_t size) { (void)addr, (void)size; return 1; }
 static void hos_fatal(void *c, const char *what, ...) { (void)c; printf("FAIL: %s\n", what); exit(1); }
+
+/* The synthetic allocator below exercises ordinary regions. The guest reservation uses Win32 in the host. */
+#undef _WIN32
+
+@PAGE_GUARD@
 
 /* the thread's virtual core, as hos_vcore_away / hos_vcore_back keep it (host/hos_thread.c) */
 static int held, takes;
@@ -69,6 +78,7 @@ void hos_vcore_back(void) { if (!held) held = 1, takes++; }
    alloc_size set, a region of that size is allocated while it is discarded, as another thread would, and where kept. */
 void hos_region_free(uint64_t addr);
 uint64_t hos_region_alloc(uint64_t size, uint64_t align);
+static unsigned page_ops_in_discard;
 static int discards, held_in_discard, listed_in_discard, locked_in_discard, twice, listed_after_second;
 static uint64_t discard_addr, discard_size, alloc_size, alloc_in_discard;
 static int listed(uint64_t addr, uint64_t size) {
@@ -78,6 +88,7 @@ static int listed(uint64_t addr, uint64_t size) {
 }
 static void discard_pages(uint64_t addr, uint64_t size) {
     discards++;
+    page_ops_in_discard = output_page_changes;
     discard_addr = addr, discard_size = size;
     held_in_discard = held;
     locked_in_discard = locked;
@@ -111,12 +122,14 @@ static void free_region(uint64_t addr, int core) {
     held = core, takes = 0, discards = 0, held_in_discard = locked_in_discard = listed_in_discard = -1;
     listed_after_second = -1;
     hos_region_free(addr);
+    check(output_page_changes == 0, "the page-change admission is released after a free");
 }
 int main(void) {
     three_regions();
     free_region(0x7100000000ULL, 1);
     check(discards == 1 && discard_addr == 0x7100000000ULL && discard_size == 0x2000000, "the region's pages are discarded, once");
     check(held_in_discard == 0, "the discard runs without the virtual core");
+    check(page_ops_in_discard == 1, "the discard still has page-change admission");
     check(locked_in_discard == 0, "the discard runs outside the list's lock");
     check(listed_in_discard == 1, "the region stays listed through its discard (no allocation is handed its pages)");
     check(nregions == 2 && regions[0].addr == 0x7200000000ULL && regions[1].addr == 0x7000000000ULL,
@@ -145,6 +158,13 @@ int main(void) {
     free_region(0x7000000000ULL, 0);
     check(discards == 1 && nregions == 2 && regions[1].addr == 0x7100000000ULL, "a thread with no core frees the region");
     check(held == 0 && takes == 0, "a thread that held no core takes none");
+
+    three_regions();
+    output_boot_addr = regions[1].addr;
+    output_boot_bytes = regions[1].size;
+    free_region(output_boot_addr, 1);
+    check(discards == 0 && nregions == 3 && held == 1, "a free cannot discard the output reservation");
+    output_boot_addr = output_boot_bytes = 0;
 
     three_regions();
     twice = 1;
@@ -183,7 +203,9 @@ def main():
     parser.add_argument("--source", type=Path, default=ROOT / "host/hos_mem.c")
     args = parser.parse_args()
     src = args.source.read_text(encoding="utf-8")
-    fixture = (HARNESS.replace("@ALLOC@", block(src, "uint64_t hos_region_alloc(uint64_t size, uint64_t align) {"))
+    guards = "\n".join(block(src, key) for key in ("int hos_output_page_change_begin(", "void hos_output_page_change_end("))
+    allocator = "\n".join(block(src, key) for key in ("static uint64_t region_alloc(", "uint64_t hos_region_alloc("))
+    fixture = (HARNESS.replace("@PAGE_GUARD@", guards).replace("@ALLOC@", allocator)
                .replace("@FREE@", block(src, "void hos_region_free(uint64_t addr) {")))
     compiler = shutil.which(args.cxx)
     if not compiler:

@@ -68,6 +68,7 @@
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
+extern std::recursive_mutex menu_mu;
 extern std::atomic<bool> movie_networks_slow;   // (vk_draw.cpp: the movie networks left out)
 int64_t presents_now;   // (the presents so far, for SlowWatch)
 /// (longshot) The last present confirmed *shown* by VK_KHR_present_wait, in microseconds from vkQueuePresentKHR to the
@@ -4209,11 +4210,14 @@ int invalidate_quick(uint64_t gpu, uint64_t size) {
     inv_count(kept);
     return kept;
 }
+std::atomic<uint64_t> output_preview_retired_serial;
+
 void do_texture_released(const nvn_tex* t) {
     std::lock_guard lk(replay_mu);
     if (t) {
         mkwvk::texture_released(t->serial);   // (vk_bank.cpp: the registrations of it)
         mkwvk::texture_released(t);           // (vk_texture.cpp: its image may take CPU writes again)
+        if (t->output_preview == 3) output_preview_retired_serial.store(t->serial, std::memory_order_release);
     }
 }
 
@@ -5096,7 +5100,236 @@ std::shared_ptr<std::vector<uint8_t>> shot_pixels(uint64_t at_value, int64_t at_
     const uint8_t* const sm = (const uint8_t*)shot_maps[at_present & 1];
     return std::make_shared<std::vector<uint8_t>>(sm, sm + (size_t)kShotW * kShotH * 4);
 }
-void do_present(const nvn_tex* t, const int crop[4]) {
+// The detached trial owns images that are still outside the texture cache and have no GPU submissions.
+using TrialClock = std::chrono::steady_clock;
+enum class OutputPath { Unavailable, FifoShown };
+struct OutputTrialSource {
+    uint64_t generation{};
+    uint64_t serial{};
+    VkImage image{};
+    bool rendered_at_target{};
+    uint64_t native_generation{};
+};
+struct OutputTrialFrame {
+    uint64_t generation{};
+    uint64_t swapchain_generation{};
+    OutputPath path{};
+    uint64_t serial{};
+    bool matches_backing{};
+};
+struct OutputProbeRequest {
+    nvn_tex targets[3]{};
+    uint64_t generation{};
+    TrialClock::time_point deadline{};
+    char mode{};
+    bool from_menu{};
+};
+struct OutputTrial {
+    OutputProbeRequest request;
+    uint64_t swapchain_generation{};
+    std::unique_ptr<OutputTrialBacking> backing;
+    bool preparing{};
+    bool active{};
+    bool reported_original{};
+    bool reported_drop{};
+    bool shown{};
+    bool kept{};
+};
+static OutputTrial output_trial;
+static std::mutex output_trial_mu;
+static std::atomic<uint64_t> output_trial_generation;
+static std::atomic<uint64_t> output_kept_generation;
+static std::atomic<bool> output_preview_path;
+static uint64_t output_preview_swapchain;
+static std::atomic<bool> output_preview_rebuilt;
+static std::atomic<uint64_t> output_preview_rebuilt_size;
+static uint64_t output_trial_sequence;
+static TrialClock::time_point output_preview_queued_until;
+static bool output_preview_activated;
+bool present_thread_on();
+static bool output_trial_watchdog(uint64_t generation);
+
+static int request_output_probe_backing(const nvn_tex* targets, char mode, bool from_menu = false) {
+    if (!targets) return 0;
+    std::lock_guard lk(output_trial_mu);
+    if (output_trial.request.generation ||
+        ((from_menu || mode == 'k') && TrialClock::now() >= output_preview_queued_until)) return 0;
+    auto& request = output_trial.request;
+    for (unsigned i = 0; i < 3; ++i) {
+        request.targets[i] = targets[i];
+        request.targets[i].pool = nullptr;
+    }
+    request.mode = mode;
+    request.from_menu = from_menu || mode == 'k';
+    request.deadline = TrialClock::now() + std::chrono::milliseconds(mode == 'x' ? 0 : 2000);
+    request.generation = ++output_trial_sequence;
+    output_trial_generation.store(request.generation, std::memory_order_release);
+    try {
+        std::thread([generation = request.generation] {
+            do {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            } while (output_trial_watchdog(generation));
+        }).detach();
+    } catch (...) {
+        output_trial = {};
+        output_trial_generation.store(0, std::memory_order_release);
+        return 0;
+    }
+    return 1;
+}
+
+static std::unique_ptr<OutputTrialBacking> clear_output_trial();
+
+static int output_trial_phase(uint64_t serial, int cancel) {
+    std::unique_ptr<OutputTrialBacking> released;
+    std::lock_guard lk(output_trial_mu);
+    const auto& trial = output_trial;
+    if (!trial.request.generation || trial.request.targets[0].serial != serial) return OUTPUT_TRIAL_EXPIRED;
+    if (cancel) {
+        if (trial.kept && trial.request.from_menu) output_preview_rebuilt.store(true, std::memory_order_release);
+        released = clear_output_trial();
+        return OUTPUT_TRIAL_EXPIRED;
+    }
+    if (TrialClock::now() >= trial.request.deadline) return OUTPUT_TRIAL_EXPIRED;
+    if (!trial.backing) return OUTPUT_TRIAL_PREPARING;
+    return trial.shown ? OUTPUT_TRIAL_SHOWN : trial.active ? OUTPUT_TRIAL_ACTIVE : OUTPUT_TRIAL_READY;
+}
+
+// A replacement native game texture supplies the running size. Generic and generated presents cannot publish it.
+static void observe_output_preview_native(const nvn_tex* t, uint64_t generation) {
+    if (!t || generation || !output_preview_rebuilt.load(std::memory_order_acquire)) return;
+    if (output_preview_rebuilt.exchange(false, std::memory_order_acq_rel))
+        output_preview_rebuilt_size.store((uint64_t)t->d.width << 32 | t->d.height, std::memory_order_release);
+}
+
+static int output_trial_publish(uint64_t serial, void (*apply)(void*, uint64_t), void* state) {
+    std::lock_guard lk(output_trial_mu);
+    auto& trial = output_trial;
+    if (!trial.backing || trial.active || trial.request.targets[0].serial != serial || TrialClock::now() >= trial.request.deadline)
+        return 0;
+    trial.active = true;
+    if (trial.request.from_menu) output_preview_activated = true;
+    trial.request.deadline = TrialClock::now() + std::chrono::seconds(2);
+    // The guest callback only publishes already validated fields while it owns the empty presentation queue.
+    apply(state, trial.request.generation);
+    return 1;
+}
+
+static bool output_trial_skip_present(const nvn_tex* t, uint64_t generation) {
+    if (!generation) return false;
+    std::lock_guard lk(output_trial_mu);
+    auto& trial = output_trial;
+    if (trial.request.generation != generation || !trial.active || TrialClock::now() >= trial.request.deadline) return true;
+    if (trial.request.mode != 'n') return false;
+    if (!t) return true;
+    for (const auto& target : trial.request.targets) {
+        if (target.serial != t->serial || target.gpu != t->gpu) continue;
+        if (!trial.reported_drop) {
+            trial.reported_drop = true;
+            logf("output trial: generation %llu suppressing native present for no-frame test", (unsigned long long)generation);
+        }
+        return true;
+    }
+    return false;
+}
+
+// Called with the trial lock held. Give the detached backing to the caller to destroy outside the lock.
+static std::unique_ptr<OutputTrialBacking> clear_output_trial() {
+    auto released = std::move(output_trial.backing);
+    output_trial = {};
+    output_trial_generation.store(0, std::memory_order_release);
+    output_kept_generation.store(0, std::memory_order_release);
+    return released;
+}
+
+static bool output_trial_watchdog(uint64_t generation) {
+    std::unique_ptr<OutputTrialBacking> released;
+    OutputProbeRequest expired;
+    {
+        std::lock_guard lk(output_trial_mu);
+        if (output_trial.request.generation != generation || output_trial.kept) return false;
+        if (TrialClock::now() < output_trial.request.deadline) return true;
+        expired = output_trial.request;
+        released = clear_output_trial();
+    }
+    const bool retained = bool(released);
+    released.reset();
+    logf("output trial: generation %llu serial %llu expired; retained backing %s",
+         (unsigned long long)expired.generation, (unsigned long long)expired.targets[0].serial,
+         retained ? "released" : "absent");
+    return false;
+}
+
+static OutputTrialFrame make_output_trial_frame(OutputTrialSource source, uint64_t swapchain, OutputPath path) {
+    if (!source.generation) return {};
+    OutputProbeRequest request;
+    std::unique_ptr<OutputTrialBacking> released;
+    {
+        std::lock_guard lk(output_trial_mu);
+        if (output_trial.request.generation != source.generation || TrialClock::now() >= output_trial.request.deadline)
+            return {};
+        if (output_trial.kept) return {};
+        if (path != OutputPath::FifoShown ||
+            (output_trial.preparing && output_trial.swapchain_generation != swapchain)) {
+            logf("output trial: generation %llu canceled; no matching FIFO shown path",
+                 (unsigned long long)source.generation);
+            released = clear_output_trial();
+            return {};
+        } else if (output_trial.backing) {
+            return {source.generation, swapchain, path, source.serial,
+                    source.rendered_at_target && output_trial.active && source.native_generation == source.generation &&
+                    output_trial.backing->matches(source.serial, source.image)};
+        } else {
+            if (output_trial.preparing) return {};
+            output_trial.preparing = true;
+            output_trial.swapchain_generation = swapchain;
+            request = output_trial.request;
+        }
+    }
+    unsigned made = 0;
+    uint64_t bytes = 0;
+    auto backing = output_probe_backing(request.targets, request.mode == 'g', made, bytes);
+    std::lock_guard lk(output_trial_mu);
+    if (output_trial.request.generation != request.generation || TrialClock::now() >= request.deadline) return {};
+    if (!backing) {
+        clear_output_trial();
+        logf("output trial: generation %llu serial %llu refused; images %u; bytes %llu",
+             (unsigned long long)request.generation, (unsigned long long)request.targets[0].serial, made, (unsigned long long)bytes);
+        return {};
+    }
+    logf("output trial: generation %llu serial %llu retained; images %u; bytes %llu; FIFO chain %llu",
+         (unsigned long long)request.generation, (unsigned long long)request.targets[0].serial, made,
+         (unsigned long long)bytes, (unsigned long long)swapchain);
+    output_trial.backing = std::move(backing);
+    return {source.generation, swapchain, path, source.serial, false};
+}
+
+static bool acknowledge_output_trial_frame(OutputTrialFrame frame) {
+    if (!frame.generation || frame.path != OutputPath::FifoShown) return false;
+    std::lock_guard lk(output_trial_mu);
+    if (frame.generation != output_trial.request.generation || frame.swapchain_generation != output_trial.swapchain_generation ||
+        !output_trial.backing || output_trial.shown || TrialClock::now() >= output_trial.request.deadline) return false;
+    if (!frame.matches_backing || !output_trial.active) {
+        if (!output_trial.reported_original) {
+            output_trial.reported_original = true;
+            logf("output trial: generation %llu FIFO shown rejected source serial %llu",
+                 (unsigned long long)frame.generation, (unsigned long long)frame.serial);
+        }
+        return false;
+    }
+    output_trial.shown = true;
+    output_trial.request.deadline = TrialClock::now() + std::chrono::seconds(10);
+    logf("output trial: generation %llu FIFO shown accepted source serial %llu",
+         (unsigned long long)frame.generation, (unsigned long long)frame.serial);
+    return true;
+}
+
+void present_image_with_trial(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view, bool source_srgb, bool allow_scale, OutputTrialSource trial);
+
+void do_present(const nvn_tex* t, const int crop[4], uint64_t native_generation = 0) {
+    OutputTrialSource trial;
+    trial.native_generation = native_generation;
+    trial.generation = output_trial_generation.load(std::memory_order_acquire);
 #ifdef TRACY_ENABLE
     HT_SCOPE("do_present");
 #endif
@@ -5137,14 +5370,23 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         Recording& r = begin_recording(value);
         memory_begin_submission();
         memory_gpu_writes_begin();   // (RX_VK_UB_SNAPSHOT's guard: a submission's start, not a part's: split_part)
-        Texture* tex = t ? texture_for_present(t) : nullptr;
+        // A held present may resume after its generation's texture release. Finish its bookkeeping
+        // without recreating an image from that old descriptor at the reusable reservation.
+        const bool dropped_output = output_trial_skip_present(t, trial.native_generation);
+        Texture* tex = t && !dropped_output ? texture_for_present(t) : nullptr;
         static int logged_p;
         if (logged_p++ < 4)
             logf("vk: present texture %#llx %ux%u format %#x: %s", (unsigned long long)(t ? t->gpu : 0),
                  t ? t->d.width : 0, t ? t->d.height : 0, t ? t->d.format : 0,
                  tex ? (tex->gpu_written ? "rendered" : "never rendered") : "no image");
         if (tex) src = tex->image, sw = tex->width, sh = tex->height;
-        if (t) temporal_note_present(t->d.width, t->d.height);   // (RX_VK_DLSS_PREWARM: the size its feature is made for)
+        if (t && !dropped_output) temporal_note_present(t->d.width, t->d.height);   // (RX_VK_DLSS_PREWARM: the size its feature is made for)
+        if (trial.generation && t) {
+            trial.serial = t->serial;
+            trial.image = src;
+            trial.rendered_at_target = tex && tex->gpu_written && sw == 1024 && sh == 576 &&
+                                       crop && crop[0] == 0 && crop[1] == 0 && crop[2] == 1024 && crop[3] == 576;
+        }
         // (the Insert menu's HDR set to Native: the game, told its display is HDR10, presents PQ codes in RGB10A2 (vk
         // A2B10G10R10); that picture goes to the HDR10 swapchain as PQ, not through the SDR-to-HDR expansion. Told by the format
         // the game presents, the one its view is made in (direct_view below), not by the cached image's: images are shared by
@@ -5184,8 +5426,10 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         // before it submits its next frame, and the interpolation's GPU work (~1 ms) held it back. The display
         // thread's present follows it on the one queue. RX_VK_SHOT_MADE shots need it in this recording.)
         static const bool fg_inline = env_on("RX_VK_SHOT_MADE");
-        const bool fg_after = framegen_on() && tex && !fg_inline;
-        interpolated = framegen_on() && tex && fg_inline &&
+        const bool preview = trial.native_generation &&
+                             trial.native_generation != output_kept_generation.load(std::memory_order_acquire);
+        const bool fg_after = !preview && framegen_on() && tex && !fg_inline;
+        interpolated = !preview && framegen_on() && tex && fg_inline &&
                        framegen_record(r.cmd, texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample), sw,
                                        sh, crop, present_native_pq.load(std::memory_order_relaxed));
         texture_frame(completed());
@@ -5516,12 +5760,95 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         }
         log_frame_stats();
     }
+    if (output_trial_skip_present(t, trial.native_generation)) return;
+    if (src) observe_output_preview_native(t, native_generation);
     if (dev.offscreen) frame_log_present();   // (no window: the copy into the offscreen image above is its present)
-    if (dev.offscreen || interpolated) return;
-    present_image(src, sw, sh, crop, direct_view, source_srgb, direct_scale);
+    const bool pending_preview = trial.generation &&
+                                 trial.generation != output_kept_generation.load(std::memory_order_acquire);
+    if (dev.offscreen || interpolated || (pending_preview && framegen_on())) {
+        if (pending_preview) make_output_trial_frame(trial, 0, OutputPath::Unavailable);
+        if (dev.offscreen || interpolated) return;
+        trial = {};
+    }
+    present_image_with_trial(src, sw, sh, crop, direct_view, source_srgb, direct_scale, trial);
 }
 
 } // namespace
+
+bool output_preview_request(uint32_t width, uint32_t height) {
+    std::lock_guard settings(menu_mu);
+    if (opts.hdr || opts.reflex || opts.dlss || framegen_on()) return false;
+    if (host->version < 41 || !host->output_preview_request || !output_preview_path.load(std::memory_order_acquire)) return false;
+    std::lock_guard lk(output_trial_mu);
+    if (output_trial.request.generation || TrialClock::now() < output_preview_queued_until) return false;
+    if (!host->output_preview_request(width, height)) return false;
+    output_preview_activated = false;
+    output_preview_queued_until = TrialClock::now() + std::chrono::seconds(2);
+    return true;
+}
+
+// 0: staging unavailable; -1: waiting; -2: activated or shown and ended; positive: seconds left to decide.
+int output_preview_seconds() {
+    std::lock_guard lk(output_trial_mu);
+    const auto now = TrialClock::now();
+    const auto& trial = output_trial;
+    if (trial.request.generation && trial.request.from_menu) {
+        if (trial.kept || now >= trial.request.deadline) return output_preview_activated ? -2 : 0;
+        return trial.shown ? (int)std::chrono::ceil<std::chrono::seconds>(trial.request.deadline - now).count() : -1;
+    }
+    return output_preview_activated ? -2 : now < output_preview_queued_until ? -1 : 0;
+}
+
+bool output_preview_answer(bool keep) {
+    std::unique_ptr<OutputTrialBacking> released;
+    std::lock_guard lk(output_trial_mu);
+    auto& trial = output_trial;
+    if (!keep) {
+        output_preview_queued_until = {};
+        output_preview_activated = false;
+        if (trial.request.generation && trial.request.from_menu) released = clear_output_trial();
+        return true;
+    }
+    if (!trial.shown || !trial.request.from_menu || trial.swapchain_generation != output_preview_swapchain ||
+        TrialClock::now() >= trial.request.deadline) return false;
+    trial.kept = true;
+    output_kept_generation.store(trial.request.generation, std::memory_order_release);
+    trial.request.deadline = TrialClock::time_point::max();
+    logf("output trial: generation %llu kept", (unsigned long long)trial.request.generation);
+    return true;
+}
+
+// The presentation thread applies the running size during its normal menu tick.
+uint64_t output_preview_take_rebuilt_size() {
+    if (!output_preview_rebuilt_size.load(std::memory_order_acquire)) return 0;
+    return output_preview_rebuilt_size.exchange(0, std::memory_order_acq_rel);
+}
+
+void take_output_trial_image(const nvn_tex* t, const VkImageCreateInfo& shape, VkImage& image, VmaAllocation& allocation) {
+    if (!t->output_preview || !output_trial_generation.load(std::memory_order_acquire)) return;
+    std::lock_guard lk(output_trial_mu);
+    if (!output_trial.active || !output_trial.backing || TrialClock::now() >= output_trial.request.deadline) return;
+    for (auto& owned : output_trial.backing->images) {
+        // A guest draw can reuse a recorded descriptor from the prior preview. Its exclusive GPU address
+        // and exact image shape still identify the backing. Only this preview's native serial can acknowledge it.
+        if (!owned.allocation || owned.gpu != t->gpu) continue;
+        const auto& preflight = owned.shape;
+        if (shape.flags != preflight.flags || shape.imageType != preflight.imageType || shape.format != preflight.format ||
+            shape.extent.width != preflight.extent.width || shape.extent.height != preflight.extent.height ||
+            shape.extent.depth != preflight.extent.depth || shape.mipLevels != preflight.mipLevels ||
+            shape.arrayLayers != preflight.arrayLayers || shape.samples != preflight.samples || shape.tiling != preflight.tiling ||
+            shape.usage != preflight.usage || shape.initialLayout != preflight.initialLayout ||
+            shape.sharingMode != preflight.sharingMode || shape.pNext || preflight.pNext) return;
+        image = owned.image;
+        allocation = owned.allocation;
+        owned.allocation = {};
+        vkDestroyImageView(dev.device, owned.view, nullptr);
+        owned.view = {};
+        logf("output trial: generation %llu adopted retained image serial %llu",
+             (unsigned long long)output_trial.request.generation, (unsigned long long)owned.serial);
+        return;
+    }
+}
 
 int shot_ask_next(const char* path, void (*done)(void* ctx, int64_t present, int ok), void* ctx) { return shot_ask(path, -1, done, ctx); }
 
@@ -5715,15 +6042,15 @@ std::atomic<uint32_t> present_kind{0};   // (vk_framegen.cpp: 1 while a made fra
 // for the submit and the present. Held over vkAcquireNextImageKHR and the fence, it stopped the replay's submits for as long as
 // the swapchain had no image free, twice a frame with frame interpolation.
 std::mutex present_image_mu;
-static bool present_out(uint32_t index, std::unique_lock<decltype(dev.present_mu)>& qk);   // (present_image's end, below)
-static bool acquire_ahead_wanted();   // (acquire ahead: every driver, RX_VK_ACQUIRE_AHEAD; after present_image)
-static void acquire_ahead(VkSwapchainKHR sc, uint64_t generation);
+static bool present_out(uint32_t index, std::unique_lock<decltype(dev.present_mu)>& qk, OutputTrialSource trial = {}, bool preview_path = false);   // (present_image's end, below)
 thread_local PendingPresent* present_defer_into = nullptr;
 static VkFence present_copy_done = VK_NULL_HANDLE;   // (present_image's copy, while it presents: the presenter thread may take it)
 static bool present_acquire_ahead = false;   // (present_image's present, while it presents: the presenter asks for the next image after it)
 namespace {
+static bool acquire_ahead_wanted();   // (acquire ahead: every driver, RX_VK_ACQUIRE_AHEAD; after present_image)
+static void acquire_ahead(VkSwapchainKHR sc, uint64_t generation);
 bool present_thread_on();
-void present_hand_off(uint32_t index, VkFence done, uint64_t reflex_id);
+void present_hand_off(uint32_t index, VkFence done, uint64_t reflex_id, OutputTrialFrame trial);
 void present_finish(VkResult res, bool on_presenter);
 std::atomic<bool> presenter_surface_lost{false};   // (the presenter thread's present: VK_ERROR_SURFACE_LOST_KHR, for present_image)
 }  // namespace
@@ -5858,6 +6185,11 @@ static bool acquire_fence_ready() {
 }
 
 void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view, bool source_srgb, bool allow_scale) {
+    present_image_with_trial(src, sw, sh, crop, view, source_srgb, allow_scale, {});
+}
+
+namespace {
+void present_image_with_trial(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view, bool source_srgb, bool allow_scale, OutputTrialSource trial) {
 #ifdef TRACY_ENABLE
     HT_SCOPE("present_image");
 #endif
@@ -5878,6 +6210,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     const bool vsync_changed = vsync_was >= 0 && vsync_was != vsync_now;
     if (vsync_was < 0) vsync_was = vsync_now;
     if (presenter_surface_lost.exchange(false, std::memory_order_acquire)) {   // (the presenter's present found the surface lost)
+        output_preview_path.store(false, std::memory_order_release);
         present_thread_drain();   // (before the queue's lock: the presenter takes it)
         std::lock_guard qk(dev.present_mu);
         invalidate_lost_surface(VK_ERROR_SURFACE_LOST_KHR);
@@ -5890,6 +6223,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
         const uint32_t width = want ? (uint32_t)(want >> 32) : dev.swap_extent.width;
         const uint32_t height = want ? (uint32_t)want : dev.swap_extent.height;
         if (!create_swapchain(width, height)) {
+            output_preview_path.store(false, std::memory_order_release);
             // Retry without replacing a newer resize published while recreation was in progress.
             uint64_t empty = 0;
             dev.swap_resize.compare_exchange_strong(empty, ((uint64_t)width << 32) | height,
@@ -5908,7 +6242,37 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
         menu_note_present_sizes(cropped ? (uint32_t)crop[2] : sw, cropped ? (uint32_t)crop[3] : sh, dev.swap_extent.width,
                                 dev.swap_extent.height);
     }
-    menu_tick();
+    // Ordered render jobs retire the preview after the copy has been submitted. On the game thread
+    // retirement and the window copy could be handled by different threads.
+    bool preview_path;
+    {
+        std::lock_guard lk(menu_mu);
+        preview_path = async_on() && dev.swapchain && dev.present_wait && dev.swap_mode == VK_PRESENT_MODE_FIFO_KHR &&
+                       !dev.hdr && !opts.hdr && !opts.reflex && !opts.dlss && !framegen_on() && !present_defer_into;
+        output_preview_path.store(preview_path, std::memory_order_release);
+        {
+            std::unique_ptr<OutputTrialBacking> released;
+            std::lock_guard gate(output_trial_mu);
+            output_preview_swapchain = dev.swapchain_generation;
+            if (output_trial.request.generation && !output_trial.kept &&
+                (!preview_path || ((output_trial.preparing || output_trial.backing) &&
+                                   dev.swapchain_generation != output_trial.swapchain_generation)))
+                released = clear_output_trial();
+        }
+        menu_tick();
+    }
+    if (trial.native_generation) {
+        std::unique_ptr<OutputTrialBacking> released;
+        std::lock_guard gate(output_trial_mu);
+        if (output_trial.request.generation != trial.native_generation || TrialClock::now() >= output_trial.request.deadline) return;
+        if (!output_trial.kept && (!preview_path || dev.swapchain_generation != output_trial.swapchain_generation)) {
+            released = clear_output_trial();
+            return;
+        }
+        // Cancellation stops new acquisitions. Once acquired, finish the copy and release the WSI image
+        // on the admitted path, even if the lease expires during the copy. Its shown receipt will be ignored.
+        // The next original frame drains the handed-off present before it acquires its own swapchain image.
+    }
     // (the slots in turn: the swapchain's count while frame generation runs (create_swapchain: present_slots_for), else 3; a
     // slot past them waits with its fence signalled. Where the count went down, the frame log's pictures in the slots past it
     // are dropped (RX_VK_FRAMELOG, at most kPresentSlotsMax - 3 of them): read only once the count came back up, they went
@@ -5930,6 +6294,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     const int64_t fence_t0 = fps_breakdown_on() ? fps_clock() : 0;   // (the FPS counter's Breakdown: this frame slot's last copy)
     if (vkWaitForFences(dev.device, 1, &f.done, VK_TRUE, UINT64_MAX) == VK_ERROR_DEVICE_LOST) device_lost();
     framelog_collect(log_slot);
+    if (output_trial_skip_present(nullptr, trial.native_generation)) return;
     uint32_t index = 0;
     const int64_t acquire_t0 = fence_t0 ? fps_clock() : 0;   // (then the swapchain's image: the display's pace)
     if (fence_t0) fps_wait(fps_stats::kGpuWait, acquire_t0 - fence_t0);
@@ -6118,6 +6483,9 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     menu_record(f.cmd, index, dev.swap_extent.width, dev.swap_extent.height, applied_colour ? colour : 0);   // (longshot) Dear ImGui's overlays, over all of it
     menu_rumble_tick();   // (longshot: the Rumble strength row's own rumble, vk_menu.cpp)
     image_barrier(f.cmd, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    // Allocate the trial backing before submitting this copy, so allocation cannot hold up its presenter hand-off.
+    if (trial.generation && preview_path && present_thread_on())
+        make_output_trial_frame(trial, dev.swapchain_generation, OutputPath::FifoShown);
     if (vkEndCommandBuffer(f.cmd) == VK_ERROR_DEVICE_LOST) device_lost();
     // (no wait: the image was free before the copy was recorded, image_free above. Not on the timeline either: one queue runs
     // submits in order, and a wait for a value another thread had counted but not yet submitted blocked the queue for good)
@@ -6164,7 +6532,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     // (acquire ahead: the presenter thread asks for the next present's image right after it makes this one, a game frame's)
     present_acquire_ahead = src && acquire_ahead_wanted();
     present_copy_done = f.done;
-    present_out(index, qk);
+    present_out(index, qk, trial, preview_path);
     present_copy_done = VK_NULL_HANDLE;
     present_acquire_ahead = false;
 }
@@ -6231,6 +6599,7 @@ static void acquire_ahead(VkSwapchainKHR sc, uint64_t generation) {
     held_image = {true, index, generation, true};
     image_waits.ahead++;
 }
+} // namespace
 
 bool present_commit(const PendingPresent& p) {
     if (!p.used) return false;
@@ -6247,20 +6616,26 @@ bool present_commit(const PendingPresent& p) {
 }
 
 // The present of a swapchain image whose copy is submitted, as present_image ended before; qk holds dev.present_mu
-static bool present_out(uint32_t index, std::unique_lock<decltype(dev.present_mu)>& qk) {
+static bool present_out(uint32_t index, std::unique_lock<decltype(dev.present_mu)>& qk, OutputTrialSource trial, bool preview_path) {
 #ifdef TRACY_ENABLE
     HT_SCOPE("present_out");
 #endif
     VkResult res;
     VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     pi.pNext = reflex_present_id(nullptr);   // (NVIDIA Reflex: the frame's present id, and its present's markers)
-    if (present_copy_done && present_thread_on()) {   // (RX_VK_PRESENT_THREAD: below)
-        // (NVIDIA Reflex: its present id goes with the present, which the presenter makes with it and marks the end of)
+    const bool hand_off = present_copy_done && present_thread_on();
+    OutputTrialFrame frame;
+    if (trial.generation) {
+        const bool fifo_shown = preview_path && hand_off && !pi.pNext && dev.present_wait &&
+                                dev.swap_mode == VK_PRESENT_MODE_FIFO_KHR && dev.swapchain && !dev.hdr;
+        frame = make_output_trial_frame(trial, dev.swapchain_generation, fifo_shown ? OutputPath::FifoShown : OutputPath::Unavailable);
+    }
+    if (hand_off) {
         const uint64_t reflex_id = pi.pNext ? static_cast<const VkPresentIdKHR*>(pi.pNext)->pPresentIds[0] : 0;
         if (reflex_id) reflex_present_handed_off();
         antilag_present();   // (AMD Anti-Lag 2: the frame's present stage)
         qk.unlock();
-        present_hand_off(index, present_copy_done, reflex_id);
+        present_hand_off(index, present_copy_done, reflex_id, frame);
         return true;   // (taken as shown: only present_commit's presents, never handed over, read it)
     }
     if (present_thread_on()) {   // (one handed over before, made first: the presents in order; the queue's lock let go meanwhile)
@@ -6361,6 +6736,7 @@ struct Presenter {
     uint64_t reflex_id = 0;          // (NVIDIA Reflex's present id for it, 0 none: present_out)
     uint64_t generation = 0;         // (dev.swapchain_generation of swapchain)
     bool ahead = false;              // (acquire ahead after it: present_image's present_acquire_ahead; a drain that gave up clears it)
+    OutputTrialFrame trial;
     int64_t copy_done_at = 0;        // (fps_clock() when the presenter's wait for it ended: the FPS counter's Breakdown)
     bool started = false;
 };
@@ -6403,6 +6779,7 @@ void presenter_loop() {
         const VkFence done = presenter.done;
         const uint64_t reflex_id = presenter.reflex_id;
         const uint64_t generation = presenter.generation;
+        const OutputTrialFrame trial = presenter.trial;
         lk.unlock();
         const auto t0 = std::chrono::steady_clock::now();
         const bool copied = !done || presenter_wait_copy(done);
@@ -6449,6 +6826,7 @@ void presenter_loop() {
                 for (int step = 0; step < 5 && w == VK_TIMEOUT; step++) w = wait_for_present(dev.device, sc, id, 20000000ull);
                 if (w == VK_ERROR_DEVICE_LOST) device_lost();
                 if (w == VK_SUCCESS) {
+                    if (res == VK_SUCCESS) acknowledge_output_trial_frame(trial);
                     shown_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - ts).count();
                     const int64_t wait_us = (int64_t)(shown_ms * 1000);
                     // (no bookkeeping at all when neither consumer is on: the perf tick or the frame trace)
@@ -6519,7 +6897,7 @@ bool presenter_wait_idle(std::unique_lock<std::mutex>& lk, int limit_ms = 0) {
     return true;
 }
 /// The present of image index, whose copy signals done, to the presenter thread (started at the first), once the one before is made
-void present_hand_off(uint32_t index, VkFence done, uint64_t reflex_id) {
+void present_hand_off(uint32_t index, VkFence done, uint64_t reflex_id, OutputTrialFrame trial) {
 #ifdef TRACY_ENABLE
     HT_SCOPE("present_hand_off");
 #endif
@@ -6532,6 +6910,7 @@ void present_hand_off(uint32_t index, VkFence done, uint64_t reflex_id) {
     presenter.index = index, presenter.swapchain = dev.swapchain, presenter.done = done, presenter.busy = true;
     presenter.reflex_id = reflex_id;
     presenter.generation = dev.swapchain_generation, presenter.ahead = present_acquire_ahead;
+    presenter.trial = trial;
     presenter.copy_done_at = 0;
     presenter.cv.notify_all();
 }
@@ -6659,6 +7038,7 @@ struct Job {
     uint64_t queue = 0;         // (a submit's queue)
     int crop[4] = {0, 0, 0, 0};
     bool has_crop = false;
+    uint64_t output_generation = 0;
     nvn_prog prog;
     std::chrono::steady_clock::time_point queued;
     uint64_t cap_seq = 0;       // (RX_VK_MEM_CHECK: the number of the capture made with it, for its take to match; 0: none)
@@ -7068,7 +7448,8 @@ void replay_thread_main() {
         drain(0);
         present_value = held_present.value;
         fo_present.store(held_present.value, std::memory_order_release);   // (frame overlap: its recording ends the frame)
-        do_present(held_present.has_tex ? &held_present.tex : nullptr, held_present.has_crop ? held_present.crop : nullptr);
+        do_present(held_present.has_tex ? &held_present.tex : nullptr, held_present.has_crop ? held_present.crop : nullptr,
+                   held_present.output_generation);
         bh_shown(held_present.queued);
         update_blocked();
         bh_st.job_ns[1] += bh_now() - t0;
@@ -7141,7 +7522,7 @@ void replay_thread_main() {
             drain(0);
             present_value = j.value;
             fo_present.store(j.value, std::memory_order_release);   // (frame overlap: its recording ends the frame)
-            do_present(j.has_tex ? &j.tex : nullptr, j.has_crop ? j.crop : nullptr);
+            do_present(j.has_tex ? &j.tex : nullptr, j.has_crop ? j.crop : nullptr, j.output_generation);
             bh_shown(j.queued);
             break;
         case JOB_TEXTURE_RELEASED:   // (after the stopped work that may use it)
@@ -7404,7 +7785,7 @@ void submit_q(const uint64_t* handles, int n, uint64_t queue) {
 void submit(const uint64_t* handles, int n) {
     submit_q(handles, n, 0);
 }
-void present(const nvn_tex* t, const int crop[4]) {
+void present_tagged(const nvn_tex* t, const int crop[4], uint64_t generation) {
     fps_presented();   // (the FPS counter: the game's frame ends here, on its presenting thread)
 #ifdef TRACY_ENABLE
     HT_SCOPE("rx present (game thread)");
@@ -7419,9 +7800,9 @@ void present(const nvn_tex* t, const int crop[4]) {
             drain(0);   // (the frame's work whole before it is shown)
             update_blocked();
             present_value = ++q_values;
-            return do_present(t, crop);
+            return do_present(t, crop, generation);
         }
-        return do_present(t, crop);
+        return do_present(t, crop, generation);
     }
     {   // (the render thread) The present is handed over after the CPU's signal its frame's work waits for: the main
         // thread makes that signal when it has written the frame's data, and the presenting thread, its poll answered
@@ -7449,6 +7830,7 @@ void present(const nvn_tex* t, const int crop[4]) {
         }
     }
     Job j{JOB_PRESENT};
+    j.output_generation = generation;
     if (t) j.tex = *t, j.has_tex = true;
     if (crop) std::memcpy(j.crop, crop, sizeof j.crop), j.has_crop = true;
     enqueue(std::move(j));
@@ -7718,7 +8100,8 @@ void fill_replay_table(MkwVkRenderer& t) {
     t.nvn_wait = wait;
     t.wait_writebacks_reading = wait_writebacks_reading;
     t.nvn_finish = finish;
-    t.nvn_present = present;
+    t.nvn_present = [](const nvn_tex* tex, const int crop[4]) { present_tagged(tex, crop, 0); };
+    t.nvn_present_trial = present_tagged;
     t.nvn_register_texture = register_texture_queued;
     t.nvn_event_signal = event_signal_queued;
     t.option = [](int id) -> int {   // (3: the fixed path's scale in 1/10000, vk_menu.cpp; DLAA: full scale, vk_dlss.cpp)
@@ -7785,6 +8168,16 @@ void fill_replay_table(MkwVkRenderer& t) {
     t.guest_imported = memory_guest_imported;
     t.nvn_vmap_changing = vmap_changing;
     t.nvn_texture_created = texture_created_of;
+    t.output_preview_stage = [](const nvn_tex* targets) {
+        const char* test = getenv("RX_VK_OUTPUT_PREVIEW_TEST");
+        const char mode = !test ? 'k' : !strcmp(test, "no-frame") ? 'n' : !strcmp(test, "allocation") ? 'g' : 'k';
+        return request_output_probe_backing(targets, mode, true);
+    };
+    t.output_preview_retired = [](uint64_t last_serial) -> int {
+        return output_preview_retired_serial.load(std::memory_order_acquire) == last_serial;
+    };
+    t.output_trial_phase = output_trial_phase;
+    t.output_trial_publish = output_trial_publish;
 }
 
 } // namespace mkwvk

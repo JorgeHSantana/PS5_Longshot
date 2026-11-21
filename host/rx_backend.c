@@ -457,6 +457,7 @@ uint64_t hos_mods_changed(void);
 int hos_cheat_info(int i, const char **name, const char **mod, const char **note, int *kind, int *on);
 void hos_cheat_set(int i, int on);
 
+int nvn_output_preview_request(uint32_t width, uint32_t height);
 static const MkwVkHost vk_host = {
     MKWVK_API_VERSION, host_log, hos_guest_base, hos_guest_size, hos_gpu_ptr, nvn_gpu_guest, nvn_gpu_read,
     nvn_gpu_write, host_collect, host_free_pages, host_mark_written, hos_ticks, hos_now_ns, nvn_tex_layout,
@@ -474,6 +475,7 @@ static const MkwVkHost vk_host = {
     hos_ab_frame,   /* (version 34, longshot: the frame trace's ab_side, host/hos_ab.c) */
     hos_mod_info, hos_mod_edit, hos_mods_changed, hos_cheat_info, hos_cheat_set,
     host_ab_value,  /* (version 36, longshot: a renderer switch's A/B value, host/hos_ab.c) */
+    nvn_output_preview_request,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
@@ -638,11 +640,39 @@ void rx_wait_writebacks_reading(const void *p, uint64_t n) {
 }
 void rx_nvn_finish(void) { vk ? vk->nvn_finish() : wgr_nvn_finish(); }
 static volatile LONG presents;   /* (the frames shown, for the camera jitter below) */
-void rx_nvn_present(const nvn_tex *t, const int crop[4]) {
+static uint64_t control_picture;
+
+static void control_picture_note(const nvn_tex *t, const int crop[4]) {
+    const unsigned tw = t ? t->d.width : 0, th = t ? t->d.height : 0;
+    const int cropped = crop && crop[2] > 0 && crop[3] > 0;
+    const unsigned w = cropped ? (unsigned)crop[2] : tw, h = cropped ? (unsigned)crop[3] : th;
+    /* Keep both pairs in one snapshot. 16 bits per side covers the supported output sizes. */
+    const uint64_t value = tw && th && tw <= UINT16_MAX && th <= UINT16_MAX && w <= UINT16_MAX && h <= UINT16_MAX
+        ? (uint64_t)tw << 48 | (uint64_t)th << 32 | (uint64_t)w << 16 | h : 0;
+    __atomic_store_n(&control_picture, value, __ATOMIC_RELAXED);
+}
+
+int rx_control_picture(HosControlPicture *out) {
+    const uint64_t value = __atomic_load_n(&control_picture, __ATOMIC_RELAXED);
+    if (!value) return 0;
+    *out = (HosControlPicture){(unsigned)(value >> 48), (uint16_t)(value >> 32),
+                              (uint16_t)(value >> 16), (uint16_t)value};
+    return 1;
+}
+
+static void nvn_present_with_generation(const nvn_tex *t, const int crop[4], uint64_t generation) {
     InterlockedIncrement(&presents);
     hos_slow_frame_present();   /* (HOS_SLOW_FRAMES: a late frame's samples written out, host/slow_frames.c) */
     hos_ab_present();   /* (longshot) HOS_AB: the frame counted for its side (host/hos_ab.c) */
-    vk ? vk->nvn_present(t, crop) : wgr_nvn_present(t, crop);
+    if (hos_control_on) control_picture_note(t, crop);
+    if (vk && generation && vk->nvn_present_trial) vk->nvn_present_trial(t, crop, generation);
+    else if (vk) vk->nvn_present(t, crop);
+    else wgr_nvn_present(t, crop);
+}
+
+void rx_nvn_present(const nvn_tex *t, const int crop[4]) { nvn_present_with_generation(t, crop, 0); }
+void rx_nvn_present_trial(const nvn_tex *t, const int crop[4], uint64_t generation) {
+    nvn_present_with_generation(t, crop, generation);
 }
 /* (longshot, nx2/oot_jitter.py) the temporal upscaler's camera jitter (NVIDIA DLSS, AMD FSR 4: gpu/vk/vk_temporal.cpp): this frame's sub-pixel offset of the scene's projection, in clip
    space (what P[0][2] and P[1][2] get), into out, for the projection matrix at guest address projection (row major, as the
@@ -720,6 +750,22 @@ void rx_nvn_texture_released(const nvn_tex *t) {
     }
     vk ? vk->nvn_texture_released(t) : wgr_nvn_texture_released(t);
 }
+int rx_output_preview_stage(const nvn_tex *targets) {
+    return started && vk && vk->output_preview_stage && vk->output_preview_stage(targets);
+}
+
+int rx_output_preview_retired(uint64_t last_serial) {
+    return started && vk && vk->output_preview_retired && vk->output_preview_retired(last_serial);
+}
+
+int rx_output_trial_phase(uint64_t serial, int cancel) {
+    return started && vk && vk->output_trial_phase ? vk->output_trial_phase(serial, cancel) : OUTPUT_TRIAL_EXPIRED;
+}
+
+int rx_output_trial_publish(uint64_t serial, void (*apply)(void *, uint64_t), void *state) {
+    return started && vk && vk->output_trial_publish && vk->output_trial_publish(serial, apply, state);
+}
+
 void rx_nvn_texture_created(const nvn_tex *t) {
     if (!started && t) {
         early_call c = {4, 0};

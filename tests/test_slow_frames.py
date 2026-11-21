@@ -115,9 +115,9 @@ def sources():
         need("else hos_sample_write(out, line);" in sampler, path + ": the sampler's lines are not written through hos_sample_write")
         need("CreateThread(NULL, 0, sample_all_thread, (void *)slow, 0, NULL);" in block(src, "void hos_prof_start(void) {"),
              path + ": HOS_SLOW_FRAMES starts no sampler")
-    need("hos_slow_frame_present();" in block((ROOT / "host/rx_backend.c").read_text(encoding="utf-8"),
-                                              "void rx_nvn_present(const nvn_tex *t, const int crop[4])"),
-         "rx_nvn_present does not tell the recorder")
+    backend = (ROOT / "host/rx_backend.c").read_text(encoding="utf-8")
+    present = block(backend, "static void nvn_present_with_generation(")
+    need("hos_slow_frame_present();" in present, "the shared native present does not tell the recorder")
     need('getenv("HOS_SAMPLE_ALL")' in slow, "HOS_SLOW_FRAMES does not stand down for HOS_SAMPLE_ALL")
     threads = (ROOT / "host/hos_thread.c").read_text(encoding="utf-8")
     acquire = block(threads, "static void vc_acquire(HosThread *t)")

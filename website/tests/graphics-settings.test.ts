@@ -91,7 +91,7 @@ test('registered text fields retain their choices and restart requirements; unkn
   const unregistered = menu.replace(/const FieldRow field_rows\[\][\s\S]*?;/, 'const FieldRow field_rows[] = {};');
   assert.notEqual(unregistered, menu);
   assert.throws(() => readGraphicsSettings(page, unregistered), /coverage mismatch at Custom output size/);
-  const wrongRestart = page.replace(/(\| \| Custom output size \|[^\n]*)\(after a restart\)/, '$1');
+  const wrongRestart = page.replace(/(\| \| Custom output size \|[^\n]*)\(most changes apply after a restart\)/, '$1');
   assert.notEqual(wrongRestart, page);
   assert.throws(() => readGraphicsSettings(wrongRestart, menu), /restart mismatch at Custom output size/);
 });

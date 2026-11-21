@@ -24,8 +24,8 @@ across a flip not a transition, the name not checked, a period of 0 accepted, a 
 The wiring's safety under flips, with the existing check of that switch run while hos_ab_value flips at every call:
 tests/test_collect_wide.py's 400 rounds of random marks and ranges (every walk's pages, their order and the marks left those
 of a plain walk, the 256-mark step and the 32-mark one taking turns).
-The places of the calls (hos_ab_start before the game's threads, hos_ab_present in rx_nvn_present, hos_ab_end in
-hos_close_finish, hos_ab_frame last in vk_host) and the list of wired switches are read from the source.
+The places of the calls (hos_ab_start before the game's threads, hos_ab_present before each renderer dispatch, hos_ab_end in
+hos_close_finish, hos_ab_frame before the Mods callbacks in vk_host) and the list of wired switches are read from the source.
 
 scripts/perf.py ab (scripts/profiling/ab.py) on made-up traces: known means per side (16 and 18 ms), the warm-up's and the transitions' frames (50 and
 100 ms) left out, a last period cut short left out and one more for the same side at both ends, two files together, and a
@@ -362,14 +362,19 @@ def wiring_checks():
     if not 0 <= main.index("hos_ab_start();") < main.index("hos_display_start();") < main.index('call_guest(c, hos_entry_init_libc0'):
         fail("host/hos_main.c: hos_ab_start is not called before the display and the game's threads start")
     backend = (ROOT / "host/rx_backend.c").read_text(encoding="utf-8")
-    present = block(backend, "void rx_nvn_present(const nvn_tex *t, const int crop[4]) {")
-    if not 0 <= present.index("hos_ab_present();") < present.index("vk->nvn_present(t, crop)"):
-        fail("host/rx_backend.c: rx_nvn_present does not count the frame (hos_ab_present) before the renderer presents")
+    present = block(backend, "static void nvn_present_with_generation(")
+    count = present.index("hos_ab_present();")
+    for dispatch in ("vk->nvn_present(t, crop)", "vk->nvn_present_trial(t, crop, generation)", "wgr_nvn_present(t, crop)"):
+        if count >= present.index(dispatch):
+            fail("host/rx_backend.c: the A/B frame count must precede " + dispatch)
+    for entry, generation in (("rx_nvn_present", "0"), ("rx_nvn_present_trial", "generation")):
+        if f"nvn_present_with_generation(t, crop, {generation});" not in block(backend, f"void {entry}("):
+            fail("host/rx_backend.c: " + entry + " does not use the shared present dispatch")
     table = re.sub(r"/\*.*?\*/", "", block(backend, "static const MkwVkHost vk_host = {"), flags=re.S)
     names = [v.strip() for v in table.split(",") if re.fullmatch(r"\w+", v.strip())]
-    # (the Mods tab's functions, version 35, come after it, then host_ab_value, version 36)
     if "hos_ab_frame" not in names or names[names.index("hos_ab_frame") + 1:] != [
-            "hos_mod_info", "hos_mod_edit", "hos_mods_changed", "hos_cheat_info", "hos_cheat_set", "host_ab_value"]:
+            "hos_mod_info", "hos_mod_edit", "hos_mods_changed", "hos_cheat_info", "hos_cheat_set",
+            "host_ab_value", "nvn_output_preview_request"]:
         fail("host/rx_backend.c: vk_host does not have hos_ab_frame (MkwVkHost.ab_frame, version 34) right before the "
              "Mods tab's functions, and host_ab_value (ab_value, version 36) after them")
     if "static int host_ab_value(const char *name, int normal) { return hos_ab_value(name, normal); }" not in backend:
@@ -378,9 +383,11 @@ def wiring_checks():
     if int(re.search(r"#define MKWVK_API_VERSION (\d+)", api).group(1)) < 36 or \
             not re.search(r"int \(\*ab_frame\)\(int64_t from_ns, int64_t to_ns\);\n    /\* \(version 35: .*?\*/\n"
                           r"    int \(\*mod_info\)\(", api, re.S) or \
-            "int (*ab_value)(const char *name, int normal);\n} MkwVkHost;" not in api:
+            ("int (*ab_value)(const char *name, int normal);\n"
+             "    /* Version 41: request a live output preview. */\n"
+             "    int (*output_preview_request)(uint32_t width, uint32_t height);\n} MkwVkHost;") not in api:
         fail("gpu/vk/vk_api.h: MkwVkHost does not have ab_frame at version 34 right before the Mods tab's functions, and "
-             "ab_value (version 36) at its end")
+             "ab_value (version 36) before the output preview callback")
     replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
     if "host->version >= 34 && host->ab_frame ? host->ab_frame(l_at, at) : -1" not in replay:
         fail("gpu/vk/vk_replay.cpp: the frame trace does not ask the host for ab_side (only from a version 34 host)")

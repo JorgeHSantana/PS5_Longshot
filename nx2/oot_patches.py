@@ -1935,8 +1935,11 @@ def apply(gen, *, protect_hearts=False, required=False):
 # - f_810a7b70 sets up the display-size object (B = [[0x84ca29c0]+216]) from a config (x1): its docked size list (+8, first
 #   2560 x 1440) is the frame's base (B+244; the frame is the base times the graphics scale's factor, f_806702e0, capped by the
 #   scale's display class: docked 3840 x 2160 at scale 0). Its first entry asks the host when it differs.
-OUT_DECL = "uint32_t hos_output_size(int height);\nuint64_t hos_rt_pool_size(uint64_t game);\n"
+OUT_DECL = "uint32_t hos_output_size(int height);\nuint64_t hos_rt_pool_size(uint64_t game);\nint hos_defer_native_output_rebuild(Ctx *c);\n"
 OUT_EDITS = [
+    ("void f_80547fc0(Ctx *__restrict A64_NOESC c) {\n",
+     "void f_80547fc0(Ctx *__restrict A64_NOESC c) {\n"
+     "    if (hos_defer_native_output_rebuild(c)) return;\n"),
     # (the picture's 2560 x 1440 at 0x81202ee4, not f_831f3200's copy at +0xb68; nx2/oot_wide.py's widescreen size, after it,
     # stays over it: host/hos_main.c makes that one at this height)
     ("    c->x[8] = 0xa00ULL;\n    c->x[8] = (c->x[8] & ~(0xFFFFULL<<32)) | (0x5a0ULL<<32);\n"
