@@ -2842,8 +2842,9 @@ void draw_controls(ui::Ctx& c) {
                                   : "Restore this control's default gamepad and keyboard bindings and turn off its Toggle.")
                        : sel_i < kControls && controls[sel_i].button == HOS_KEY_SPRINT && selected_col == kCtlToggle
                            ? "Toggle for Sprint: On, a press of its key or button starts Sprint and the next ends it; Off, Link "
-                             "sprints only while you hold it. Opening Insert, pressing Plus or Minus or focus loss ends it. Off by "
-                             "default."
+                             "sprints only while you hold it. Opening Insert, pressing Plus or Minus or focus loss ends it. It also "
+                             "ends when Link stops, attacks, uses an item, swims or climbs, or while ZL is held; a roll keeps it. "
+                             "Off by default."
                        : sel_i < kControls && controls[sel_i].button == HOS_KEY_SPRINT
                            ? "Enable Sprint in the Controls tab to sprint without rolling. With Toggle off, hold the assigned input "
                              "while moving. With Toggle on, press it to start or stop. Enabling Sprint moves L3 to Sprint if Sprint "

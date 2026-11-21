@@ -79,11 +79,11 @@ enum { HOS_OPT_FPS_CAP = 53 };
 enum { HOS_OPT_HOLD_TOGGLE = 54 };
 /* Audio output: 0 Auto, 1 Stereo, 2 5.1, 3 Mono. Only Mono averages final stereo output live. */
 enum { HOS_OPT_AUDIO_OUTPUT = 57 };
-/* (HOS_OPT_SPRINT, 97: the Controls tab's Sprint row, host/nn_hid.c sprint_step: 1 on, 0 Sprint's key and button do
+/* (HOS_OPT_SPRINT, 97: the Controls tab's Sprint row, host/oot_sprint.c: 1 on, 0 Sprint's key and button do
    nothing) */
 enum { HOS_OPT_SPRINT = 97 };
 /* (HOS_OPT_SPRINT_TOGGLE, 98: the Controls page's Toggle for Sprint, toggle_sprint=: 1, a press of Sprint's key or button
-   turns it on and the next turns it off (host/nn_hid.c sprint_toggle_step); 0, the default: Sprint while held) */
+   turns it on and the next or Link's state turns it off (host/oot_sprint.c); 0, the default: Sprint while held) */
 enum { HOS_OPT_SPRINT_TOGGLE = 98 };
 /* Damage taken: 0 Half, 1 Normal (unchanged), 2 Double, 3 Quadruple. */
 enum { HOS_OPT_DAMAGE_TAKEN = 55 };
@@ -179,7 +179,7 @@ enum { HOS_PROMPTS_LIVE_TEXTURES = 1, HOS_PROMPTS_LIVE_LAYOUTS = 2, HOS_PROMPTS_
    key is held, the movement keys tilt the left stick less: host/nn_hid.c walk_held). The ocarina's five note controls
    take a gamepad input too, and share it: a note's key can be some other control's key at once, host/nn_hid.c has_pad.
    The HUD shortcut (keys and gamepad inputs, its own: host/nn_hid.c hud_pad_mask). Then Sprint, keys and gamepad inputs,
-   which holds A while Link is steered (host/nn_hid.c sprint_step: the game's run on A held) */
+   which sets the game's dash input in Link's flags (host/oot_sprint.c: the game's run after a roll) */
 enum { HOS_KEY_MOVE_UP = HOS_SW_N, HOS_KEY_MOVE_DOWN, HOS_KEY_MOVE_LEFT, HOS_KEY_MOVE_RIGHT, HOS_KEY_CAM_UP,
        HOS_KEY_CAM_DOWN, HOS_KEY_CAM_LEFT, HOS_KEY_CAM_RIGHT, HOS_KEY_OC_NOTE_L, HOS_KEY_OC_NOTE_R,
        HOS_KEY_OC_NOTE_A, HOS_KEY_OC_NOTE_Y, HOS_KEY_OC_NOTE_X, HOS_KEY_WALK, HOS_KEY_TOGGLE_HUD, HOS_KEY_SPRINT, HOS_KEY_N };

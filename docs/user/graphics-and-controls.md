@@ -304,11 +304,13 @@ helper asks you to.
   pads in Switch mode, DualSense and DualShock 4. Set the pad down for a second if the aim creeps.
 - **Walk mode** and **Walk speed:** while the Walk key is held (<kbd>Caps Lock</kbd> unless you change it), the movement
   keys tilt the stick only Walk speed of the way. With Toggle, one press walks and the next runs.
-- **Sprint** (Controls tab, off by default): Link runs the game's own run, the one after a roll while A stays held,
-  without the roll. By default, hold <kbd>Shift</kbd> while you move, or on a controller hold the left stick pressed in; let go and
-  he moves as before. With Sprint On, its **Toggle** cell on the Controls page instead starts and stops it with a press.
-  He runs past people, signs and pots without talking, reading or picking up; tap A to roll or
-  act as usual. Sprint is disabled while the instrument is waiting for a note. Turning the row on moves <kbd>Shift</kbd> from B
+- **Sprint** (Controls tab, off by default): Link runs the game's own run, the one after a roll, without the roll.
+  By default, hold <kbd>Shift</kbd> while you move, or on a controller hold the left stick pressed in; let go and he moves
+  as before. With Sprint On, its **Toggle** cell on the Controls page instead starts it with a press; the next press ends
+  it, and so does Link stopping, attacking, using an item, swimming or climbing, or holding ZL. A roll or a jump keeps it.
+  Sprint never presses A: he runs past people, signs and pots without talking, reading or picking up, and A rolls or acts
+  as usual, sprinting or not. In a conversation or a cutscene the left stick's press is the game's again (it hides the
+  text box) and starts no sprint. Sprint is disabled while the instrument is waiting for a note. Turning the row on moves <kbd>Shift</kbd> from B
   to Sprint (B goes to <kbd>V</kbd>, when no control has V) and the left stick's press from LS to Sprint; turning it off
   puts them back. Controls you rebound yourself are left alone, and the Controls page's **Sprint** line rebinds it.
 

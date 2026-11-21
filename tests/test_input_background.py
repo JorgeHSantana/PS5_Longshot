@@ -96,10 +96,16 @@ def main():
     cheat_state += "static uint64_t hud_pad_mask(void);\n" + block(hid, "static int pad_sprint_down(")
     # (Sprint on for the input, as the row's layout publishes it: the fixture's rx_option says the row is on)
     cheat_state += "\nstatic volatile LONG sprint_on = 1, sprint_toggle_mode;\n"
-    cheat_state += "\nvolatile uint32_t hos_sprint_press_mask;\n"
-    cheat_state += re.search(r"^#define SPRINT_ROLL_GAP_MS [^\n]*", hid, re.M).group(0) + "\n"
-    cheat_state += block(hid, "static int sprint_toggle_step(") + "\n"   # (npad_states': Sprint's Toggle)
-    cheat_state += block(hid, "static void sprint_step(")   # (npad_states': A held, without the roll)
+    # (npad_states hands Sprint's input to host/oot_sprint.c hos_sprint_input, which the game's buttons pass through:
+    # tests/test_sprint.py runs it against a fake game; here a spy notes what it is handed)
+    cheat_state += """
+static int spy_sprint_on, spy_sprint_down, spy_sprint_l3, spy_sprint_toggle, spy_sprint_reset, spy_sprint_blocked;
+uint64_t hos_sprint_input(uint64_t buttons, int on, int down, int l3, int toggle, int reset, int blocked) {
+    spy_sprint_on = on, spy_sprint_down = down, spy_sprint_l3 = l3, spy_sprint_toggle = toggle;
+    spy_sprint_reset = reset, spy_sprint_blocked = blocked;
+    return buttons;
+}
+"""
     cheat_spies = """
 volatile int hos_oot_live_action;
 int hos_oot_flight_shortcut_ready(void) { CHECK(!"unexpected cheat readiness query"); return 0; }

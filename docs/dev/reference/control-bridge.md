@@ -131,7 +131,8 @@ read after its request, plus `at` frames, and is held for `frames` frames (1 to 
 
 For a Sprint change, record the exact revision and build used for any bridge run. Compare the base and updated head
 using a physical Xbox controller and keyboard on Windows, and a controller on Linux or Steam Deck. With Sprint Off and
-On, check release while steering and the handoff to the player's A press; capture the menu before and after. Report the
+On, check release while steering, the player's own A press while sprinting, and the left stick's press in a
+conversation; capture the menu before and after. Report the
 Linux build, applicable Tier 1 coverage, lint and CI on the updated head, and identify any suite failures also present
 on the baseline. A bridge input does not replace the physical-device comparison.
 

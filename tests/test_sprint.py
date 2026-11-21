@@ -1,21 +1,22 @@
-"""Sprint (host/nn_hid.c, the Controls page's line, the Controls tab's Sprint row, gpu/vk/menu/sprint.cpp): a control past the Switch's buttons with
-keys and gamepad inputs that, while the left stick is pushed, holds A, the game's own run. Off by default.
+"""Sprint (host/nn_hid.c, the Controls page's line, the Controls tab's Sprint row, gpu/vk/menu/sprint.cpp, host/oot_sprint.c): a
+control past the Switch's buttons with keys and gamepad inputs that sets the game's dash input in Link's flags, the game's own
+run after a roll, while held or from a press to the next with its Toggle. Off by default.
 
 The bindings: host/nn_hid.c's binding table is compiled alone (C), as tests/test_bound_keys.py does, and linked with the
 Sprint module's apply_sprint_layout cut out of gpu/vk/menu/sprint.cpp (C++), against a fake longshot_options.ini for each case. A new
 install's defaults are the ones from before Sprint (Shift B, the left stick's press LS) and give Sprint nothing; the row
 turned on gives it Shift and the press (B to V, LS keeping its other input) and turned off puts them back; a player who
 rebound B, Shift or the press, or whose V is taken, or who bound Sprint, keeps theirs. The sources are checked for the
-rest: read_input reads Sprint's key and gamepad input (and a test run's SPRINT, which never reaches the game), npad_states hands sprint_step the stick only with the row on, the
+rest: read_input reads Sprint's key and gamepad input (and a test run's SPRINT, which never reaches the game), npad_states hands host/oot_sprint.c its input only with the row on, the
 module's row is on the Controls tab and lays the controls out as it changes, the Controls page has Sprint's line, writes
 its pad_ line and lays them out again as it resets.
-sprint_step is compiled alone: A only while steered and the key or the gamepad input held (let go, the plain run again),
-hos_sprint_press_mask A's bit while it is Sprint's A (not the player's own), the
-player's own A mid-sprint a gap and then a press of theirs (a tap shorter than the gap too). nx2/oot_patches.py patch_sprint_press runs on synthetic matcher input: the mask goes
-between the pair that makes "pressed" and its store, in the two controllers' updates only, once.
+host/oot_sprint.c is compiled alone against a fake game (Link's state chain, the actor and event managers): the dash input
+while held or toggled, ended by Link's state, ZL, standing still (by the frames' time) or the host's reset, kept through
+a roll; A never added; in a conversation the left stick's press handed to the game as LS. nx2/oot_patches.py's two calls
+after the loads of Link's input flags run on text written as the lift writes it.
 
 Physical review: compare ae8e78b0910d with the updated head using an Xbox controller and keyboard on Windows and a
-controller on Linux or Steam Deck. With Sprint Off and On, release Sprint while steering and press A during Sprint;
+controller on Linux or Steam Deck. With Sprint Off and On, release Sprint while steering, press A during Sprint and press the left stick in a conversation;
 capture menu screenshots before and after. Report the Linux build, applicable Tier 1 coverage, lint and CI, and name
 any suite failures also present on the baseline. This fixture does not exercise physical L3 or either platform's input.
 python -I -B tests/test_sprint.py   (needs a C and a C++ compiler)
@@ -218,12 +219,10 @@ class SprintTests(unittest.TestCase):
         self.assertLess(read.index("ReleaseSRWLockShared(&input_bind_lock);"), read.index("hos_oot_autoload_input();"))
         self.assertLess(read.index("input_pads[i][k] = pad_bind[i][k]"), read.index("ReleaseSRWLockShared(&input_bind_lock);"))
         self.assertLess(npad.index("read_input(&buttons, &taps, stick);"), npad.index("const int sprint_enabled = sprint_frame;"))
-        self.assertIn("const int physical_sprint = sprint_enabled ? sprint_now : 0;",
+        self.assertIn("const int sprint_down = (sprint_enabled ? sprint_now : 0) | (sprint_enabled && synthetic_sprint ? SPRINT_KEY : 0);",
                       npad, "Sprint runs without the Controls tab's Sprint row on")
-        self.assertIn("sprint_step(&buttons, sprint_held, steered, menu_open || hos_oc_wait == 1, hos_now_ns(),", npad,
+        self.assertIn("buttons = hos_sprint_input(buttons, sprint_enabled,", npad,
                       "npad_states does not give Sprint the buttons as the game will get them")
-        self.assertLess(npad.index("const int steered ="), npad.index("sprint_step("),
-                        "Sprint must see the stick before it lets it go")
         # (a script's or the bridge's SPRINT: Sprint's key for a test run, never a button the game or the cheats see)
         self.assertIn('{"SPRINT", B_SPRINT}', test_bound_keys.block(hid, "static int parse_presses(const char *s, int64_t base_ms, int live) {"),
                       "HOS_INPUT_SCRIPT has no SPRINT")
@@ -309,137 +308,232 @@ class SprintTests(unittest.TestCase):
                         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
 
-STEP_MAIN = r"""
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+# host/oot_sprint.c against a fake game: Link's pointer chain and the actor and event managers in a small memory map. Each
+# frame reads the controller (hos_sprint_input, as npad_states hands it Sprint's input) and then runs Link's movement
+# update (hos_sprint_link, at 0x804ce798) and his stance update (hos_sprint_stance, at 0x80c27f3c), which must find the
+# dash input (bit 4) in his flags exactly while the sprint is on.
+ENGINE_PRELUDE = r"""
+#include <assert.h>
 #include <stdint.h>
-enum { B_A = 0 };
-volatile uint32_t hos_sprint_press_mask;
-static int fails;
-#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
-static uint64_t b;
-static void step_a(int held, int steered, int menu, int64_t ms, int own_a) {
-    b = own_a ? 1 : 0;
-    sprint_step(&b, held, steered, menu, ms * 1000000, 0);
-}
-static void step(int held, int steered, int menu, int64_t ms) { step_a(held, steered, menu, ms, 0); }
-#define RUNS (b & 1)
-#define MASK hos_sprint_press_mask
-int main(void) {
-    /* the key: A while held and steered, the stick as it is; the press mask A's bit while it is Sprint's A */
-    step(SPRINT_KEY, 0, 0, 0);       CHECK(!RUNS && !MASK);   /* standing: nothing */
-    step(SPRINT_KEY, 1, 0, 1000);    CHECK(RUNS && MASK == 1);
-    step(SPRINT_KEY, 1, 0, 1100);    CHECK(RUNS && MASK == 1);
-    /* the player's own A going down mid-sprint: A let go for the gap, then held as their press (the mask 0) */
-    step_a(SPRINT_KEY, 1, 0, 1150, 1);   CHECK(!RUNS && MASK == 0);   /* the gap: A up */
-    step_a(SPRINT_KEY, 1, 0, 1180, 1);   CHECK(!RUNS && MASK == 0);
-    step_a(SPRINT_KEY, 1, 0, 1201, 1);   CHECK(RUNS && MASK == 0);    /* A down again: a press, theirs */
-    step(SPRINT_KEY, 1, 0, 1230);        CHECK(RUNS && MASK == 0);    /* theirs up: still owed for the gap */
-    step(SPRINT_KEY, 1, 0, 1260);        CHECK(RUNS && MASK == 1);    /* Sprint's own A again: no press */
-    /* a tap shorter than the gap: the press still comes */
-    step_a(SPRINT_KEY, 1, 0, 1300, 1);   CHECK(!RUNS);
-    step(SPRINT_KEY, 1, 0, 1320);        CHECK(!RUNS);
-    step(SPRINT_KEY, 1, 0, 1360);        CHECK(RUNS && MASK == 0);
-    step(SPRINT_KEY, 1, 0, 1420);        CHECK(RUNS && MASK == 1);
-
-    step(0, 1, 0, 1450);             CHECK(!RUNS && !MASK);   /* let go: walks */
-    /* their A down before Sprint starts: theirs, no gap */
-    step_a(0, 1, 0, 1460, 1);        CHECK(RUNS && !MASK);    /* (the player's own A: not Sprint's) */
-    step_a(SPRINT_KEY, 1, 0, 1470, 1);   CHECK(RUNS && MASK == 0);
-    step(0, 1, 0, 1480);
-    step(SPRINT_KEY, 1, 1, 1500);    CHECK(!RUNS && !MASK);   /* not with the menu open */
-    /* Releasing Sprint and tapping A in the same sample still creates the gap and delivers the tap. */
-    step(SPRINT_PAD, 1, 0, 1510);         CHECK(RUNS && MASK == 1);
-    step_a(0, 1, 0, 1520, 1);           CHECK(!RUNS && !MASK);
-    step(0, 1, 0, 1530);                 CHECK(!RUNS && !MASK);
-    step(0, 1, 0, 1571);                 CHECK(RUNS && !MASK);
-    step(0, 1, 0, 1600);
-    /* a tap remains owed when Sprint is released or movement stops during the gap */
-    step(SPRINT_KEY, 1, 0, 1650);
-    step_a(SPRINT_KEY, 1, 0, 1660, 1); CHECK(!RUNS);
-    step(0, 1, 0, 1680);               CHECK(!RUNS && !MASK);
-    step(0, 1, 0, 1800);               CHECK(RUNS && !MASK); /* even after a long frame */
-    step(0, 1, 0, 1860);               CHECK(!RUNS && !MASK);
-    step(SPRINT_KEY, 1, 0, 1870);
-    step_a(SPRINT_KEY, 1, 0, 1880, 1); CHECK(!RUNS);
-    step(SPRINT_KEY, 0, 0, 1900);      CHECK(!RUNS && !MASK);
-    step(SPRINT_KEY, 0, 0, 1940);      CHECK(RUNS && !MASK);
-    step(0, 0, 0, 1990);               CHECK(!RUNS && !MASK);
-    /* a long interval between reads still delivers the tap while Sprint remains held */
-    step(SPRINT_KEY, 1, 0, 1991);
-    step_a(SPRINT_KEY, 1, 0, 1992, 1); CHECK(!RUNS && !MASK);
-    step(SPRINT_KEY, 1, 0, 2192);      CHECK(RUNS && !MASK);
-    step(SPRINT_KEY, 1, 0, 2252);      CHECK(RUNS && MASK == 1);
-    step(0, 0, 0, 2260);
-    /* the gamepad input: only while held, as the key */
-    step(SPRINT_PAD, 1, 0, 2300);    CHECK(RUNS && MASK == 1);
-    step(SPRINT_PAD, 1, 0, 2350);    CHECK(RUNS && MASK == 1);   /* held: runs */
-    step(0, 1, 0, 2400);             CHECK(!RUNS && !MASK);    /* let go while moving: back to the plain run */
-    step(0, 1, 0, 2500);             CHECK(!RUNS);             /* (and stays so) */
-    step(SPRINT_PAD, 0, 0, 2600);    CHECK(!RUNS && !MASK);    /* held standing: nothing */
-    step(SPRINT_PAD, 1, 0, 2700);    CHECK(RUNS && MASK == 1);   /* still held, moving again: runs, no new press needed */
-    step(0, 0, 0, 2800);             CHECK(!RUNS && !MASK);    /* stopped and let go: off */
-    /* A second tap during the first tap's owed interval needs its own gap. */
-    step(SPRINT_KEY, 1, 0, 2900);        CHECK(RUNS && MASK == 1);
-    step_a(SPRINT_KEY, 1, 0, 2910, 1);  CHECK(!RUNS && !MASK);
-    step(SPRINT_KEY, 1, 0, 2920);      CHECK(!RUNS && !MASK);
-    step(SPRINT_KEY, 1, 0, 2961);      CHECK(RUNS && !MASK);
-    step_a(SPRINT_KEY, 1, 0, 2970, 1); CHECK(!RUNS && !MASK);
-    step(SPRINT_KEY, 1, 0, 2980);      CHECK(!RUNS && !MASK);
-    step(SPRINT_KEY, 1, 0, 3021);      CHECK(RUNS && !MASK);
-    step(SPRINT_KEY, 1, 0, 3072);      CHECK(RUNS && MASK == 1);
-    if (!fails) printf("PASS\n");
-    return fails != 0;
-}
-"""
-
-
-TOGGLE_MAIN = r"""
 #include <stdio.h>
-static int fails;
-#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
+#include <string.h>
+typedef struct { uint64_t x[32]; } Ctx;
+#define g_module_base 0ull
+static struct { uint64_t a, v; } cells[64];
+static int ncells;
+static int reads;
+static void put(uint64_t a, uint64_t v) {
+    for (int i = 0; i < ncells; i++)
+        if (cells[i].a == a) { cells[i].v = v; return; }
+    cells[ncells].a = a, cells[ncells].v = v, ncells++;
+}
+static uint64_t get(uint64_t a) {
+    for (int i = 0; i < ncells; i++)
+        if (cells[i].a == a) return cells[i].v;
+    return 0;
+}
+int hos_mem_region(uint64_t a, uint64_t size) {
+    (void)size;
+    reads++;
+    for (int i = 0; i < ncells; i++)
+        if (cells[i].a == a) return 1;
+    return 0;
+}
+#define G64(a) get(a)
+#define G32(a) ((uint32_t)get(a))
+volatile uint32_t hos_frame_seconds_bits;
+"""
+
+ENGINE_GAME = r"""
+enum { LINK = 0x1000, CHAIN_A = 0x2000, CHAIN_B = 0x3000, CHAIN_C = 0x4000, CHAIN_D = 0x5000, MGR = 0x6000, CTL = 0x7000,
+       EVENTS = 0x8000, OTHER_A = 0x9000 };
+enum { S_WALK = 1, S_JUMP = 13, S_LAND = 32, S_SLIDE = 35, S_ROLL = 99, S_WAIT = 40, S_ATTACK = 7 };
+#define BIT_A (1ull << 0)
+#define BIT_LS (1ull << 4)
+#define BIT_ZL (1ull << 8)
+
+static void game(void) {
+    put(LINK, 0x84b6dfc0ull), put(LINK + 0x18, CHAIN_A), put(CHAIN_A + 0x270, CHAIN_B), put(CHAIN_B + 0x188, CHAIN_C);
+    put(CHAIN_C + 0x1c0, CHAIN_D), put(CHAIN_D + 0x28, S_WAIT), put(CHAIN_D + 0x4c, 0);
+    put(0x84c9e0d0ull, 0x84c9e0d8ull), put(0x84c9e0d8ull, MGR), put(MGR, 0x84bffe68ull), put(MGR + 0x470, CTL);
+    put(CTL, 0x84b69698ull), put(CTL + 0x18, CHAIN_A);
+    put(0x84c9e090ull, 0x84c9e098ull), put(0x84c9e098ull, EVENTS), put(EVENTS + 0x68, 0);
+}
+static void state(int id) { put(CHAIN_D + 0x28, (uint64_t)id); }
+static void event(int on) { put(EVENTS + 0x68, on ? 0x1234 : 0); }
+
+/* What npad_states hands over this frame (the Sprint row, its Toggle, the left stick's press as Sprint's input) */
+static int on = 1, toggle, l3 = 1, blocked, reset;
+/* one frame: the controller read with Sprint held or not and these buttons (what reaches the game in *game_saw), then
+   Link's two updates; 1 when both found the dash input */
+static int frame(int sprint, uint64_t buttons, uint64_t *game_saw) {
+    const uint64_t seen = hos_sprint_input(buttons, on, sprint, l3 && sprint, toggle, reset, blocked);
+    if (game_saw) *game_saw = seen;
+    Ctx c;
+    memset(&c, 0, sizeof c);
+    c.x[19] = LINK, c.x[10] = 0x1, c.x[8] = 0x1;   /* (other flags stay) */
+    hos_sprint_link(&c);
+    const int link = (c.x[10] & 0x10) != 0;
+    assert(c.x[10] & 0x1);
+    hos_sprint_stance(&c);
+    const int stance = (c.x[8] & 0x10) != 0;
+    assert(link == stance);
+    return link;
+}
+/* a press: down for a frame, then up */
+static int tap(void) { int r = frame(1, 0, NULL); return frame(0, 0, NULL) || r; }
+
 int main(void) {
-    /* Toggle off: held as it is */
-    CHECK(sprint_toggle_step(SPRINT_PAD, 0, 0) == SPRINT_PAD);
-    CHECK(sprint_toggle_step(0, 0, 0) == 0);
-    /* Toggle on: a press starts it, it stays on let go, the next press ends it */
-    CHECK(sprint_toggle_step(SPRINT_PAD, 1, 0) == SPRINT_KEY);
-    CHECK(sprint_toggle_step(SPRINT_PAD, 1, 0) == SPRINT_KEY);   /* (still the same press) */
-    CHECK(sprint_toggle_step(0, 1, 0) == SPRINT_KEY);            /* let go: still on */
-    CHECK(sprint_toggle_step(SPRINT_KEY, 1, 0) == 0);            /* the next press: off */
-    CHECK(sprint_toggle_step(0, 1, 0) == 0);
-    /* a reset ends it, and the press held across it does not start it again */
-    CHECK(sprint_toggle_step(SPRINT_PAD, 1, 0) == SPRINT_KEY);
-    CHECK(sprint_toggle_step(SPRINT_PAD, 1, 1) == 0);
-    CHECK(sprint_toggle_step(SPRINT_PAD, 1, 0) == 0);
-    CHECK(sprint_toggle_step(0, 1, 0) == 0);
-    CHECK(sprint_toggle_step(SPRINT_PAD, 1, 0) == SPRINT_KEY);   /* a new press: on */
-    /* the Toggle turned off: held again at once, nothing latched */
-    CHECK(sprint_toggle_step(0, 0, 0) == 0);
-    CHECK(sprint_toggle_step(0, 1, 0) == 0);
-    if (!fails) printf("PASS\n");
-    return fails != 0;
+    game();
+    uint64_t saw;
+
+    /* the row off: nothing happens, and the buttons go through as they are */
+    on = 0, state(S_WALK);
+    reads = 0;
+    assert(!frame(1, BIT_A, &saw) && saw == BIT_A);
+    assert(reads == 0);   /* neither hook looks up actors or state while disabled */
+    frame(0, 0, NULL);
+    on = 1;
+
+    /* held (Toggle off): on while held, off when let go; A is never added, the player's own A goes through */
+    toggle = 0, state(S_WALK);
+    frame(0, 0, NULL);
+    assert(frame(1, 0, &saw) && saw == 0);
+    assert(frame(1, BIT_A, &saw) && saw == BIT_A);   /* (their A, a roll: theirs, the sprint goes on) */
+    state(S_ROLL), assert(frame(1, 0, NULL));
+    state(S_WALK), assert(frame(1, 0, NULL));
+    assert(!frame(0, 0, NULL));
+    state(S_ATTACK), assert(!frame(1, 0, NULL));   /* (held into an attack: off) */
+    frame(0, 0, NULL), state(S_WALK);
+
+    /* Toggle: a press while walking starts it; it goes on through jumps, landings, slides and rolls */
+    toggle = 1;
+    frame(0, 0, NULL);
+    assert(frame(1, 0, &saw) && saw == 0);
+    assert(frame(0, 0, NULL));
+    int keep[] = {S_JUMP, S_LAND, S_SLIDE, S_ROLL, S_WALK};
+    for (int i = 0; i < 5; i++) state(keep[i]), assert(frame(0, 0, NULL));
+    /* the next press ends it */
+    assert(!tap());
+    /* any other state ends it at once */
+    assert(tap());
+    state(S_ATTACK), assert(!frame(0, 0, NULL));
+    state(S_WALK), assert(!frame(0, 0, NULL));
+    /* ZL held ends it */
+    assert(tap());
+    assert(!frame(0, BIT_ZL, NULL)), assert(!frame(0, 0, NULL));
+    /* the host's reset (Insert opened, Plus or Minus, the focus lost) ends it */
+    assert(tap());
+    reset = 1, assert(!frame(0, 0, NULL)), reset = 0;
+    assert(!frame(0, 0, NULL));
+    /* Blocking and events end an existing toggle, including before the next Link update. */
+    assert(tap());
+    blocked = 1, assert(!frame(0, 0, NULL)), blocked = 0;
+    assert(!frame(0, 0, NULL));
+    assert(tap());
+    event(1), assert(!frame(0, 0, NULL)), event(0);
+    assert(!frame(0, 0, NULL));
+    /* standing still: four 60 Hz frames are kept, the fifth ends it */
+    assert(tap());
+    state(S_WAIT);
+    for (int i = 0; i < 4; i++) assert(frame(0, 0, NULL));
+    assert(!frame(0, 0, NULL));
+    /* ... at 240 fps by the frames' time, not by updates: 16 updates of a 240th are four 60 Hz frames */
+    {
+        float quarter = 1.0f / 240.0f;
+        memcpy((void *)&hos_frame_seconds_bits, &quarter, 4);
+        state(S_WALK), assert(tap());
+        state(S_WAIT);
+        for (int i = 0; i < 15; i++) assert(frame(0, 0, NULL));
+        frame(0, 0, NULL);   /* (the 16th: at the edge, 16 floats of a 240th add up to a hair over four frames) */
+        assert(!frame(0, 0, NULL));
+        hos_frame_seconds_bits = 0;
+    }
+    /* a press while standing: ninety frames to start moving */
+    state(S_WAIT);
+    assert(tap());
+    for (int i = 0; i < 80; i++) assert(frame(0, 0, NULL));
+    state(S_WALK), assert(frame(0, 0, NULL));
+    state(S_WAIT);
+    for (int i = 0; i < 4; i++) assert(frame(0, 0, NULL));
+    assert(!frame(0, 0, NULL));
+
+    /* a conversation (an event runs, Link's update goes on): the left stick's press is the game's LS, it hides the text
+       box, for as long as it is held; no sprint */
+    state(S_WALK), event(1);
+    assert(!frame(1, 0, &saw) && saw == BIT_LS);
+    assert(!frame(1, 0, &saw) && saw == BIT_LS);
+    assert(!frame(0, 0, &saw) && saw == 0);
+    event(0);
+    assert(!frame(0, 0, NULL));
+    /* ... Sprint on a key or another button: nothing goes to the game */
+    l3 = 0, event(1);
+    assert(!frame(1, 0, &saw) && saw == 0);
+    frame(0, 0, NULL), event(0), l3 = 1;
+    /* blocked (Insert open, the ocarina waiting for a note): neither Sprint's nor the game's */
+    blocked = 1;
+    assert(!frame(1, 0, &saw) && saw == 0);
+    frame(0, 0, NULL), blocked = 0;
+    /* a menu, a cutscene or a load (no update of Link for eight reads): the game's, and no sprint after */
+    for (int i = 0; i < 8; i++) hos_sprint_input(0, on, 0, 0, toggle, 0, 0);
+    assert(hos_sprint_input(0, on, 1, 1, toggle, 0, 0) == BIT_LS);
+    assert(!frame(1, 0, &saw) && saw == BIT_LS);   /* (the same press held on into gameplay stays the game's) */
+    frame(0, 0, NULL);
+    /* Missing or invalid manager and controlled actor pointers never accept either Link update. */
+    {
+        Ctx c = {0};
+        c.x[19] = LINK;
+        assert(tap());
+        for (int i = 0; i < 6; i++) {
+            put(0x84c9e0d8ull, i == 0 ? 0 : MGR);
+            put(MGR, i == 1 ? 0 : 0x84bffe68ull);
+            put(MGR + 0x470, i == 2 ? 0 : CTL);
+            put(CTL, i == 3 ? 0 : 0x84b69698ull);
+            put(CTL + 0x18, i == 4 ? 0 : (i == 5 ? OTHER_A : CHAIN_A));
+            c.x[10] = c.x[8] = 0;
+            hos_sprint_link(&c), hos_sprint_stance(&c);
+            assert(!(c.x[10] & 0x10) && !(c.x[8] & 0x10));
+        }
+        put(CTL + 0x18, CHAIN_A);
+        reset = 1, assert(!frame(0, 0, NULL)), reset = 0;
+    }
+    /* a Link the player does not control does not sprint */
+    put(CTL + 0x18, OTHER_A);
+    frame(1, 0, NULL);
+    assert(!frame(0, 0, NULL));
+    put(CTL + 0x18, CHAIN_A);
+    reset = 1, frame(0, 0, NULL), reset = 0;   /* (that press is still owed to the controlled Link: ended here) */
+    assert(!frame(0, 0, NULL));
+    /* the Toggle changed mid-sprint: the sprint ends */
+    assert(tap());
+    toggle = 0, assert(!frame(0, 0, NULL));
+    puts("ok");
+    return 0;
 }
 """
 
 
-class SprintToggleTests(unittest.TestCase):
-    """host/nn_hid.c sprint_toggle_step alone: the Controls page's Toggle for Sprint"""
+def engine_source():
+    text = (ROOT / "host" / "oot_sprint.c").read_text(encoding="utf-8")
+    text = re.sub(r"^#include.*$", "", text, flags=re.M)
+    text = text.replace("extern volatile uint32_t hos_frame_seconds_bits;", "")
+    text = text.replace("int hos_mem_region(uint64_t addr, uint64_t size);", "")
+    return ENGINE_PRELUDE + text + ENGINE_GAME
 
-    def test_toggle(self):
+
+class SprintEngineTests(unittest.TestCase):
+    """host/oot_sprint.c: the game's dash input while Sprint runs, held or toggled, against a fake game"""
+
+    def test_engine(self):
         compiler = compiler_command("CC", "gcc", "clang")
-        if not compiler[0]:
+        if not compiler or not compiler[0]:
             self.skipTest("no C compiler")
-        hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
-        code = (test_bound_keys.block(hid, "enum { SPRINT_KEY") + ";\n" +
-                test_bound_keys.block(hid, "static int sprint_toggle_step("))
-        with tempfile.TemporaryDirectory(prefix="longshot-sprint-toggle-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="longshot-sprint-engine-") as tmp:
             tmp = Path(tmp)
-            (tmp / "t.c").write_text(code + "\n#define sprint_toggle_step(a,b,c) sprint_toggle_step(a,b,c,0)\n" + TOGGLE_MAIN, encoding="utf-8")
+            (tmp / "t.c").write_text(engine_source(), encoding="utf-8")
             binary = tmp / ("t.exe" if sys.platform == "win32" else "t")
-            build = subprocess.run(compiler + ["-std=gnu11", "-Wall", "-Werror", str(tmp / "t.c"), "-o", str(binary)],
-                                   text=True, capture_output=True)
+            build = subprocess.run([*compiler, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
+                                    str(tmp / "t.c"), "-o", str(binary)], text=True, capture_output=True)
             self.assertEqual(build.returncode, 0, build.stderr)
             run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
@@ -448,97 +542,87 @@ class SprintToggleTests(unittest.TestCase):
         hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
         npad = test_bound_keys.block(hid, "static void npad_states(")
         self.assertIn("const int sprint_toggle = sprint_enabled && sprint_toggle_frame;", npad)
-        self.assertIn("sprint_toggle_step(physical_sprint, sprint_toggle, sprint_reset, suppressed)", npad,
-                      "npad_states does not give Sprint's held through its Toggle")
+        self.assertIn("buttons = hos_sprint_input(buttons, sprint_enabled, sprint_down & (SPRINT_KEY | SPRINT_PAD),", npad,
+                      "npad_states does not hand Sprint's input to host/oot_sprint.c")
+        self.assertLess(npad.index("buttons = hold_toggle_apply("), npad.index("buttons = hos_sprint_input("),
+                        "Sprint must see the buttons as the game will get them")
+        self.assertIn("SPRINT_L3", test_bound_keys.block(hid, "static int pad_sprint_down("),
+                      "Sprint does not say when its gamepad input is the left stick's press")
+        for gone in ("hos_sprint_press_mask", "sprint_step(", "sprint_toggle_step(", "SPRINT_ROLL_GAP_MS"):
+            self.assertNotIn(gone, hid, "the old Sprint, A held without its press, is still in host/nn_hid.c")
         menu = (ROOT / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
         self.assertIn("|| button == HOS_KEY_SPRINT;", test_bound_keys.block(menu, "bool has_toggle(int button) {"),
                       "the Controls page has no Toggle for Sprint")
         self.assertIn('if (i < HOS_SW_N || i == HOS_KEY_SPRINT) fprintf(f, "toggle_%s=%d\\n"', menu,
                       "the menu does not save toggle_sprint")
+        self.assertIn("ends when Link stops, attacks, uses an item, swims or climbs", menu,
+                      "the Toggle's help does not say Link's state ends a toggled sprint")
         replay = (ROOT / "gpu" / "vk" / "vk_replay.cpp").read_text(encoding="utf-8")
-        self.assertIn("host->binding(HOS_BIND_SPRINT_TOGGLE, 0, 0)", replay,
-                      "the host cannot see Sprint's Toggle")
+        self.assertIn("host->binding(HOS_BIND_SPRINT_TOGGLE, 0, 0)", replay, "the host cannot see Sprint's Toggle")
 
 
-class SprintStepTests(unittest.TestCase):
-    def test_step(self):
-        compiler = compiler_command("CC", "gcc", "clang")
-        if not compiler or not compiler[0]:
-            self.skipTest("no C compiler")
-        hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
-        gap = re.search(r"^#define SPRINT_ROLL_GAP_MS [^\n]*", hid, re.M).group(0)
-        code = (test_bound_keys.block(hid, "enum { SPRINT_KEY") + ";\n" + gap + "\n" +
-                test_bound_keys.block(hid, "static void sprint_step("))
-        head, body = STEP_MAIN.split("static int fails;", 1)
-        with tempfile.TemporaryDirectory(prefix="longshot-sprint-step-") as tmp:
-            tmp = Path(tmp)
-            (tmp / "t.c").write_text(head + code + "\nstatic int fails;" + body, encoding="utf-8")
-            binary = tmp / ("t.exe" if sys.platform == "win32" else "t")
-            build = subprocess.run([*compiler, "-std=gnu11", "-Wall", "-Werror", str(tmp / "t.c"), "-o", str(binary)],
-                                   text=True, capture_output=True)
-            self.assertEqual(build.returncode, 0, build.stderr)
-            run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)
-            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+# Independent synthetic functions and anchors for the patch machinery.
+LINK_FN = ('#include "a64.h"\n' + "void f_80001234(Ctx *c) {\n"
+           "    prepare();\n    sample_value();\n    finish();\n}\n")
+STANCE_FN = ("void f_80005678(Ctx *c) {\n"
+             "    begin();\n    sample_byte();\n    check_value();\n}\n")
 
 
-class SprintPressPatchTests(unittest.TestCase):
-    """Exercise the matcher with independently authored synthetic functions."""
+class SprintPatchTests(unittest.TestCase):
+    """nx2/oot_patches.py: matching and insertion on independently authored synthetic text"""
 
     def setUp(self):
         sys.path.insert(0, str(ROOT / "nx2"))
         import oot_patches
         self.p = oot_patches
-        pair = lambda reg: (
-            '    { uint64_t _r = (c->x[8] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[%d])) << 0))); _r &= 0xFFFFFFFFULL; c->x[9] = _r; }\n'
-            '    { uint64_t _r = (c->x[%d] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[8])) << 0))); _r &= 0xFFFFFFFFULL; c->x[8] = _r; }\n' % (reg, reg))
-        self.heads = ('void f_8038a220(Ctx *__restrict A64_NOESC c) {',
-                      'void f_834a3680(Ctx *__restrict A64_NOESC c) {')
-        self.sample = ('#include "a64.h"\n' + self.heads[0] + '\n    synthetic_before();\n' + pair(28) +
-                       '    synthetic_store();\n}\n' + self.heads[1] + '\n' + pair(21) +
-                       '    synthetic_store();\n}\nvoid f_80000000(Ctx *c) {\n' + pair(28) + '}\n')
+        # Exercise both public patch paths and touches with invented sites.
+        for name, value in {
+            "SPRINT_LINK_HEAD": "void f_80001234(Ctx *c) {\n",
+            "SPRINT_LINK_AT": r"prepare\(\);\s*(?P<site>sample_value\(\);\s*)finish\(\);",
+            "SPRINT_STANCE_HEAD": "void f_80005678(Ctx *c) {\n",
+            "SPRINT_STANCE_AT": r"begin\(\);\s*(?P<site>sample_byte\(\);\s*)check_value\(\);",
+        }.items():
+            old = getattr(oot_patches, name)
+            self.addCleanup(setattr, oot_patches, name, old)
+            setattr(oot_patches, name, value)
 
     def test_patch(self):
-        out, n = self.p.patch_sprint_press(self.sample)
-        self.assertEqual(n, 2)
-        self.assertEqual(out.count(self.p.SPRINT_MASK), 2, "the mask is not in both controllers' update")
-        self.assertEqual(out.count(self.p.SPRINT_DECL), 1)
-        for head in self.heads:
-            body = out[out.index(head):]
-            body = body[:body.index("\n}\n")]
-            self.assertLess(body.index("c->x[9] = _r; }"), body.index(self.p.SPRINT_MASK), "the mask before pressed is made")
-            self.assertLess(body.index(self.p.SPRINT_MASK), body.index("synthetic_store"), "the mask after the store")
-        other = out[out.index("void f_80000000"):]
-        self.assertNotIn("hos_sprint_press_mask", other, "a function that is not the controllers' update was patched")
-        again, n2 = self.p.patch_sprint_press(out)
-        self.assertEqual((again, n2), (out, 2), "a second run changes the code")
+        p = self.p
+        out, n = p.patch_sprint_link(LINK_FN)
+        self.assertEqual(n, 1)
+        self.assertIn(p.SPRINT_LINK_CALL + "finish();", out)
+        self.assertEqual(out.count(p.SPRINT_DECL), 1)
+        self.assertEqual(p.patch_sprint_link(out), (out, 1), "a second run changes the code")
+        out, n = p.patch_sprint_stance(out + STANCE_FN)
+        self.assertEqual(n, 1)
+        self.assertIn(p.SPRINT_STANCE_CALL + "check_value();", out)
+        self.assertEqual(out.count(p.SPRINT_STANCE_CALL), 1)
+        self.assertEqual(out.count(p.SPRINT_DECL), 1, "declared once for both")
+        whole, _, _ = p.patch_file(LINK_FN + STANCE_FN, "t.c", True)
+        self.assertEqual((whole.count(p.SPRINT_LINK_CALL), whole.count(p.SPRINT_STANCE_CALL)), (1, 1),
+                         "patch_file does not run the two")
 
     def test_drifted(self):
-        """an anchor that is not there leaves the code as it was, and the count says so (report() warns)"""
-        drifted = self.sample.replace("c->x[28]", "c->x[27]")
-        out, n = self.p.patch_sprint_press(drifted)
-        self.assertEqual(n, 1)
-        self.assertNotIn(self.p.SPRINT_MASK, out[out.index(self.heads[0]):out.index(self.heads[1])])
-        self.assertEqual(self.p.patch_sprint_press("#include \"a64.h\"\n"), ("#include \"a64.h\"\n", 0))
+        """another build's code: left as it was, and the count says so (report() warns)"""
+        p = self.p
+        plain = "void f_80000000(Ctx *c) {\n}\n"
+        self.assertEqual(p.patch_sprint_link(plain), (plain, 0))
+        other = LINK_FN.replace("sample_value()", "other_value()")
+        self.assertEqual(p.patch_sprint_link(other), (other, 0))
+        other = STANCE_FN.replace("check_value()", "other_check()")
+        self.assertEqual(p.patch_sprint_stance(other), (other, 0))
+        duplicate = LINK_FN.replace("    finish();", "    finish();\n    prepare(); sample_value(); finish();")
+        self.assertEqual(p.patch_sprint_link(duplicate), (duplicate, 0))
+        report = (ROOT / "nx2" / "oot_patches.py").read_text(encoding="utf-8")
+        self.assertIn('(total["sprint link"], total["sprint stance"]) != (1, 1)', report,
+                      "report() does not warn when a site is missing")
+        self.assertNotIn("hos_sprint_press_mask", report, "the old press mask is still patched in")
 
-    def test_body_ends_at_its_brace(self):
-        """f_8038a220 without its pair, followed by a function that is not a `void f_` with one: that pair is not
-        counted as f_8038a220's (the body ends at its own closing brace), and is left alone"""
-        lines = self.sample.split("\n")
-        start = lines.index("void f_8038a220(Ctx *__restrict A64_NOESC c) {")
-        pair, store = lines[start + 2:start + 4], lines[start + 4]
-        helper = ["static void helper(Ctx *__restrict A64_NOESC c) {"] + pair + [store, "}"]
-        text = "\n".join(lines[:start + 2] + [store, "}"] + helper + lines[start + 6:])
-        self.assertIn("static void helper", text)
-        out, n = self.p.patch_sprint_press(text)
-        self.assertEqual(n, 1, "the pair in the function after f_8038a220 was counted as its own")
-        self.assertNotIn(self.p.SPRINT_MASK, out[out.index("static void helper"):out.index("void f_834a3680")])
-
-    def test_host_side(self):
-        hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
-        self.assertIn("volatile uint32_t hos_sprint_press_mask;", hid, "the host has no press mask for the patch")
-        patches = (ROOT / "nx2" / "oot_patches.py").read_text(encoding="utf-8")
-        self.assertIn('counts["sprint press"] += n', patches, "patch_file does not run the patch")
-        self.assertIn('total["sprint press"] != len(SPRINT_HEADS)', patches, "report() does not warn when it is missing")
+    def test_kept_from_locals(self):
+        """nx2/guest_locals.py keeps the context in a function the patches change: both are found by touches()"""
+        p = self.p
+        self.assertTrue(p.touches(LINK_FN.replace('#include "a64.h"\n', "")))
+        self.assertTrue(p.touches(STANCE_FN))
 
 
 if __name__ == "__main__":

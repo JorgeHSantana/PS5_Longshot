@@ -55,7 +55,6 @@ static LONG hud_bind_generation;
 static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
 static SRWLOCK input_bind_lock = SRWLOCK_INIT;
 static _Thread_local int sprint_frame, sprint_toggle_frame, sprint_excluded, input_in_front, input_snapshot_active;
-static _Thread_local uint64_t injected_buttons;
 static _Thread_local int input_keys[HOS_KEY_N][2], input_pads[HOS_KEY_N][2];
 static int sampled_key(int i, int k) { return input_snapshot_active ? input_keys[i][k] : key_bind[i][k]; }
 static int sampled_pad(int i, int k) { return input_snapshot_active ? input_pads[i][k] : pad_bind[i][k]; }
@@ -258,6 +257,12 @@ static void hold_toggle_case(void) {
     bridge_buttons = 0; packet(0, 0, 0, 0);
 }
 
+/* Sprint's input as npad_states hands it to host/oot_sprint.c (a spy here): Sprint never presses A, so the game's buttons
+   are the player's own; held, toggled, ended by Insert, the focus lost or a bridge's exclusive input, and a bridge's
+   SPRINT counted as its key */
+#define SPY(on, down, toggle, reset, blocked) \
+    CHECK(spy_sprint_on == (on) && spy_sprint_down == (down) && spy_sprint_toggle == (toggle) && \
+          spy_sprint_reset == (reset) && spy_sprint_blocked == (blocked) && !spy_sprint_l3)
 static void sprint_toggle_case(void) {
     const uint64_t a = 1ULL << B_A;
     controls_case = front = 1;
@@ -265,59 +270,31 @@ static void sprint_toggle_case(void) {
     key_bind[HOS_KEY_SPRINT][0] = 'G';
     held_keys['W'] = 1;
     packet(0, 0, 32767, 0);
-    held_keys['G'] = 1; packet(a, 0, 32767, 0);
-    menu_open = 1; packet(0, 0, 0, 0);
+    SPY(1, 0, 1, 0, 0);
+    held_keys['G'] = 1; packet(0, 0, 32767, 0);   /* (no A from Sprint: the game's run comes from Link's flags) */
+    SPY(1, 1, 1, 0, 0);
+    menu_open = 1; packet(0, 0, 0, 0);            /* Insert open: no press is Sprint's, and a toggled sprint ends */
+    CHECK(spy_sprint_reset && spy_sprint_blocked);   /* (the keys may go to the menu then) */
     menu_open = 0; packet(0, 0, 32767, 0);
+    SPY(1, 1, 1, 0, 0);
     held_keys['G'] = 0; packet(0, 0, 32767, 0);
-    held_keys['G'] = 1; packet(a, 0, 32767, 0);
-    front = 0; focus_gain_after_query = focus_queries + 1; packet(0, 0, 0, 0);
-    CHECK(front); packet(0, 0, 32767, 0); /* focus returned after the background sample, while G was held */
-    held_keys['G'] = 0; packet(0, 0, 32767, 0);
-    held_keys['G'] = 1; packet(a, 0, 32767, 0);
-    held_keys['G'] = 0; packet(a, 0, 32767, 0);
-    bridge_active = 1; bridge_up = 1; bridge_buttons = a; packet(0, 0, 32767, 0);
-    uint64_t previous = G64(72);
-    bridge_active = 0; bridge_buttons = 0; packet(0, 0, 32767, 0);
-    bridge_active = 1; packet(0, 0, 32767, 0); /* a second takeover preserves the bridge tap */
-    now_ns += 60000000; packet(a, 0, 32767, 0);
-    CHECK((G64(72) & ~previous & a) && !(hos_sprint_press_mask & a));
-    bridge_buttons = 0; now_ns += 60000000; packet(0, 0, 32767, 0);
-    bridge_active = 0; packet(a, 0, 32767, 0); /* exclusion kept the physical latch */
-    held_keys['G'] = 1; packet(0, 0, 32767, 0);
-    held_keys['G'] = 0; packet(0, 0, 32767, 0);
-    held_keys['G'] = 1; packet(a, 0, 32767, 0);
-    held_keys['G'] = 0; packet(a, 0, 32767, 0);
-    bridge_buttons = a; packet(0, 0, 32767, 0); /* nonexclusive injected tap during Sprint */
-    bridge_buttons = 0; bridge_active = 1; bridge_up = 1; packet(0, 0, 32767, 0);
-    now_ns += 60000000; packet(a, 0, 32767, 0);
-    CHECK(!(hos_sprint_press_mask & a));
-    now_ns += 60000000; packet(0, 0, 32767, 0);
-    bridge_active = 0; packet(a, 0, 32767, 0);
-    physical_buttons = a; packet(0, 0, 32767, 0); /* handoff pending */
-    physical_buttons = 0;
-    bridge_active = 1; bridge_buttons = 0; packet(0, 0, 32767, 0);
-    now_ns += 60000000; packet(0, 0, 32767, 0);
-    bridge_active = 0; packet(a, 0, 32767, 0);
-    physical_buttons = a; packet(0, 0, 32767, 0); /* physical tap starts the gap */
+    SPY(1, 0, 1, 0, 0);
+    physical_buttons = a; packet(a, 0, 32767, 0); /* the player's own A: theirs, untouched */
     physical_buttons = 0; packet(0, 0, 32767, 0);
-    bridge_buttons = a; packet(0, 0, 32767, 0); /* injected tap joins it */
+    front = 0; packet(0, 0, 0, 0);                /* the focus lost: a toggled sprint ends */
+    CHECK(spy_sprint_reset && spy_sprint_blocked);
+    front = 1; packet(0, 0, 32767, 0);
+    sprint_toggle_mode = 0;                       /* Toggle off: Sprint while held */
+    held_keys['G'] = 1; packet(0, 0, 32767, 0);
+    SPY(1, 1, 0, 0, 0);
+    held_keys['G'] = 0;
+    bridge_up = 1; bridge_active = 1; bridge_buttons = 1ULL << B_SPRINT; packet(0, 0, 32767, 0);
+    CHECK(spy_sprint_down && !spy_sprint_blocked);   /* a bridge's SPRINT is Sprint's key, even exclusive */
     bridge_buttons = 0; packet(0, 0, 32767, 0);
-    previous = G64(72);
-    bridge_active = 1; packet(0, 0, 32767, 0); /* movement-only exclusive takeover */
-    now_ns += 60000000; packet(a, 0, 32767, 0);
-    CHECK((G64(72) & ~previous & a) && !(hos_sprint_press_mask & a));
-    now_ns += 60000000; packet(0, 0, 32767, 0);
-    bridge_up = 1;
-    bridge_buttons = 1ULL << B_SPRINT; packet(a, 0, 32767, 0);
-    bridge_buttons = 0; packet(0, 0, 32767, 0);
-    bridge_active = 0; packet(a, 0, 32767, 0); /* released G rearms the retained latch */
-    held_keys['G'] = 1; packet(0, 0, 32767, 0); /* turn the latch off */
-    held_keys['G'] = 0; packet(0, 0, 32767, 0);
-    held_keys['G'] = 1; packet(a, 0, 32767, 0);
-    held_keys['G'] = 0; packet(a, 0, 32767, 0);
-    bridge_active = 1; front = 0; packet(0, 0, 32767, 0);
-    front = 1; bridge_active = 0; packet(0, 0, 32767, 0); /* real focus loss resets it */
+    CHECK(!spy_sprint_down && spy_sprint_blocked);   /* an exclusive bridge input keeps the player's Sprint out */
+    bridge_active = 0; packet(0, 0, 32767, 0);
 }
+#undef SPY
 
 /* The game's menus' mouse clicks (host/oot_menu.c), through the real hos_hid_tap and host_taps: a click is a short
    press of the host's own, which a Toggle on that button must not latch; the player's presses of it still do. */

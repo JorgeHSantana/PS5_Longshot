@@ -87,10 +87,10 @@ struct Options {
     int pad_background = 0;   // the controllers count while another window has the focus (host/nn_hid.c; HOS_INPUT_BACKGROUND)
     int mouse_native = 0; // the mouse turns the camera's own angles (host/mouse_native.c); 0: as the right stick; 2: off (never captured)
     int disable_camera_centering = 0; // 0: stock movement-follow turning; 1: keep the player's horizontal direction
-    int sprint = 0; // 1: Sprint's key and button run (host/nn_hid.c sprint_step, HOS_OPT_SPRINT), and turning it on gave them
+    int sprint = 0; // 1: Sprint's key and button run (host/oot_sprint.c, HOS_OPT_SPRINT), and turning it on gave them
                     // Shift and the left stick's press (vk_menu.cpp apply_sprint_layout); 0, the default: they do nothing
     int sprint_toggle = 0; // the Controls page's Toggle for Sprint (toggle_sprint=, HOS_OPT_SPRINT_TOGGLE): 1, a press turns it
-                           // on and the next off; 0, the default: Sprint while its key or button is held
+                           // on and the next or Link's state off; 0, the default: Sprint while its key or button is held
     int mouse_sens = 100; // the mouse's sensitivity in percent: 0.1 degrees a count at 100 with native look (host/nn_hid.c)
     int mouse_invert = 0; // the mouse's up and down swapped
     int mouse_invert_x = 0; // the mouse's left and right swapped (HOS_OPT_MOUSE_INVERT_X, 61)

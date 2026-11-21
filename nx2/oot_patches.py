@@ -30,10 +30,10 @@ Each is a runtime switch where it can be, so the game's own path stays reachable
   (f_80797240) asks the Compaction thread for a round whenever none runs (its flag bit 1, always set), and each texture a
   round moved is made again; hos_oot_tex_compact_due says whether it may ask now (HOS_TEX_COMPACT_MS: once a second as
   shipped, 0 at every frame, the game's own). The round itself is untouched.
-- Sprint without the press (host/nn_hid.c sprint_step): the controllers' update works out "pressed this frame" as held now and
-  not held before, and stores it with "released" at +8 (f_8038a220: the four the game plays with; f_834a3680: the menus').
-  While Sprint is the one holding A, hos_sprint_press_mask (A's bit) is cleared from "pressed": the game sees A held, its
-  run, and never pressed, so no roll and no talk, open or pick up. 0 otherwise: the game's own presses.
+- Sprint (host/oot_sprint.c): two places load Link's input flags, whose bit 4 is the dash input, the game's own run after a
+  roll: his movement update (f_804caa80, at 0x804ce798, for the sprint's start and keep tests) and his stance and camera
+  update (f_80c225d0, at 0x80c27f3c). A call right after each load (hos_sprint_link, hos_sprint_stance) ORs the bit in
+  while Sprint runs. A and the game's buttons are left alone.
 - Ocarina note controls: the note-wait action's start (f_828a9190) and tick (f_828a9280) report the wait to the host (hos_oc_wait, hos_oc_beat), which swaps the five notes for its own controls (host/nn_hid.c); a tick whose gates refuse reports no wait, so a dialogue keeps its buttons.
 - The neighbouring map the OptimizeChangeBank thread preloads, kept while the game's choice only flickers
   (host/oot_ocb_hold.h): the preload manager's update (f_832b9880) picks one of the map's neighbours each frame and a
@@ -1602,38 +1602,55 @@ def patch_ocarina_wait(s):
     return s
 
 
-# (the controllers' update: f_8038a220, the game's four; f_834a3680, the menus' one. Each computes "pressed" (x9: held now
-# x8 and not before) and "released" (x8: before and not now), then stores the two at +8. The before is x28 in the one and
-# x21 in the other; the pair is once in each function. The mask goes in after the pair, before the store, however a later
-# pass spells the store)
-SPRINT_DECL = "extern volatile uint32_t hos_sprint_press_mask;\n"
-SPRINT_HEADS = ("void f_8038a220(Ctx *__restrict A64_NOESC c) {", "void f_834a3680(Ctx *__restrict A64_NOESC c) {")
-SPRINT_PAIR = ("    { uint64_t _r = (c->x[8] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[%d])) << 0))); _r &= 0xFFFFFFFFULL; c->x[9] = _r; }\n"
-               "    { uint64_t _r = (c->x[%d] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[8])) << 0))); _r &= 0xFFFFFFFFULL; c->x[8] = _r; }\n")
-SPRINT_MASK = "    c->x[9] &= ~(uint64_t)hos_sprint_press_mask;   /* (nx2/oot_patches.py: Sprint's A held, never pressed) */\n"
+# Sprint (host/oot_sprint.c): two places load Link's input flags, whose bit 4 is the dash input that makes him sprint.
+# Link's movement update, f_804caa80, loads them into x10 at 0x804ce798 for the sprint's start and keep tests; the stance
+# and camera update, f_80c225d0, loads their low byte into x8 at 0x80c27f3c. Link is in x19 at both. A call right after
+# each load ORs the bit in while Sprint runs.
+SPRINT_LINK_HEAD = "void f_804caa80(Ctx *__restrict A64_NOESC c) {\n"
+# Match the loads and their surrounding landmarks as patterns, not excerpts from lifted game code.
+# The named group ends at the instruction whose result the host hook changes.
+_SPRINT_LOAD = r"c->x\[%d\]\s*=\s*recomp_load%d\(c,\s*c->x\[%d\]\s*\+\s*%d\);\s*"
+SPRINT_LINK_AT = (r"L_804ce790:;\s*" + _SPRINT_LOAD % (10, 64, 19, 80) +
+                  _SPRINT_LOAD % (9, 32, 19, 44) +
+                  r"(?P<site>" + _SPRINT_LOAD % (10, 64, 10, 0) + r")")
+SPRINT_LINK_CALL = "    hos_sprint_link(c);   /* (nx2/oot_patches.py: Sprint) */\n"
+SPRINT_STANCE_HEAD = "void f_80c225d0(Ctx *__restrict A64_NOESC c) {\n"
+SPRINT_STANCE_AT = (_SPRINT_LOAD % (8, 64, 19, 80) +
+                    r"(?P<site>" + _SPRINT_LOAD % (8, 8, 8, 0) + r")" +
+                    r"if\s*\(\(\(c->x\[8\]\s*>>\s*4\)\s*&\s*1\)\)\s*\{\s*goto\s+L_80c27f54;\s*\}")
+SPRINT_STANCE_CALL = "    hos_sprint_stance(c);   /* (nx2/oot_patches.py: Sprint) */\n"
+SPRINT_DECL = "extern void hos_sprint_link(Ctx *c);\nextern void hos_sprint_stance(Ctx *c);\n"
 
 
-def patch_sprint_press(s):
-    """Sprint's A without its press, in the controllers' update: (s, the functions patched, made now or before)"""
-    found, out = 0, s
-    for head in SPRINT_HEADS:
-        at = out.find(head)
-        if at < 0:
-            continue
-        end = out.find("\n}\n", at + len(head))   # (the function's own closing brace: what follows it is never read)
-        end = end + 1 if end >= 0 else len(out)
-        body = out[at:end]
-        if SPRINT_MASK in body:
-            found += 1
-            continue
-        pairs = [SPRINT_PAIR % (r, r) for r in (28, 21) if body.count(SPRINT_PAIR % (r, r)) == 1]
-        if len(pairs) != 1:
-            continue
-        out = out[:at] + body.replace(pairs[0], pairs[0] + SPRINT_MASK, 1) + out[end:]
-        found += 1
-    if found and SPRINT_DECL not in out:
-        out = out.replace('#include "a64.h"\n', '#include "a64.h"\n' + SPRINT_DECL, 1)
-    return out, found
+def _sprint_hook(source, head, pattern, call):
+    """Put call after the unique matching site in the function, or leave differing code alone."""
+    start = source.find(head)
+    if start < 0:
+        return source, 0
+    end = source.find("\nvoid f_", start + len(head))
+    end = end if end >= 0 else len(source)
+    body = source[start:end]
+    if call in body:
+        return source, 1
+    matches = list(re.finditer(pattern, body))
+    if len(matches) != 1:
+        return source, 0
+    at = matches[0].end("site")
+    body = body[:at] + call + body[at:]
+    source = source[:start] + body + source[end:]
+    if SPRINT_DECL not in source:
+        source = source.replace('#include "a64.h"\n', '#include "a64.h"\n' + SPRINT_DECL, 1)
+    return source, 1
+
+
+def patch_sprint_link(source):
+    """f_804caa80 calls hos_sprint_link right after it loads Link's input flags into x10 (0x804ce798): (source, found)"""
+    return _sprint_hook(source, SPRINT_LINK_HEAD, SPRINT_LINK_AT, SPRINT_LINK_CALL)
+
+
+def patch_sprint_stance(source):
+    """f_80c225d0 calls hos_sprint_stance right after it loads the flags' low byte into x8 (0x80c27f3c): (source, found)"""
+    return _sprint_hook(source, SPRINT_STANCE_HEAD, SPRINT_STANCE_AT, SPRINT_STANCE_CALL)
 
 
 def patch_file(s, name, protect_hearts=False):
@@ -1715,11 +1732,12 @@ def patch_file(s, name, protect_hearts=False):
             lines.append("oot_patches: the ocarina note wait in " + name)
         out = ocw
     if protect_hearts:   # (the supported build's functions)
-        sprint, n = patch_sprint_press(out)
-        counts["sprint press"] += n
-        if sprint != out:
-            lines.append("oot_patches: Sprint's A without its press at %d function(s) in %s" % (n, name))
-        out = sprint
+        for what, patch in (("sprint link", patch_sprint_link), ("sprint stance", patch_sprint_stance)):
+            sprint, n = patch(out)
+            counts[what] += n
+            if sprint != out:
+                lines.append("oot_patches: Sprint's %s site in %s" % (what.split()[1], name))
+            out = sprint
     out, n = fixed_scale(out)
     if n:
         counts["fixed path's scale"] += 1
@@ -1961,9 +1979,9 @@ def report(paths, counts, protect_hearts=False):
             print("oot_patches: WARNING: the %s was found %d times" % (what, n))
     if protect_hearts and speed_hooks != len(SPEED_PLACES):
         print("oot_patches: WARNING: the movement speed's places were found %d times, not %d" % (speed_hooks, len(SPEED_PLACES)))
-    if protect_hearts and total["sprint press"] != len(SPRINT_HEADS):   # (without it Sprint's A rolls and acts as a press)
-        print("oot_patches: WARNING: the controllers' press was found in %d of %d functions (Sprint's A is a press there)"
-              % (total["sprint press"], len(SPRINT_HEADS)))
+    if protect_hearts and (total["sprint link"], total["sprint stance"]) != (1, 1):   # (without them Sprint does nothing)
+        print("oot_patches: WARNING: Sprint's sites were found %d and %d times of 1 each (movement, stance): Sprint does "
+              "nothing" % (total["sprint link"], total["sprint stance"]))
     if protect_hearts and total["opening skip"] != 3:
         print("oot_patches: WARNING: the opening skip was found at %d of 3 functions" % total["opening skip"])
     if protect_hearts and camera_speed != len(CAMERA_SPEED_HEADS):
