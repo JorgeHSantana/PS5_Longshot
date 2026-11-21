@@ -116,6 +116,11 @@ class Scenes(unittest.TestCase):
         for key, row in ((ab.SKIP_TITLE, '"Skip title screen", &opts.skip_title'), (ab.FRAMEGEN_OFF, '"Frame generation", &opts.framegen'),
                          (ab.VSYNC_OFF, '"V-Sync", &opts.vsync')):
             self.assertIn(row, menu, key)
+        with open(os.path.join(ROOT, "gpu", "vk", "upscaler_rows.h"), encoding="utf-8") as f:
+            rows = f.read()
+        self.assertIn("kPercent[] = {0, 100, 75, 67,", rows)   # (FIXED_RESOLUTION's 3: 67 %, Auto 0)
+        with open(os.path.join(ROOT, "gpu", "vk", "menu", "upscaler.cpp"), encoding="utf-8") as f:
+            self.assertIn('.key = "resolution"', f.read())
         self.assertIn('{"Auto", "On", "Off"}', menu)   # (vsync=2: Off)
 
 
@@ -339,11 +344,30 @@ class Files(unittest.TestCase):
         ab.pin_options(mine, pinned, framegen=False, vsync=False)
         with open(pinned) as f:
             lines = f.read().split()
-        self.assertEqual(lines, ["upscaler=3", "vsync=2", "skip_title_screen=1", "frame_generation=0"])
+        self.assertEqual(lines, ["upscaler=3", "vsync=2", "skip_title_screen=1", "frame_generation=0", "resolution=3"])
         with open(mine) as f:
             self.assertEqual(f.read(), "upscaler=3\nvsync=1\n")   # (the player's file left alone)
         fresh = os.path.join(self.d, "fresh.ini")
         ab.pin_options(None, fresh, framegen=True, vsync=True)
+        with open(fresh) as f:
+            self.assertEqual(f.read().split(), ["skip_title_screen=1", "resolution=3"])
+
+    def test_pin_options_resolution(self):
+        # (Auto, the game's dynamic resolution, is pinned at 67 %; a player's own share is kept; --dynamic keeps Auto)
+        cases = (("resolution=0\n", False, "resolution=3"), ("resolution=4\n", False, "resolution=4"),
+                 ("upscaler=1\n", False, "resolution=3"), ("resolution=0\n", True, "resolution=0"))
+        for k, (text, dynamic, want) in enumerate(cases):
+            src = os.path.join(self.d, "src%d.ini" % k)
+            with open(src, "w") as f:
+                f.write(text)
+            out = os.path.join(self.d, "out%d.ini" % k)
+            ab.pin_options(src, out, framegen=True, vsync=True, dynamic=dynamic)
+            with open(out) as f:
+                got = [l for l in f.read().split() if l.startswith("resolution=")]
+            self.assertEqual(got, [want], text)
+        self.assertTrue(ab.dynamic_resolution(None))
+        fresh = os.path.join(self.d, "dyn.ini")
+        ab.pin_options(None, fresh, framegen=True, vsync=True, dynamic=True)
         with open(fresh) as f:
             self.assertEqual(f.read().split(), ["skip_title_screen=1"])
 

@@ -4,7 +4,7 @@
     dev.py ab --env NAME=VALUE [...]            a switch, set against unset, on one runtime (no build)
     dev.py ab --a NAME=VALUE --b NAME=VALUE     a switch, two values
     dev.py ab                                   this checkout's committed change (its pack) against its base (main)
-       [--scene NAME | --save FOLDER [--slot NN]] [--seconds 60] [--runs 3] [--warmup 10] [--options FILE]
+       [--scene NAME | --save FOLDER [--slot NN]] [--seconds 60] [--runs 3] [--warmup 10] [--options FILE] [--dynamic]
        [--set NAME=VALUE] [--framegen] [--vsync] [--headless] [--runtime DIR] [--separate] [--allow KEY] [--dirty]
        [--dry-run] [--scenes]
 
@@ -16,7 +16,8 @@ What it does:
     the game's Skip title screen row, the scene reached with the Debug tab's teleport and age switch, then a warm-up
     until no frame waits for a pipeline or a shader, then --seconds measured from the frame trace (RX_VK_FRAME_TRACE);
   - runs interleaved A, B, A, B, every one from a copy of one pinned options file (cap off: HOS_FPS_MAX=1000; V-Sync
-    and frame generation off unless asked), and refused when the runs differ in what ran (the menu's settings, the
+    and frame generation off unless asked; the Render resolution at 67 % where the file leaves it at Auto, the game's
+    dynamic resolution, unless --dynamic), and refused when the runs differ in what ran (the menu's settings, the
     switches set, the renderer, the window) in anything but the compared thing (a compared switch's own menu row, as
     gpu/vk/switches.def names its options-file key, counts as the compared thing; --allow KEY names another);
   - a switch whose reader takes HOS_AB (host/hos_ab.c: a hos_ab_value("NAME", ...) call in host/ or gpu/) and whose
@@ -58,6 +59,12 @@ COMMON_ENV = {"HOS_FPS_MAX": "1000", "RX_VK_FRAME_TRACE": "1", "HOS_AUDIO_MUTE":
               "HOS_WINDOW_NOACTIVATE": "1"}
 # (the pinned options file's rows set for every run: the title skipped (host/oot_autoload.c), V-Sync Off, frame generation Off)
 SKIP_TITLE, VSYNC_OFF, FRAMEGEN_OFF = ("skip_title_screen", 1), ("vsync", 2), ("frame_generation", 0)
+# (and the Render resolution at 67 %, DLSS's and FSR's Quality share (gpu/vk/upscaler_rows.h kPercent[3]), where the options
+# file leaves it at Auto: the game's dynamic resolution sizes the 3D to the GPU's load, so a change that saves GPU time comes
+# out as a larger picture, not as frames, and each run settles at a size of its own. One switch, Hyrule Field at 4K on an
+# RTX 3090, came out +6.0 % and then -6.5 % at Auto, every run of one side past every run of the other both times; at 67 %
+# it was +1.1 %, each side's three runs within 1 %. --dynamic keeps Auto)
+FIXED_RESOLUTION = ("resolution", 3)
 # (a frame is still warming up while one of these frame-trace columns is over its limit: pipelines waited for or made,
 # shaders translated)
 COLD = {"pipe_waits": 0, "pipelines_ms": 1.0, "translate_ms": 1.0}
@@ -489,13 +496,27 @@ def default_runtime():
 
 # ---- a run ----
 
-def pin_options(src, path, framegen, vsync):
+def dynamic_resolution(path):
+    """Whether the options file at path (None: no file) leaves the Render resolution at Auto, the game's dynamic resolution:
+    no resolution= line, or 0"""
+    if not path:
+        return True
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            key, eq, value = line.strip().partition("=")
+            if eq and key.strip() == FIXED_RESOLUTION[0]:
+                return value.strip() in ("", "0")
+    return True
+
+
+def pin_options(src, path, framegen, vsync, dynamic=False):
     """The options file every run starts from a copy of: src's (or none: every row at its default) with the title skipped,
-    V-Sync and frame generation off unless asked"""
+    V-Sync and frame generation off unless asked, and the Render resolution fixed where it was Auto unless dynamic is asked"""
     from pipeline_tour import set_ini
     if src:
         shutil.copyfile(src, path)
-    set_ini(path, [SKIP_TITLE] + ([] if vsync else [VSYNC_OFF]) + ([] if framegen else [FRAMEGEN_OFF]))
+    fixed = [] if dynamic or not dynamic_resolution(src) else [FIXED_RESOLUTION]
+    set_ini(path, [SKIP_TITLE] + ([] if vsync else [VSYNC_OFF]) + ([] if framegen else [FRAMEGEN_OFF]) + fixed)
 
 
 def run_one(plan, side, k, pinned):
@@ -667,6 +688,9 @@ def cmd_ab(a):
     plan = make_plan(a_env, b_env, change, scene, a.seconds, a.runs, a.warmup, common_env, how, why, hashes, rts, folder,
                      a.allow or ())
     print(plan_text(plan), flush=True)
+    if not a.dynamic and dynamic_resolution(a.options):
+        say("the Render resolution at 67 % in every run: the options file leaves it at Auto, the game's dynamic resolution, "
+            "whose 3D size follows the GPU's load (--dynamic keeps Auto)")
     if a.dry_run:
         return 0
     os.makedirs(folder)
@@ -678,7 +702,7 @@ def cmd_ab(a):
         for k in leaked:
             del os.environ[k]
     pinned = os.path.join(folder, "options.ini")
-    pin_options(a.options, pinned, a.framegen, a.vsync)
+    pin_options(a.options, pinned, a.framegen, a.vsync, a.dynamic)
     runs = [run_one(plan, side, k, pinned) for side, k in plan["order"]]
     res = summarise(plan, runs)
     for r in runs:   # (the analysis' own lists: results.json keeps the numbers)
@@ -718,6 +742,9 @@ def add_commands(sub):
     p.add_argument("--warmup", type=int, default=10, help="seconds of warm-up at least, then until no frame waits for a "
                                                             "pipeline (at most %d)" % WARM_MAX_S)
     p.add_argument("--options", metavar="FILE", help="the options file to pin (default: none, every row at its default)")
+    p.add_argument("--dynamic", action="store_true", help="keep the Render resolution at Auto, the game's dynamic resolution "
+                                                          "(default: 67%% where the options file leaves it at Auto, so the "
+                                                          "3D is the same size in every run)")
     p.add_argument("--framegen", action="store_true", help="keep the options file's frame generation")
     p.add_argument("--vsync", action="store_true", help="keep the options file's V-Sync")
     p.add_argument("--headless", action="store_true", help="no window (HOS_HEADLESS=1): not what players see")
