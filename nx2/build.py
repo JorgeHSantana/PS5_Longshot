@@ -1675,6 +1675,24 @@ def compile_one(job):
             shutil.copyfile(cached, obj)
         open(stamp, "w").write(key)
         return src, 0.0, None
+    # (a zero byte in the source: the translation and the repository never write one into C, so the drive or the memory
+    # changed the file after it was written. A player's code_009.c (26 MB) had one where a "(" belonged, and the compiler said
+    # only "extraneous ')' before ';'" (nightly 695, 2026-11-21). Refused first, in one line with "error:": make_game names
+    # the stopped build by it, and forgets the lift when the file is the game's, so the next build writes it again. A read
+    # of a few milliseconds for the biggest file, beside a compile of seconds to minutes; a file it cannot read is the
+    # compiler's to report)
+    try:
+        with open(src, "rb") as f:
+            data = f.read()
+    except OSError:
+        data = b""
+    at = data.find(b"\0")
+    if at >= 0:
+        return src, 0.0, ("%s:%d:%d: error: this file has a zero byte, which the build never writes: the drive or the PC's "
+                          "memory changed it after it was written. Build again: the file is made again. If this keeps "
+                          "happening, check the drive for errors and test the memory"
+                          % (src, data.count(b"\n", 0, at) + 1, at - data.rfind(b"\n", 0, at)))
+    del data   # (not held while the compiler runs: a 26 MB file per job)
     c_src = src
     if any(f.startswith("-DLONGSHOT_SPLIT_GIANTS=") for f in fl):   # (LONGSHOT_SPLIT_GIANTS: a copy with the giants cut, if any)
         import split_giants
