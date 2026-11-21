@@ -39,6 +39,12 @@ inline bool fetch_bounds_buffers = false;
 // (longshot) isnan tested on the value's bits (IsNan in emit_spirv_floating_point.cpp), not OpIsNan, for AMD's older Windows
 // shader compiler (RX 5000 and RX 6000: gpu/vk/device_policy.h); RX_VK_NAN_BITS=0 or 1
 inline bool nan_bits = false;
+// (longshot) In compute-fallback mesh stages, emit NoContraction f32 multiplies as OpFma(a, b, -0.0f) (EmitFPMul32):
+// AMD's older Windows proprietary shader compiler (RDNA 1 and 2: gpu/vk/device_policy.h) ignores NoContraction and
+// reassociates fma(t, v * rsq, add) into fma(rsq * t, v, add) in depth-only mesh fallback shaders where gl_Position
+// cannot be decorated Invariant, causing grass tips to fail the colour pass's EQUAL depth test and flash white.
+// OpFma(a, b, -0.0f) is IEEE-754 bit-exact with a * b and blocks the reassociation; RX_VK_MESH_STRICT_FMUL=0 or 1
+inline bool mesh_fallback_strict_fmul = false;
 // (longshot) a storage buffer table's entries searched in a loop the driver is asked not to unroll (DefineGlobalMemoryFunctions),
 // not one test an entry written out sixteen times. Mesa inlines every function, DontInline or not: OoT's foliage culling
 // (53caac5f) has 46 global accesses, each with its ~70 table entries written out, over 100k instructions that Intel's

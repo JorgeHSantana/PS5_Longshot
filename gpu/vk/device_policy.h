@@ -242,6 +242,7 @@ inline bool parse_decimal(const char* text, double hi, double& out) {
 enum class Sw : unsigned {
     astc_on_cpu, batch_submits, compute_builds_serial, pcache_fetch_lock, split_before_draw, ub_snapshot, split_ub_flush,
     occ_copy, mirrors, fsr4_tune, position_invariant, equal_depth_bias, cap_spare_max, staging_keep, workers, acquire_ahead,
+    mesh_fallback_strict_fmul,
     fetch_bounds, nan_bits, gather_offset,   // (device_policy_fixes_env's three)
     count
 };
@@ -272,6 +273,14 @@ struct DevicePolicy {
     // Players of OoT ports on those cards saw black and white blocks where a NaN test did not hold. The colour outputs'
     // NaN guard is such a test too. RX_VK_NAN_BITS. Read (coopmat_init)
     bool nan_bits = false;
+    // AMD's older Windows shader compiler (RDNA 1 and 2, RX 5000 and RX 6000: same driverInfo check as nan_bits): in
+    // compute-fallback mesh stages, where gl_Position cannot be decorated Invariant, the compiler ignores NoContraction
+    // (even with DISABLE_OPTIMIZATION_BIT) and reassociates fma(t, v * rsq, add) into fma(rsq * t, v, add) in depth-only
+    // passes where v * rsq has one use while keeping v * rsq in the colour pass. The 1-ULP shift on grass blade tips
+    // fails the colour pass's EQUAL depth test and flashes white (sky) triangles (issues 1710, 1799, 1934; seen on
+    // 0x800161 / 26.11.2). Emitting NoContraction f32 multiplies as fma(a, b, -0.0f) (IEEE-754 bit-exact, single
+    // v_fmaak_f32) blocks the reassociation. RX_VK_MESH_STRICT_FMUL. Read (coopmat_init; in the program cache's stamp)
+    bool mesh_fallback_strict_fmul = false;
     // AMD's and Intel's drivers and the mobile ones Eden runs on: gathers nudged by 1/512 of a texel, so that the four
     // texels a gather picks match Maxwell's at texel edges (emit_spirv_image.cpp ImageGatherSubpixelOffset, Eden's, which
     // Hookshot had never turned on). Eden and Lichii turn it on for these drivers: shadow edges drawn as dashed lines
@@ -523,6 +532,7 @@ inline DevicePolicy device_policy(const DeviceFacts& f) {
     // one driver's bug
     p.fetch_bounds = !f.nvidia();
     p.nan_bits = f.driver_id == VK_DRIVER_ID_AMD_PROPRIETARY && f.driver_info && std::strstr(f.driver_info, "proprietary shader compiler");
+    p.mesh_fallback_strict_fmul = p.nan_bits;
     switch (f.driver_id) {
     case VK_DRIVER_ID_AMD_PROPRIETARY:
     case VK_DRIVER_ID_AMD_OPEN_SOURCE:
@@ -681,6 +691,7 @@ template <class Get> void device_policy_env(DevicePolicy& p, const DeviceFacts& 
     flag(Sw::split_before_draw, "RX_VK_SPLIT_BEFORE_DRAW", p.split_before_draw);
     flag(Sw::occ_copy, "RX_VK_OCC_COPY", p.occ_copy);
     flag(Sw::acquire_ahead, "RX_VK_ACQUIRE_AHEAD", p.acquire_ahead);
+    flag(Sw::mesh_fallback_strict_fmul, "RX_VK_MESH_STRICT_FMUL", p.mesh_fallback_strict_fmul);
     {   // (off only: the tuning rewrites AMD's shaders for AMD's GPUs, and a value that says on leaves the default)
         const char* e = nullptr;
         if (word("RX_VK_FSR4_TUNE", e) == 0) p.fsr4_tune = false, mark(Sw::fsr4_tune, "RX_VK_FSR4_TUNE", e);
@@ -766,6 +777,7 @@ template <class Line> void device_policy_log(const DevicePolicy& p, const Device
         l.add(" on driver version %#x:", (unsigned)f.driver_version);
         l.flag("fetch_bounds", p.fetch_bounds, p.set(Sw::fetch_bounds));
         l.flag("nan_bits", p.nan_bits, p.set(Sw::nan_bits));
+        l.flag("mesh_fallback_strict_fmul", p.mesh_fallback_strict_fmul, p.set(Sw::mesh_fallback_strict_fmul), "0x800161");
         l.flag("gather_offset", p.gather_offset, p.set(Sw::gather_offset));
         l.flag("frag_shuffle_fallback", p.frag_shuffle_fallback);
         l.flag("position_invariant", p.position_invariant, p.set(Sw::position_invariant));
