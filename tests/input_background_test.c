@@ -13,6 +13,8 @@ static int mouse_let_go, game_menu_mouse, side_binds;   /* (the game's menus and
 static int held_keys[256], walk_mode, walk_speed;
 static int player_stamps;   /* (host/nn_hid.c player_used: the input the game menus' cursor hides by; held_input_case) */
 static uint64_t physical_buttons;
+static int physical_deck_builtin;   /* (the Deck's built-in controls give gameplay input: its mouse must not) */
+static int32_t physical_rstick;     /* (the right stick they give, which Steam's Desktop layout also drives the mouse with) */
 static int InterlockedExchange(int *p, int v) { int old = *p; *p = v; return old; }
 /* API spies must not collide with Windows SDK/import-library names. */
 #define GetCurrentProcessId fixture_GetCurrentProcessId
@@ -102,12 +104,15 @@ short GetAsyncKeyState(int key) {
     key_queries++;
     return (controls_case ? held_keys[key & 255] : key == 'P' || key == 'D') ? (short)-32768 : 0;
 }
-int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]) {
-    bootstrap_polls++; *buttons = 1ULL << B_Y; stick[0] = -31000; return 1;
+int hos_sdl_pads(uint64_t *buttons, int32_t stick[4], int *deck_builtin_input) {
+    bootstrap_polls++; *buttons = 1ULL << B_Y; stick[0] = -31000;
+    if (deck_builtin_input) *deck_builtin_input = 0;
+    return 1;
 }
-void pads_read(uint64_t *buttons, int32_t stick[4]) {
+void pads_read(uint64_t *buttons, int32_t stick[4], int *deck_builtin_input) {
     /* The physical backend boundary is a spy; actual routing merges its result with the script below. */
-    if (controls_case) { *buttons |= physical_buttons; return; }
+    if (deck_builtin_input) *deck_builtin_input = physical_deck_builtin;
+    if (controls_case) { *buttons |= physical_buttons; stick[2] = physical_rstick; return; }
     pad_merges++; *buttons |= 1ULL << B_B; stick[0] = -12000; stick[2] = 8000;
 }
 void binds_load(void) {
@@ -130,7 +135,12 @@ void hos_mouse_native_free(int free) { native_free = free; }
 void hos_mouse_native_stick(int held) { (void)held; }
 static void mouse_setup(void) {}
 static void mouse_sens_keys(void) {}
-int mouse_stick(int32_t *x, int32_t *y, int held) { (void)x; (void)y; mouse_pointing = held; mouse_queries++; return 0; }
+static int mouse_motion[2];   /* (mouse_stick's: Steam's Desktop layout drives the mouse with the right stick) */
+int mouse_stick(int32_t *x, int32_t *y, int held) {
+    mouse_pointing = held; mouse_queries++;
+    *x = mouse_motion[0]; *y = mouse_motion[1];
+    return mouse_motion[0] || mouse_motion[1];   /* (the pointer taken in whenever it moved) */
+}
 void rx_request_frame_dump(void) { commands++; }
 void rx_set_screenshot_ms(int64_t ms) { (void)ms; commands++; }
 void rx_request_rdoc_capture(int frames) { (void)frames; commands++; }
@@ -292,6 +302,65 @@ static void menu_side_case(void) {
     mouse_mode = 0; packet(0, 0, 0, 0);
     held_keys[VK_XBUTTON1] = 1; packet(a, 0, 0, 0);
     held_keys[VK_XBUTTON1] = 0; packet(0, 0, 0, 0);
+}
+
+/* The Steam Deck's built-in controls expose a mouse interface as well as the pad (in its desktop layout R2 is a left
+   click, L2 a right one), so a gameplay control bound to a mouse button fired twice: once from the pad, once from
+   that click. While those controls give gameplay input the mouse's gameplay bindings must not count; its pointer and
+   its clicks in one of the game's menus are not touched. Through the real read_input. */
+static void deck_mouse_case(void) {
+    const uint64_t a = 1ULL << B_A, y = 1ULL << B_Y;
+    front = controls_case = side_binds = 1;
+    mouse_mode = 1;   /* (Native: the fake camera holds the capture, so the mouse's buttons can be controls) */
+    packet(0, 0, 0, 0);
+    /* an ordinary pad: the left button is Y, as its binding says */
+    held_keys[VK_LBUTTON] = 1; packet(y, 0, 0, 0);
+    /* the Deck's built-in controls give gameplay input: the same click is not Y, and the pad's own press counts */
+    physical_buttons = a; physical_deck_builtin = 1;
+    packet(a, 0, 0, 0);
+    /* let go and pressed again while they still give input: still nothing from the mouse */
+    held_keys[VK_LBUTTON] = 0; packet(a, 0, 0, 0);
+    held_keys[VK_LBUTTON] = 1; packet(a, 0, 0, 0);
+    /* the controls go, the button held through: it must be let go before it is Y again */
+    physical_buttons = 0; physical_deck_builtin = 0;
+    packet(0, 0, 0, 0);
+    held_keys[VK_LBUTTON] = 0; packet(0, 0, 0, 0);
+    held_keys[VK_LBUTTON] = 1; packet(y, 0, 0, 0);
+    held_keys[VK_LBUTTON] = 0; packet(0, 0, 0, 0);
+    /* one of the game's menus has the mouse: its pointer and left click are the menu's either way */
+    mouse_let_go = game_menu_mouse = 1;
+    physical_deck_builtin = 1; packet(0, 0, 0, 0);
+    held_keys[VK_LBUTTON] = 1; packet(0, 0, 0, 0);
+    held_keys[VK_LBUTTON] = 0; packet(0, 0, 0, 0);
+    physical_deck_builtin = 0; packet(0, 0, 0, 0);
+    mouse_let_go = game_menu_mouse = 0; packet(0, 0, 0, 0);
+    /* the mouse free in play (Esc): no button of it is a control, the built-in controls or not */
+    mouse_let_go = 1;
+    physical_buttons = a; physical_deck_builtin = 1;
+    held_keys[VK_LBUTTON] = 1; packet(a, 0, 0, 0);
+    held_keys[VK_LBUTTON] = 0; physical_buttons = 0; physical_deck_builtin = 0; packet(0, 0, 0, 0);
+}
+
+/* Steam's Desktop layout drives the Deck's mouse with the right stick as well as its buttons: with the built-in
+   controls giving gameplay input the camera takes the pad's stick once, not the mouse's motion as well, and the
+   pointer is still taken in so it does not fly across the window. Through the real read_input. */
+static void deck_motion_case(void) {
+    front = controls_case = 1;
+    mouse_mode = 0;   /* (As the stick: the mouse's motion would be the right stick's) */
+    physical_rstick = 8000;
+    mouse_motion[0] = 20000;
+    packet(0, 0, 0, 20000);   /* an ordinary mouse: its motion is the camera's, over the stick's */
+    physical_deck_builtin = 1;
+    const int before = mouse_queries;
+    packet(0, 0, 0, 8000);    /* the built-in controls: the pad's stick alone */
+    CHECK(mouse_queries > before);   /* (the pointer still taken in: captured and held at the center) */
+    mouse_mode = 1;           /* (Native too: the camera hook is not asked for, the motion dropped) */
+    packet(0, 0, 0, 8000);
+    mouse_mode = 2;           /* (Off too: the built-in controls still take the pointer, its motion counts for nothing) */
+    packet(0, 0, 0, 8000);
+    physical_deck_builtin = 0; mouse_mode = 0;
+    packet(0, 0, 0, 20000);   /* (the controls go: the mouse's motion is the camera's again) */
+    mouse_motion[0] = mouse_motion[1] = 0; physical_rstick = 0;
 }
 
 /* The player's input hides the game menus' cursor until the mouse moves (host/display.c gm_cursor_shown), so an input
@@ -457,6 +526,16 @@ int main(int argc, char **argv) {
     if (!strcmp(name, "menu-side-buttons")) {
         menu_side_case();
         puts("PASS: the mouse's side buttons stay their controls' while one of the game's menus has the mouse");
+        free(memory); return 0;
+    }
+    if (!strcmp(name, "deck-mouse")) {
+        deck_mouse_case();
+        puts("PASS: the Deck's built-in controls give their actions once, not twice through the mouse interface they also expose");
+        free(memory); return 0;
+    }
+    if (!strcmp(name, "deck-motion")) {
+        deck_motion_case();
+        puts("PASS: the Deck's built-in controls' right stick is the camera once, not the mouse's motion as well; the pointer is still taken in");
         free(memory); return 0;
     }
     if (!strcmp(name, "held-input")) {

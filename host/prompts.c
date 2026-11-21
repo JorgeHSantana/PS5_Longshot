@@ -35,7 +35,7 @@
 #include "hd_rumble.h"   /* (hd_rumble_kind: SDL's types of the Switch's controllers) */
 
 int hos_binding(int set, int button, int slot);   /* nn_hid.c */
-int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]);   /* pad_sdl.c */
+int hos_sdl_pads(uint64_t *buttons, int32_t stick[4], int *deck_builtin_input);   /* pad_sdl.c */
 void hos_sdl_pad_first(char *out, size_t cap, int *type, int *sdl);
 int hos_mods_file(const char *rel, char *out, size_t cap);   /* mods.c */
 extern const char *hos_romfs_dir;   /* nn_fs.c: the game's RomFS folder */
@@ -202,7 +202,7 @@ static int choose_face(const char *dir) {
     uint64_t b = 0;
     int32_t s[4] = {0};
     for (int i = 0; i < 30 && !name[0]; i++) {
-        hos_sdl_pads(&b, s);
+        hos_sdl_pads(&b, s, NULL);
         hos_sdl_pad_first(name, sizeof name, &type, &sdl);
         if (!name[0]) Sleep(50);
     }

@@ -65,13 +65,14 @@ static int menu_open;
 int rx_option(int id, int otherwise) { return id == 1 ? menu_open : id == 11 || id == 16 || id == 17 ? 0 : otherwise; }
 static uint64_t pads_down;      /* (by position, 1 << HOS_PAD_*: every pad SDL has, merged as pad_sdl.c merges them) */
 static int32_t pads_stick[4];
-int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]) { *buttons |= pads_down; memcpy(stick, pads_stick, sizeof pads_stick); return 2; }
+int hos_sdl_pads(uint64_t *buttons, int32_t stick[4], int *deck_builtin_input) { (void)deck_builtin_input; *buttons |= pads_down; memcpy(stick, pads_stick, sizeof pads_stick); return 2; }
 static void player_used(void) {}
 static void binds_load(void) {}
 static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
 static int pad_bind[HOS_KEY_N][2] = {[HOS_KEY_TOGGLE_HUD] = {-1, -1}};
 static LONG hud_bind_generation;
 static uint64_t oc_consumed_pads;
+static volatile LONG pad_count_now;
 static int sprint_now;   /* (Sprint's gamepad input, read with the pads: tests/test_sprint.py) */
 enum { SPRINT_PAD = 2 };
 static int sprint_read(void) { return sprint_now; }
@@ -163,8 +164,9 @@ def main():
         block(hid, "void hos_filter_stick("),
         re.search(r"^static volatile int xinput_pads_now;.*$", hid, re.M).group(0),
         block(hid, "static void pads_read("),
-        # (read_input's `down`, the buttons down at this read, which the cut block fills for the player's input check below it)
-        "static void game_pads(uint64_t *buttons, int32_t stick[4]) {\n    uint64_t down = 0;\n    " + pads + "\n    (void)down;\n}",
+        # (read_input's `down`, the buttons down at this read, which the cut block fills for the player's input check below it;
+        #  deck_builtin_input is read_input's local the cut block passes to pads_read)
+        "static void game_pads(uint64_t *buttons, int32_t stick[4]) {\n    uint64_t down = 0;\n    int deck_builtin_input = 0;\n    (void)deck_builtin_input;\n    " + pads + "\n    (void)down;\n}",
         MAIN))
     with tempfile.TemporaryDirectory(prefix="longshot-pads-after-menu-") as tmp:
         src = Path(tmp) / "t.c"

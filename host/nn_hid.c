@@ -330,10 +330,10 @@ static int parse_presses(const char *s, int64_t base_ms, int live);   /* (live: 
 
 static void parse_script(void) {
     {   /* start SDL's controller thread now: pads are open by the time the game window comes to the front */
-        int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]);
+        int hos_sdl_pads(uint64_t *buttons, int32_t stick[4], int *deck_builtin_input);
         uint64_t b = 0;
         int32_t st[4] = {0};
-        hos_sdl_pads(&b, st);
+        hos_sdl_pads(&b, st, NULL);
     }
     npresses = 0;
     script_t0 = hos_now_ns();
@@ -788,27 +788,30 @@ void hos_filter_stick(int16_t x, int16_t y, int zone, int32_t out[2]) {
 static volatile int xinput_pads_now;   /* (pads_read: the controllers XInput has, while it is polled) */
 int hos_xinput_pads(void) { return xinput_pads_now; }   /* (host/prompts.c: Auto's face) */
 
-static void pads_read(uint64_t *buttons, int32_t stick[4]) {
+static void pads_read(uint64_t *buttons, int32_t stick[4], int *deck_builtin_input) {
     static int64_t next_read, retry[XUSER_MAX_COUNT];
     static int was_connected[XUSER_MAX_COUNT];
     static uint64_t cached_buttons;
     static LONG cached_hud_generation;
     static int32_t cached_stick[4];
+    static int cached_deck_builtin;
     const int64_t now = hos_now_ns();
     const LONG generation = __atomic_load_n(&hud_bind_generation, __ATOMIC_ACQUIRE);
     if (now < next_read && generation == cached_hud_generation) {
         *buttons |= cached_buttons;
         stick_max(stick, cached_stick);
+        if (deck_builtin_input) *deck_builtin_input = cached_deck_builtin;   /* (the same poll as the buttons) */
         return;
     }
     next_read = now + 2000000;
     uint64_t raw = 0;   /* (by position: 1 << HOS_PAD_*) */
     int32_t s[4] = {0};
     int sdl_pads = 0;
+    int deck_builtin = 0;   /* (the Deck's built-in controls give gameplay input: its mouse must not) */
     {   /* every controller SDL knows (DualSense, DualShock 4, Switch Pro, ...: hos/pad_sdl.c) */
-        int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]);
+        int hos_sdl_pads(uint64_t *buttons, int32_t stick[4], int *deck_builtin_input);
         static int was;
-        const int n = hos_sdl_pads(&raw, s);
+        const int n = hos_sdl_pads(&raw, s, &deck_builtin);
         if (n != was) hos_log("hid: %d controller%s through SDL", n, n == 1 ? "" : "s");
         was = n;
         sdl_pads = n;
@@ -884,6 +887,8 @@ static void pads_read(uint64_t *buttons, int32_t stick[4]) {
     memcpy(cached_stick, s, sizeof s);
     cached_hud_generation = generation;
     cached_buttons = bound_pad_buttons(raw);
+    cached_deck_builtin = deck_builtin;
+    if (deck_builtin_input) *deck_builtin_input = deck_builtin;
     *buttons |= cached_buttons;
     stick_max(stick, s);
 }
@@ -1221,11 +1226,12 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
         static const char *env;
         static int looked;
         if (!looked) looked = 1, env = getenv("HOS_INPUT_BACKGROUND");
-        if (pads_in_background(env, rx_option(4, 0))) pads_read(buttons, stick), sprint_now = pad_sprint_down();
+        if (pads_in_background(env, rx_option(4, 0))) pads_read(buttons, stick, NULL), sprint_now = pad_sprint_down();
         hud_shortcut(0, 0);
         walk_held(0, 0, rx_option(HOS_OPT_WALK_MODE, 0) == 1);   /* (behind: a toggled walk is kept) */
         return;
     }
+    int deck_builtin_input = 0;   /* (longshot) the Deck's built-in controls give gameplay input: its mouse must not */
     uint64_t down = 0;   /* (the pads' buttons and the bound keys down at this read) */
     {   /* (longshot) while the Insert menu is open the pads are its own, as the keyboard is (key()), and after it
            closed each input it had waits until it is let go (the press that closed it never reaches the game); the
@@ -1233,7 +1239,7 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
            no longer keeps the rest from the game */
         uint64_t pb = 0;
         int32_t ps[4] = {0};
-        pads_read(&pb, ps);
+        pads_read(&pb, ps, &deck_builtin_input);
         down = pb;
         static int menu_was;
         const int menu = rx_option(1, 0);
@@ -1267,11 +1273,15 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
     static int native_looked;
     if (!native_looked) native_looked = 1, native_env = getenv("HOS_MOUSE_NATIVE");
     const int mode = native_env ? !env_value_off(native_env) : rx_option(6, 0);   /* (2: Off, the mouse never captured) */
-    const int native = mode == 1;
+    /* (longshot) The Deck's built-in controls expose a mouse as well as a pad, and Steam's Desktop layout drives it
+       with their right stick too, so while those controls give gameplay input the mouse's motion must steer nothing:
+       Native's camera hook is not asked for, and the stick path's motion is dropped below. The mouse is still taken
+       in (mouse_stick) so its pointer stays held at the center and never flies across the window. */
+    const int native = mode == 1 && !deck_builtin_input;
     int hos_mouse_native(void);
     void hos_mouse_native_free(int free);
     const uint64_t game_stick = (1ULL << B_ZR) | (1ULL << B_L) | (1ULL << B_R);
-    int captured = 0, as_stick = mode == 0;
+    int captured = 0, as_stick = mode == 0 || deck_builtin_input;
     if (native) {
         mouse_setup();
         mouse_sens_keys();
@@ -1281,12 +1291,17 @@ static void read_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
     }
     if (as_stick) {
         captured = mouse_stick(&mouse[2], &mouse[3], (int)((*buttons | *taps | toggles.latched) >> B_L & 1));
+        if (deck_builtin_input) mouse[2] = mouse[3] = 0;   /* (taken for the pointer's sake, never the camera's) */
         if (captured) stick_max(stick, mouse);
     }
     /* (the side buttons in the game's menus; not with Mouse camera Off, where no button of the mouse is a control) */
     int hos_mouse_in_game_menu(void);   /* display.c */
     const int menu_mouse = mode != 2 && hos_mouse_in_game_menu();
-    mouse_buttons_arm(captured, menu_mouse);
+    /* (the Deck's built-in controls put gameplay actions on the mouse's buttons as well: in its desktop layout R2 is
+       a left click and L2 a right one, and the pad's own buttons already carry those actions, so the mouse interface
+       must not fire them too. Menus keep their pointer and clicks. Arm every read, so a button held while this
+       applies is let go before counting again.) */
+    mouse_buttons_arm(captured && !deck_builtin_input, menu_mouse);
     hud_shortcut(!rx_option(1, 0), captured || menu_mouse);
     captured |= menu_mouse;   /* (from here on: whether a mouse button can be a control; the armed ones are) */
     if (captured)

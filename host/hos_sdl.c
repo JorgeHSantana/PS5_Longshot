@@ -27,8 +27,7 @@ static struct {
     void *PadOpen, *PadClose, *PadConnected, *PadsUpdate, *PadButton, *PadAxis, *PadName, *PadRumble;
     void *PadType, *PadEffect;   /* (optional: HD rumble, host/pad_sdl.c) */
     void *PadHasSensor, *PadSensorEnable, *PadSensorData;   /* (motion: optional, NULL in an SDL without them) */
-    void *PadVendor, *PadSteamHandle, *SetHintPriority;   /* (Steam's stand-in pads: optional, host/steam_pads.h) */
-    void *PadProduct;   /* (a pad's USB product id: optional, host/vibration.h's Steam Controller (2026)) */
+    void *PadVendor, *PadProduct, *PadSteamHandle, *SetHintPriority;   /* (Steam's stand-in pads: optional, host/steam_pads.h; PadProduct also for vibration.h's Steam Controller (2026)) */
     void *JoystickGUID, *PadMapping;   /* (optional connection diagnostics: no serial number or device path) */
     void *PadWireless;   /* (optional: a pad's transport, SDL_GetJoystickConnectionState) */
     /* (optional, host/pad_sdl.c's vibration: an Xbox pad's trigger motors; a pad's HID device, written beside SDL for a
@@ -1049,8 +1048,8 @@ int hos_sdl_pad_sensor(void *pad, int type, float *data, int n) {
     return version == 3 ? CALL(_Bool (*)(void *, int, float *, int), PadSensorData)(pad, type, data, n)
                         : CALL(int (*)(void *, int, float *, int), PadSensorData)(pad, type, data, n) == 0;
 }
-/* (Steam's stand-in pads, host/steam_pads.h) whether the SDL tells them apart; a pad's USB vendor (0 unknown); its
-   Steam Input handle, not 0 for a Steam stand-in pad */
+/* (Steam's stand-in pads, host/steam_pads.h) whether the SDL tells them apart; a pad's USB vendor and product (0
+   unknown); its Steam Input handle, not 0 for a Steam stand-in pad */
 int hos_sdl_knows_steam_pads(void) { return f.PadVendor && f.PadSteamHandle && f.SetHintPriority; }
 uint16_t hos_sdl_pad_vendor(void *pad) { return f.PadVendor ? CALL(uint16_t (*)(void *), PadVendor)(pad) : 0; }
 uint16_t hos_sdl_pad_product(void *pad) { return f.PadProduct ? CALL(uint16_t (*)(void *), PadProduct)(pad) : 0; }

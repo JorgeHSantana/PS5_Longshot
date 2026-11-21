@@ -63,8 +63,8 @@ static struct {
     uint32_t serial;
     float bias[3], bias_t;
     int has_bias;
-    uint16_t vendor;      /* (longshot) its USB vendor, and its Steam Input handle: not 0 for a Steam stand-in pad */
-    uint16_t product;     /* (longshot) its USB product id (host/vibration.h: a Steam Controller (2026)) */
+    uint16_t vendor;      /* (longshot) its USB vendor and product, and its Steam Input handle: not 0 for a Steam stand-in pad */
+    uint16_t product;     /* (longshot) its USB product id (host/vibration.h: a Steam Controller (2026); the Deck's built-in controls, host/steam_pads.h) */
     uint64_t steam;
     int motion_only;      /* (host/steam_pads.h) a real Valve pad while a Steam stand-in pad is open: motion, no input */
 } pads[MAX_PADS];
@@ -73,6 +73,7 @@ static SRWLOCK state_lock = SRWLOCK_INIT;
 static uint64_t state_buttons;
 static int32_t state_stick[4];
 static int state_count;
+static int state_deck_builtin;   /* (longshot) the Deck's built-in controls gave gameplay input in that poll */
 static char state_name[128];   /* the first controller's name (host/prompts.c: the button prompts' Auto) */
 static int state_type, state_sdl;   /* and its SDL type (the loaded SDL's numbers, 0 unknown), and that SDL (3, 2; 0 none) */
 static volatile LONG rumble_low, rumble_high;   /* 0..65535, set by the vibration HLE */
@@ -493,6 +494,7 @@ static void pads_poll(void) {
                 pads[slot].serial = ++pads_opened;
                 pads[slot].has_bias = 0;
                 pads[slot].vendor = hos_sdl_pad_vendor(gc);
+                pads[slot].product = hos_sdl_pad_product(gc);
                 pads[slot].steam = hos_sdl_pad_steam_handle(gc);
                 pads[slot].motion_only = 0;   /* (the poll below decides, and says so) */
                 hos_sdl_pad_log_connection(gc, pads[slot].motion, pads[slot].steam != 0);
@@ -532,6 +534,7 @@ static void pads_poll(void) {
         int stand_in = 0;   /* (longshot) a Steam stand-in pad open (host/steam_pads.h) */
         int64_t status_used = -1;   /* (longshot) the Controls page's vibration line: the pad used last */
         int status_pad = -1;
+        int deck_builtin = 0;   /* (longshot) the Deck's built-in controls give gameplay input: its mouse must not */
         for (int i = 0; i < MAX_PADS; i++) stand_in |= pads[i].gc && pads[i].steam;
         for (int i = 0; i < MAX_PADS; i++) {
             void *gc = pads[i].gc;
@@ -558,6 +561,7 @@ static void pads_poll(void) {
                 motion_only_used(i, now);
                 continue;
             }
+            if (steam_pads_deck_builtin(pads[i].vendor, pads[i].product, pads[i].steam)) deck_builtin = 1;
             count++;
             uint64_t sig = 0;
             for (int k = BTN_A; k <= BTN_RIGHT; k++)   /* (SDL3's gamepad buttons are in SDL2's order) */
@@ -652,6 +656,7 @@ static void pads_poll(void) {
         state_buttons = b;
         memcpy(state_stick, s, sizeof s);
         state_count = count;
+        state_deck_builtin = deck_builtin;
         state_name[0] = 0;
         state_type = state_sdl = 0;
         for (int i = 0; i < MAX_PADS; i++)
@@ -694,9 +699,12 @@ void hos_sdl_pads_pump(void) {
 #endif
 
 /* The controllers' merged state (nn_hid.c): ORs their inputs in (1 << HOS_PAD_*), keeps the larger stick
-   deflections; returns how many controllers SDL has open. Starts the SDL thread on the first call. */
-int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]) {
+   deflections; returns how many controllers SDL has open. Starts the SDL thread on the first call. When
+   deck_builtin_input is not NULL it is set to whether the Deck's built-in controls gave gameplay input in that same
+   poll (host/steam_pads.h): read under this lock, so it and the buttons describe one poll. */
+int hos_sdl_pads(uint64_t *buttons, int32_t stick[4], int *deck_builtin_input) {
     static volatile LONG started;
+    if (deck_builtin_input) *deck_builtin_input = 0;
     if (!started && !InterlockedExchange(&started, 1)) {
         if (env_on("HOS_NO_SDL")) return 0;
         if (!hos_sdl_load()) {
@@ -722,6 +730,7 @@ int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]) {
     for (int k = 0; k < 4; k++)
         if ((state_stick[k] < 0 ? -state_stick[k] : state_stick[k]) > (stick[k] < 0 ? -stick[k] : stick[k]))
             stick[k] = state_stick[k];
+    if (deck_builtin_input) *deck_builtin_input = state_deck_builtin;
     ReleaseSRWLockShared(&state_lock);
     return n;
 }
