@@ -40,5 +40,6 @@ assets/saves/
 | Name | Where it stands |
 |---|---|
 | `kokiri-start` | Kokiri Forest, Link's house, right after the opening (a new game, control just given) |
+| `market-entrance` | Castle Town Market, child Link in the town's gate facing the Market, by day |
 
 How to make one: [docs/dev/reference/saves.md](../../docs/dev/reference/saves.md#saves-in-the-repository).
