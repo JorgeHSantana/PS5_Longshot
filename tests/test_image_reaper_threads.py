@@ -38,6 +38,7 @@ FIXTURE = r"""
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <mutex>
@@ -157,7 +158,11 @@ static VkResult vmaBindImageMemory(VmaAllocator, VmaAllocation, VkImage) { retur
 
 /* REAPER */
 
-#define CHECK(c, what) do { if (!(c)) { std::printf("FAIL: %s\n", what); return 1; } } while (0)
+// (the process ends at once, as the game's does on Linux: host/posix/win32_posix.c ExitProcess is _exit. A return from main
+// runs the static destructors under the detached reaper, which waits on reap_cv: glibc's destructor of it blocks for good,
+// after a failed check as after a passed one, and the result is lost with the process killed)
+[[noreturn]] static void finish(int code) { std::fflush(stdout); std::_Exit(code); }
+#define CHECK(c, what) do { if (!(c)) { std::printf("FAIL: %s\n", what); finish(1); } } while (0)
 
 // (images made for a case: an image, its allocation, 2 views, every 3rd a buffer and its allocation, every 5th a memory object)
 struct Made {   // (a case's own: the record of what was destroyed starts again with it, as its objects may take a past case's addresses)
@@ -344,7 +349,7 @@ int main(int argc, char** argv) {
         CHECK(unplug(m), "the ledgers' reap_now case did not drain");
     }
     std::printf("image reaper, on threads: ok\n");
-    return 0;
+    finish(0);
 }
 """
 
