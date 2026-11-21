@@ -7180,7 +7180,7 @@ thread_local uint64_t mesh_conv_off = 0;
 thread_local int mesh_mode = 0;   // (this recording's RX_VK_MESH_CONV: mesh_conv_begin_recording)
 thread_local mesh_conv::Batch mesh_batch;   // (RX_VK_MESH_CONV=2: the draws converted at the last barrier of the game's)
 // (the counts behind the log's "indirect mesh draws' arguments" line: mesh_conv_stats)
-enum { kMcOne, kMcBatched, kMcBatches, kMcBatchItems, kMcDropped, kMcStale, kMcNoMesh, kMcCount };
+enum { kMcOne, kMcBatched, kMcBatches, kMcBatchItems, kMcDropped, kMcStale, kMcFallback, kMcCount };
 std::atomic<int64_t> st_mc[kMcCount];
 uint32_t mesh_count_word() {
     static const uint32_t word = getenv("RX_VK_MESH_IND_COUNT_WORD") ? (uint32_t)atoi(getenv("RX_VK_MESH_IND_COUNT_WORD")) & 3 : 0;
@@ -7254,10 +7254,12 @@ bool mesh_indirect_convert(VkCommandBuffer cmd, const DrawArgs& d) {
     mesh_conv_buf = VK_NULL_HANDLE;
     if (mesh_args_rewrite() || !d.mesh || !d.indirect) return false;
     const int mode = mesh_mode;
-    if (mode >= 1 && !dev.mesh_shader) {   // (no mesh shaders: the compute fallback reads the game's own records, never these)
-        st_mc[kMcNoMesh].fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
+    // (longshot) Converted without mesh shaders too: the compute fallback dispatches the draw's workgroups from these records
+    // (fallback_record: vkCmdDispatchIndirect from mesh_conv_buf), and leaves out an indirect mesh draw that has none. #1846
+    // returned here when the device had no mesh shaders, which is where the fallback runs: every RADV GPU by default (the Steam
+    // Deck: Automatic is the compute path there, and dev.mesh_shader false), cards without mesh shaders, RX_VK_MESH_SHADERS=compute.
+    // There every GPU-culled mesh draw was left out: no grass, ferns, falling leaves or fireflies, and leaf cards whose depth was
+    // drawn without their colour. No batch there (mesh_conv_batching): each converts here, one by one, as mode 1 does
     if (mode >= 2 && mesh_ring_filled.load(std::memory_order_acquire)) {   // (converted at the barrier before it: mesh_conv_batch)
         if (const mesh_conv::Entry* e = mesh_batch.take(cmd, d.op)) {
             if (mesh_conv::still_holds(mesh_ring_pos.load(std::memory_order_relaxed), e->start, kMeshRing)) {
@@ -7277,6 +7279,7 @@ bool mesh_indirect_convert(VkCommandBuffer cmd, const DrawArgs& d) {
     uint64_t off = 0, start = 0;
     if (!mesh_ring_slot(n, &off, &start)) return false;
     st_mc[kMcOne].fetch_add(1, std::memory_order_relaxed);
+    if (!dev.mesh_shader) st_mc[kMcFallback].fetch_add(1, std::memory_order_relaxed);
     end_pass(cmd);
     GprofSpan gp(cmd, "meshconv (an indirect mesh draw's arguments -> {count, 1, 1}, with its barriers)");   // (RX_VK_PASS_TIMING)
     thread_local std::vector<VkBufferCopy> regions;
@@ -7376,7 +7379,8 @@ void mesh_conv_batch(VkCommandBuffer cmd, const mesh_conv::Item* items, size_t n
     st_mc[kMcBatchItems].fetch_add((int64_t)copies.size(), std::memory_order_relaxed);
 }
 /// (vk_replay.cpp's log) out[7]: draws converted one by one, from a batch, batches, draws in them, batch draws converted again
-/// after a write (dropped), after the ring came round (stale), draws left unconverted (no mesh shaders); since the last call
+/// after a write (dropped), after the ring came round (stale), draws converted for the compute fallback (a GPU without mesh
+/// shaders in use: of the ones one by one); since the last call
 void mesh_conv_stats(int64_t out[7]) {
     for (int i = 0; i < kMcCount; i++) out[i] = st_mc[i].exchange(0, std::memory_order_relaxed);
 }

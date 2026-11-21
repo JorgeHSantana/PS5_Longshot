@@ -8,12 +8,14 @@ recordings (HOS_AB) and the ring coming round. Then variants that must fail: slo
 once is then wrong), a draw that stores to memory not dropping the batch, the scan stepping over buffer clears, a slot the ring
 came round onto used. The source checks: vk_draw.cpp drops the batch at a dispatch and at a draw whose program writes memory,
 reads the switch at each recording's start (through the host's A/B, version 36), and fills the ring once with 1s; the replay
-scans right after the game's barrier and names each mesh draw's op.
+scans right after the game's barrier and names each mesh draw's op; and a GPU without mesh shaders in use (the compute
+fallback, which dispatches each indirect mesh draw's workgroups from the converted records and leaves out a draw with none:
+every RADV GPU by default, the Steam Deck among them) still has its draws converted. The conversion and fallback functions are
+also compiled from the selected source with stand-ins, checking their copy, published slot and indirect dispatch.
 """
 import argparse
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
@@ -86,6 +88,22 @@ def main():
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     with tempfile.TemporaryDirectory(prefix="longshot-mesh-conv-") as folder:
         tmp = Path(folder)
+        draw = (src / "gpu/vk/vk_draw.cpp").read_text(encoding="utf-8")
+        (tmp / "mesh_conv_real.inc").write_text(
+            block(draw, "bool mesh_indirect_convert(VkCommandBuffer cmd, const DrawArgs& d) {") + "\n" +
+            block(draw, "bool fallback_record(VkCommandBuffer cmd, Program& p, const DrawArgs& d) {") + "\n",
+            encoding="utf-8")
+        real_exe = tmp / ("mesh_conv_real.exe" if os.name == "nt" else "mesh_conv_real")
+        real_cmd = [cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers",
+                    "-I" + str(src), "-I" + str(tmp), str(ROOT / "tests/mesh_conv_real_test.cpp"), "-o", str(real_exe)]
+        r = subprocess.run(real_cmd, capture_output=True, text=True, timeout=180, creationflags=flags)
+        if r.returncode:
+            print(r.stdout + r.stderr)
+            fail("the real conversion and fallback fixture did not build")
+        r = subprocess.run([str(real_exe)], capture_output=True, text=True, timeout=120, creationflags=flags)
+        if r.returncode:
+            print(r.stdout + r.stderr)
+            fail("the fallback did not copy, publish and dispatch the converted arguments")
         (tmp / "mesh_conv_pass_ops.inc").write_text("#define PASS_OPS " + " ".join(pass_ops.split()) + "\n", encoding="utf-8")
         exe = tmp / ("mesh_conv.exe" if os.name == "nt" else "mesh_conv")
         cmd = [cxx, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers", "-I" + str(src),
@@ -104,7 +122,7 @@ def main():
             if r.returncode == 0:
                 fail("the broken variant %s was not caught" % v)
     print("PASS: RX_VK_MESH_CONV's slots and batch on the model (0, 1, 2 and flips between recordings); %d broken variants "
-          "caught; the source's drops, switch read, ring fill and scan placement" % len(MUST_FAIL))
+          "caught; the source's drops, switch read, ring fill, scan placement and the compute fallback's conversion" % len(MUST_FAIL))
 
 
 if __name__ == "__main__":

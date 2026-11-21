@@ -4772,8 +4772,8 @@ void log_frame_stats() {
                     cut += b;
                 }
             logf("vk: a frame: indirect mesh draws' arguments (RX_VK_MESH_CONV=%d): %.1f converted one by one, %.1f from %.1f batches "
-                 "at the game's barriers (%.1f converted in them; %.1f dropped after a write, %.1f the ring came round), %.1f left as "
-                 "they are (no mesh shaders); scans ended at a barrier %.1f, an op %.1f, the end %.1f, full %.1f; the draws "
+                 "at the game's barriers (%.1f converted in them; %.1f dropped after a write, %.1f the ring came round), %.1f for the "
+                 "compute fallback (no mesh shaders in use: one by one); scans ended at a barrier %.1f, an op %.1f, the end %.1f, full %.1f; the draws "
                  "batched by a scan right after an op that ended the one before, by op:%s",
                  mesh_conv_mode(), mc[0] / 120.0, mc[1] / 120.0, mc[2] / 120.0, mc[3] / 120.0, mc[4] / 120.0, mc[5] / 120.0,
                  mc[6] / 120.0, stops[mesh_conv::kStopBarrier] / 120.0, stops[mesh_conv::kStopOp] / 120.0,
