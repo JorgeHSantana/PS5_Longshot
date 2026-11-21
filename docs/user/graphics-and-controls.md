@@ -185,6 +185,9 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | Developer: Intel shader compiles | Auto, Side by side, One at a time (after a restart; Intel graphics on Windows only) | Auto |
 | | Developer: Intel quick compute builds | Off, On (changes at once; Intel graphics on Windows only) | On |
 | | Developer: Set up for a weak laptop | Sets the rows for integrated graphics with 4 CPU threads or fewer (shown on integrated graphics only) | |
+| | Input recording: Record input | Records your input from Link's next update until you press it again: the controller, motion, the mouse camera, and the Debug tools' teleports and switches. The file goes in your folder, `recordings/`. For tests and bug reports | |
+| | Input recording: Play recording | Opens a page: Stop playback while one plays, Last recording, then your recordings, newest first. Link is taken to a recording's age and map and put where it started; your controller does nothing for the game until it ends or you stop it, and the menu turns compact so you can watch | |
+| | Input recording: Drift correction | Off, Every update, Every second, Every 5 s: how often a replay puts Link and the camera back on the recording while they are within 1 m of it | Every update |
 
 For a live preview while adjusting Custom HUD placement, use the compact menu. Right Shift switches to it by default.
 

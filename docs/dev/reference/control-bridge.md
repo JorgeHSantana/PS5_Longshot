@@ -158,6 +158,8 @@ listed.
 | `saves` | none | `path`, `account`, `option`, `slots` |
 | `quit` | none | `quitting` |
 | `relaunch` | none | `relaunching` |
+| `record` | `action` (`start` default, or `stop`); `path` (default: the player's `recordings/` folder), `route` (`false`: a [route](input.md#routes) holds no guest words) | `path`; with `stop`, `written` (`false`: it had not started yet, or the file could not be written) |
+| `play` | `action` (`start` default, or `stop`); `path` (default: the last recording made), `sync` (1: updates between corrections, 0 none), `sync_max` (1 m) | none; errors `busy`, `not_found`, `wrong_map` (it starts on a map no teleport goes to). Link is taken to the recording's age and map first, so a start can take a load: wait on `status`'s `recorder` |
 | `mem_read` | `addr`, `size`, `format` (`hex` or `base64`), `timeout` (10) | `format`, `addr`, `size`, `data` |
 | `mem_read_many` | `ranges` (list of `{addr, size}`), `format`, `timeout` (10) | `format`, `ranges` (each `addr`, `size`, `data`); a single range replies like `mem_read` |
 | `mem_write` | `addr`, `hex` or `base64`, `timeout` (10) | `wrote`, `addr` |
@@ -182,6 +184,7 @@ listed.
 | `stalled` | No frame for a second |
 | `map` | The last map known (`Sequence_CurrentBanc`), read every 250 ms in Link's update; kept through loads; `null` until Link is first seen |
 | `game` | The game's snapshot from Link's update (below), or `null` |
+| `recorder` | The [input recording](input.md#input-recordings) now: `mode` (`off`, `recording`, `playing`), `started`, `waiting` (a replay waiting for a load), `frame` and `end`, `link_apart` of `link_checked` updates, `syncs` and the `largest` correction in metres, `diverged`, `anchors` met of `anchors_wanted`, and `path` (with `off`, the last recording made) |
 
 `game_picture` records the last native game's present texture dimensions and its crop dimensions. With no crop, both
 pairs are the texture extent. The value is `null` until the first valid sample. Interpolated frames leave it unchanged.

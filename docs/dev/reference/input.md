@@ -69,6 +69,114 @@ it: position and window size in physical pixels, held buttons, pending presses a
 
 The Insert menu works in swapchain coordinates, independent of the game's letterbox (`vk_menu_hit.h`).
 
+## Input recordings
+
+An input recording writes down what the player's input does to the game, where it reaches it, and gives it back: the
+same route and the same presses on every run, for tests, bug reports and `dev.py ab --route`
+([`host/input_movie.h`](../../../host/input_movie.h) the format and its logic, [`host/input_movie.c`](../../../host/input_movie.c)
+the switches, the controls and the file). It holds:
+
+- each read of controller No.1 (`npad_states`): the button word and the sticks after every source and filter (pads, keys,
+  the mouse as a stick, the script, the bridge, the toggles, the menus' filters), and the flight and free camera cheats'
+  inputs;
+- each motion read (`GetSixAxisSensorStates`): the gyroscope's readings the game is handed;
+- each player camera update (`hos_mouse_camera`, `host/mouse_native.c`): whether the native mouse camera was on, whether
+  the camera was free, whether a stick turned it, and the mouse's turn in degrees;
+- the mouse in the game's menus (`host/oot_menu.c`, Windows): the focus changes and Items page choices it makes by
+  calling the game (its clicks and scrolls are the controller's). A replay hands a focus only to one of the screen's
+  buttons then, and an item only when it is one of Key Items'; any other is counted as not met;
+- the Debug tools' actions where the game takes them (`oot_update_player_cheats`, `host/hos_main.c`): teleports, the age
+  switch, items, Mark and Return, the hour, from the Insert menu, `HOS_INPUT_LIVE`'s `!cheat` or the control bridge;
+- the Debug tools' rows that change what the game does (heart protection, flight, the free camera, Link's speed, damage
+  taken), at the start and at each change;
+- the loads (anchors), Link's positions and the camera's state (the fingerprints, below).
+
+While a recording plays, the game gets it all in place of the player's devices, the script, the bridge, the mouse and the
+Debug tools' own actions and rows until it ends; then the input is the player's again. The player's menu changes nothing
+in the replay (`rx_option` answers those rows with the recording's), nor the replay the player's menu.
+
+### Starting and stopping
+
+- **In the game:** the Insert menu's Debug tab, its Input recording section (`gpu/vk/menu/input_recording.cpp`).
+  **Record input** starts a recording from Link's next update and stops it (to the player's folder,
+  `recordings/<date>-<time>-<map>.jsonl`). **Play recording** opens a page: Stop playback while one plays (where it is,
+  the corrections), Last recording (after a restart, the folder's newest), then the folder's recordings newest first, or
+  No recordings yet. A recording plays from where it started: Link is taken to its age and map first (the Debug tab's age
+  switch and teleport, each asked again after 12 s, up to three times) and put at its start; only a map no teleport goes
+  to is refused. Link and the camera are held to the recording for its first 30 updates (`MOVIE_SETTLE`: the game's move
+  of Link lands an update late), not counted as corrections. While it plays the menu is the compact bar, the pads still
+  reach the menu (not the game), and pressing any of the page's rows stops it. **Drift correction** is its `HOS_INPUT_SYNC` (Off, every
+  update, every second, every 5 s). The rows work with the Debug tools on or off.
+- **Over the control bridge:** `record` and `play` ([the bridge](control-bridge.md)), and `status`'s `recorder`: an
+  agent's or a test's way ([replay a recording](../developing.md#replay-a-recording)).
+- **From the start, with the switches:**
+
+```
+HOS_INPUT_RECORD=run.jsonl HOS_REALTIME_STEP=0 HOS_FIXED_TIME=1767225600 ./longshot      # play, then quit
+HOS_INPUT_PLAY=run.jsonl   HOS_REALTIME_STEP=0 HOS_FIXED_TIME=1767225600 ./longshot      # the same input again
+```
+
+### How a replay holds to its recording
+
+- **Frames.** `f` is the game frame, by the game clock (its sixtieths of a second), in every line. The game reads the
+  controller twice in most frames, from its jobs, while Link updates on another worker, so a frame has one pad:
+  recording, its first read takes the input and its later reads get the same; a replay gives every read of a frame that
+  frame's pad. The reads each frame had are written down (`frames` lines), and a replay counts the frames whose count
+  differs. So a recorded run is not quite an unrecorded one: a frame's later reads skip the merge, and the script, the
+  hold toggles and `HOS_INPUT_LIVE`'s file move on once a frame instead of at every read. At a cap above 60 or with Real
+  time, several of the game's frames share one of the recording's: a recording made at 60 plays at its own speed in an
+  uncapped run, approximately (the log says so at the start).
+- **Frame 0** is the frame after Link's first update, so a load that takes more or fewer frames does not move the input.
+  `HOS_INPUT_FROM=boot` starts at the game's first read instead (two runs of one nightly took 768 and 551 frames to load).
+- **Loads (anchors).** Each of Link's first updates after 10 frames without one (a teleport, a door, the age switch) is
+  an anchor, written down with its frame. A replay re-bases its frames at its own anchor to the recording's, and when its
+  load takes longer it waits at the anchor's frame (giving that frame's pad again) until its own. The input after a load
+  is where it was against the game, however long the load took. A load the recording does not have, or one that has not
+  ended 15 s after the recording's, is a divergence.
+- **Fingerprints.** After each of Link's updates the recording notes his position when it moved (`mark`), and at each
+  camera update its state block (`view`: 14 words from `+0x178`) and inputs (`in`: 13 words from `+0x45c` of the object
+  at `0x84c9ede0`). A replay holds each update to them exactly, by its frame and its call within the frame (`i`), so one
+  more or one fewer camera update, motion read or Link update in a frame (the jobs' race) leaves the frames after it
+  alone. It logs the first that differs, and ends with `input: playback over at frame N of N: ...`.
+- **Drift correction (`HOS_INPUT_SYNC`, on by default).** Where a replay leaves a fingerprint, Link is moved back to the
+  mark through the game's own move of his character controller (`OneShotPhysicsCctChangePosition`, as Mark and Return
+  do), and the camera's block and inputs are written back, at every update (`HOS_INPUT_SYNC=<n>`: every n-th; `0`: never,
+  the exact test). Only while Link is within `HOS_INPUT_SYNC_MAX` (1 m) of the mark: further than that, the replay went
+  another way (a hit taken, a door missed), which is not float noise. It is said once (`input: the replay diverged at
+  frame N: ...`) and nothing is put back after it, so a test fails on it rather than being steered back. Velocities, other
+  actors and timers stay the replay's own: a corrected replay follows a route, it does not prove the run. The end gives
+  the corrections' count, the largest and the mean.
+- **The host's own time-based choices.** A run that records or plays takes the OptimizeChangeBank hold
+  (`host/oot_ocb_hold.c`) and the texture heap's compaction gap (`host/oot_tex_compact.c`) by the game clock's time
+  instead of the wall's (`hos_input_movie_time`), so they land on the same frame of a replay as of its recording. One
+  that records or plays from its start has no movie pacing (`host/nn_vi.c`).
+- **An exact replay** needs the same game: the 60 cap with Per frame (`HOS_REALTIME_STEP=0`), `HOS_FIXED_TIME`, the same
+  save, settings and build, and `HOS_INPUT_SYNC=0`. The game's jobs and loads still run at the PC's pace, so a replay can
+  leave the recording where the game itself does not run the same twice; the fingerprints say where.
+- **A replay recorded too.** `HOS_INPUT_RECORD` beside `HOS_INPUT_PLAY` records the replay's own fingerprints, to another
+  file, and ends it with a `result` line (how many updates apart, the corrections, a divergence, the anchors). One that is
+  the file played (its name, another spelling of it or a link to it) is refused, so the recording is kept, and the replay
+  goes on unrecorded.
+
+### Routes
+
+A route is a recording that can be committed: `HOS_INPUT_ROUTE=1` (or the bridge's `record` with `route`) writes no guest
+words and no addresses (the camera's angles alone, no menu mouse lines) and names the repository save it starts from in
+its header (`HOS_INPUT_SAVE`). `dev.py route record --save <name> --name <route>` records one from a repository save into
+`assets/routes/`, `dev.py route check` holds it to what a route may contain (as `tests/test_routes.py` does), and
+`dev.py ab --route <route>` measures while it plays. The rules are in [assets/routes](../../../assets/routes/README.md).
+
+### Format
+
+ls-input-recording/1, the JSON lines of mooki's [ls-workbench](https://github.com/mooki000/ls-workbench)
+(`play/pilot/inputlog.py`): a header, then one object a line with its frame `f` and `cmd` (`pad`, `cam`, `gyro`,
+`motion`, `focus`, `itemkey`, `frames`, `view`, `mark`, `action`, `option`, `anchor`; a replay's own recording also
+`result`). A replay passes over that format's bridge commands (`press`, `stick`, `sequence`, `live`), and refuses a
+file with a NaN or an infinity in it. A recording other than a route holds the game's memory words: it stays on the PC.
+
+**With nothing recorded or played** every hook returns after one load of the run's mode: nothing is locked, read from
+the game or copied for a recording.
+
 ## Switches
 
 | Switch | Effect |
@@ -91,5 +199,7 @@ Scripted input for test runs (`HOS_INPUT_SCRIPT`, `HOS_INPUT_LIVE`) is in [devel
 | `tests/test_display_pointer.py` | Pointer sampling and consumption on both hosts, DPI ratios, concurrent samples |
 | `tests/test_menu_hit.py`, `tests/test_game_menu_mouse_buttons.py` | Menu hit regions and the game-menu mailbox |
 | `tests/test_steam_pads.py` | Steam's ignore list |
+| `tests/test_input_movie.py` | Input recordings: the format, the recorder, playback, the frame alignment, loads, actions and rows, drift correction and divergence, starting and stopping at run time, routes |
+| `tests/test_routes.py` | Routes hold only what a route may (`assets/routes/`) |
 
 None of these needs a controller; check a physical device in the game.

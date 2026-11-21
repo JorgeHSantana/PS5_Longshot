@@ -6,6 +6,7 @@
    comes from (OCB_BUILD): the game's own too. */
 #include "hos.h"
 #include "oot_ocb_hold.h"
+#include "input_movie.h"   /* (HosMovieTime: the game clock's time while an input recording is recorded or played) */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdlib.h>
@@ -19,6 +20,10 @@ static SRWLOCK hold_lock = SRWLOCK_INIT;   /* (one manager, updated once a frame
 static int hold_read;                      /* (the switch and the build read, under hold_lock) */
 static int64_t hold_ns;                    /* (0: the game's own choice; never below 0) */
 static long long calls;                    /* (under hold_lock: updates seen, for the log's counts) */
+/* (the hold's clock: the wall's, or the game clock's while an input recording is recorded or played, so a held choice is
+   taken on the same frame of a replay as of its recording: host/input_movie.c; under hold_lock) */
+int64_t hos_input_movie_time(HosMovieTime *t, int64_t wall_ns);
+static HosMovieTime hold_time;
 
 static uint64_t guest_load(void *ctx, uint64_t addr, int size) {
     Ctx *c = (Ctx *)ctx;
@@ -45,7 +50,7 @@ uint64_t hos_oot_ocb_pick(Ctx *c, uint64_t mgr, uint64_t chosen) {
     int out = want;
     if (hold_ns > 0) {
         const long long refused = hold.refused;
-        out = oot_ocb_step(&hold, guest_load, c, mgr, want, hold_ns, hos_now_ns());
+        out = oot_ocb_step(&hold, guest_load, c, mgr, want, hold_ns, hos_input_movie_time(&hold_time, hos_now_ns()));
         if (hold.refused != refused && !refused)
             hos_log("ocb: the preload manager at 0x%llx is not laid out as host/oot_ocb_hold.h knows it: the game's own "
                     "choice at each such update", (unsigned long long)mgr);

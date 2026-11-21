@@ -121,7 +121,8 @@ enum MenuTab {
     TAB_MOTION = TAB_COUNT,   // (longshot: not a tab of the strip, the Motion page that the Controls tab's Motion row
                               // opens: one past the strip's tabs, so a tab added before TAB_COUNT moves it along)
     TAB_FPS_DEV = TAB_MOTION + 1,   // (longshot: not a tab either, the FPS counter's Dev lines page, from the Gameplay tab)
-    TAB_PAGE = TAB_FPS_DEV + 1   // (longshot: the Controls page's rows, above its grid; no tab shows them)
+    TAB_RECORDINGS = TAB_FPS_DEV + 1,   // (longshot: nor this, the input recordings to play, from the Debug tab: menu/input_recording.cpp)
+    TAB_PAGE = TAB_RECORDINGS + 1   // (longshot: the Controls page's rows, above its grid; no tab shows them)
 };
 
 struct Row {
@@ -404,9 +405,10 @@ constexpr int kCoreRows = sizeof core::rows / sizeof core::rows[0];
 const char* (ini_key)(const Row& r);   // (spelled apart from its definition: the checks cut that by its text)
 /// The model's page for each MenuTab: the strip's tabs, then the pages a row opens
 const char* const kTabIds[TAB_PAGE + 1] = {"graphics", "audio",  "gameplay",    "controls",     "nfc",
-                                           "mods",     "debug",  "motion",      "fps_details",  "controls_page"};
+                                           "mods",     "debug",  "motion",      "fps_details",  "recordings", "controls_page"};
 const char* const kTabLabels[TAB_PAGE + 1] = {"Graphics", "Audio", "Gameplay", "Controls",            "NFC",
-                                              "Mods",     "Debug", "Motion",   "FPS counter details", "Controls"};
+                                              "Mods",     "Debug", "Motion",   "FPS counter details", "Play recording",
+                                              "Controls"};
 int page_tab(const char* id);   // (a page's MenuTab by its id: below)
 // (rows modules describe, headings included; past it a row is left out, and logged. Every row is a module's: 110 of them
 // when the last moved, so room to grow; tests/test_menu_module_slots.py keeps the menu within it)
@@ -784,12 +786,18 @@ void outputs_sync() {
 }
 
 int cur_tab = TAB_GRAPHICS;
-int tab_selected[TAB_FPS_DEV + 1] = {};   // (and the pages' a row opens: Motion, the FPS counter's details)
+int tab_selected[TAB_RECORDINGS + 1] = {};   // (and the pages' a row opens: Motion, the FPS counter's details, the recordings)
 bool is_motion_row(const Row& r) {
     return row_opens(r) == TAB_MOTION || (r.tab == TAB_CONTROLS && !r.value && !r.setting && !strcmp(r.name, "Motion"));
 }
 bool is_fps_dev_row(const Row& r) {
     return row_opens(r) == TAB_FPS_DEV || (r.tab == TAB_GAMEPLAY && !r.value && !r.setting && !strcmp(r.name, "FPS counter details"));
+}
+bool is_recordings_row(const Row& r) { return row_opens(r) == TAB_RECORDINGS; }
+/// (the page a page of the menu goes back to: Motion to Controls, the FPS counter's details to Gameplay, the recordings to
+/// Debug; -1 a tab of the strip)
+int page_parent(int tab) {
+    return tab == TAB_MOTION ? TAB_CONTROLS : tab == TAB_FPS_DEV ? TAB_GAMEPLAY : tab == TAB_RECORDINGS ? TAB_DEBUG : -1;
 }
 
 // ---- the rows that take a restart: their values at the start (menu_init, the GPU's at menu_set_gpu_count) ----
@@ -1685,12 +1693,12 @@ double fps_target_ms() {
     return fps_stats::target_ms_for(cap, fifo, fifo ? (display_refresh_mhz() + 500) / 1000 : 0);
 }
 menu_hit::Map hits;      // (the menu's controls as last drawn: the mouse's, menu_tick)
-float scroll_at[TAB_FPS_DEV + 2];   // (the first row shown, eased toward the selection: the options' tabs and the Motion page, then
+float scroll_at[TAB_RECORDINGS + 2];   // (the first row shown, eased toward the selection: the options' tabs and the Motion page, then
                                    // the Controls page: kControlsSlot)
-constexpr int kControlsSlot = TAB_FPS_DEV + 1;
-int wheel_rows[TAB_FPS_DEV + 2];   // (the mouse wheel's notches since the last drawing, a slot each: scroll_rows scrolls by them)
-int scrolled_to[TAB_FPS_DEV + 2] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1};   // (the selection scroll_rows last brought into view)
-float scroll_want[TAB_FPS_DEV + 2];   // (where scroll_at is going: the wheel moves it, a new selection too)
+constexpr int kControlsSlot = TAB_RECORDINGS + 1;
+int wheel_rows[TAB_RECORDINGS + 2];   // (the mouse wheel's notches since the last drawing, a slot each: scroll_rows scrolls by them)
+int scrolled_to[TAB_RECORDINGS + 2] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};   // (the selection scroll_rows last brought into view)
+float scroll_want[TAB_RECORDINGS + 2];   // (where scroll_at is going: the wheel moves it, a new selection too)
 float ease_step = 0;     // (this drawing's share of the way: the time since the last one)
 
 ui::Ctx ui_ctx(uint32_t w, uint32_t h) {
@@ -2068,8 +2076,13 @@ constexpr DebugGroup debug_groups[] = {{"Player", 0, 6}, {"Travel", 6, 9}, {"Cam
 constexpr int kDebugGroups = sizeof debug_groups / sizeof debug_groups[0];
 constexpr int kDebugGeneralRows = 2;
 constexpr int kDebugTools = sizeof debug_tools_order / sizeof debug_tools_order[0];
+/// (the sections after the Developer one, a module's (menu/input_recording.cpp's Input recording): each heading's row and
+/// where its rows begin in debug_rows' list; debug_rows fills them)
+int debug_sections[8][2];
+int debug_section_count;
 /// The Debug tab's rows as shown (its row numbers, tab_row_to_global's): the switch, the tools in debug_tools_order while they
-/// are on, then the Developer rows; *dev where those start, *dev_head the Developer heading's row (-1 none). Their count
+/// are on, then the Developer rows and those of the sections after it (debug_sections); *dev where those start, *dev_head the
+/// Developer heading's row (-1 none). Their count
 int debug_rows(int* out, int* dev, int* dev_head) {
     const int count = tab_row_count(TAB_DEBUG);
     int n = 0;
@@ -2084,11 +2097,14 @@ int debug_rows(int* out, int* dev, int* dev_head) {
             if (debug_tools_order[t] == -1 ? r.value == &opts.damage_taken : r.cheat == debug_tools_order[t]) out[n++] = k;
         }
     *dev = n;
+    debug_section_count = 0;
     if (quick_debug) return n;
     for (int k = 0; k < count; ++k) {
         const Row& r = rows[tab_row_to_global(TAB_DEBUG, k)];
-        if (r.heading) *dev_head = k;
-        else if (*dev_head >= 0 && r.cheat < 0 && r.value != &opts.debug_tools) out[n++] = k;
+        if (r.heading && *dev_head < 0) *dev_head = k;
+        else if (r.heading && debug_section_count < 8)   // (a section after Developer: its heading, where its rows begin)
+            debug_sections[debug_section_count][0] = k, debug_sections[debug_section_count++][1] = n;
+        else if (*dev_head >= 0 && !r.heading && r.cheat < 0 && r.value != &opts.debug_tools) out[n++] = k;
     }
     return n;
 }
@@ -2124,6 +2140,8 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
             return w + (tight ? 56 : 68) * s;
         }
         if (r.cheat == 0 || r.cheat == 1 || r.cheat == 7 || r.value) return halves_w + pad;
+        if (!r.value && r.setting && r.setting->kind == menu::Kind::Page)   // (a page it opens: its text, room for the arrow)
+            return ui::size_of(c.f.strong, px, r.setting->text ? r.setting->text(0).c_str() : "").x + (tight ? 64 : 80) * s;
         if (!r.value && r.setting && !r.setting->choices.empty()) {   // (#1633: a module's button: the widest text its cell shows)
             float w = 0;
             for (const char* t : r.setting->choices) w = std::max(w, ui::size_of(c.f.strong, px, t).x);
@@ -2156,8 +2174,13 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
     int foot = std::max(next_row[0], next_row[1]);
     if (tools) foot++;
     const int dev_row = foot;
-    for (int i = dev; i < n; ++i) vrow[i] = dev_row + 1 + (i - dev);
-    const int visual_count = n > dev ? dev_row + 1 + (n - dev) : foot;
+    int extra = 0, sections = 0, section_row[8] = {};   // (a section after Developer: a gap, then its heading over its rows)
+    for (int i = dev; i < n; ++i) {
+        while (sections < debug_section_count && debug_sections[sections][1] == i)
+            extra += 2, section_row[sections++] = dev_row + (i - dev) + extra;
+        vrow[i] = dev_row + 1 + (i - dev) + extra;
+    }
+    const int visual_count = n > dev ? dev_row + 1 + (n - dev) + extra : foot;
     int sel_at = 0;
     for (int i = 0; i < n; ++i)
         if (order[i] == sel) sel_at = vrow[i];
@@ -2182,6 +2205,8 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
     for (int g = 0; tools && g < kDebugGroups; ++g)
         heading(head_col[g] ? mid + gap * .5f : left, !two || head_col[g] ? right : mid - gap * .5f, head_row[g], debug_groups[g].title);
     if (dev_head >= 0 && n > dev) heading(left, right, dev_row, rows[tab_row_to_global(TAB_DEBUG, dev_head)].name);
+    for (int k = 0; k < sections; ++k)   // (only those with a row shown: a heading over nothing is left out)
+        heading(left, right, section_row[k], rows[tab_row_to_global(TAB_DEBUG, debug_sections[k][0])].name);
     for (int i = 0; i < n; ++i) {
         const int k = order[i];
         const Row& r = rows[tab_row_to_global(TAB_DEBUG, k)];
@@ -2202,6 +2227,9 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
                         row_fixed(r.value));
         } else if (r.setting && r.setting->kind == menu::Kind::Action && r.setting->text) {   // (#1633: a module's button's text)
             choice_cell(c, va, vb, r.setting->text(0), selected, false, false);
+        } else if (r.setting && r.setting->kind == menu::Kind::Page) {   // (a page it opens: its text, and the arrow, as elsewhere)
+            choice_cell(c, va, vb, r.setting->text ? r.setting->text(0) : "", selected, false, false);
+            ui::triangle(c, ImVec2(vb.x - 15 * s, (va.y + vb.y) * 0.5f), 10 * s, 1, selected ? ui::kGoldInk : ui::kInk);
         } else if (r.cheat == 0 || r.cheat == 1 || r.cheat == 7) {
             halves_cell(c, va, vb, "Off", "On", cheat_value(r.cheat) == "On", selected, false);
         } else if (age_shown(r.cheat)) {   // (Link's age now: the other half switches)
@@ -2501,7 +2529,7 @@ void draw_options(ui::Ctx& c) {
     for (int i = 0; i < TAB_COUNT; i++) {
         // (the Motion page: under Controls; the FPS counter details: under Gameplay)
         if (!tab_shown(i)) continue;   // (the Mods tab without mods)
-        const bool shown = i == (cur_tab == TAB_MOTION ? TAB_CONTROLS : cur_tab == TAB_FPS_DEV ? TAB_GAMEPLAY : cur_tab);
+        const bool shown = i == (page_parent(cur_tab) >= 0 ? page_parent(cur_tab) : cur_tab);
         if (shown || i == hover_tab) {
             // (an inset from a little below the banner's top, its upper corners rounded; the shown one with a gold line under it)
             const ImVec2 a(x + 2 * s, 7 * s), b(x + tw[i] - 2 * s, hh - 3 * s);
@@ -2601,7 +2629,7 @@ void draw_options(ui::Ctx& c) {
         } else {
             prompt_list[prompts_n++] = {ui::kConfirm, confirms ? (pending == &selr ? "Confirm" : selr.name) : selr.setting && selr.setting->verb ? selr.setting->verb : "Open"};
         }
-        if (cur_tab == TAB_MOTION || cur_tab == TAB_FPS_DEV) prompt_list[prompts_n++] = {ui::kBack, "Back"};   // (Esc: to Controls, or Gameplay)
+        if (page_parent(cur_tab) >= 0) prompt_list[prompts_n++] = {ui::kBack, "Back"};   // (Esc: to Controls, Gameplay or Debug)
         else {
             prompt_list[prompts_n++] = {ui::kTabs, "Tabs"}, prompt_list[prompts_n++] = {ui::kBack, "Close"};
         }
@@ -2683,6 +2711,7 @@ void draw_tune_bar(ui::Ctx& c) {
     // Header strip inside card: Tab Name and restart status
     const char* cur_name = cur_tab == TAB_MOTION ? "Motion" : tab_title(cur_tab);
     if (cur_tab == TAB_FPS_DEV) cur_name = "FPS counter details";
+    if (cur_tab == TAB_RECORDINGS) cur_name = "Play recording";
     const float header_y = by0 + 13 * s;
     ui::text_mid(c, c.f.heading, 14 * s, bx0 + 16 * s, header_y, ui::kGoldHi, cur_name);
 
@@ -3866,6 +3895,70 @@ const char* motion_gyro_text(int v) { return tx_gyro(v); }
 void menu_rumble_test() {
     if (host && host->version >= 32 && host->rumble_test) host->rumble_test();
 }
+// (longshot, issue 1113) the input recordings' rows (menu/input_recording.cpp): the host's input_record, input_play and
+// input_status (host/input_movie.c)
+static const char* input_refused;
+static bool input_status_stale = true;   // (a start or a stop: asked again at once)
+MenuInputStatus menu_input_status() {
+    // (asked by many rows' cells and shown hooks each frame: the host's answer kept for 50 ms, its lock taken once)
+    static MenuInputStatus kept;
+    static std::chrono::steady_clock::time_point at;
+    const auto now = std::chrono::steady_clock::now();
+    if (!input_status_stale && now - at < std::chrono::milliseconds(50)) return kept;
+    input_status_stale = false, at = now;
+    MenuInputStatus s;
+    static char why[128];
+    if (host && host->version >= 42 && host->input_status) {
+        MkwVkInputStatus h{};
+        host->input_status(&h);
+        s.mode = h.mode, s.started = h.started, s.held = h.held, s.diverged = h.diverged;
+        s.frame = h.frame, s.end = h.end, s.syncs = h.syncs, s.largest = h.largest;
+        snprintf(s.path, sizeof s.path, "%s", h.path);
+        snprintf(why, sizeof why, "%s", h.why);
+    }
+    s.refused = input_refused ? input_refused : why[0] ? why : nullptr;   // (or why the host gave the last one up)
+    kept = s;
+    return s;
+}
+void menu_input_record(int start) {
+    if (!host || host->version < 42 || !host->input_record) return;
+    input_refused = nullptr, input_status_stale = true;
+    if (!host->input_record(start) && start) input_refused = "A recording or a playback is running: stop it first.";
+}
+/// The recordings folder's files, newest first, asked of the host at most once a second (the page draws every frame)
+const char* menu_input_recording(int index) {
+    static std::vector<std::string> files;
+    static std::chrono::steady_clock::time_point at;
+    static bool have;
+    const auto now = std::chrono::steady_clock::now();
+    if (!have || now - at > std::chrono::seconds(1)) {
+        files.clear();
+        char path[1024];
+        for (int i = 0; i < 32 && host && host->version >= 42 && host->input_recording && host->input_recording(i, path, sizeof path); i++)
+            files.emplace_back(path);
+        have = true, at = now;
+    }
+    return index >= 0 && index < (int)files.size() ? files[index].c_str() : nullptr;
+}
+static void input_play(int start, int index) {
+    if (!host || host->version < 42 || !host->input_play) return;
+    static const int syncs[] = {0, 1, 60, 300};   // (Drift correction: Off, every update, every second, every 5 s)
+    const char* path = index >= 0 ? menu_input_recording(index) : nullptr;
+    if (start && index >= 0 && !path) return;
+    const int r = host->input_play(start, syncs[std::clamp(opts.input_replay_sync, 0, 3)], path);
+    input_status_stale = true;
+    if (start && r == 1 && open_now.load()) {   // (the game in view while it plays: the compact bar, on Stop playback)
+        tune_mode = true;
+        if (cur_tab == TAB_RECORDINGS) tab_selected[TAB_RECORDINGS] = 0;
+        menu_refresh = true;
+    }
+    input_refused = !start || r == 1 ? nullptr
+                    : r == -1      ? "That recording could not be played (made from the game's start, or not a recording)."
+                    : r == -2      ? "That recording starts on a map no teleport goes to: go there first."
+                                   : "A recording or a playback is running: stop it first.";
+}
+void menu_input_play(int start) { input_play(start, -1); }
+void menu_input_play_file(int index) { input_play(1, index); }
 
 void startup_fade_to(float f) { startup_fade.store(f, std::memory_order_relaxed); }
 
@@ -4389,7 +4482,7 @@ void menu_option_set(int id, int value) {
 bool bridge_row(int i) { return rows[i].value && !rows[i].heading && rows[i].cheat < 0 && row_shown(i); }
 void bridge_fill(int i, MkwVkSetting* out) {
     static const char* const tabs[] = {"graphics", "audio", "gameplay", "controls", "nfc", "mods", "debug", "motion",
-                                       "gameplay", "controls"};
+                                       "gameplay", "debug", "controls"};
     static_assert(sizeof tabs / sizeof tabs[0] == TAB_PAGE + 1, "a name for each MenuTab");
     const Row& r = rows[i];
     *out = MkwVkSetting{};
@@ -5243,15 +5336,18 @@ void menu_tick() {
         if (tune_toggle && listening == 0) tune_mode = !tune_mode, changed = true;
         if (press[5] && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS, press[5] = false, changed = true;   // (back)
         if (press[5] && cur_tab == TAB_FPS_DEV) cur_tab = TAB_GAMEPLAY, press[5] = false, changed = true;   // (back)
+        if (press[5] && cur_tab == TAB_RECORDINGS) cur_tab = TAB_DEBUG, press[5] = false, changed = true;   // (back)
         if (press[5] && cur_tab == TAB_MODS && mods_grab >= 0) mods_grab = -1, press[5] = false, changed = true;   // (puts the mod down)
         if (press[5] && pending) pending = nullptr, changed = true;   // (a Restart or Quit waiting for its second press: cancelled)
         else if (press[5] && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS, press[5] = false, changed = true;   // (back)
         else if (press[5] && cur_tab == TAB_FPS_DEV) cur_tab = TAB_GAMEPLAY, press[5] = false, changed = true;   // (back)
+        else if (press[5] && cur_tab == TAB_RECORDINGS) cur_tab = TAB_DEBUG, press[5] = false, changed = true;   // (back)
         else if (press[5] && restart_ask()) page = 5, ask_sel = 0, changed = true;   // (the restart question first)
         else if (press[5]) open_now = false, tune_mode = false, quick_debug = false;
         // (the tabs: LB and RB, Q and E, or Tab; from the Motion page, as from Controls)
         if ((tab_left || tab_right) && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS;
         if ((tab_left || tab_right) && cur_tab == TAB_FPS_DEV) cur_tab = TAB_GAMEPLAY;
+        if ((tab_left || tab_right) && cur_tab == TAB_RECORDINGS) cur_tab = TAB_DEBUG;
         if (tab_left || tab_right) {   // (the tabs shown: the Mods tab only with mods)
             do cur_tab = (cur_tab + (tab_left ? TAB_COUNT - 1 : 1)) % TAB_COUNT;
             while (!tab_shown(cur_tab));
@@ -5304,6 +5400,8 @@ void menu_tick() {
             } else if (r.cheat >= 0) cheat_press(r.cheat, press, changed);   // (a debug tool: on the Debug tab itself)
             else if (press[7] && is_motion_row(r)) cur_tab = TAB_MOTION, tab_selected[TAB_MOTION] = 0, press[7] = false, changed = true;
             else if (press[7] && is_fps_dev_row(r)) cur_tab = TAB_FPS_DEV, tab_selected[TAB_FPS_DEV] = 0, press[7] = false, changed = true;
+            else if (press[7] && is_recordings_row(r))
+                cur_tab = TAB_RECORDINGS, tab_selected[TAB_RECORDINGS] = 0, press[7] = false, changed = true;
             else if (press[7] && r.setting && r.setting->on_activate &&   // (#1633: a module's button, unless locked)
                      !(r.setting->locked && r.setting->locked()))
                 r.setting->on_activate(), press[7] = false, changed = true;

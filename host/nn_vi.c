@@ -171,6 +171,13 @@ static void fps_refresh(void) {
         env = e ? fps_of(atoi(e)) : 0;
         start = hos_ini_option("frame_rate_cap", 0);
         movie_pace = env_on_or("HOS_MOVIE_PACE", 1);   /* (0: the movie pacing off) */
+        /* (longshot, issue 1113: off for a run that records or plays an input recording from its start, whose frames are the
+           game clock's at the 60 cap: a movie's wall-clock pacing would leave the Per frame step, and its frames with it) */
+        const char *rec = getenv("HOS_INPUT_RECORD"), *play = getenv("HOS_INPUT_PLAY");
+        if (movie_pace && ((rec && *rec) || (play && *play))) {
+            movie_pace = 0;
+            hos_log("vi: no movie pacing in a run that records or plays an input recording (HOS_INPUT_RECORD, HOS_INPUT_PLAY)");
+        }
     }
     const int i = env ? 0 : rx_option(HOS_OPT_FPS_CAP, start);
     const int row = env ? env : fps_of(i == -1 ? 30 : caps[i >= 0 && i < CAPS ? i : 0]);

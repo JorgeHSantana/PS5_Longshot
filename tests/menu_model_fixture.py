@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from srccut import block  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-TABS = ["TAB_GRAPHICS", "TAB_AUDIO", "TAB_GAMEPLAY", "TAB_CONTROLS", "TAB_NFC", "TAB_MODS", "TAB_DEBUG", "TAB_MOTION", "TAB_FPS_DEV", "TAB_PAGE"]
+TABS = ["TAB_GRAPHICS", "TAB_AUDIO", "TAB_GAMEPLAY", "TAB_CONTROLS", "TAB_NFC", "TAB_MODS", "TAB_DEBUG", "TAB_MOTION", "TAB_FPS_DEV", "TAB_RECORDINGS", "TAB_PAGE"]
 
 # (an item of a page as built: heading, its key (a section's id), label, shown (a module's row with a shown() of its own, which
 # can hide it), and value: the core row's value expression in vk_menu.cpp ("&opts.x", "nullptr"), "" for a module's)
@@ -56,7 +56,7 @@ def menu_sources(root=None):
 
 TAB_OF_PAGE = {"graphics": "TAB_GRAPHICS", "audio": "TAB_AUDIO", "gameplay": "TAB_GAMEPLAY", "controls": "TAB_CONTROLS",
                "nfc": "TAB_NFC", "mods": "TAB_MODS", "debug": "TAB_DEBUG", "motion": "TAB_MOTION", "fps_details": "TAB_FPS_DEV",
-               "controls_page": "TAB_PAGE"}
+               "recordings": "TAB_RECORDINGS", "controls_page": "TAB_PAGE"}
 
 
 def _fields(text):

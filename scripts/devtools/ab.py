@@ -4,7 +4,8 @@
     dev.py ab --env NAME=VALUE [...]            a switch, set against unset, on one runtime (no build)
     dev.py ab --a NAME=VALUE --b NAME=VALUE     a switch, two values
     dev.py ab                                   this checkout's committed change (its pack) against its base (main)
-       [--scene NAME | --save FOLDER [--slot NN]] [--seconds 60] [--runs 3] [--warmup 10] [--options FILE] [--dynamic]
+       [--scene NAME | --save FOLDER [--slot NN] | --route ROUTE [--sync N]] [--seconds 60] [--runs 3] [--warmup 10]
+       [--options FILE] [--dynamic]
        [--set NAME=VALUE] [--framegen] [--vsync] [--headless] [--runtime DIR] [--separate] [--allow KEY] [--dirty]
        [--threads] [--dry-run] [--scenes]
 
@@ -15,6 +16,10 @@ What it does:
     `dev.py queue run --mode timing`), started once, from a save in a user folder of the run's own, the title skipped by
     the game's Skip title screen row, the scene reached with the Debug tab's teleport and age switch, then a warm-up
     until no frame waits for a pipeline or a shader, then --seconds measured from the frame trace (RX_VK_FRAME_TRACE);
+  - --route ROUTE (assets/routes/, scripts/devtools/routes.py): the route's repository save instead of a scene, and after
+    the warm-up the route played over the control bridge (its `play`, put back at every --sync-th update, 1 by default):
+    the measured stretch is the route, the same moving input on both sides; a run whose replay diverged (Link past 1 m
+    from the route) or missed one of its loads is refused;
   - runs interleaved A, B, A, B, every one from a copy of one pinned options file (cap off: HOS_FPS_MAX=1000; V-Sync
     and frame generation off unless asked; the Render resolution at 67 % where the file leaves it at Auto, the game's
     dynamic resolution, unless --dynamic), and refused when the runs differ in what ran (the menu's settings, the
@@ -37,7 +42,7 @@ import statistics
 import sys
 import time
 
-from . import build, common, packs, vcs
+from . import build, common, packs, routes, vcs
 
 WHO = "dev.py ab"
 # (the scenes: a repository save (assets/saves) to start from, then the Debug tab's teleport to a destination of
@@ -649,7 +654,7 @@ def run_one(plan, side, k, pinned):
             time.sleep(1)
         lap(clock, "title and load")
         phase = "teleport"
-        if scene["age"] and st["age"] != scene["age"]:
+        if scene["age"] and st["age"] != scene["age"] and not scene.get("route"):
             drive.switch_age(g, scene["age"])
         if scene["dest"]:
             drive.teleport(g, scene["dest"][0], scene["dest"][1], scene["age"])
@@ -671,7 +676,17 @@ def run_one(plan, side, k, pinned):
         if not rows:
             raise drive.Failed("no frame trace at %s (RX_VK_FRAME_TRACE)" % trace)
         start = num(rows[-1], "at_ns")
-        time.sleep(plan["seconds"])
+        if scene.get("route"):   # (the route played from where the save loaded Link: measured while it plays)
+            g.must("play", timeout=30, path=scene["route"]["path"], sync=scene["route"]["sync"])
+            rows = read_trace(trace)
+            start = num(rows[-1], "at_ns") if rows else start
+            end = time.monotonic() + plan["seconds"] + 120
+            while (g.must("status").get("recorder") or {}).get("mode") not in ("off", None):
+                if time.monotonic() > end:
+                    raise drive.Failed("the route did not end within %d s of its length" % 120)
+                time.sleep(0.5)
+        else:
+            time.sleep(plan["seconds"])
         time.sleep(3)   # (the trace is flushed every 60 frames)
         lap(clock, "measured")
         phase = "stop"
@@ -689,6 +704,13 @@ def run_one(plan, side, k, pinned):
         with open(info["log"], encoding="utf-8", errors="replace") as f:
             text = f.read()
         facts = log_facts(text)
+        if scene.get("route"):   # (a route's replay that went another way measured another run: refused)
+            gone = re.search(r"input: the replay diverged at frame (\d+): ([^\n]*)", text)
+            if gone:
+                raise drive.Failed("the route's replay diverged at frame %s: %s" % gone.groups())
+            met = re.search(r"input: (\d+) of (\d+) anchors met", text)
+            if met and met.group(1) != met.group(2):
+                raise drive.Failed("the route's replay met %s of its %s loads" % met.groups())
         skip = set(plan["compared"]) | set(plan["allow"]) | {"HOS_AB"}
         r.update(ran=dict(what_ran(status, options, facts, skip), version=facts["version"]), gpu=facts["gpu"],
                  cold=sum(1 for x in rows if cold(x)), log_lines=[l for l in [facts["switches_line"]] + facts["ab_lines"] if l])
@@ -761,12 +783,23 @@ def cmd_ab(a):
         die("--set names a compared switch: %s" % ", ".join(sorted(clash)))
     if a.runs < 1 or a.seconds < 10:
         die("--runs 1 or more, --seconds 10 or more")
-    scene = scene_of(a.scene, a.save, a.slot)
+    if a.route:
+        if a.save:
+            die("--route or --save, not both: a route starts from its own repository save")
+        r = routes.read_route(routes.route_file(a.route))
+        if r["seconds"] < 10:
+            die("the route %s is %.1f s: 10 s or more to measure" % (r["name"], r["seconds"]))
+        scene = {"name": "route-" + r["name"], "save": r["save"], "folder": None, "slot": None, "to": None, "age": None,
+                 "hour": None, "about": "the route %s (%.0f s from %s, %s)" % (r["name"], r["seconds"], r["save"], r["map"]),
+                 "route": {"path": r["path"], "sync": a.sync, "frames": r["frames"]}}
+        a.seconds = int(r["seconds"])
+    else:
+        scene = scene_of(a.scene, a.save, a.slot)
     for p in (a.options, scene["folder"]):
         if p and not os.path.exists(p):
             die("no such file or folder: %s" % p)
     from tours import route
-    scene["dest"] = destination(scene, route.actions())
+    scene["dest"] = None if scene.get("route") else destination(scene, route.actions())
     common_env = dict(COMMON_ENV, **both)
     if a.headless:
         common_env["HOS_HEADLESS"] = "1"
@@ -855,6 +888,9 @@ def add_commands(sub):
     p.add_argument("--scenes", action="store_true", help="list the scenes")
     p.add_argument("--save", metavar="FOLDER", help="start from this save folder instead of the scene's repository save")
     p.add_argument("--slot", help="with --save: that slot alone")
+    p.add_argument("--route", metavar="ROUTE", help="measure while a route (assets/routes/ or a file) plays, from its save")
+    p.add_argument("--sync", type=int, default=1, help="with --route: put Link and the camera back at every N-th update "
+                                                       "(0 never; default %(default)s)")
     p.add_argument("--seconds", type=int, default=60, help="measured a run (default %(default)s)")
     p.add_argument("--runs", type=int, default=3, help="pairs of runs, or HOS_AB runs (default %(default)s)")
     p.add_argument("--warmup", type=int, default=10, help="seconds of warm-up at least, then until no frame waits for a "

@@ -13,6 +13,10 @@ Measure in the game, through the queue (scripts/devtools/ab.py):
     dev.py ab [--env NAME=VALUE | --a ... --b ...] [--scene NAME] [--runs 3] [--seconds 60] [--dry-run]
                                             a switch (set against unset), or this checkout's change against its base:
                                             the scene loaded, warmed up, interleaved timing runs, the Measurements written
+    dev.py ab --route ROUTE ...             the same over a route (assets/routes/): the input recorded once, given back
+Routes, input recordings for tests and dev.py ab (scripts/devtools/routes.py):
+    dev.py route record --save NAME --name ROUTE    play it once from a repository save: to assets/routes/
+    dev.py route check | list               a route holds only what a route may; the routes
 The PC's job queue (scripts/devtools/jobqueue.py):
     dev.py queue run NAME [--mode MODE] -- CMD...   CMD when the queue lets it
     dev.py queue status | history | cancel JOB
@@ -37,13 +41,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # (python -I leaves the script's folder off the path)
-from devtools import ab, build, home, jobqueue, packs, update  # noqa: E402
+from devtools import ab, build, home, jobqueue, packs, routes, update  # noqa: E402
 
 
 def parser():
     p = argparse.ArgumentParser(prog="dev.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="group", required=True, metavar="COMMAND")
-    for m in (build, ab, jobqueue, packs, home, update):
+    for m in (build, ab, routes, jobqueue, packs, home, update):
         m.add_commands(sub)
     return p
 

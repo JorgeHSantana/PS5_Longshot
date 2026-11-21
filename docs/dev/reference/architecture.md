@@ -468,7 +468,7 @@ MENU_MODULE(hdr) {
 - **Its texts are the translations' keys**: a row moved keeps its label, help and choices to the character.
 - **Where it goes**: `after(key)` / `before(key)` beside a row, `first()`, `last()`, `order(n)`, `at(n)` within its
   section; a section (`heading(id, label, place)`) is placed among its tab's the same way. The tabs are `graphics`,
-  `audio`, `gameplay`, `controls`, `nfc`, `mods`, `debug` and the pages `motion`, `fps_details`, `controls_page`. The
+  `audio`, `gameplay`, `controls`, `nfc`, `mods`, `debug` and the pages `motion`, `fps_details`, `recordings`, `controls_page`. The
   order is worked out once, whatever order the modules register in.
 - **Kinds**: Choice, Toggle, Slider, headings, Action (a button: `on_activate`, `verb`, `confirm`) and Page (`opens`).
 - **Hooks** instead of checks by label elsewhere: `shown`, `locked`, `text`, `hint`, `step_fn`, `on_change`,

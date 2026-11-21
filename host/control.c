@@ -937,6 +937,21 @@ static void status_reply(int ci, const char *id, const char *sample, int64_t now
     else buf_puts(&b, "null");
     buf_puts(&b, ",\"game\":");
     status_game(&b, sample);
+    HosControlRecorder rec;   /* (longshot, issue 1113: an input recording now) */
+    if (G.game->recorder) {
+        memset(&rec, 0, sizeof rec);
+        G.game->recorder(&rec);
+        static const char *const modes[] = {"off", "recording", "playing"};
+        buf_printf(&b, ",\"recorder\":{\"mode\":\"%s\",\"started\":%s,\"waiting\":%s,\"frame\":%u,\"end\":%u,"
+                   "\"link_apart\":%u,\"link_checked\":%u,\"syncs\":%u,\"largest\":%.4f,\"diverged\":%s,\"anchors\":%u,"
+                   "\"anchors_wanted\":%u,\"path\":", modes[rec.mode >= 0 && rec.mode <= 2 ? rec.mode : 0],
+                   rec.started ? "true" : "false", rec.held ? "true" : "false", rec.frame, rec.end, rec.link_apart,
+                   rec.link_checked, rec.syncs, (double)rec.largest, rec.diverged ? "true" : "false", rec.anchors,
+                   rec.anchors_wanted);
+        if (rec.path[0]) buf_str(&b, rec.path);
+        else buf_puts(&b, "null");
+        buf_puts(&b, "}");
+    } else buf_puts(&b, ",\"recorder\":null");
     buf_puts(&b, ",\"version\":");
     buf_str(&b, G.game->version ? G.game->version : "unknown");
     const char *r = G.game->renderer ? G.game->renderer() : NULL;
@@ -1483,6 +1498,70 @@ static int teleport_done(Pending *p, Conn *c, int64_t now) {
 
 static void conn_flush_now(Conn *c);
 static void transport_cleanup(void);
+/* ---- record and play: input recordings (longshot, issue 1113: host/input_movie.c) ---- */
+/* {"cmd":"record","action":"start","path":<file>,"route":true} or {"cmd":"record","action":"stop"}; the reply's "path" is
+   the recording's file */
+static void cmd_record(int ci, const JDoc *d, int req, const char *id) {
+    Conn *c = &G.conns[ci];
+    if (!G.game->record_start || !G.game->record_stop || !G.game->recorder)
+        return reply_error(c, id, "unavailable", "no input recordings here");
+    const char *action = str_arg(d, req, "action");
+    HosControlRecorder rec;
+    memset(&rec, 0, sizeof rec);
+    if (!action || !strcmp(action, "start")) {
+        const char *path = str_arg(d, req, "path");
+        if (!G.game->record_start(path && *path ? path : NULL, bool_arg(d, req, "route", 0)))
+            return reply_error(c, id, "busy", "a recording or a playback is running: stop it first");
+    } else if (!strcmp(action, "stop")) {
+        G.game->recorder(&rec);
+        if (rec.mode != 1) return reply_error(c, id, "not_recording", "nothing is being recorded");
+        HosControlRecorder after;
+        memset(&after, 0, sizeof after);
+        G.game->record_stop();
+        G.game->recorder(&after);   /* (written: the last recording made is this one; else it had not started, or failed) */
+        Buf b = {0};
+        reply_start(&b, id, 1);
+        buf_puts(&b, ",\"path\":");
+        buf_str(&b, rec.path);
+        buf_printf(&b, ",\"written\":%s", strcmp(after.path, rec.path) || !rec.started ? "false" : "true");
+        reply_end(c, &b);
+        return;
+    } else return reply_error(c, id, "bad_request", "record: action, start or stop");
+    G.game->recorder(&rec);
+    Buf b = {0};
+    reply_start(&b, id, 1);
+    buf_puts(&b, ",\"path\":");
+    if (rec.path[0]) buf_str(&b, rec.path);
+    else buf_puts(&b, "null");
+    reply_end(c, &b);
+}
+/* {"cmd":"play","path":<file>,"sync":<updates>,"sync_max":<m>} (path: the last recording made; sync 1, sync_max 1 by
+   default), or {"cmd":"play","action":"stop"} */
+static void cmd_play(int ci, const JDoc *d, int req, const char *id) {
+    Conn *c = &G.conns[ci];
+    if (!G.game->play_start || !G.game->play_stop) return reply_error(c, id, "unavailable", "no input recordings here");
+    const char *action = str_arg(d, req, "action");
+    if (action && !strcmp(action, "stop")) {
+        G.game->play_stop();
+        Buf b = {0};
+        reply_start(&b, id, 1);
+        reply_end(c, &b);
+        return;
+    }
+    if (action && strcmp(action, "start")) return reply_error(c, id, "bad_request", "play: action, start or stop");
+    int bad = 0;
+    const double sync = num_arg(d, req, "sync", 1, &bad), sync_max = num_arg(d, req, "sync_max", 1, &bad);
+    if (bad || sync < 0 || sync > 1e6 || !(sync_max > 0) || sync_max > 1e4)
+        return reply_error(c, id, "bad_request", "play: sync (updates between corrections, 0 none), sync_max (metres)");
+    const char *path = str_arg(d, req, "path");
+    const int r = G.game->play_start(path && *path ? path : NULL, (int)sync, (float)sync_max);
+    if (r == 0) return reply_error(c, id, "busy", "a recording or a playback is running: stop it first");
+    if (r == -1) return reply_error(c, id, "not_found", "no such recording (or none made yet), or not ls-input-recording/1");
+    if (r == -2) return reply_error(c, id, "wrong_map", "the recording starts on a map no teleport goes to");
+    Buf b = {0};
+    reply_start(&b, id, 1);
+    reply_end(c, &b);
+}
 static void cmd_quit(int ci, const char *id) {
     Conn *c = &G.conns[ci];
     Buf b = {0};
@@ -1904,6 +1983,8 @@ static void request(int ci, const char *line, size_t len) {
         reply_ok(c, id);
     } else if (!strcmp(cmd, "quit")) cmd_quit(ci, id);
     else if (!strcmp(cmd, "relaunch")) cmd_relaunch(ci, id);
+    else if (!strcmp(cmd, "record")) cmd_record(ci, &d, req, id);
+    else if (!strcmp(cmd, "play")) cmd_play(ci, &d, req, id);
     else if (!strncmp(cmd, "mem_", 4) || !strcmp(cmd, "symbols")) cmd_mem(ci, &d, req, id, cmd);
     else reply_error(c, id, "unknown_cmd", "no command %.60s", cmd);
 }
@@ -2528,6 +2609,21 @@ void hos_oot_sample_cancel(uint64_t ticket);
 int hos_oot_sample(uint64_t ticket, char *out, size_t cap);
 void hos_oot_watch(int slot, const HosControlOotWatch *watch);
 int hos_oot_poll(int slot, char *out, size_t cap);
+/* (longshot, issue 1113) input recordings: host/input_movie.c's start, stop and status */
+#include "input_movie.h"
+int hos_input_record_start(const char *path, int route);
+void hos_input_record_stop(void);
+int hos_input_play_start(const char *path, int sync, float sync_max);
+void hos_input_play_stop(void);
+void hos_input_movie_status(HosInputMovieStatus *out);
+static void game_recorder(HosControlRecorder *out) {
+    HosInputMovieStatus s;
+    hos_input_movie_status(&s);
+    out->mode = s.mode, out->started = s.started, out->held = s.held, out->diverged = s.diverged;
+    out->frame = s.frame, out->end = s.end, out->link_apart = s.link_apart, out->link_checked = s.link_checked;
+    out->syncs = s.syncs, out->anchors = s.anchors, out->anchors_wanted = s.anchors_wanted, out->largest = s.largest;
+    snprintf(out->path, sizeof out->path, "%s", s.path);
+}
 static HosControlGame game = {
     .frame = game_frame, .frame_info = rx_control_frame_info, .shot = rx_control_shot, .setting = rx_control_setting,
     .setting_set = rx_control_setting_set, .mem_region = game_mem_region, .mem_read = game_mem_read,
@@ -2537,7 +2633,9 @@ static HosControlGame game = {
     .teleport_cancel = hos_oot_teleport_cancel, .age = hos_oot_age_ask, .oot_state = hos_oot_state,
     .oot_sample_ask = hos_oot_sample_ask, .oot_sample_cancel = hos_oot_sample_cancel,
     .oot_sample = hos_oot_sample, .oot_watch = hos_oot_watch, .oot_poll = hos_oot_poll,
-    .relaunch = game_relaunch, .picture = rx_control_picture};
+    .relaunch = game_relaunch, .picture = rx_control_picture,
+    .record_start = hos_input_record_start, .record_stop = hos_input_record_stop, .play_start = hos_input_play_start,
+    .play_stop = hos_input_play_stop, .recorder = game_recorder};
 
 void hos_control_start(const char *version) {
     const char *path = getenv("HOS_CONTROL");

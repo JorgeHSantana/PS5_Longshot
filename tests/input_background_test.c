@@ -7,6 +7,7 @@
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); exit(1); } } while (0)
 #include "input_constants.inc"
 #include "../host/hold_toggle.h"
+#include "../host/input_movie.h"   /* (MoviePad: npad_states hands each read to the input recording, host/input_movie.c) */
 static int toggle_flags, toggle_reset, sprint_reset_pending;
 static int controls_case, mouse_mode, native_free = 1, mouse_pointing;
 static int mouse_let_go, game_menu_mouse, side_binds;   /* (the game's menus and the mouse's side buttons: menu_side_case) */
@@ -78,6 +79,10 @@ int hos_control_input(uint64_t *buttons, int32_t stick[4]) {
         if (bridge_stick[i]) stick[i] = bridge_stick[i];
     return bridge_active;
 }
+/* (no recording and no playback here: every read is the player's, and each one is offered to the recording once) */
+static int movie_begins, movie_ends;
+int hos_input_movie_begin(MoviePad *given) { (void)given; movie_begins++; return 0; }
+void hos_input_movie_end(const MoviePad *p) { (void)p; movie_ends++; CHECK(movie_ends == movie_begins); }
 static void *at(uint64_t address) { CHECK(address <= 512 - 8); return memory + address; }
 #define GP(a) at(a)
 static void *hos_guest_range(uint64_t a, uint64_t n) { return a <= 512 && n <= 512 - a ? memory + a : NULL; }

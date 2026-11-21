@@ -148,6 +148,7 @@ static size_t hos_log_redact(char *out, size_t cap, const char *line) { snprintf
 /* HOS_FATAL */
 void rx_close_asked(void) {}
 void hos_fs_wait_writes(void) {}
+void hos_input_movie_close(void) {}   /* (host/input_movie.c: no recording here) */
 /* CLOSE_FINISH */
 /* CONTROL_QUIT */
 static int relaunch_asked = 1;

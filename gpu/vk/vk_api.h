@@ -14,10 +14,19 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 41   /* (40: HOS_BIND_SPRINT_TOGGLE; 41: live output preview) */
+#define MKWVK_API_VERSION 42   /* (40: HOS_BIND_SPRINT_TOGGLE; 41: live output preview; 42: input recordings) */
 
 enum { OUTPUT_TRIAL_EXPIRED, OUTPUT_TRIAL_PREPARING, OUTPUT_TRIAL_READY, OUTPUT_TRIAL_ACTIVE, OUTPUT_TRIAL_SHOWN };
 enum { HOS_MONITOR_CURRENT = 1, HOS_MONITOR_PRIMARY = 2 };
+/* (version 42) what an input recording does now (MkwVkHost.input_status; host/input_movie.h's HosInputMovieStatus) */
+typedef struct MkwVkInputStatus {
+    int mode;   /* 0 nothing, 1 recording, 2 playing */
+    int started, held, diverged;
+    uint32_t frame, end, link_apart, syncs;
+    float largest;   /* metres: Link's largest correction */
+    char path[512];  /* the file recorded or played; with nothing, the last recording made ("" none) */
+    char why[128];   /* why the last playback was given up before its start ("" none) */
+} MkwVkInputStatus;
 typedef struct MkwVkMonitor {
     char id[512];             /* opaque persistent preference; never a runtime handle or list index */
     char name[256];           /* UTF-8 label, may collide: the UI also shows dimensions */
@@ -366,6 +375,16 @@ typedef struct MkwVkHost {
     int (*ab_value)(const char *name, int normal);
     /* Version 41: request a live output preview. */
     int (*output_preview_request)(uint32_t width, uint32_t height);
+    /* (version 42, longshot) input recordings (host/input_movie.c), for the Insert menu's Debug tab (gpu/vk/menu/
+       input_recording.cpp). input_record: start 1 a recording to the player's recordings folder from Link's next update, 0 its
+       stop; 1 done, 0 something is recorded or played already. input_play: start 1 the recording at path (NULL: the last
+       made, or the folder's newest), put back at every sync-th update (HOS_INPUT_SYNC's; 0 never), 0 its stop; 1 started,
+       0 busy, -1 none, -2 it starts on a map no teleport goes to. input_status: what is recorded or played now.
+       input_recording: the i-th newest of the recordings folder (its path), 0 past the last */
+    int (*input_record)(int start);
+    int (*input_play)(int start, int sync, const char *path);
+    void (*input_status)(MkwVkInputStatus *out);
+    int (*input_recording)(int i, char *out, size_t cap);
 } MkwVkHost;
 /* (version 35) a cheat's kind: a heading (no opcodes), a data cheat (switched), a master cheat (always on), not supported (note) */
 enum { MKWVK_CHEAT_HEADING, MKWVK_CHEAT_DATA, MKWVK_CHEAT_MASTER, MKWVK_CHEAT_UNSUPPORTED };

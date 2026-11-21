@@ -458,6 +458,34 @@ int hos_cheat_info(int i, const char **name, const char **mod, const char **note
 void hos_cheat_set(int i, int on);
 
 int nvn_output_preview_request(uint32_t width, uint32_t height);
+/* (longshot, issue 1113) MkwVkHost's input recordings (version 42): host/input_movie.c's start, stop and status, for the
+   Insert menu's Debug tab */
+#include "input_movie.h"
+int hos_input_record_start(const char *path, int route);
+void hos_input_record_stop(void);
+int hos_input_play_start(const char *path, int sync, float sync_max);
+void hos_input_play_stop(void);
+void hos_input_movie_status(HosInputMovieStatus *out);
+static int host_input_record(int start) {
+    if (start) return hos_input_record_start(NULL, 0);
+    hos_input_record_stop();
+    return 1;
+}
+int hos_input_recording_at(int i, char *out, size_t cap);
+static int host_input_play(int start, int sync, const char *path) {
+    if (start) return hos_input_play_start(path, sync, 1.0f);
+    hos_input_play_stop();
+    return 1;
+}
+static void host_input_status(MkwVkInputStatus *out) {
+    HosInputMovieStatus s;
+    hos_input_movie_status(&s);
+    memset(out, 0, sizeof *out);
+    out->mode = s.mode, out->started = s.started, out->held = s.held, out->diverged = s.diverged;
+    out->frame = s.frame, out->end = s.end, out->link_apart = s.link_apart, out->syncs = s.syncs, out->largest = s.largest;
+    snprintf(out->path, sizeof out->path, "%s", s.path);
+    snprintf(out->why, sizeof out->why, "%s", s.why);
+}
 static const MkwVkHost vk_host = {
     MKWVK_API_VERSION, host_log, hos_guest_base, hos_guest_size, hos_gpu_ptr, nvn_gpu_guest, nvn_gpu_read,
     nvn_gpu_write, host_collect, host_free_pages, host_mark_written, hos_ticks, hos_now_ns, nvn_tex_layout,
@@ -476,6 +504,8 @@ static const MkwVkHost vk_host = {
     hos_mod_info, hos_mod_edit, hos_mods_changed, hos_cheat_info, hos_cheat_set,
     host_ab_value,  /* (version 36, longshot: a renderer switch's A/B value, host/hos_ab.c) */
     nvn_output_preview_request,
+    host_input_record, host_input_play, host_input_status,   /* (version 42, longshot: input recordings, host/input_movie.c) */
+    hos_input_recording_at,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
@@ -855,7 +885,14 @@ int rx_guest_imported(uint64_t lo, uint64_t hi) {
     return r;
 }
 /* (nvn_native.c: the CPU set an event's value) in order with the submits, for the GPU's waits on it */
-int rx_option(int id, int otherwise) { return vk && vk->option ? vk->option(id) : otherwise; }
+/* (longshot, issue 1113) an input recording's playback answers the Debug tools rows it holds (host/input_movie.c): the
+   player's menu changes nothing in a replay, nor the replay the player's menu */
+int hos_input_movie_option(int id, int *v);
+int rx_option(int id, int otherwise) {
+    int v;
+    if (hos_input_movie_option(id, &v)) return v;
+    return vk && vk->option ? vk->option(id) : otherwise;
+}
 void rx_option_set(int id, int value) { if (vk && vk->option_set) vk->option_set(id, value); }
 /* (longshot) the control bridge (host/control.c): the Vulkan back end's, none without it (0) */
 int rx_control_frame_info(int64_t *presents, int64_t *draws, int *width, int *height) {

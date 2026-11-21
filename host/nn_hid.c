@@ -40,6 +40,8 @@
 #include "../gpu/vk/vk_api.h"   /* (the controls' names: HOS_SW_*, HOS_PAD_*) */
 #include "hos_motion.h"
 #include "hold_toggle.h"
+#include "input_movie.h"   /* (MoviePad, MovieMotion: input recordings) */
+_Static_assert(sizeof(HosMotionState) == sizeof(((MovieMotion *)0)->v), "a motion reading is 18 floats in a recording");
 #include "hos_atomic_file.h"   /* (the sensitivity is written whole or not at all) */
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
@@ -232,6 +234,18 @@ static void mouse_setup(void) {   /* (once: the sensitivity kept in <user>/mouse
     }
 }
 
+/* (mouse_native.c) The sensitivity the native mouse camera turns by: hos_mouse_sens once a read went the mouse's way
+   (mouse_setup and mouse_sens_keys set it up there), and before that HOS_MOUSE_SENS or the menu's, 0.1 to 5 as its keys
+   keep it: a test script's MX= and MY= under HOS_INPUT_EXCLUSIVE, which returns before the mouse, turned the camera by 0
+   degrees. Nothing is set up here: mouse_sens_keys still moves an old mouse_sens.txt into the menu at the first read */
+double hos_mouse_sensitivity(void) {
+    double s = hos_mouse_sens;
+    if (s > 0) return s;
+    const char *e = getenv("HOS_MOUSE_SENS");
+    s = e && atof(e) > 0 ? atof(e) : rx_option(7, 100) / 100.0;
+    return s < 0.1 ? 0.1 : s > 5 ? 5 : s;
+}
+
 static int mouse_stick(int32_t *rx, int32_t *ry, int pointing) {
     static int64_t next_tick;
     static int32_t shown[2];
@@ -310,7 +324,7 @@ static int game_in_front(void) {
 /* HOS_INPUT_SCRIPT, and HOS_INPUT_LIVE=<file>: lines appended to that file while the game runs are presses in the
    script's syntax, their times counted from when the line is read ("0:LUP/2000,2:A"): a test can steer the game
    by looking at its screenshots. */
-typedef struct { int64_t start_ms, end_ms; uint64_t buttons; int32_t stick[4]; int host; } Press;   /* (host: hos_hid_tap's) */
+typedef struct { int64_t start_ms, end_ms; uint64_t buttons; int32_t stick[4]; int32_t mouse[2]; int host; } Press;   /* (host: hos_hid_tap's) */
 #define MAX_PRESSES 1024
 static Press presses[MAX_PRESSES];
 static int npresses = -1;
@@ -418,6 +432,10 @@ static int parse_presses(const char *s, int64_t base_ms, int live) {
         int64_t hold = 200;
         for (;;) {
             size_t n = strcspn(s, "+/,\r\n");
+            /* (MX=<counts>, MY=<counts>: the mouse's motion each frame while it is held, for the native mouse camera's tests:
+               hos_script_mouse_take) */
+            if (n > 3 && s[0] == 'M' && (s[1] == 'X' || s[1] == 'Y') && s[2] == '=')
+                p.mouse[s[1] == 'Y'] = (int32_t)strtol(s + 3, NULL, 10);
             for (unsigned i = 0; i < sizeof names / sizeof *names; i++)
                 if (strlen(names[i].name) == n && !strncmp(s, names[i].name, n)) {
                     if (names[i].b >= 0) p.buttons |= 1ULL << names[i].b;
@@ -452,6 +470,14 @@ static void host_drag_read(int32_t stick[4]);   /* (above) */
 
 /* (the host's taps go to *taps, not *buttons: they are the game's menus' mouse clicks, not the player's presses, so
    hold-to-toggle does not latch them) */
+/* (the script's mouse motion, MX= and MY=, as counts the native mouse camera takes with the window's: host/mouse_native.c) */
+static int32_t script_mouse[2];   /* (the controller's thread adds, the camera's update takes) */
+int hos_script_mouse_take(int32_t *dx, int32_t *dy) {
+    *dx = __atomic_exchange_n(&script_mouse[0], 0, __ATOMIC_RELAXED);
+    *dy = __atomic_exchange_n(&script_mouse[1], 0, __ATOMIC_RELAXED);
+    return *dx || *dy;
+}
+
 static void scripted_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) {
     if (npresses < 0) parse_script();
     live_input();
@@ -462,6 +488,8 @@ static void scripted_input(uint64_t *buttons, uint64_t *taps, int32_t stick[4]) 
             *(presses[i].host ? taps : buttons) |= presses[i].buttons;
             for (int k = 0; k < 4; k++)
                 if (presses[i].stick[k]) stick[k] = presses[i].stick[k];
+            if (presses[i].mouse[0]) __atomic_fetch_add(&script_mouse[0], presses[i].mouse[0], __ATOMIC_RELAXED);
+            if (presses[i].mouse[1]) __atomic_fetch_add(&script_mouse[1], presses[i].mouse[1], __ATOMIC_RELAXED);
         }
     host_stick_read(stick);
     host_drag_read(stick);
@@ -1433,15 +1461,34 @@ static void npad_states(Ctx *c) {
                     (unsigned long long)c->x[30]);
         }
     }
-    if (connected) {
+    /* (longshot, issue 1113) HOS_INPUT_PLAY: a recording's read is the recording's alone (host/input_movie.c): none of the
+       merge below runs, so neither the player's devices, the script, the bridge nor the toggles reach the game.
+       HOS_INPUT_RECORD: a game frame has one pad, its first read's (its later reads are given the same: an input that
+       changed between two reads of a frame reached the game's jobs or not as their race went) */
+    int hos_input_movie_begin(MoviePad *given);
+    void hos_input_movie_end(const MoviePad *p);
+    MoviePad given;
+    const int played = connected && hos_input_movie_begin(&given);
+    uint64_t axes = 0, flight = 0;   /* (the free camera and flight cheats' inputs, taken from the sticks) */
+    int height = 0;
+    if (connected && played) {   /* (a recording given to the game, or a recorded frame's later read: the pads still read for
+                                    the Insert menu (hos_pad_raw), not the game's input; behind other windows only as the
+                                    player's Controller in background row lets them) */
+        static const char *env;
+        static int looked;
+        if (!looked) looked = 1, env = getenv("HOS_INPUT_BACKGROUND");
+        if (game_in_front() || pads_in_background(env, rx_option(4, 0))) {
+            uint64_t menu_buttons = 0;
+            int32_t menu_stick[4] = {0, 0, 0, 0};
+            pads_read(&menu_buttons, menu_stick, NULL);
+        }
+    }
+    if (connected && !played) {
         read_input(&buttons, &taps, stick);
         const int sprint_enabled = sprint_frame;
         const int synthetic_sprint = buttons >> B_SPRINT & 1;
         buttons &= ~(1ULL << B_SPRINT);
         hos_hid_buttons = buttons;   /* (cheats.c: the cheats' button conditions) */
-        uint64_t axes = 0;
-        uint64_t flight = 0;
-        int height = 0;
         const int menu_open = rx_option(1, 0);
         const uint64_t enabled = (uint32_t)rx_option(HOS_OPT_HOLD_TOGGLE, 0) &
                                  ~((1ULL << B_PLUS) | (1ULL << B_MINUS));
@@ -1499,18 +1546,31 @@ static void npad_states(Ctx *c) {
         __atomic_store_n(&free_camera_height, height, __ATOMIC_RELAXED);
     }
     uint64_t hos_title_input(uint64_t buttons);   /* totk_title.c: the title menu's credits entries */
-    if (connected) buttons = hos_title_input(buttons);
+    if (connected && !played) buttons = hos_title_input(buttons);
     uint64_t hos_frame_step_buttons(uint64_t buttons);   /* nn_vi.c: the frame step of the wheel and quick menus */
-    if (connected) buttons = hos_frame_step_buttons(buttons);
+    if (connected && !played) buttons = hos_frame_step_buttons(buttons);
     /* (no stick direction bits 16-23 in the state: the game's own controllers take bits 16-19 as the D-pad, so the left
        stick pushed forward, bit 17, held one and A pressed while running forward did not roll. They work out the
        sticks' directions from the axes themselves) */
+    /* (what the game is given: recorded here, or the recording's; HOS_INPUT_RECORD / HOS_INPUT_PLAY) */
+    uint64_t word = played ? 0 : oc_pad_word(buttons);   /* (while the game waits for a note button, the five are the controls: oc_notes) */
+    if (played) {   /* (the frame's pad, with the cheats' inputs as it had them) */
+        word = given.bits;
+        memcpy(stick, given.stick, sizeof given.stick);
+        __atomic_store_n(&flight_input, given.flight, __ATOMIC_RELAXED);
+        __atomic_store_n(&move_stick_held, abs(stick[0]) > 4096 || abs(stick[1]) > 4096, __ATOMIC_RELAXED);
+        __atomic_store_n(&free_camera_axes, given.axes, __ATOMIC_RELAXED);
+        __atomic_store_n(&free_camera_height, given.height, __ATOMIC_RELAXED);
+    } else if (connected) {
+        const MoviePad pad = {word, {stick[0], stick[1], stick[2], stick[3]}, flight, axes, height};
+        hos_input_movie_end(&pad);   /* (recording: the frame's pad) */
+    }
     int64_t s = ++sampling;
     for (int i = 0; i < count; i++) {
         uint64_t e = out + (uint64_t)i * STATE_SIZE;
         memset(GP(e), 0, STATE_SIZE);
         G64(e) = (uint64_t)(s - i);
-        G64(e + 8) = oc_pad_word(buttons);   /* (while the game waits for a note button, the five are the controls: oc_notes) */
+        G64(e + 8) = word;
         memcpy(GP(e + 16), stick, 16);
         G32(e + 32) = connected ? ATTR_CONNECTED : 0;
     }
@@ -1573,8 +1633,25 @@ HLE(_ZN2nn3hid22GetSixAxisSensorStatesEPNS0_18SixAxisSensorStateEiRKNS0_19SixAxi
     static const char *background_env;
     static int background_looked;
     if (!background_looked) background_looked = 1, background_env = getenv("HOS_INPUT_BACKGROUND");
-    const int counts = motion_counts(game_in_front(), background_env, rx_option(4, 0));
-    const int live = count && counts ? hos_sdl_motion_history(h, count) : 0;
+    int hos_input_movie_active(void);
+    int hos_input_movie_playing(void);
+    int hos_input_movie_gyro(MovieMotion *h, int max, int live);
+    const int counts = motion_counts(game_in_front(), background_env, rx_option(4, 0)) && !hos_input_movie_playing();
+    int live = count && counts ? hos_sdl_motion_history(h, count) : 0;
+    if (hos_input_movie_active()) {   /* (HOS_INPUT_RECORD / HOS_INPUT_PLAY: the readings handed out, recorded, or the recording's) */
+        MovieMotion mm[HOS_MOTION_HISTORY];
+        for (int i = 0; i < live; i++) {
+            mm[i].n = h[i].n, mm[i].dt = h[i].dt_ns;
+            memcpy(mm[i].v, &h[i].st, sizeof mm[i].v);
+        }
+        const int was = live;
+        live = hos_input_movie_gyro(mm, count, live);
+        if (live != was || hos_input_movie_playing())
+            for (int i = 0; i < live; i++) {
+                h[i].n = mm[i].n, h[i].dt_ns = mm[i].dt;
+                memcpy(&h[i].st, mm[i].v, sizeof mm[i].v);
+            }
+    }
     /* (each switch between live and at rest moves the numbers a whole history past the last ones given out, so no entry
        of one ever has a number an entry of the other had) */
     if (live) {

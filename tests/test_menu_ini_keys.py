@@ -37,6 +37,7 @@ FROZEN = {   # (a key: the value its row saves, as players' files hold them)
     "crt_lines": "&opts.crt_lines",
     "damage_taken": "&opts.damage_taken",
     "debug_tools": "&opts.debug_tools",
+    "drift_correction": "&opts.input_replay_sync",
     "descriptor_reuse": "&opts.descriptor_reuse",
     "disable_camera_centering": "&opts.disable_camera_centering",
     "discord_status": "&opts.discord",

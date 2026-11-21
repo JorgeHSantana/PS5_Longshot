@@ -502,7 +502,8 @@ class OcbHoldTests(unittest.TestCase):
 
     def test_host_calls_the_rule(self):
         host = (ROOT / "host" / "oot_ocb_hold.c").read_text(encoding="utf-8")
-        for needle in ('getenv("HOS_OCB_HOLD_MS")', "oot_ocb_step(&hold, guest_load, c, mgr, want, hold_ns, hos_now_ns())",
+        for needle in ('getenv("HOS_OCB_HOLD_MS")',
+                       "oot_ocb_step(&hold, guest_load, c, mgr, want, hold_ns, hos_input_movie_time(&hold_time, hos_now_ns()))",
                        "uint64_t hos_oot_ocb_pick(Ctx *c, uint64_t mgr, uint64_t chosen) {",
                        "strcmp(hos_main_build_id, OCB_BUILD) != 0", "if (!hold_read) {"):
             self.assertIn(needle, host)

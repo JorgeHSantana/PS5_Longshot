@@ -19,6 +19,14 @@ void hos_control_log(const char *line);
 extern volatile int hos_control_on;
 
 /* The source of the last native game present submitted to the renderer. */
+/* (longshot, issue 1113) an input recording now (host/input_movie.c): the status reply's "recorder" */
+typedef struct HosControlRecorder {
+    int mode;   /* 0 nothing, 1 recording, 2 playing */
+    int started, held, diverged;
+    uint32_t frame, end, link_apart, link_checked, syncs, anchors, anchors_wanted;
+    float largest;   /* metres: Link's largest correction */
+    char path[512];  /* the file recorded or played; with nothing, the last recording made */
+} HosControlRecorder;
 typedef struct HosControlPicture {
     unsigned texture_width, texture_height;
     unsigned width, height;   /* crop size, or the texture size when there is no crop */
@@ -103,6 +111,16 @@ typedef struct HosControlGame {
     void (*relaunch)(void);
     /* Copies the last observed source dimensions. 0 before a native game present. */
     int (*picture)(HosControlPicture *out);
+    /* (longshot, issue 1113) input recordings (host/input_movie.c). record_start: a recording from Link's next update to path
+       (NULL: the player's recordings folder; route: no guest words, for assets/routes/), 0 when something is recorded or
+       played already; play_start: path (NULL: the last recording made) from Link's next update, put back at every sync-th
+       update (0 never) while within sync_max metres; 1 started, 0 busy, -1 no such recording, -2 it starts on another map.
+       recorder: what is recorded or played now. NULL: no recordings here */
+    int (*record_start)(const char *path, int route);
+    void (*record_stop)(void);
+    int (*play_start)(const char *path, int sync, float sync_max);
+    void (*play_stop)(void);
+    void (*recorder)(HosControlRecorder *out);
 } HosControlGame;
 
 /* Listens on path and serves on a thread of its own. 0 when it could not (logged) */

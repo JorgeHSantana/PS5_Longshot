@@ -1579,6 +1579,20 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
         if (asked & OOT_BRIDGE_AGE) action = OOT_AGE_ACTION, bridge_adult = asked & 1;
         else if (asked) action = OOT_TELEPORT_ACTION + asked - 1;
     }
+    {   /* (longshot, issue 1113) an input recording's playback gives the recording's actions at their frame and takes none
+           of the player's (the menu's, HOS_INPUT_LIVE's, the bridge's, which is told so): host/input_movie.c */
+        int hos_input_movie_action(int live, int *dropped);
+        int dropped;
+        const int live = action;
+        action = hos_input_movie_action(live, &dropped);
+        if (dropped && bridge_ticket) {
+            teleport.why = "an input recording is playing: its own teleports and age switches are taken";
+            oot_bridge_teleport_done(bridge_ticket, 0);
+            bridge_ticket = 0;
+        }
+        if (action != live) bridge_adult = -1;   /* (the recording's age switch: a switch, as it was taken) */
+    }
+    int taken = action;   /* (what the game took, for an input recording: not an age switch to the age Link has) */
     oot_teleport_followup(c, actor);
     oot_inventory_refresh(c, now);
     oot_player_speed(c, components);
@@ -1590,6 +1604,7 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
         if (bridge_adult >= 0 && oot_gamedata_bool(c, 0xcea220d3u, &child) && !child == bridge_adult) {
             hos_log("cheats: age toggle: Link is the %s already", child ? "child" : "adult");
             oot_bridge_teleport_done(bridge_ticket, 2);
+            taken = 0;
         } else {
             const int sent = oot_toggle_age(c, actor);
             if (bridge_ticket) oot_bridge_teleport_done(bridge_ticket, sent);
@@ -1602,6 +1617,8 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
     } else if (action >= 100 && action < 124) {
         oot_set_time(c, action - 100);
     }
+    void hos_input_movie_action_taken(int a);
+    hos_input_movie_action_taken(taken);   /* (recording: the action at its frame) */
     if (!flying && action != 2 && action != 3) return;
 
     // Follow OneShotPhysicsCctChangePosition to Link's controller.
@@ -1831,6 +1848,34 @@ int hos_oot_opening(Ctx *c, int mode) {
     return 0;
 }
 
+/* (longshot, issue 1113) HOS_INPUT_SYNC: Link put at a position through the game's own move of his character controller
+   (OneShotPhysicsCctChangePosition, as the Mark / Return cheats do: oot_update_player_cheats), so his physics body moves
+   with him; 0 when the controller or the move is not there */
+#if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
+static int oot_put_link(Ctx *c, uint64_t components, const float pos[3]) {
+    const uint64_t controller = oot_player_controller(c, components);
+    if (!controller || recomp_load64(c, 0x84c54f10ULL + 0xe8) != 0x806d2530ULL) return 0;
+    A64Fn change_position = a64_lookup(0x806d2530ULL);
+    if (!change_position) return 0;
+    const Ctx saved = *c;
+    const uint64_t arg = c->x[31] - 16;
+    for (unsigned i = 0; i < 3; i++) {
+        uint32_t bits;
+        memcpy(&bits, &pos[i], sizeof bits);
+        recomp_store32_sp(c, arg + i * 4, bits);
+    }
+    recomp_store32_sp(c, arg + 12, 0);
+    c->x[31] = arg;
+    c->x[0] = controller;
+    c->x[1] = arg;
+    flight_pose_actor = 0;
+    flight_transform_controller = 0;
+    change_position(c);
+    *c = saved;
+    return 1;
+}
+#endif
+
 void hos_oot_lift_player(Ctx *c, uint64_t actor) {
 #if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
     flight_pose_actor = 0;
@@ -1850,6 +1895,21 @@ void hos_oot_lift_player(Ctx *c, uint64_t actor) {
     oot_update_player_cheats(c, actor, components);
     void hos_oot_state_tap(uint64_t actor);   /* the control bridge's copied snapshot and per-connection samples */
     hos_oot_state_tap(actor);
+    /* (longshot, issue 1113) an input recording's marks and anchors, and a replay held to them: Link's position (+0x31c, as
+       the state tap reads it) after each update (host/input_movie.c); nothing read with nothing recorded or played */
+    int hos_input_movie_active(void);
+    if (hos_input_movie_active()) {
+        int hos_input_movie_link(const float pos[3], float to[3]);
+        float pos[3], to[3];
+        for (int i = 0; i < 3; i++) {
+            const uint32_t bits = (uint32_t)recomp_load32(c, actor + 0x31c + 4 * (uint64_t)i);
+            memcpy(&pos[i], &bits, 4);
+        }
+        if (hos_input_movie_link(pos, to) && !oot_put_link(c, components, to)) {   /* (HOS_INPUT_SYNC: put back) */
+            static int said;
+            if (!said++) hos_log("input: HOS_INPUT_SYNC: Link's character controller was not found: he is not put back");
+        }
+    }
     ReleaseSRWLockExclusive(&cheats_lock);
 #else
     (void)c;

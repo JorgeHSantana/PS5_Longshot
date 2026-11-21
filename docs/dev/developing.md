@@ -326,16 +326,58 @@ start. The newest 15 are kept. A helper then shows the [crash window](reference/
 | `HOS_INPUT_LIVE=<file>` | A file the test appends lines of presses to, read every 30 ms. `!cheat <n>` sends a Cheats page action; `!synclog` logs the NVN syncs |
 | `HOS_INPUT_FRAME_CLOCK=1` | The script's time runs at 60 game frames a second instead of the wall clock |
 | `HOS_INPUT_EXCLUSIVE=1` | The script alone drives the game until 5 s after its last press |
+| `HOS_INPUT_RECORD=<file>` | Records the input where it reaches the game, frame by frame: an [input recording](reference/input.md#input-recordings) (also the Insert menu's Debug tab, Record input) |
+| `HOS_INPUT_PLAY=<file>` | Plays a recording back in place of the player's devices, the script and the bridge, and logs where the run first leaves it |
+| `HOS_INPUT_SYNC=<n>` | With `HOS_INPUT_PLAY`: Link and the camera put back on the recording at every n-th update (1 by default; 0 never, the exact test) |
+| `HOS_INPUT_SYNC_MAX=<m>` | Past this many metres (1) from the recording the replay has diverged: said once, nothing put back after it |
+| `HOS_INPUT_ROUTE=1` | With `HOS_INPUT_RECORD`: a [route](reference/input.md#routes), no guest words or addresses; `HOS_INPUT_SAVE` names its save |
+| `HOS_INPUT_FROM=boot` | A recording starts at the game's first controller read, not the frame after Link's first update |
 | `RX_VK_MENU_SCRIPT=<s>:<key>,...` | Timed Insert-menu keys: `INS UP DOWN LEFT RIGHT ESC ENTER TABL TABR PADS PADE PADW PADN`, `TYPE:<text>`, and in a text field `HOME END BACK DEL` |
 | `RX_VK_UI_PROMPTS=pad` or `keys` | The menu's button prompts for a pad or keys (screenshots) |
 
 Presses are `<seconds>:<button>[+<button>...][/<ms>]`, comma-separated: `2:A,5.5:LUP/1500,9:ZL+R`. Buttons:
 `A B X Y L R ZL ZR PLUS MINUS LS RS LEFT UP RIGHT DOWN`, and sticks at their edge `LUP LDOWN LLEFT LRIGHT RUP RDOWN
 RLEFT RRIGHT`. `SPRINT` holds the Sprint control's key (it runs only with the Controls tab's Sprint row on); the game
-never sees it as a button. A press is held 200 ms unless `/<ms>` says otherwise; names are case-sensitive. Scripted and bridge
+never sees it as a button. `MX=<counts>` and `MY=<counts>` move the mouse that many counts a frame while held, for the
+native mouse camera (`60:MX=40/1000` turns it for a second). A press is held 200 ms unless `/<ms>` says otherwise; names are case-sensitive. Scripted and bridge
 presses count while the window is in the background; the game still has to be in a state that reads the controller.
 Switches that name a file or press buttons are taken only from the environment or `HOS_ENV_FILE`, never from
 `longshot_env.txt` ([switches](reference/switches.md#longshot_envtxt)).
+
+### Replay a recording
+
+The same input on every run, for a bug to show again, a fix to be checked against it, or a moving route to measure on:
+an [input recording](reference/input.md#input-recordings). Every replay says how close it stayed in its log, so a run
+that went another way is seen, not taken for a result.
+
+1. **Record it once.** In the game: the Insert menu's Debug tab, Input recording, Record input; press it again to stop.
+   The file is `recordings/<date>-<time>-<map>.jsonl` in the run's user folder. Over the bridge: `record` and `record
+   action=stop` (its `path`). From the start: `HOS_INPUT_RECORD=<file>`. A recording to commit is a
+   [route](reference/input.md#routes): `dev.py route record --save <name> --name <route>`. Record at the 60 cap with the
+   Per frame step and `HOS_FIXED_TIME`, as a replay runs.
+2. **Play it on the change**, through the queue (`--mode shared`), with `HOS_REALTIME_STEP=0
+   HOS_FIXED_TIME=1767225600 HOS_FPS_MAX=60` as it was recorded:
+   - **a recording made in the game** (the menu or the bridge's `record`): in a running game, the bridge's `play
+     path=<file>` or the Debug tab's Play recording page. Link is taken to the recording's age and map and put at its
+     start first, so it plays from wherever the game is. Wait on `status`'s `recorder` until `mode` is `off` again;
+   - **one made from the start** (`HOS_INPUT_RECORD`, a route): `HOS_INPUT_PLAY=<file>` from the same save. It starts at
+     Link's first update after the save's load, as the recording did, with nothing moved: the exact way. A recording
+     made in the game, played from the switches, starts where the save puts Link, not where it began, and diverges.
+3. **Read how it went.** The log's `input: playback over at frame N of N` line and the `HOS_INPUT_SYNC` line after it:
+   how many updates were apart, the corrections, the largest. `input: the replay diverged at frame N` means the run went
+   another way (a hit, a door missed) and nothing after it is the recording's: the result is not a test of the change.
+   For a number a script reads, record the replay too (`HOS_INPUT_RECORD=<other file>` beside `HOS_INPUT_PLAY`): its
+   last line is `{"cmd":"result",...}`.
+
+| Run | Drift correction | Use |
+|---|---|---|
+| A test of a fix or a picture along a route | on (`HOS_INPUT_SYNC=1`, the default) | Link and the camera follow the route; small float drift is put back, a divergence still fails |
+| Whether the game runs the same twice | off (`HOS_INPUT_SYNC=0`) | the first update apart is the first place the game went its own way |
+| A measurement over a route | `dev.py ab --route <route>` ([measure](#measure-a-change)) | A and B on the same route; a run that diverged or missed a load is refused |
+
+A recording other than a route holds the game's memory words: it stays on the PC, like a save (not in a commit, a pull
+request, a comment or a test request). Write in the pull request what the recording does (where, how long, its loads)
+and what the replays logged, not the file.
 
 ### Memory tour
 
@@ -386,8 +428,11 @@ python -I scripts/dev.py ab --env RX_VK_ASYNC=0 --dry-run      # the plan, nothi
 | Check | Refuses to write up runs that differ in a menu setting, a switch, the renderer or the window, apart from what is compared (`--allow KEY` for a row the change adds) |
 | Write up | The Measurements section is printed and saved in `runs/ab/` of the development folder (`dev.py paths runs`). Separate runs report each run's fps, 1% low, frame times and hitch count, the medians and observed fps ranges; their verdict cannot distinguish noise with one run a side. In-run comparisons report pooled frame times and hitches per minute of retained steady frames on each side, with a verdict based on an interval across periods; even one launch can provide enough periods. `--threads` is temporarily unavailable because CPU samples cannot yet be matched safely to the measured frames. The timing line reports preparation, the run batch and median run phases, including copy and analysis after stopping; phases (including cleanup on failure) are also in `results.json`. Exit status 1 when a run failed, 3 when the sides differed |
 
-What it can't do, by hand: frame pacing on the screen (PresentMon during the same route), a route that moves (it
-measures Link standing still), a profiled run first ([profile](#profile)), and an older base (build the merge base
+A route that moves: `dev.py ab --route <route>` plays a route of `assets/routes/` in each run and measures while it plays
+(`--sync N`, 1 by default), from the route's save; a run whose replay diverged or missed a load is refused
+([replay a recording](#replay-a-recording)).
+
+What it can't do, by hand: frame pacing on the screen (PresentMon during the same route), a profiled run first ([profile](#profile)), and an older base (build the merge base
 as a pack and compare the two packs). Run each side as `dev.py queue run NAME --mode timing -- <your run>`, with
 `HOS_OPTIONS_FILE` pinned and each log's `vk: switches set` line read back.
 
