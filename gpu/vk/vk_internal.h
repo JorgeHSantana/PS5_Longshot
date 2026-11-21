@@ -188,6 +188,8 @@ extern Device dev;
 /// ask: a create that compiles nothing (VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT), on the replay thread so a
 /// draw or dispatch never waits for a compile. It never waits here either: while a worker holds the gate, busy is set and
 /// the caller answers VK_PIPELINE_COMPILE_REQUIRED (cold) without asking the driver.
+/// (The UHD's 0x170 read was the pipeline cache's data fetched beside builds, #252, which pcache_fetch_lock keeps apart
+/// on its own: the preparation's graphics builds pass the gate on Auto from driver 101.9175, IntelPrepareLane below.)
 bool intel_compiles_side_by_side();   // (vk_menu.cpp: the row as this run started with it)
 bool intel_quick_compute();   // (vk_menu.cpp: the Intel quick compute builds row, as it is now: vk_draw.cpp compute_optimize)
 inline bool intel_gate_on() {
@@ -203,11 +205,37 @@ inline bool intel_gate_on() {
     return false;
 #endif
 }
+/// (longshot) The shader preparation's threads (vk_draw.cpp prepare_run, precompile_warm, precompile_run) while they build:
+/// where intel_prepare_open, their graphics pipelines and shader modules pass the gate side by side (intel_compiles.h
+/// intel_prepare_side_by_side_chosen: on Auto from driver 101.9175, #1706, #2011). Their compute pipelines still take it
+inline thread_local bool intel_prepare_lane_on = false;
+struct IntelPrepareLane {
+    bool was = intel_prepare_lane_on;
+    explicit IntelPrepareLane(bool on = true) { intel_prepare_lane_on = was || on; }   // (on false: as it was)
+    ~IntelPrepareLane() { intel_prepare_lane_on = was; }
+    IntelPrepareLane(const IntelPrepareLane&) = delete;
+    IntelPrepareLane& operator=(const IntelPrepareLane&) = delete;
+};
+bool intel_prepare_side_by_side();   // (menu/intel.cpp: the row as this run started with it, the GPU and its driver)
+/// Whether the preparation's graphics builds pass a gate that is on (said once)
+inline bool intel_prepare_open() {
+    static const bool open = [] {
+        const bool o = intel_gate_on() && intel_prepare_side_by_side();
+        if (o)
+            logf("vk: Intel's compiler is given the shader preparation's graphics pipelines side by side (Intel shader "
+                 "compiles row: Auto, driver 101.9175 or newer); its compute pipelines and play one at a time");
+        return o;
+    }();
+    return open;
+}
 struct IntelDriverGate {
     std::unique_lock<std::mutex> hold;
     bool busy = false;
-    explicit IntelDriverGate(bool ask = false) {
+    /// prepare_ok: a graphics pipeline or a shader module, which a preparation thread builds side by side where
+    /// intel_prepare_open (never a compute pipeline)
+    explicit IntelDriverGate(bool ask = false, bool prepare_ok = false) {
         if (!intel_gate_on()) return;
+        if (prepare_ok && intel_prepare_lane_on && intel_prepare_open()) return;
         static std::mutex mu;
         static std::once_flag once;
         std::call_once(once, [] {

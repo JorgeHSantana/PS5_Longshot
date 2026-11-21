@@ -102,6 +102,7 @@
 #include "warm_bounded.h"
 #include "crash_markers.h"   // (the files that count the starts that crashed in a step: a close puts them back)
 #include "compute_gate.h"
+#include "intel_compiles.h"   // (intel_prepare_workers: the preparation's threads where Intel's compiler takes them side by side)
 #include "compute_pin.h"
 #include "mesh_conv.h"   // (RX_VK_MESH_CONV: the indirect mesh draws' ring slots and the batch at the game's barriers)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
@@ -1453,7 +1454,7 @@ VkResult cached_graphics(const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl)
 #ifdef TRACY_ENABLE
     HT_SCOPE("cached_graphics (pipeline compile)");
 #endif
-    IntelDriverGate gate(compiles_nothing(ci->flags));
+    IntelDriverGate gate(compiles_nothing(ci->flags), true);   // (a preparation thread's: side by side, intel_prepare_open)
     if (gate.busy) return intel_gate_busy();
     return create_cached(guarded_graphics_held, ci, pl);
 }
@@ -1727,7 +1728,7 @@ VkPipeline compute_pipeline_cached(const Program& q, bool noopt) {
 /// (a graphics pipeline made with the cache chosen for it: pcache through the play caches, another or none as it is)
 VkResult graphics_with(VkPipelineCache cache, const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl) {
     if (cache && cache == pcache) return cached_graphics(ci, pl);
-    IntelDriverGate gate(quick_build || compiles_nothing(ci->flags));
+    IntelDriverGate gate(quick_build || compiles_nothing(ci->flags), true);
     if (gate.busy) return intel_gate_busy();
     return guarded_graphics_held(cache, ci, pl);
 }
@@ -10142,6 +10143,18 @@ bool pcache_saved_now() {
     const auto size = std::filesystem::file_size(pcache_path, ec);
     return !ec && size >= before;
 }
+/// (longshot) The threads a preparation step builds graphics pipelines on: want, or where Intel's compiler takes them side by
+/// side only while its gate holds play's (intel_prepare_open: an Arc A-series or Core Ultra on Auto, driver 101.9175 or
+/// newer), as many as the free memory allows (intel_compiles.h intel_prepare_workers: 16 workers side by side on a 16 GB
+/// A730M ran into the commit limit, #1717). Said once a step
+unsigned prepare_pipeline_threads(unsigned want, const char* step) {
+    if (!intel_prepare_open()) return want;
+    const uint64_t avail = memory_available_mb();
+    const unsigned n = intel_prepare_workers(want, avail == compute_gate::kUnknownMB ? UINT64_MAX : avail);
+    logf("vk: preparation (%s): Intel's compiler takes the graphics pipelines side by side on %u threads of %u (%llu MB "
+         "free)", step, n, want, avail == compute_gate::kUnknownMB ? 0ull : (unsigned long long)avail);
+    return n;
+}
 bool warm_libraries(void (*progress)(size_t done, size_t total)) {
     const auto t0 = std::chrono::steady_clock::now();
     pcache_init();   // (before the workers: the libraries are built into it, and the start that only warms has not made it yet)
@@ -10176,6 +10189,7 @@ bool warm_libraries(void (*progress)(size_t done, size_t total)) {
     const auto worker = [&] {
         ub_thread_off();   // (a background thread: see ub_thread_off)
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);   // (as prepare_run's, and half the CPUs)
+        const IntelPrepareLane lane;   // (a preparation thread: vk_internal.h)
         for (;;) {
             if (prepare_stopped()) return;
             const size_t i = next++;
@@ -10434,6 +10448,8 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
         ub_thread_off();   // (a background thread: see ub_thread_off)
         // (below normal, and half the CPUs, below: on all of them at High the driver's compiles froze the whole PC)
         SetThreadPriority(GetCurrentThread(), background ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);
+        // (a preparation thread, its modules side by side where intel_prepare_open; in play, background, as play's: vk_internal.h)
+        const IntelPrepareLane lane(!background);
         for (;;) {
             if (prepare_stopped()) return;
             const size_t i = next++;
@@ -10696,12 +10712,13 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
     const std::string notes_path = pipe_notes_path();
     auto log_at = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     std::chrono::steady_clock::time_point save_at{};   // (warm_save_tick: the cache written as it goes)
-    const unsigned threads = std::min(usable_cpus(), 16u);
+    const unsigned threads = prepare_pipeline_threads(std::min(usable_cpus(), 16u), "the noted pipelines");
     warm_bounded::run(progs.size(), threads, [&](size_t i) {
         static thread_local bool off = (ub_thread_off(), true);   // (a background thread: see ub_thread_off)
         static thread_local FILE* in = fopen(notes_path.c_str(), "rb");
         static thread_local std::unique_ptr<PipeNote> note = std::make_unique<PipeNote>();
         (void)off;
+        const IntelPrepareLane lane;   // (a preparation thread: its graphics pipelines side by side where intel_prepare_open)
         const auto& list = by_prog.at(progs[i]);
         size_t found = 0;
         program_cache_borrow(progs[i], [&](Program& p) {
@@ -11114,6 +11131,7 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     auto& done = pre->done;
     const auto worker = [pre, total] {
         ub_thread_off();   // (a background thread: see ub_thread_off)
+        const IntelPrepareLane lane;   // (a preparation thread: its graphics pipelines side by side where intel_prepare_open)
         auto& notes = pre->notes;
         auto& computes = pre->computes;
         auto& fallbacks = pre->fallbacks;
@@ -11178,7 +11196,8 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     };
     std::vector<std::thread> threads;
     const unsigned cpus = usable_cpus();
-    for (unsigned i = 0; i < std::min(cpus, 64u); i++) threads.emplace_back(worker);
+    const unsigned workers = prepare_pipeline_threads(std::min(cpus, 64u), "the precompile");
+    for (unsigned i = 0; i < workers; i++) threads.emplace_back(worker);
     static const int stall_s = getenv("RX_VK_PRECOMPILE_STALL_S") ? atoi(getenv("RX_VK_PRECOMPILE_STALL_S")) : 30;
     size_t last_done = 0;
     auto last_change = std::chrono::steady_clock::now();
@@ -11415,6 +11434,7 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     static const int budget_s = getenv("RX_VK_PREDICT_S") ? atoi(getenv("RX_VK_PREDICT_S")) : 0;
     const auto worker = [pre, t0] {
         ub_thread_off();   // (a background thread: see ub_thread_off)
+        const IntelPrepareLane lane;   // (a preparation thread: its graphics pipelines side by side where intel_prepare_open)
         driver_cache_only = true;
         for (;;) {
             if (prepare_stopped() || pre->abandoned.load()) return;
@@ -11469,7 +11489,8 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     const int faults_before = driver_faults();
     std::vector<std::thread> threads;
     const unsigned cpus = usable_cpus();
-    for (unsigned i = 0; i < std::min(cpus, 64u); i++) threads.emplace_back(worker);
+    const unsigned workers = prepare_pipeline_threads(std::min(cpus, 64u), "the predicted pipelines");
+    for (unsigned i = 0; i < workers; i++) threads.emplace_back(worker);
     // (longshot) Nothing finished for this long, on any worker (each pipeline counts as it finishes): the run goes on, the stuck
     // workers left in the driver, the rest of the predicted pipelines built in play when first drawn. When:
     // - the driver faulted in this run (driver_faults: caught, and a driver can stop answering after one): wherever the run is;

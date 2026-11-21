@@ -807,7 +807,9 @@ VkShaderModule make_module(const std::vector<uint32_t>& spirv, uint64_t program,
     ci.codeSize = spirv.size() * 4;
     ci.pCode = spirv.data();
     VkShaderModule m = VK_NULL_HANDLE;
-    IntelDriverGate gate(busy != nullptr);   // (busy given: Intel's gate only tried, the dispatch's program_cache_complete_ask)
+    // (busy given: Intel's gate only tried, the dispatch's program_cache_complete_ask. A preparation thread's: side by side
+    // where intel_prepare_open, a module being no compute pipeline)
+    IntelDriverGate gate(busy != nullptr, true);
     if (gate.busy) {
         *busy = true;
         return VK_NULL_HANDLE;

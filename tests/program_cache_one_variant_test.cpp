@@ -77,7 +77,7 @@ constexpr VkResult VK_SUCCESS = 0;
 bool gate_held = false;   // (Windows Intel: a worker inside the compiler, so a gate that is only tried comes back busy)
 struct IntelDriverGate {
     bool busy = false;
-    explicit IntelDriverGate(bool ask = false) : busy(ask && gate_held) {}
+    explicit IntelDriverGate(bool ask = false, bool /*prepare_ok*/ = false) : busy(ask && gate_held) {}
 };
 thread_local uint64_t module_program = 0;
 bool driver_faulted_program(uint64_t) { return false; }

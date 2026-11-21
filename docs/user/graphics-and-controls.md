@@ -254,7 +254,8 @@ helper asks you to.
 - **Robust buffers** drops a read past a buffer's end instead of stopping the GPU: Auto is on, on every card.
   **ASTC as RGBA8** is the [AMD texture workaround](common-issues.md#amd-blocky-textures-solid-rectangles-in-the-sky-or-dark-courtyard-surfaces).
   **Intel shader compiles** (Intel graphics on Windows): One at a time is the safe choice; Side by side builds faster
-  on many cores but can crash in Intel's driver. Auto is side by side on the Arc B-series with driver 101.9154 or newer.
+  on many cores but can crash in Intel's driver. Auto is side by side on the Arc B-series with driver 101.9154 or newer,
+  and for the shader preparation's graphics pipelines on every Intel GPU with driver 101.9175 or newer.
 - **FPS counter** has five levels: **FPS**; **Frame time** (with the 1% low, green at the cap's rate, amber under it,
   red under two thirds of it); **Graph** (the last 4 seconds, red marks over frames that took twice the cap's time);
   **Breakdown** (where each frame's time went: the game, the renderer, the waits); **Dev** (the renderer's own numbers,

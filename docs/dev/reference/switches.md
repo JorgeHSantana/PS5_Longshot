@@ -213,6 +213,16 @@ The Debug tab's Intel shader compiles row lifts the gate after a restart: Auto (
 B-series (PCI device `0xE2xx`) with driver 101.9154 or newer, one at a time on every other Intel GPU
 (`intel_compiles.h`). `RX_VK_NO_INTEL_SERIAL=1` is side by side for a run, `=0` one at a time.
 
+The shader preparation (the launcher's Prepare shaders, and the start-up screen) goes further on Auto: from driver
+101.9175 its graphics pipelines and shader modules go side by side on every Intel GPU (`IntelPrepareLane`,
+`intel_prepare_side_by_side_chosen`), while its compute pipelines and everything play builds keep the row's choice. One
+at a time, the preparation took hours on an Arc A730M and a Core Ultra's Arc iGPU (#1706, #2011). The fault the gate was
+put in for was the pipeline cache's data fetched beside builds (#252), which `pcache_fetch_lock` keeps apart by itself.
+Side by side there, the threads that build pipelines are held to the free memory, 768 MB each past 4 GB
+(`intel_prepare_workers`): 16 on a 16 GB A730M ran into the commit limit (#1717). The log says it once a step
+(`vk: preparation (...): Intel's compiler takes the graphics pipelines side by side on N threads of M`). One at a time
+on the row, or `RX_VK_NO_INTEL_SERIAL=0`, keeps the preparation one at a time too.
+
 ### Mesh shaders
 
 | Switch | What it does |
