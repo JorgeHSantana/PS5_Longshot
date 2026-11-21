@@ -3,16 +3,27 @@
 #include "gpu/vk/vk_menu.cpp"
 #include <SDL.h>
 #include <png.h>
+#include <imgui_internal.h>
+#include <limits>
+#include <memory>
 #include <stdexcept>
 
 // Any accidental attempt to resolve a game directory fails closed.
 extern "C" DWORD GetModuleFileNameA(HMODULE, LPSTR, DWORD) { std::abort(); }
 extern "C" DWORD GetFileAttributesA(LPCSTR) { std::abort(); }
+extern "C" HANDLE FindFirstFileA(LPCSTR, WIN32_FIND_DATAA*) { std::abort(); }
+extern "C" BOOL FindNextFileA(HANDLE, WIN32_FIND_DATAA*) { std::abort(); }
+extern "C" BOOL FindClose(HANDLE) { std::abort(); }
+extern "C" BOOL PostMessageA(HWND, UINT, WPARAM, LPARAM) { std::abort(); }   // (there is no window to post to)
 
 // Explicit fixture capabilities: no GPU-specific upscaler or latency SDK. These are
 // display inputs, not probes of the capture machine or claims about supported hardware.
 namespace mkwvk {
-const MkwVkHost* host = nullptr;
+// No host: no callback is set, so no row has a tag, a mod, a monitor or a microphone to list. The NFC Scan row asks the host
+// whether a scan is under way until its text says no more, so the host's scan is idle.
+static int idle_scan(int) { return 0; }
+static MkwVkHost empty_host = [] { MkwVkHost h{}; h.nfc_scan = idle_scan; return h; }();
+const MkwVkHost* host = &empty_host;
 Device dev{}; // No physical device: hide hardware-specific Debug actions in this UI-only fixture.
 std::atomic<bool> present_native_pq{false}; // Synthetic SDR presentation, never a live HDR surface.
 void logf(const char*, ...) {}
@@ -42,12 +53,61 @@ FgMaker framegen_maker() { return static_cast<FgMaker>(0); }
 namespace bug_report {
 State state() { return kIdle; }
 std::string shown() { return {}; }
+void fill_here(Inputs&) {}   // (the menu's Bug report row is drawn, never run)
+}
+// What the menu's rows ask the renderer for when they act or describe the device: no window, no device, nothing listed.
+HWND app_window() { return nullptr; }
+std::string driver_text() { return {}; }
+std::string device_report_text() { return {}; }
+std::string state_list_snapshot(bool* present) { if (present) *present = false; return {}; }
+void samplers_changed() {}
+void menu_debug_rows(int, int) {}
+}
+
+// The banner's logo, as vk_imgui.cpp makes it for the renderer: assets/longshot.png's straight RGBA pixels in a colour texture
+// (null until main() loads it). render() below uploads it to SDL like the font atlas.
+namespace mkwvk::ui {
+static ImTextureData* banner_logo = nullptr;
+ImTextureData* logo(float* aspect) {
+    *aspect = banner_logo ? float(banner_logo->Width) / banner_logo->Height : 1.f;
+    return banner_logo;
 }
 }
 
 static void check(bool ok, const char* what) {
     if (!ok) throw std::runtime_error(std::string(what) + ": " + SDL_GetError());
 }
+
+struct SdlSession {
+    ~SdlSession() { SDL_Quit(); }
+};
+
+struct BannerTexture {
+    ImTextureData texture{};
+
+    explicit BannerTexture(const char* filename) {
+        png_image logo{};
+        const std::unique_ptr<png_image, decltype(&png_image_free)> read(&logo, png_image_free);
+        logo.version = PNG_IMAGE_VERSION;
+        if (!png_image_begin_read_from_file(&logo, filename)) throw std::runtime_error(logo.message);
+        constexpr png_uint_32 max_side = 4096;
+        if (!logo.width || !logo.height || logo.width > max_side || logo.height > max_side ||
+            uint64_t(logo.width) * logo.height * 4 > uint64_t(std::numeric_limits<int>::max()))
+            throw std::runtime_error("banner logo dimensions exceed the supported RGBA texture size");
+        logo.format = PNG_FORMAT_RGBA;
+        texture.Create(ImTextureFormat_RGBA32, int(logo.width), int(logo.height));
+        if (!png_image_finish_read(&logo, nullptr, texture.GetPixels(), 0, nullptr))
+            throw std::runtime_error(logo.message);
+        texture.UseColors = true;
+        ImGui::RegisterUserTexture(&texture);
+        mkwvk::ui::banner_logo = &texture;
+    }
+
+    ~BannerTexture() {
+        ImGui::UnregisterUserTexture(&texture);
+        mkwvk::ui::banner_logo = nullptr;
+    }
+};
 
 // SDL's software renderer consumes the real ImGui triangles, clip rectangles and
 // dynamic font atlas. No recreation of menu labels, rows or layout lives here.
@@ -92,17 +152,22 @@ static void render(SDL_Renderer* renderer, ImDrawData* data) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 4) { fprintf(stderr, "usage: menu-capture FONT_DIRECTORY graphics|graphics-screen|audio|controls OUTPUT.png\n"); return 2; }
+    if (argc != 5) { fprintf(stderr, "usage: menu-capture FONT_DIRECTORY LOGO.png graphics|graphics-screen|audio|controls OUTPUT.png\n"); return 2; }
     try {
-        const std::string tab = argv[2];
+        const std::string tab = argv[3];
         if (tab != "graphics" && tab != "graphics-screen" && tab != "audio" && tab != "controls") throw std::runtime_error("unsupported view");
         constexpr int width = 1280, height = 720;
         check(SDL_Init(0) == 0, "SDL initialization");
-        SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_RGBA32);
+        const SdlSession sdl;
+        const std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> surface(
+            SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_RGBA32), SDL_FreeSurface);
         check(surface != nullptr, "capture surface");
-        SDL_Renderer* renderer = SDL_CreateSoftwareRenderer(surface);
-        check(renderer != nullptr, "software renderer");
-        ImGui::CreateContext();
+        const std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> software(
+            SDL_CreateSoftwareRenderer(surface.get()), SDL_DestroyRenderer);
+        check(software != nullptr, "software renderer");
+        SDL_Renderer* renderer = software.get();
+        const std::unique_ptr<ImGuiContext, decltype(&ImGui::DestroyContext)> context(
+            ImGui::CreateContext(), ImGui::DestroyContext);
         auto& io = ImGui::GetIO();
         io.IniFilename = nullptr;
         io.LogFilename = nullptr;
@@ -116,12 +181,13 @@ int main(int argc, char** argv) {
             return f;
         };
         mkwvk::ui::Fonts fonts{font("LibertinusSans-Regular.ttf"), font("LibertinusSans-Bold.ttf"), font("LibertinusSerif-Semibold.ttf")};
+        const BannerTexture banner(argv[2]);
         mkwvk::opts.menu_lang = 1; // English; do not read language.txt or environment-selected game language.
         mkwvk::cur_tab = tab == "audio" ? mkwvk::TAB_AUDIO : tab == "controls" ? mkwvk::TAB_CONTROLS : mkwvk::TAB_GRAPHICS;
         mkwvk::opts.ultrawide = 0; // Explicit 16:9, independent of any real monitor.
         mkwvk::outputs_sync();
         // Snapshot these fixture values as the starting state, without restart_init's language-file read.
-        for (int i = 0; i < mkwvk::kRows; ++i) {
+        for (int i = 0; i < (int)std::size(mkwvk::rows); ++i) {
             auto& row = mkwvk::rows[i];
             int slot = row.restart && row.value ? mkwvk::restart_state.add(mkwvk::row_restart_value(row)) : -1;
             mkwvk::restart_slot[i] = slot;
@@ -156,16 +222,16 @@ int main(int argc, char** argv) {
             ImGui::Render();
             render(renderer, ImGui::GetDrawData());
         }
+        bool drew_logo = false;
+        for (const auto* list : ImGui::GetDrawData()->CmdLists)
+            for (const auto& cmd : list->CmdBuffer)
+                if (cmd.ElemCount && cmd.GetTexID() == banner.texture.GetTexID()) drew_logo = true;
+        if (!drew_logo) throw std::runtime_error("Graphics guide banner did not draw the logo");
         std::vector<unsigned char> rgba(width * height * 4);
         check(SDL_RenderReadPixels(renderer, nullptr, SDL_PIXELFORMAT_RGBA32, rgba.data(), width * 4) == 0, "capture pixels");
         png_image png{};
         png.version = PNG_IMAGE_VERSION; png.width = width; png.height = height; png.format = PNG_FORMAT_RGBA;
-        if (!png_image_write_to_file(&png, argv[3], 0, rgba.data(), width * 4, nullptr)) throw std::runtime_error(png.message);
-        for (auto* t : ImGui::GetPlatformIO().Textures) {
-            if (t->GetTexID() != ImTextureID_Invalid) SDL_DestroyTexture(reinterpret_cast<SDL_Texture*>(t->GetTexID()));
-            t->SetTexID(ImTextureID_Invalid); t->SetStatus(ImTextureStatus_Destroyed);
-        }
-        ImGui::DestroyContext(); SDL_DestroyRenderer(renderer); SDL_FreeSurface(surface); SDL_Quit();
+        if (!png_image_write_to_file(&png, argv[4], 0, rgba.data(), width * 4, nullptr)) throw std::runtime_error(png.message);
         return 0;
     } catch (const std::exception& e) { fprintf(stderr, "%s\n", e.what()); return 1; }
 }

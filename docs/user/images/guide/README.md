@@ -10,10 +10,13 @@ links to those public files.
 `manifest.json` records each image's dimensions, SHA-256, capture conditions, application release and reviewed UI
 source hashes. All six launcher images are UI-only captures built from Launcher nightly-52-b1d9f7a9 source
 `b1d9f7a9b19fa99b91ec3e8cd24455d4703d6d25`; they replace the earlier official-AppImage and rc.3 fixture captures.
-The Graphics image is recaptured from fullscreen monitor PR #1277, `54d25c79ead4d07e22cdcf5f07e481e19f90f78c`, on main `e335bd5c`.
-The [fullscreen-monitor source review](source-review-fullscreen-monitor.md) records the current capture and comparison.
-Its review revision is a SHA-256 of the sorted file/hash pairs in `reviewed_source.files`, so it remains verifiable
-after squash merging without depending on a temporary topic commit. Earlier captures and reviews remain in repository history.
+The current Graphics image was captured from main `f1f2dc5bd2821cef061798ba40a043d281ac1707` (nightly 680).
+The [fullscreen-monitor source review](source-review-fullscreen-monitor.md) records the nightly 680 comparison and
+historical rc.8 comparisons. Earlier images remain in repository history.
+
+The current Graphics entry names that exact Git commit in `reviewed_source.revision`. Verify it with
+`scripts/check_guide_screenshots.py --review-sources` from a checkout with the recorded source and fixture files.
+Older reviews may use a `sha256:` revision computed from the sorted file/hash pairs in `reviewed_source.files`.
 These are real maintained views rendered with synthetic state, not screenshots of a running game or a claim of
 reproducible official binaries. `captured_source` records the capture inputs; `reviewed_source` records the inputs reviewed for retention.
 
@@ -117,9 +120,10 @@ and the rendered pages inspected. A passing integrity check alone is not a visua
 
 ## UI-only settings fixture
 
-`scripts/screenshots/menu.cpp` compiles the real `gpu/vk/vk_menu.cpp`, translation code and bundled ImGui. It calls
+`scripts/screenshots/menu.cpp` compiles the real `gpu/vk/vk_menu.cpp`, the menu's model and feature modules
+(`gpu/vk/menu_model.cpp`, `gpu/vk/menu/*.cpp`, which hold most of its rows), translation code and bundled ImGui. It calls
 its drawing function with deterministic illustrative settings and renders the resulting geometry through SDL2's
-software renderer. It uses bundled Libertinus fonts over a solid background. It does not initialize a game,
+software renderer. It uses bundled Libertinus fonts over a solid background and draws the banner's logo from `assets/longshot.png`. It does not initialize a game,
 Vulkan device, game-font loader, saved configuration or save workflow. Hardware-specific capabilities are disabled
 fixture inputs. The result is an explicitly captioned UI-only example, not a runtime screenshot or a configuration
 recommendation. Differences from a live Vulkan presentation have not been validated.
@@ -134,9 +138,23 @@ python -I scripts/screenshots/capture_menu.py \
 ```
 
 `--vulkan-headers` must contain `vulkan/vulkan.h`; no Vulkan runtime or private game files are needed. The source
-checkout must include bundled ImGui and Libertinus. This optional local capture build is separate from site builds
+checkout must include bundled ImGui, Libertinus and `assets/longshot.png`. This optional local capture build is separate from site builds
 and the lightweight CI guard. It outputs Graphics, Audio and Controls PNGs plus `menu-capture.json`; currently only
 the Graphics image is published. Inspect the output before copying a selected image into this directory.
+
+For an older source without `gpu/vk/menu_model.cpp`, use the helper that matches its menu layout. For the
+historical rc.8 comparison, run `scripts/screenshots/capture_menu.py` from a checkout of `f4fa8dae` with
+`--source` pointing at the clean rc.8 checkout (`2f1c0c9c`). Use the current helper for modular sources.
+The current helper reports an unsupported source before compiling.
+
+Run the Linux smoke check with the same compiler and Vulkan headers you use for capture:
+
+```sh
+python -I -B scripts/screenshots/check_menu_capture.py --cxx clang++ --vulkan-headers /path/to/include
+```
+
+It links the maintained menu and renders Graphics in a temporary directory. The fast guide workflow checks
+image integrity and source drift without compiling the fixture.
 
 For the Sprint change, compare the published Graphics image with a capture from the updated head, including the
 visible labels, values, selected help and navigation. Record the comparison and reviewed source hashes in the

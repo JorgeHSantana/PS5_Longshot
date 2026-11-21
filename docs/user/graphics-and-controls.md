@@ -21,7 +21,7 @@ A and B on. Beside the rows, the help says what the row does and what the chosen
 
 </a>
 
-*UI-only example from development build 54d25c79 on Linux. The Custom values shown are illustrative, not recommended defaults.*
+*UI-only example from main f1f2dc5b (nightly 680) on Linux. The Custom values shown are illustrative, not recommended defaults.*
 
 Your choices are saved as you go, in `longshot_options.ini`: in `%APPDATA%\Longshot` when the launcher starts the game
 on Windows, so every version shares them, otherwise in the game folder ([where the files go](updates-and-saves.md#where-the-files-go)).
@@ -87,16 +87,16 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | CRT lines | 240, 480, 720 virtual lines (shown with a CRT filter on; changes at once; capped at half the destination height) | 240 |
 | | Ultrawide menus | Full width; Centred, blurred sides; Centred, black bars (with the Aspect ratio at the monitor's shape) | Centred, blurred sides |
 | | HUD layout | Screen's edges, Middle 16:9 or Custom. `HOS_WIDE_UI`, when set, overrides the choice | Screen's edges |
-| | Hearts and magic horizontal | From −15% to +15% of the picture's width (Custom) | 0% |
-| | Hearts and magic vertical | From −15% to +15% of the picture's height (Custom) | 0% |
-| | Hearts and magic size | From 75% to 125% (Custom) | 100% |
-| | Action and item buttons horizontal | From −15% to +15% of the picture's width (Custom) | 0% |
-| | Action and item buttons vertical | From −15% to +15% of the picture's height (Custom) | 0% |
-| | Action and item buttons size | From 75% to 125% (Custom) | 100% |
-| | Minimap horizontal | From −15% to +15% of the picture's width (Custom) | 0% |
-| | Minimap vertical | From −15% to +15% of the picture's height (Custom) | 0% |
-| | Minimap size | From 75% to 125% (Custom) | 100% |
-| | Reset HUD placement | Restores the three groups to their usual positions and sizes (Custom) | — |
+| | Hearts and magic horizontal | From −15% to +15% of the picture's width (shown with HUD layout set to Custom and no `HOS_WIDE_UI` override) | 0% |
+| | Hearts and magic vertical | From −15% to +15% of the picture's height (shown with HUD layout set to Custom and no `HOS_WIDE_UI` override) | 0% |
+| | Hearts and magic size | From 75% to 125% (shown with HUD layout set to Custom and no `HOS_WIDE_UI` override) | 100% |
+| | Action and item buttons horizontal | From −15% to +15% of the picture's width (shown with HUD layout set to Custom and no `HOS_WIDE_UI` override) | 0% |
+| | Action and item buttons vertical | From −15% to +15% of the picture's height (shown with HUD layout set to Custom and no `HOS_WIDE_UI` override) | 0% |
+| | Action and item buttons size | From 75% to 125% (shown with HUD layout set to Custom and no `HOS_WIDE_UI` override) | 100% |
+| | Minimap horizontal | From −15% to +15% of the picture's width (shown with HUD layout set to Custom and no `HOS_WIDE_UI` override) | 0% |
+| | Minimap vertical | From −15% to +15% of the picture's height (shown with HUD layout set to Custom and no `HOS_WIDE_UI` override) | 0% |
+| | Minimap size | From 75% to 125% (shown with HUD layout set to Custom and no `HOS_WIDE_UI` override) | 100% |
+| | Reset HUD placement | Restores the three groups to their usual positions and sizes (shown with HUD layout set to Custom and no `HOS_WIDE_UI` override) | — |
 | | HDR | Off, Expanded, Native (the game's) | Off |
 | | HDR paper white | 80 to 400 nits, in steps of 10 (while HDR is on) | 200 nits |
 | | HDR peak brightness | 400 to 4000 nits, in steps of 100 (while HDR is on) | 1000 nits |
@@ -265,7 +265,7 @@ helper asks you to.
 - **Sprint** (Controls tab, off by default): Link runs the game's own run, the one after a roll while A stays held,
   without the roll. Hold <kbd>Shift</kbd> while you move, or on a controller hold the left stick pressed in; let go and
   he moves as before. He runs past people, signs and pots without talking, reading or picking up; tap A to roll or
-  act as usual. While the ocarina waits for a note, Sprint does nothing. Turning the row on moves <kbd>Shift</kbd> from B
+  act as usual. Sprint is disabled while the instrument is waiting for a note. Turning the row on moves <kbd>Shift</kbd> from B
   to Sprint (B goes to <kbd>V</kbd>, when no control has V) and the left stick's press from LS to Sprint; turning it off
   puts them back. Controls you rebound yourself are left alone, and the Controls page's **Sprint** line rebinds it.
 

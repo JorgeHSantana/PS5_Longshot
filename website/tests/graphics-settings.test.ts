@@ -174,12 +174,13 @@ test('cards retain markup, stable anchors, conditions and a readable no-JS fallb
   assert(result.includes('only in builds with'));
   assert(result.includes('data-settings-filters hidden'));
   assert(result.includes('<li class="graphics-badge-restart">After a restart</li>'));
+  assert(result.includes('<li>Custom HUD layout without a HOS_WIDE_UI override</li>'));
   assert(result.includes('<p class="graphics-summary">Runs the game as the console docked or handheld.</p>'));
   assert(result.includes('<a href="#settings-hdr">HDR</a>') && result.includes('<a href="#settings-controls">'));
   const groups = readGraphicsSettings(page, menu);
   for (const group of groups) assert(result.includes(`href="#${group.id}"`) && result.includes(`id="${group.id}"`));
   const long = groups.flatMap(group => group.settings).filter(setting => setting.choices.length > SHORT_CHOICES).length;
-  assert.equal((result.match(/<details>/g) || []).length, long);
+  assert.equal((result.match(/<details><summary>Choices and requirements<\/summary>/g) || []).length, long);
   assert(long > 0 && long < groups.flatMap(group => group.settings).length / 2);
   assert(!result.includes('| Tab | Option | Choices | Default |'), 'the table is replaced by the cards');
   assert(result.includes('Writing the controls in longshot_options.ini yourself'), 'the text after the table stays');
