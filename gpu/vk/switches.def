@@ -236,6 +236,7 @@ SW(HOS_WINDOW_NOACTIVATE, diag, bool, "off: the window opens in front", "=1 open
 SW(HOS_WINDOW_SIZE, tune, string, "1280x720", "Sets the window's client size as WxH (each at least 64).")
 SW(HOS_WINDOW_TITLE, tune, string, "'Longshot'", "The window's title on Linux (SDL).")
 SW(HOS_WM_CLASS, tune, string, "HOS_APP_ID", "The window's WM class / app id on Linux (SDL).")
+SW(HOS_WS_FLOOR_MB, hw, int, "Windows: a soft working-set minimum of a quarter of the RAM, at most 4096 MB: Windows keeps that much of the game in RAM before it trims below it (host/ws_floor.h)", "<MB>: that minimum instead (at most half the RAM); 0 (or off, no, false): Windows' own minimum, as before, so memory pressure can trim the game to a fraction of what its frames touch.")
 SW(HOS_XINPUT, attempt, bool, "XInput polled only while SDL has no controller open", "Polls XInput as well as SDL even when SDL has controllers open.")
 SW(HOS_ZERO_ALL_PAGES, kill, bool, "above 4 GB only pages not already in use are zeroed", "=1 zeroes the whole range of every page allocation, as before.")
 SW(LONGSHOT_BUILDER_HOME, player, string, "not read by the game", "The Builder's own folder; the game only refuses it from longshot_env.txt.")
