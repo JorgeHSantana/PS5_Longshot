@@ -41,7 +41,7 @@ It sets these defaults; a switch you set yourself keeps your value (`RX_VK_PASS_
 | `HOS_PRESENT_TRACE` | `presents.csv`: the game's presents |
 | `RX_VK_FRAME_TRACE=1` | `frames.csv`: the frame trace (below) |
 | `HOS_PROFILE_EVERY=5`, `HOS_THREAD_TIMES=5` | busiest threads and each thread's CPU, in the log every 5 s |
-| `HOS_FPS_LOG=1` | the frame limiter and the game clock's speed, in the log |
+| `HOS_FPS_LOG=1` | the frame limiter, the game's pacing mode (`+0x24f`) and the game clock's speed, in the log |
 | `RX_VK_PASS_TIMING=1` | GPU time per pass, in the log every 600 presents |
 | `RX_VK_SLOW_LOG=50` | the replay's times for each frame over 50 ms, in the log |
 
