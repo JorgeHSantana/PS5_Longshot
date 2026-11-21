@@ -66,6 +66,7 @@ Options opts;
 int saves = 0, presets = 0;
 int debug_warning_choice = 0, output_pick = 0, monitor_pick = 0;
 bool debug_warning = false, menu_refresh = false;
+std::atomic<int> grass_distance_now{0};
 void save() { saves++; }
 void apply_pad_layout(int) {}
 int detect_pad_layout() { return opts.pad_layout; }

@@ -69,6 +69,7 @@
 #include "menu/upscaler.h"   // (the upscaler module's, still used here: the pipeline share's line, the bug report)
 #include "menu/bindings.h"   // (the Controls page's module, still used here: the grid, the options file, menu_tick)
 #include "menu/sprint.h"   // (the Sprint module's, still used here: the Controls page's Reset lays Sprint out again)
+#include "menu/sim_turf.h"   // (the Simulated turf page's area observation, persistence and live resource edits)
 #include "menu/pipeline_list.h"   // (Save my pipeline list's, still used here: its worker finished, its line measured)
 #include "menu/nfc.h"   // (the NFC module's, still used here: its tags listed when the menu opens, a scan followed)
 #include "menu/framegen.h"   // (the frame generation module's, still used here: the pipeline share's line, set_row, row_fixed)
@@ -123,7 +124,8 @@ enum MenuTab {
     TAB_SPEAKER = TAB_MOTION + 1,   // (longshot: not a tab either, the Controller speaker page, from the Audio tab)
     TAB_FPS_DEV = TAB_SPEAKER + 1,   // (longshot: not a tab either, the FPS counter's Dev lines page, from the Gameplay tab)
     TAB_RECORDINGS = TAB_FPS_DEV + 1,   // (longshot: nor this, the input recordings to play, from the Debug tab: menu/input_recording.cpp)
-    TAB_PAGE = TAB_RECORDINGS + 1   // (longshot: the Controls page's rows, above its grid; no tab shows them)
+    TAB_SIM_TURF = TAB_RECORDINGS + 1,   // (the Simulated turf page, opened by the Graphics tab's row)
+    TAB_PAGE = TAB_SIM_TURF + 1   // (longshot: the Controls page's rows, above its grid; no tab shows them)
 };
 
 struct Row {
@@ -407,11 +409,10 @@ const char* (ini_key)(const Row& r);   // (spelled apart from its definition: th
 /// The model's page for each MenuTab: the strip's tabs, then the pages a row opens
 const char* const kTabIds[TAB_PAGE + 1] = {"graphics", "audio",  "gameplay",    "controls",     "nfc",
                                            "mods",     "debug",  "motion",      "controller_speaker", "fps_details",
-                                           "recordings", "controls_page"};
+                                           "recordings", "sim_turf_settings", "controls_page"};
 const char* const kTabLabels[TAB_PAGE + 1] = {"Graphics", "Audio", "Gameplay", "Controls",            "NFC",
                                               "Mods",     "Debug", "Motion",   "Controller speaker",  "FPS counter details",
-                                              "Play recording",
-                                              "Controls"};
+                                              "Play recording", "Simulated turf", "Controls"};
 int page_tab(const char* id);   // (a page's MenuTab by its id: below)
 // (rows modules describe, headings included; past it a row is left out, and logged. Every row is a module's: 110 of them
 // when the last moved, so room to grow; tests/test_menu_module_slots.py keeps the menu within it)
@@ -789,7 +790,7 @@ void outputs_sync() {
 }
 
 int cur_tab = TAB_GRAPHICS;
-int tab_selected[TAB_RECORDINGS + 1] = {};   // (and the pages' a row opens: Motion, the Controller speaker, the FPS counter's details, the recordings)
+int tab_selected[TAB_SIM_TURF + 1] = {};   // (and the pages a row opens: Motion, Controller speaker, FPS details, recordings and Simulated turf)
 bool is_motion_row(const Row& r) {
     return row_opens(r) == TAB_MOTION || (r.tab == TAB_CONTROLS && !r.value && !r.setting && !strcmp(r.name, "Motion"));
 }
@@ -798,10 +799,16 @@ bool is_fps_dev_row(const Row& r) {
     return row_opens(r) == TAB_FPS_DEV || (r.tab == TAB_GAMEPLAY && !r.value && !r.setting && !strcmp(r.name, "FPS counter details"));
 }
 bool is_recordings_row(const Row& r) { return row_opens(r) == TAB_RECORDINGS; }
-/// (the page a page of the menu goes back to: Motion to Controls, the FPS counter's details to Gameplay, the recordings to
-/// Debug; -1 a tab of the strip)
+bool is_sim_turf_row(const Row& r) { return row_opens(r) == TAB_SIM_TURF; }
+/// (the page a page of the menu goes back to: Motion to Controls, FPS details to Gameplay, recordings to Debug and simulated
+/// turf settings to Graphics; -1 a tab of the strip)
 int page_parent(int tab) {
-    return tab == TAB_MOTION ? TAB_CONTROLS : tab == TAB_SPEAKER ? TAB_AUDIO : tab == TAB_FPS_DEV ? TAB_GAMEPLAY : tab == TAB_RECORDINGS ? TAB_DEBUG : -1;
+    return tab == TAB_MOTION       ? TAB_CONTROLS
+         : tab == TAB_SPEAKER      ? TAB_AUDIO
+         : tab == TAB_FPS_DEV      ? TAB_GAMEPLAY
+         : tab == TAB_RECORDINGS   ? TAB_DEBUG
+         : tab == TAB_SIM_TURF     ? TAB_GRAPHICS
+                                   : -1;
 }
 
 // ---- the rows that take a restart: their values at the start (menu_init, the GPU's at menu_set_gpu_count) ----
@@ -1732,12 +1739,12 @@ double fps_target_ms() {
     return fps_stats::target_ms_for(cap, fifo, fifo ? (display_refresh_mhz() + 500) / 1000 : 0);
 }
 menu_hit::Map hits;      // (the menu's controls as last drawn: the mouse's, menu_tick)
-float scroll_at[TAB_RECORDINGS + 2];   // (the first row shown, eased toward the selection: the options' tabs and the Motion page, then
+float scroll_at[TAB_SIM_TURF + 2];   // (the first row shown, eased toward the selection: the tabs and subpages, then
                                    // the Controls page: kControlsSlot)
-constexpr int kControlsSlot = TAB_RECORDINGS + 1;
-int wheel_rows[TAB_RECORDINGS + 2];   // (the mouse wheel's notches since the last drawing, a slot each: scroll_rows scrolls by them)
-int scrolled_to[TAB_RECORDINGS + 2] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};   // (the selection scroll_rows last brought into view)
-float scroll_want[TAB_RECORDINGS + 2];   // (where scroll_at is going: the wheel moves it, a new selection too)
+constexpr int kControlsSlot = TAB_SIM_TURF + 1;
+int wheel_rows[TAB_SIM_TURF + 2];   // (the mouse wheel's notches since the last drawing, a slot each: scroll_rows scrolls by them)
+int scrolled_to[TAB_SIM_TURF + 2] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};   // (selection last brought into view)
+float scroll_want[TAB_SIM_TURF + 2];   // (where scroll_at is going: the wheel moves it, a new selection too)
 float ease_step = 0;     // (this drawing's share of the way: the time since the last one)
 
 ui::Ctx ui_ctx(uint32_t w, uint32_t h) {
@@ -2752,6 +2759,7 @@ void draw_tune_bar(ui::Ctx& c) {
     if (cur_tab == TAB_FPS_DEV) cur_name = "FPS counter details";
     if (cur_tab == TAB_RECORDINGS) cur_name = "Play recording";
     if (cur_tab == TAB_SPEAKER) cur_name = "Controller speaker";
+    if (cur_tab == TAB_SIM_TURF) cur_name = "Simulated turf";
     const float header_y = by0 + 13 * s;
     ui::text_mid(c, c.f.heading, 14 * s, bx0 + 16 * s, header_y, ui::kGoldHi, cur_name);
 
@@ -4015,7 +4023,10 @@ void menu_row_top(const int* value, int hi) {
     for (Row& r : rows)
         if (r.value == value) r.hi = hi;
 }
-void menu_save_options() { save(); }
+void menu_save_options() {
+    sim_turf_settings_flush();
+    save();
+}
 void menu_redraw() { menu_refresh = true; }
 const char* menu_version() { return LONGSHOT_VERSION; }
 /// (as the restart question's Restart now: the window closes, then the game starts again, host/hos_relaunch.c)
@@ -4252,6 +4263,7 @@ void menu_init() {
         }
     }
     first_start = !has_options;
+    sim_turf_settings_init();
     menu_colour_vision_changed(opts.colour_vision);
     menu_sync_hud_placement();
     sync_transition_autosave();
@@ -4619,7 +4631,7 @@ void menu_option_set(int id, int value) {
 bool bridge_row(int i) { return rows[i].value && !rows[i].heading && rows[i].cheat < 0 && row_shown(i); }
 void bridge_fill(int i, MkwVkSetting* out) {
     static const char* const tabs[] = {"graphics", "audio", "gameplay", "controls", "nfc", "mods", "debug", "motion",
-                                       "audio", "gameplay", "debug", "controls"};
+                                       "audio", "gameplay", "debug", "graphics", "controls"};
     static_assert(sizeof tabs / sizeof tabs[0] == TAB_PAGE + 1, "a name for each MenuTab");
     const Row& r = rows[i];
     *out = MkwVkSetting{};
@@ -4946,6 +4958,7 @@ void menu_tick() {
     fullscreen_tick();
     game_lang_tick();
     outputs_follow_screen();
+    sim_turf_settings_tick(prof_now());
     if (const uint64_t size = output_preview_take_rebuilt_size())
         menu_output_rebuilt((uint32_t)(size >> 32), (uint32_t)size);
     if (output_preview_target.w) {
@@ -5514,12 +5527,14 @@ void menu_tick() {
         if (press[5] && cur_tab == TAB_FPS_DEV) cur_tab = TAB_GAMEPLAY, press[5] = false, changed = true;   // (back)
         if (press[5] && cur_tab == TAB_RECORDINGS) cur_tab = TAB_DEBUG, press[5] = false, changed = true;   // (back)
         if (press[5] && cur_tab == TAB_SPEAKER) cur_tab = TAB_AUDIO, press[5] = false, changed = true;   // (back)
+        if (press[5] && cur_tab == TAB_SIM_TURF) cur_tab = TAB_GRAPHICS, press[5] = false, changed = true;   // (back)
         if (press[5] && cur_tab == TAB_MODS && mods_grab >= 0) mods_grab = -1, press[5] = false, changed = true;   // (puts the mod down)
         if (press[5] && pending) pending = nullptr, changed = true;   // (a Restart or Quit waiting for its second press: cancelled)
         else if (press[5] && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS, press[5] = false, changed = true;   // (back)
         else if (press[5] && cur_tab == TAB_FPS_DEV) cur_tab = TAB_GAMEPLAY, press[5] = false, changed = true;   // (back)
         else if (press[5] && cur_tab == TAB_RECORDINGS) cur_tab = TAB_DEBUG, press[5] = false, changed = true;   // (back)
         else if (press[5] && cur_tab == TAB_SPEAKER) cur_tab = TAB_AUDIO, press[5] = false, changed = true;   // (back)
+        else if (press[5] && cur_tab == TAB_SIM_TURF) cur_tab = TAB_GRAPHICS, press[5] = false, changed = true;   // (back)
         else if (press[5] && restart_ask()) page = 5, ask_sel = 0, changed = true;   // (the restart question first)
         else if (press[5]) open_now = false, tune_mode = false, quick_debug = false;
         // (the tabs: LB and RB, Q and E, or Tab; from the Motion page, as from Controls)
@@ -5527,6 +5542,7 @@ void menu_tick() {
         if ((tab_left || tab_right) && cur_tab == TAB_FPS_DEV) cur_tab = TAB_GAMEPLAY;
         if ((tab_left || tab_right) && cur_tab == TAB_RECORDINGS) cur_tab = TAB_DEBUG;
         if ((tab_left || tab_right) && cur_tab == TAB_SPEAKER) cur_tab = TAB_AUDIO;
+        if ((tab_left || tab_right) && cur_tab == TAB_SIM_TURF) cur_tab = TAB_GRAPHICS;
         if (tab_left || tab_right) {   // (the tabs shown: the Mods tab only with mods)
             do cur_tab = (cur_tab + (tab_left ? TAB_COUNT - 1 : 1)) % TAB_COUNT;
             while (!tab_shown(cur_tab));
@@ -5582,6 +5598,7 @@ void menu_tick() {
             else if (press[7] && is_recordings_row(r))
                 cur_tab = TAB_RECORDINGS, tab_selected[TAB_RECORDINGS] = 0, press[7] = false, changed = true;
             else if (press[7] && is_speaker_row(r)) cur_tab = TAB_SPEAKER, tab_selected[TAB_SPEAKER] = 0, press[7] = false, changed = true;
+            else if (press[7] && is_sim_turf_row(r)) cur_tab = TAB_SIM_TURF, tab_selected[TAB_SIM_TURF] = 0, press[7] = false, changed = true;
             else if (press[7] && r.setting && r.setting->on_activate &&   // (#1633: a module's button, unless locked)
                      !(r.setting->locked && r.setting->locked()))
                 r.setting->on_activate(), press[7] = false, changed = true;
@@ -5612,6 +5629,7 @@ void menu_tick() {
         if (!now_open) {
             tune_mode = false;
             if (drag_row >= 0) save();   // (a slider let go off the window: kept now)
+            sim_turf_settings_flush();
             hover_tab = -1, drag_row = -1, mouse_read = false;
             pending = nullptr;
             edit_end(false);   // (longshot: a text field being edited, its text as it was)

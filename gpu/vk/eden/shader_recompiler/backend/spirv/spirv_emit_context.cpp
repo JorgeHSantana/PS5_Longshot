@@ -1336,7 +1336,9 @@ void EmitContext::DefineGlobalMemoryFunctions(const Info& info) {
             // nvn_buffer_used[index], took a descriptor's place in the list for an NVN slot number: with the tracked
             // buffers first, the slots' own descriptors past them were skipped and their reads gave 0. A match is exact,
             // so searching a buffer the access never falls in costs a comparison and nothing else.
-            if (info.storage_buffers_descriptors[index].count > 1) {
+            // (longshot) nor a simulated-turf private one (ir_opt/sim_turf_pool_pass.h): no constant-bank word describes it, and the
+            // accesses that go to it name it
+            if (info.storage_buffers_descriptors[index].count > 1 || IsSimTurfStorage(info.storage_buffers_descriptors[index])) {
                 continue;
             }
             const auto& ssbo{info.storage_buffers_descriptors[index]};

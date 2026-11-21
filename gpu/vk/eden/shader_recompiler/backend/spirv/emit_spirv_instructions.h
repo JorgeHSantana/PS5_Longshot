@@ -116,6 +116,7 @@ void EmitWriteGlobalS16(EmitContext& ctx, Id address, Id value);
 void EmitWriteGlobal32(EmitContext& ctx, Id address, Id value);
 void EmitWriteGlobal64(EmitContext& ctx, Id address, Id value);
 void EmitWriteGlobal128(EmitContext& ctx, Id address, Id value);
+Id EmitStorageBufferLength(EmitContext& ctx, const IR::Value& binding);
 Id EmitLoadStorageU8(EmitContext& ctx, const IR::Value& binding, const IR::Value& offset);
 Id EmitLoadStorageS8(EmitContext& ctx, const IR::Value& binding, const IR::Value& offset);
 Id EmitLoadStorageU16(EmitContext& ctx, const IR::Value& binding, const IR::Value& offset);

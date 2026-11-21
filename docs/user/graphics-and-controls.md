@@ -118,6 +118,7 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | Rescan ReShade presets | Refreshes the user preset list and reloads the selected file. | |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
 | | Grass distance | Game's, 2x, 3x, 4x: how far the short grass blades reach | Game's |
+| | Simulated turf | Opens the area's six-row simulated-turf page: Use global multipliers; Fade start; Turf density; Minimum blades; Far power; Reset current area. With global multipliers on, the four value rows become multipliers of each area's installed profile. Fade start and Minimum blades can both be 0 for no simulated turf. Changes apply at once and save per area in `sim_turf_settings.ini`. | Each area's installed profile |
 | | Shadow resolution | Auto (for the card's memory), Game's (1600), High (2200), Highest (3072): the sun's shadow maps, applies at once; Highest also keeps the nearest shadows from shimmering as much | Auto |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
@@ -207,6 +208,13 @@ helper asks you to.
   Shadow resolution for a card with that much memory. It leaves the Upscaler and Frame generation as you chose them:
   with DLSS, FSR 3.1 or FSR 4, the preset's resolution becomes their nearest mode. Changing most other rows yourself
   sets it to Custom.
+- **Simulated turf** controls the large-scale, flowing turf made by an area's fluid/turf simulation and keeps
+  a separate profile for each visited area. Leave **Use global multipliers** off to edit that area's Fade start, Turf
+  density, Minimum blades and Far power directly; turn it on to scale every area's installed values instead. **Reset
+  current area** removes only the current area's edits. Setting Fade start and Minimum blades to 0 disables its simulated
+  turf for lower-end systems; flowers, shrubs and the short decorative blades controlled by **Grass distance** can remain.
+  The renderer measures the resulting turf-list demand and holds only the needed record capacity plus headroom; sustained
+  lower demand can release that capacity down to zero.
 - **Auto (this PC)** chooses for the PC it runs on: the memory tier from the card's video memory (Minimum on an
   integrated GPU, a Steam Deck or a card without mesh shaders), DLSS on an NVIDIA RTX card or FSR 4 on an AMD RDNA 4 card (RX 9000)
   where the build has them. In the first minute of play it lowers the Render resolution a step while frames are missed
@@ -248,7 +256,7 @@ helper asks you to.
 - **Grass distance** sets how far the short grass blades reach: Kokiri Forest's tufts and the moss on its stones. The game
   picks patches within 22 m of Link and thins blades by distance from the camera, from 12 m to about 20 m. 2x, 3x and 4x
   extend their radius and fades by that factor. Game's, the default, keeps the console's reach. The change applies at once.
-  Hyrule Field's main grass keeps the game's density to avoid overflowing its fixed blade list. Saved as `grass_distance`;
+  This row does not change the large-scale simulated turf controlled by **Simulated turf**. Saved as `grass_distance`;
   `RX_VK_GRASS_DISTANCE=<n>` (1 to 8) overrides the row for one run.
 - **GPU device** matters on a PC with more than one graphics card: Auto prefers a dedicated one. The card you choose is
   remembered as that card, not its place in the list.

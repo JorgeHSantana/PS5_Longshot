@@ -4,8 +4,8 @@
 #include <cstring>
 
 namespace mkwvk {
-// The short blades' scene-buffer words and their reach powers. Field grass is left at the game's density:
-// increasing it can overflow the game's fixed blade list.
+// The short decorative blades' scene-buffer words and their reach powers. Large-scale flowing simulated turf is
+// deliberately left to the separate Simulated turf page and its adaptive private lists.
 inline int grass_words(uint64_t key, uint16_t* words, int* power) {
     switch (key) {
     case 0x383a566958350efeull: words[0] = 75, power[0] = 1; return 1;
