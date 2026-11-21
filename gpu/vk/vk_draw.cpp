@@ -1062,8 +1062,10 @@ bool pcache_load_off() {
     }();
     return off;
 }
-/// (longshot) The pipeline cache's files go when they were made for another translator than this one (program_cache_stamp,
-/// which the program cache and the prepare record start over by): their pipelines can no longer be hit, and the file only grew,
+/// (longshot) The pipeline cache's files go when they were made for another translator than this one (program_cache_stamp, which
+/// the program cache and the prepare record start over by; files of this translator under an earlier program cache format are
+/// kept, pipelines_stamp_ok, as their stamp file says, so a build of that format keeps them too): their pipelines can no longer
+/// be hit, and the file only grew,
 /// read whole at every start and held by the driver (pcache_stamp.h). Once a run, before the first of pcache_init and
 /// prepare_run: whether files went, so that prepare_run makes the stage libraries the warm pass kept in them again
 /// (prepared_for.warmed), whatever its record says. (longshot, issue
@@ -1072,7 +1074,7 @@ bool pcache_load_off() {
 bool pcache_drop_stale() {
     static const bool dropped = [] {
         const std::string dir = cache_path("");   // (where pcache_init keeps them: the game folder's cache/, vk_paths.h)
-        const pcache_stamp::Dropped gone = pcache_stamp::check(dir, program_cache_stamp());
+        const pcache_stamp::Dropped gone = pcache_stamp::check(dir, program_cache_stamp(), pipelines_stamp_ok);
         if (gone.files)
             logf("vk: pipeline cache: %zu files made for another translator dropped (%llu MB); it starts empty", gone.files,
                  (unsigned long long)(gone.bytes >> 20));
@@ -1814,7 +1816,7 @@ std::vector<std::unique_ptr<PipeNote>> pipe_notes_read() {
     std::vector<std::unique_ptr<PipeNote>> notes;
     if (FILE* f = fopen(pipe_notes_path().c_str(), "rb")) {
         uint64_t head[2] = {0, 0};
-        if (fread(head, 8, 2, f) == 2 && head[0] == program_cache_stamp() && head[1] == sizeof(PipeNote)) {
+        if (fread(head, 8, 2, f) == 2 && pipelines_stamp_ok(head[0]) && head[1] == sizeof(PipeNote)) {
             std::unordered_set<uint64_t> seen;
             for (;;) {
                 auto rec = std::make_unique<PipeNote>();
@@ -1862,7 +1864,8 @@ void notes_open_locked(const std::vector<std::unique_ptr<PipeNote>>* known) {
         if (fread(head, 8, 2, f) != 2) head[0] = 0;
         fclose(f);
     }
-    const bool same = head[0] == stamp && head[1] == sizeof(PipeNote);
+    // (a head of this translator under an earlier program cache format is the same: its notes are about the pipelines, kept)
+    const bool same = pipelines_stamp_ok(head[0]) && head[1] == sizeof(PipeNote);
     if (same) cut_part_record(path, sizeof head, sizeof(PipeNote));
     if (same && known) {
         for (const auto& n : *known) noted.insert(n->key);
@@ -11314,7 +11317,7 @@ bool predicted_keys_read(std::vector<uint64_t>& keys) {
     bool ok = false;
     if (FILE* f = fopen(predicted_keys_path().c_str(), "rb")) {
         uint64_t head[2]{};
-        if (fread(head, 8, 2, f) == 2 && head[0] == program_cache_stamp() && head[1] <= (64u << 20) &&
+        if (fread(head, 8, 2, f) == 2 && pipelines_stamp_ok(head[0]) && head[1] <= (64u << 20) &&
             fseek(f, 0, SEEK_END) == 0 && ftell(f) == 16 + (long)head[1] * 8 && fseek(f, 16, SEEK_SET) == 0) {
             keys.resize((size_t)head[1]);
             ok = fread(keys.data(), 8, keys.size(), f) == keys.size();
@@ -11483,7 +11486,7 @@ void predicted_check() {
     std::vector<PipeNote> sample;
     if (FILE* f = fopen(predicted_sample_path().c_str(), "rb")) {
         uint64_t head[3]{};
-        if (fread(head, 8, 3, f) == 3 && head[0] == program_cache_stamp() && head[1] == sizeof(PipeNote) && head[2] <= 64) {
+        if (fread(head, 8, 3, f) == 3 && pipelines_stamp_ok(head[0]) && head[1] == sizeof(PipeNote) && head[2] <= 64) {
             sample.resize((size_t)head[2]);
             if (fread(sample.data(), sizeof(PipeNote), sample.size(), f) != sample.size()) sample.clear();
         }
@@ -12100,7 +12103,7 @@ bool precompile_covers_notes() {
     if (!f) return false;
     const size_t n = fread(rec, sizeof(*rec), 3, f);
     fclose(f);
-    if (n < 2 || rec[0] != program_cache_stamp()) return false;
+    if (n < 2 || !pipelines_stamp_ok(rec[0])) return false;
     if (n == 3 && rec[2] == ComputePlan::every) return true;
     // Play learns more keys as it dispatches them. Its usual start needn't repeat the warm
     // each time that happens. A Builder must cover its current list, including a Most -> All upgrade.
@@ -12114,7 +12117,7 @@ std::vector<NoteRef> pipe_notes_refs(bool* whole) {
     FILE* f = fopen(pipe_notes_path().c_str(), "rb");
     if (!f) return refs;
     uint64_t head[2] = {0, 0};
-    if (fread(head, 8, 2, f) == 2 && head[0] == program_cache_stamp() && head[1] == sizeof(PipeNote)) {
+    if (fread(head, 8, 2, f) == 2 && pipelines_stamp_ok(head[0]) && head[1] == sizeof(PipeNote)) {
         // (what a reference needs lies in two places of a note: its first words, and the vertex formats inside its state)
         constexpr size_t kFront = offsetof(PipeNote, s);
         constexpr size_t kVattr = offsetof(PipeNote, s) + offsetof(NvnState, vattr);

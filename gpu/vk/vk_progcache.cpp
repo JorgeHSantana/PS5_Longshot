@@ -8,8 +8,12 @@
 // kProgramCacheFormat: a cache of the old format is then not read, and the next start prepares again. That includes the types
 // written as they lie in memory: Program::Answer, the questions, Stage::c1 and the head's words (vk_shader.h, which the translator
 // stamp does not cover); the static_asserts beside kProgramCacheFormat stop a build whose layout of those changed, so that it is
-// raised. (Shader::Info, also written as it lies, is the recompiler's: its folders are in the translator stamp.) The pipeline notes,
-// the state lists' notes and longshot_prepared.bin are stamped with program_cache_stamp too, so they go with it
+// raised. (Shader::Info, also written as it lies, is the recompiler's: its folders are in the translator stamp.) longshot_prepared.bin
+// is stamped with program_cache_stamp too, so it goes with it. The pipeline side (the driver's pipeline cache, the pipeline notes,
+// the precompile's .built record, the module identifiers, the prediction's keys and sample) is stamped with it but judged by
+// pipelines_stamp_ok: what it holds is about the SPIR-V, the program keys and their variants, which a format change leaves as they
+// were, so it is kept for every earlier format of this translator. A format bump can therefore never drop the pipeline side: a
+// change to the SPIR-V, the keys or the variants belongs in the translator's stamp (nx2/translator_files.py, translator_stamp)
 #ifndef _WIN32
 #include <fcntl.h>
 #include <sys/file.h>
@@ -69,14 +73,33 @@ static_assert(std::is_same_v<decltype(Program::workgroup), std::array<uint32_t, 
               std::is_same_v<decltype(Program::fallback_payload_words), uint32_t> &&
               std::is_same_v<decltype(Program::fallback_task_threads), uint32_t>, "the record head's words (put_head)");
 
+/// The program cache's stamp for this translator had its format been `format`
+uint64_t program_cache_stamp_of(uint32_t format) {
+    uint64_t h = translator_stamp();
+    for (size_t i = 0; i < sizeof format; i++) h = (h ^ ((const uint8_t*)&format)[i]) * 1099511628211ull;
+    return h;
+}
+
 uint64_t program_cache_stamp() {
-    static const uint64_t stamp = [] {
-        uint64_t h = translator_stamp();
-        const uint32_t format = kProgramCacheFormat;
-        for (size_t i = 0; i < sizeof format; i++) h = (h ^ ((const uint8_t*)&format)[i]) * 1099511628211ull;
-        return h;
-    }();
+    static const uint64_t stamp = program_cache_stamp_of(kProgramCacheFormat);
     return stamp;
+}
+
+/// Whether a file of the pipeline side stamped `stamp` was made for this translator, by this program cache format or an earlier
+/// one. A format change is about how longshot_programs.bin lays out its records, not about the SPIR-V: the pipelines the driver
+/// keeps, the notes of which ones play made, the module identifiers and the prediction's keys are all as good as before.
+/// (#1809 raised the format from 1 to 3 and nightly-622's first start dropped them all with the program file: the preparation
+/// built every pipeline again with nothing in the driver's cache, hours on AMD, though every one of them was still there)
+bool pipelines_stamp_ok(uint64_t stamp) {
+    if (stamp == program_cache_stamp()) return true;
+    static const std::array<uint64_t, kProgramCacheFormat> earlier = [] {   // (made once, as program_cache_stamp is)
+        std::array<uint64_t, kProgramCacheFormat> s{};
+        for (uint32_t format = 1; format < kProgramCacheFormat; format++) s[format] = program_cache_stamp_of(format);
+        return s;
+    }();
+    for (uint32_t format = 1; format < kProgramCacheFormat; format++)
+        if (stamp == earlier[format]) return true;
+    return false;
 }
 
 // ---- (longshot) The program cache, longshot_programs.bin beside the executable: what translation made, by the key of the

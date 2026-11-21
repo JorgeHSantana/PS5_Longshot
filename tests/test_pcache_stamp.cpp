@@ -69,6 +69,15 @@ int main(int argc, char** argv) {
     put(dir + "longshot_vk_pipelines.stamp", 9);   // (a byte too many)
     CHECK(!read(dir, &s));
 
+    // a stamp `also` takes (the same translator under an earlier program cache format): kept, the stamp file as it was
+    write(dir, 0x5678);
+    put(dir + "longshot_vk_pipelines.bin", 500);
+    d = check(dir, 0x9abc, [](uint64_t kept) { return kept == 0x5678; });
+    CHECK(d.files == 0 && there(dir + "longshot_vk_pipelines.bin") && read(dir, &s) && s == 0x5678);
+    // one it does not take still goes
+    d = check(dir, 0x9abc, [](uint64_t kept) { return kept == 0x1111; });
+    CHECK(d.files == 1 && !there(dir + "longshot_vk_pipelines.bin") && read(dir, &s) && s == 0x9abc);
+
     if (failed) return 1;
     std::printf("pcache_stamp: ok\n");
     return 0;

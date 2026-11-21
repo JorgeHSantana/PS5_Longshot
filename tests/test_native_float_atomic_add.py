@@ -217,7 +217,8 @@ def check_source():
     # (the program cache's stamp: program_cache_stamp, vk_progcache.cpp, hashes translator_stamp's, which says what the
     # translator is told; it was disk_stamp's before #2323)
     progcache = (VK / "vk_progcache.cpp").read_text(encoding="utf-8")
-    if "translator_stamp()" not in cut(progcache, "uint64_t program_cache_stamp() {", "vk_progcache.cpp"):
+    if "program_cache_stamp_of(kProgramCacheFormat)" not in cut(progcache, "uint64_t program_cache_stamp() {", "vk_progcache.cpp") or \
+            "translator_stamp()" not in cut(progcache, "uint64_t program_cache_stamp_of(uint32_t format) {", "vk_progcache.cpp"):
         raise SystemExit("FAIL: the program cache's stamp no longer holds translator_stamp's: update this check")
     stamp = shader[shader.index("uint64_t translator_stamp() {"):]
     if "profile().support_float32_atomic_add" not in stamp[:stamp.index("return h;")]:

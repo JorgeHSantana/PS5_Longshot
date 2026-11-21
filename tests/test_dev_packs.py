@@ -141,7 +141,7 @@ def test_cache_format(d):
     again, though the translator's stamp is the same: found in the renderer's source as the game reads it"""
     src = (ROOT / packs.PROGRAM_CACHE).read_text(encoding="utf-8")
     check("kProgramCacheFormat found in %s" % packs.PROGRAM_CACHE, packs.CACHE_FORMAT.search(src))
-    check("program_cache_stamp holds kProgramCacheFormat", "const uint32_t format = kProgramCacheFormat;" in src)
+    check("program_cache_stamp holds kProgramCacheFormat", "program_cache_stamp_of(kProgramCacheFormat)" in src)
     import subprocess
     repo = d / "fmt"
     path = repo / "gpu" / "vk" / "vk_progcache.cpp"

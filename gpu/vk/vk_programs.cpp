@@ -156,7 +156,7 @@ bool ids_ready() {
         vkGetPhysicalDeviceProperties2(dev.physical, &p2);
         const std::string cache = program_cache_path();
         ids.open(cache.substr(0, cache.find_last_of("\\/") + 1) + "longshot_module_ids.bin", program_cache_stamp(),
-                 ip.shaderModuleIdentifierAlgorithmUUID);
+                 ip.shaderModuleIdentifierAlgorithmUUID, pipelines_stamp_ok);
         logf("vk: module identifiers: %zu known (longshot_module_ids.bin): a learned compute variant's pipeline is made at its "
              "program's create call without its code", ids.size());
     });

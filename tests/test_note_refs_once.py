@@ -126,6 +126,7 @@ std::filesystem::file_time_type id_last_write_time(const std::string& path, std:
 }
 constexpr uint64_t kStamp = 0x5354414d50ull;
 uint64_t program_cache_stamp() { return kStamp; }
+bool pipelines_stamp_ok(uint64_t stamp) { return stamp == kStamp; }
 /* TARGETS_OK */
 bool formats_ok(uint32_t n, const uint32_t color[8], uint32_t has_depth, uint32_t depth) {
     for (uint32_t i = 0; i < n && i < 8; i++) if (color[i] == 0xBAD) return false;

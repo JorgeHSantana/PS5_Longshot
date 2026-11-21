@@ -59,11 +59,12 @@ inline bool is_cache_file(const std::string& name) {
 struct Dropped { size_t files = 0; uint64_t bytes = 0; };
 
 /// The cache's files in dir go when they were made for another stamp than `stamp` (or for none: a folder from before the stamp
-/// file, whose files may hold any older translator's pipelines); the stamp file then says `stamp`. What went
-inline Dropped check(const std::string& dir, uint64_t stamp) {
+/// file, whose files may hold any older translator's pipelines); the stamp file then says `stamp`. A stamp `also` takes is kept
+/// too, as it is (vk_draw.cpp: the same translator under an earlier program cache format, pipelines_stamp_ok). What went
+inline Dropped check(const std::string& dir, uint64_t stamp, bool (*also)(uint64_t) = nullptr) {
     Dropped d;
     uint64_t kept = 0;
-    if (read(dir, &kept) && kept == stamp) return d;
+    if (read(dir, &kept) && (kept == stamp || (also && also(kept)))) return d;
     // (nothing here may throw: it runs at every start. The range-for's ++ throws on an error, and path::string() throws on
     // Windows for a name the code page cannot hold, so the iterator is stepped by increment(ec) and such a name, never one of
     // ours, is passed over)
