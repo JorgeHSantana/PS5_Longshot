@@ -62,7 +62,9 @@ FIXTURE = r"""
 #include <vector>
 #include <sirit/sirit.h>
 #include "shader_recompiler/profile.h"
+#include "shader_recompiler/stage.h"
 using Sirit::Id;
+using Shader::Stage;
 struct NotImplementedException : std::runtime_error {
     template <typename... A> explicit NotImplementedException(const char* what, A&&...) : std::runtime_error(what) {}
 };
@@ -81,6 +83,8 @@ struct Info { bool uses_atomic_f32_add{}; };
 struct EmitContext : Sirit::Module {
     using Sirit::Module::Module;
     Shader::Profile profile{};
+    Stage stage{Stage::Compute};
+    bool mesh_fallback{};
     Id U1{};
     std::array<Id, 5> U32{}, F32{};
     Id u32_zero_value{};
@@ -103,6 +107,7 @@ void EmitContext::define_storage_buffers(const Info& info) {
 int main(int argc, char** argv) {
     if (argc < 4) return 2;
     EmitContext ctx{0x00010600};
+    ctx.profile.supported_spirv = 0x00010600;
     ctx.profile.support_float32_atomic_add = argv[2][0] == '1';
     ctx.profile.support_descriptor_aliasing = argv[3][0] == '1';
     ctx.AddCapability(spv::Capability::Shader);
@@ -346,7 +351,8 @@ def main():
                      ceiling[:ceiling.index("\n") + 1],
                      cut(context, "Id CasTriesVariable(EmitContext& ctx)", "CasTriesVariable"),
                      cut(context, "Id CasLoopDone(EmitContext& ctx", "CasLoopDone"),
-                     cut(context, "Id CasLoop(EmitContext& ctx", "CasLoop")])
+                     cut(context, "Id CasLoop(EmitContext& ctx", "CasLoop"),
+                     cut(context, "Id SubgroupCasLoop(EmitContext& ctx", "SubgroupCasLoop")])
     helpers = "\n".join(cut(atomic, marker, "emit_spirv_atomic.cpp") for marker in (
         "Id StorageIndex(EmitContext& ctx", "Id StoragePointer(EmitContext& ctx", "std::pair<Id, Id> AtomicArgs(EmitContext& ctx",
         "Id EmitStorageAtomicAddF32(EmitContext& ctx"))
