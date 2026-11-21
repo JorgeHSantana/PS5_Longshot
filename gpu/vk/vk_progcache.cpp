@@ -9,11 +9,12 @@
 // written as they lie in memory: Program::Answer, the questions, Stage::c1 and the head's words (vk_shader.h, which the translator
 // stamp does not cover); the static_asserts beside kProgramCacheFormat stop a build whose layout of those changed, so that it is
 // raised. (Shader::Info, also written as it lies, is the recompiler's: its folders are in the translator stamp.) longshot_prepared.bin
-// is stamped with program_cache_stamp too, so it goes with it. The pipeline side (the driver's pipeline cache, the pipeline notes,
-// the precompile's .built record, the module identifiers, the prediction's keys and sample) is stamped with it but judged by
-// pipelines_stamp_ok: what it holds is about the SPIR-V, the program keys and their variants, which a format change leaves as they
-// were, so it is kept for every earlier format of this translator. A format bump can therefore never drop the pipeline side: a
-// change to the SPIR-V, the keys or the variants belongs in the translator's stamp (nx2/translator_files.py, translator_stamp)
+// is stamped with program_cache_stamp too, so it goes with it. The pipeline side is judged apart: the driver's pipeline cache, the
+// .built record, the module identifiers and the prediction's keys and sample by pipelines_stamp_ok (this translator under any
+// format up to this one: a format change leaves the SPIR-V, the program keys and their variants as they were), and the driver's
+// pipeline cache, across a translator change too, within its bound (pcache_stamp.h). The pipeline notes have a stamp of their own
+// (vk_draw.cpp notes_stamp): they hold what the game asked, and a note whose key this translator makes otherwise is passed over
+// (note_key_holds). So no format bump drops the pipeline side
 #ifndef _WIN32
 #include <fcntl.h>
 #include <sys/file.h>

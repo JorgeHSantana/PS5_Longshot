@@ -9,7 +9,7 @@ wants. This check:
   and that build_unrolled asks the caches (no compile) before it asks for kBuildHeadroom;
 - runs pipeline_cache_file.h's sweep of cut-short saves on a leftover .tmp of that file: it goes;
 - compiles pcache_stamp.h and runs its drop against a folder holding the translator's files and that file, made for another
-  translator: the translator's files go, FSR 4's stays.
+  translator and past what another translator carries (its base): the translator's files go, FSR 4's stays.
 
 python -I -B tests/test_fsr4_own_cache.py [--cxx g++]
 """
@@ -42,6 +42,7 @@ static bool there(const std::string& path) {
 int main(int, char** argv) {
     const std::string dir = std::string(argv[1]) + "/", own = argv[2];
     write(dir, 0x1111);   // (the old translator's stamp, as an update finds it)
+    write_base(dir, Base{1, 0x1111, 0, 0});   // (a main file past what another translator carries: its files dropped)
     put(dir + kMainFile);
     put(dir + std::string(kPlayPrefix) + "3.bin");
     put(dir + own);

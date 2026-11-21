@@ -51,6 +51,7 @@ DRIVER = r'''#define _CRT_SECURE_NO_WARNINGS 1
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 #ifndef _WIN32
@@ -127,6 +128,9 @@ std::filesystem::file_time_type id_last_write_time(const std::string& path, std:
 constexpr uint64_t kStamp = 0x5354414d50ull;
 uint64_t program_cache_stamp() { return kStamp; }
 bool pipelines_stamp_ok(uint64_t stamp) { return stamp == kStamp; }
+bool notes_stamp_ok(uint64_t stamp) { return stamp == kStamp; }
+static uint64_t restamped;   // (the head the walk took, handed to be stamped as the notes' own)
+void notes_restamp(const std::string&, uint64_t had) { restamped = had; }
 /* TARGETS_OK */
 bool formats_ok(uint32_t n, const uint32_t color[8], uint32_t has_depth, uint32_t depth) {
     for (uint32_t i = 0; i < n && i < 8; i++) if (color[i] == 0xBAD) return false;
@@ -136,7 +140,8 @@ void note_color_types(const PipeNote& n, uint8_t types[8]) { for (int i = 0; i <
 
 /* WALK */
 
-// (the walk before this change, as main 0de25c3e had it: the reference every answer is compared with)
+// (the walk before this change, as main 0de25c3e had it, but for a duplicate key, whose later note is the one kept now (a key
+// noted again after its old note was passed over): the reference every answer is compared with)
 std::vector<NoteRef> base_notes_refs() {
     std::vector<NoteRef> refs;
     FILE* f = fopen(pipe_notes_path().c_str(), "rb");
@@ -145,7 +150,7 @@ std::vector<NoteRef> base_notes_refs() {
     if (fread(head, 8, 2, f) == 2 && head[0] == program_cache_stamp() && head[1] == sizeof(PipeNote)) {
         constexpr size_t kFront = offsetof(PipeNote, s);
         constexpr size_t kVattr = offsetof(PipeNote, s) + offsetof(NvnState, vattr);
-        std::unordered_set<uint64_t> seen;
+        std::unordered_map<uint64_t, size_t> seen;
         uint8_t front[kFront];
         PipeNote probe{};
         for (int64_t at = 16;; at += (int64_t)sizeof(PipeNote)) {
@@ -159,7 +164,9 @@ std::vector<NoteRef> base_notes_refs() {
                 continue;
             r.key = probe.key, r.prog = probe.prog, r.variant = probe.variant, r.at = at;
             note_color_types(probe, r.color_types);
-            if (seen.insert(r.key).second) refs.push_back(r);
+            const auto [slot, fresh] = seen.try_emplace(r.key, refs.size());
+            if (fresh) refs.push_back(r);
+            else refs[slot->second] = r;
         }
     }
     fclose(f);
@@ -221,7 +228,7 @@ int main(int argc, char** argv) {
                 fails++;
             }
         };
-        // (whole notes; a duplicate key, the first kept; a note refused by its targets and one by its formats)
+        // (whole notes; a duplicate key, the later kept; a note refused by its targets and one by its formats)
         std::vector<PipeNote> notes = some(6);
         notes.push_back(make(3));
         notes.push_back(make(40, 9));
@@ -229,6 +236,12 @@ int main(int argc, char** argv) {
         notes.push_back(make(42));
         write(notes);
         agree("whole notes, a duplicate key, refused targets and formats", 7);
+        CHECK(pipe_notes_refs()[2].key == 3 && pipe_notes_refs()[2].at == 16 + 6 * rec);   // (its place, the later note's record)
+        CHECK(restamped == kStamp);   // (a walk alone, a preparation's, stamps the head it took as the notes' own)
+        restamped = 0;
+        write(notes, kStamp + 1);
+        CHECK(pipe_notes_refs().empty() && restamped == 0);   // (a head it refuses is left alone)
+        write(notes);
         // (a tail cut inside the next note's front, inside its middle, one byte short; and a whole note past a cut one: the
         // walk stops at the cut, as before)
         for (const long keep : {10L, front + 4, (long)(offsetof(PipeNote, s) + offsetof(NvnState, vattr)) + 8, rec / 2, rec - 1}) {

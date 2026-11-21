@@ -252,6 +252,8 @@ void load_work(LoadJob& job) {
                     if (n.variant != p->variant) continue;
                     if (!job.draw_waiting.load(std::memory_order_relaxed)) {
                         if (!pipe_note_at(notes_in, n.at, note.get())) { left++; continue; }
+                        // (a key of another translator's: not a pipeline of this program's to wait for, so it keeps no modules)
+                        if (!note_key_holds(*p, *note)) continue;
                         bytes += (int64_t)sizeof(PipeNote);
                         // The draw may have arrived during the disk read.
                         if (!job.draw_waiting.load(std::memory_order_relaxed)) {

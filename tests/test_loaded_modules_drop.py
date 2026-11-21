@@ -51,7 +51,8 @@ def check_load_work():
             ("census.load_pipes += pipeline_keep_ready(n.key, pl), built++;", "a built noted pipeline is not counted"),
             ("else census.load_pipes_cold++, left++;", "a cold noted pipeline does not keep the modules"),
             ("census.load_pipes_deferred++, left++;", "a noted pipeline deferred to its draw does not keep the modules"),
-            ("if (!pipe_note_at(notes_in, n.at, note.get())) { left++; continue; }", "a note that did not read does not keep them")):
+            ("if (!pipe_note_at(notes_in, n.at, note.get())) { left++; continue; }", "a note that did not read does not keep them"),
+            ("if (!note_key_holds(*p, *note)) continue;", "a note whose key is another translator's is built, or keeps the modules")):
         if needle not in work:
             raise SystemExit("FAIL: " + why + " (looked for: " + needle + ")")
     if "shader modules let go once their programs' noted pipelines were built" not in programs:

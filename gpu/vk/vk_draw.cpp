@@ -1064,19 +1064,23 @@ bool pcache_load_off() {
     }();
     return off;
 }
-/// (longshot) The pipeline cache's files go when they were made for another translator than this one (program_cache_stamp, which
-/// the program cache and the prepare record start over by; files of this translator under an earlier program cache format are
-/// kept, pipelines_stamp_ok, as their stamp file says, so a build of that format keeps them too): their pipelines can no longer
-/// be hit, and the file only grew,
-/// read whole at every start and held by the driver (pcache_stamp.h). Once a run, before the first of pcache_init and
-/// prepare_run: whether files went, so that prepare_run makes the stage libraries the warm pass kept in them again
-/// (prepared_for.warmed), whatever its record says. (longshot, issue
-/// 388) With the file not read (pcache_load_off) they go too: a start that reads it would drop them, and kept they were 1.2 GB
-/// of disk after every update that changed the translator
+/// (longshot) The pipeline cache's files judged against this translator (pcache_stamp.h check, program_cache_stamp): kept when
+/// they were made for it (or for it under an earlier program cache format, pipelines_stamp_ok, as their stamp file says, so a
+/// build of that format keeps them too); another translator's carried within their bound, as most of their pipelines are this
+/// one's too; dropped past it, or for a folder from before the stamp file: a file that only grew, read whole at every start and
+/// held by the driver (issue 388). Once a run, before the first of pcache_init and prepare_run: whether files went, so that
+/// prepare_run makes the stage libraries the warm pass kept in them again (prepared_for.warmed), whatever its record says. With
+/// the file not read (pcache_load_off) they are judged too: a start that reads it would judge them the same
 bool pcache_drop_stale() {
     static const bool dropped = [] {
         const std::string dir = cache_path("");   // (where pcache_init keeps them: the game folder's cache/, vk_paths.h)
         const pcache_stamp::Dropped gone = pcache_stamp::check(dir, program_cache_stamp(), pipelines_stamp_ok);
+        if (gone.carried && gone.base)
+            logf("vk: pipeline cache: another translator's (%llu MB, %llu MB when a precompile last finished alone) carried: most of "
+                 "its pipelines are this one's too", (unsigned long long)(gone.all >> 20), (unsigned long long)(gone.base >> 20));
+        else if (gone.carried)
+            logf("vk: pipeline cache: another translator's (%llu MB, no precompile finished for it yet) carried: most of its "
+                 "pipelines are this one's too", (unsigned long long)(gone.all >> 20));
         if (gone.files)
             logf("vk: pipeline cache: %zu files made for another translator dropped (%llu MB); it starts empty", gone.files,
                  (unsigned long long)(gone.bytes >> 20));
@@ -1778,6 +1782,19 @@ void precompile_built_write(size_t notes, uint64_t compute_coverage) {
         fclose(f);
     }
 }
+/// The record just written also says the cache's file holds what it counts (pcache_stamp::kBuiltWhole), so that its size can be the
+/// carry's base. Not said by a start that gave up on building them, nor before the file was written
+void precompile_built_whole() {
+    if (env_on("LONGSHOT_PREPARE_ONLY")) return;
+    const std::string path = precompile_built_path();
+    std::error_code ec;
+    if (std::filesystem::file_size(path, ec) != 3 * sizeof(uint64_t) || ec) return;
+    if (FILE* f = fopen(path.c_str(), "ab")) {
+        const uint64_t whole = pcache_stamp::kBuiltWhole;
+        fwrite(&whole, sizeof whole, 1, f);
+        fclose(f);
+    }
+}
 /// The notes of this build (longshot_pipelines.bin), each pipeline once
 /// (longshot) Targets a pipeline can be made with: at most 8 colour targets, a sample count Vulkan has, a topology it has.
 /// The notes and the state list are files: what they say is checked before a pipeline is made from it
@@ -1814,21 +1831,59 @@ bool note_sane(PipeNote& n) {
     }
     return n.s.prog.nstage <= 6;
 }
+/// (longshot) The pipeline notes' own stamp. A note holds what the game asked (PipeNote, NvnState: the game's keys and state; a
+/// program's key is its guest code's, vk_shader.cpp code_key), which no translator makes, so the notes are good across a translator
+/// change: a note whose program variant the new translator does not make is passed over by the warm and the load, and play notes
+/// it again. They were stamped with the program cache's stamp and dropped with it at every translator change, and the preparation
+/// after an update then knew nothing of what play had drawn. Stamped now by how a note is laid out: kNotesFormat, raised with any
+/// change to PipeNote, NvnState or the NVN structs NvnState holds (tests/test_notes_format.py holds their fingerprint and fails
+/// until it is). A file of this translator stamped as before (pipelines_stamp_ok) is read too, and stamped anew when read
+constexpr uint32_t kNotesFormat = 1;
+uint64_t notes_stamp() {
+    static const uint64_t stamp = [] {
+        uint64_t h = 0xCBF29CE484222325ull;
+        const auto add = [&h](const void* d, size_t n) {
+            for (size_t i = 0; i < n; i++) h = (h ^ ((const uint8_t*)d)[i]) * 1099511628211ull;
+        };
+        static const char tag[] = "longshot pipeline notes";
+        add(tag, sizeof tag);
+        const uint64_t v[] = {kNotesFormat, sizeof(PipeNote), sizeof(NvnState)};
+        add(v, sizeof v);
+        return h;
+    }();
+    return stamp;
+}
+bool notes_stamp_ok(uint64_t stamp) { return stamp == notes_stamp() || pipelines_stamp_ok(stamp); }
+/// A notes file read with a stamp from before notes_stamp: its head stamped anew, so that the next translator change keeps it
+void notes_restamp(const std::string& path, uint64_t had) {
+    if (had == notes_stamp()) return;
+    if (FILE* f = fopen(path.c_str(), "r+b")) {
+        const uint64_t stamp = notes_stamp();
+        if (fwrite(&stamp, 8, 1, f) == 1) logf("vk: pipeline notes %s: stamped as the notes' own, kept across a translator change now", path.c_str());
+        fclose(f);
+    }
+}
+
 std::vector<std::unique_ptr<PipeNote>> pipe_notes_read() {
     std::vector<std::unique_ptr<PipeNote>> notes;
+    uint64_t had = 0;
     if (FILE* f = fopen(pipe_notes_path().c_str(), "rb")) {
         uint64_t head[2] = {0, 0};
-        if (fread(head, 8, 2, f) == 2 && pipelines_stamp_ok(head[0]) && head[1] == sizeof(PipeNote)) {
-            std::unordered_set<uint64_t> seen;
+        if (fread(head, 8, 2, f) == 2 && notes_stamp_ok(head[0]) && head[1] == sizeof(PipeNote)) {
+            had = head[0];
+            std::unordered_map<uint64_t, size_t> seen;   // (a key noted again is the later note's: note_key_passed)
             for (;;) {
                 auto rec = std::make_unique<PipeNote>();
                 if (fread(rec.get(), sizeof(PipeNote), 1, f) != 1) break;
                 if (!note_sane(*rec)) continue;
-                if (seen.insert(rec->key).second) notes.push_back(std::move(rec));
+                const auto [slot, fresh] = seen.try_emplace(rec->key, notes.size());
+                if (fresh) notes.push_back(std::move(rec));
+                else notes[slot->second] = std::move(rec);
             }
         }
         fclose(f);
     }
+    if (had) notes_restamp(pipe_notes_path(), had);
     return notes;
 }
 /// A note's targets, as its draw had them
@@ -1843,6 +1898,34 @@ Targets note_targets(const PipeNote& n) {
 }
 void state_record(const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo, const uint8_t color_types[8]);
 uint64_t pipeline_key(const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo);
+/// (longshot) Whether a note's key is the one this build makes of it. The notes are kept across a translator change (notes_stamp),
+/// and a key mixes in what the translator made (key_inputs: the vertex shader's loads; without EDS3 blend, the write masks, which
+/// take the fragment shader's colour outputs): under another translator a note's state can make another key than the one it was
+/// noted under. Built under its old key, a draw of that key would be handed a pipeline made for another state (a write mask
+/// the game had masked off). Passed over instead (counted: notes_key_moved), and play notes it again under its own key. Under
+/// one translator on one GPU every note's key holds: pipeline_key reads nothing note_sane clears
+std::atomic<size_t> notes_key_moved{0};
+/// (note_mu) Keys held by a note passed over: another state can make that key under this translator (the key mixes the loaded
+/// attributes' formats and not which ones they are), and play must be able to note it. Its note goes after the old one in the
+/// file, and the readers take a key's last note
+std::unordered_set<uint64_t> notes_key_left;
+void note_key_passed(uint64_t key) {
+    static std::atomic<bool> said{false};
+    if (!said.exchange(true))
+        logf("vk: pipeline notes: a note passed over: its key is another translator's (play notes it again)");
+    std::lock_guard lk(note_mu);
+    notes_key_left.insert(key);
+}
+/// (note_mu) Whether play's pipeline of this key is to be written: a key the file lacks, or one only a passed-over note holds
+bool note_new_locked(uint64_t key) { return noted.insert(key).second || notes_key_left.erase(key) != 0; }
+bool note_key_check(const Program& p, const PipeNote& n) {   // (note_key_holds, outside this namespace, for vk_programs.cpp)
+    const bool holds = pipeline_key(p, n.s, note_targets(n), (VkPrimitiveTopology)n.topo) == n.key;
+    if (!holds) {
+        notes_key_moved.fetch_add(1, std::memory_order_relaxed);
+        note_key_passed(n.key);
+    }
+    return holds;
+}
 /// A list a crash or a full disk left ending in part of a record: cut back to its last whole record, which are all kept. The
 /// records added after a part one were never read back (their pipelines built again in play at each start)
 static void cut_part_record(const std::string& path, uint64_t head, uint64_t rec) {
@@ -1859,15 +1942,17 @@ static void cut_part_record(const std::string& path, uint64_t head, uint64_t rec
 /// and the next read takes that one). Without them the records are read here in order. The first new pipeline in play opened
 /// the file and read its keys back with a seek and an 8-byte read each: 142 ms for 1150 notes on the thread replaying
 void notes_open_locked(const std::vector<std::unique_ptr<PipeNote>>* known) {
-    static const uint64_t stamp = program_cache_stamp();
+    static const uint64_t stamp = notes_stamp();
     const std::string path = pipe_notes_path();
     uint64_t head[2] = {0, 0};
     if (FILE* f = fopen(path.c_str(), "rb")) {
         if (fread(head, 8, 2, f) != 2) head[0] = 0;
         fclose(f);
     }
-    // (a head of this translator under an earlier program cache format is the same: its notes are about the pipelines, kept)
-    const bool same = pipelines_stamp_ok(head[0]) && head[1] == sizeof(PipeNote);
+    // (a head of the notes' own stamp, or of this translator's program cache under any format: the notes are kept, and stamped
+    // as the notes' own)
+    const bool same = notes_stamp_ok(head[0]) && head[1] == sizeof(PipeNote);
+    if (same) notes_restamp(path, head[0]);
     if (same) cut_part_record(path, sizeof head, sizeof(PipeNote));
     if (same && known) {
         for (const auto& n : *known) noted.insert(n->key);
@@ -1898,7 +1983,7 @@ bool pipeline_note(uint64_t key, const Program& p, const NvnState& s, const Targ
     rec->s = s;
     std::lock_guard lk(note_mu);
     if (!note_file) notes_open_locked(nullptr);
-    if (!note_file || !noted.insert(key).second) return false;
+    if (!note_file || !note_new_locked(key)) return false;
     fwrite(rec.get(), sizeof(PipeNote), 1, note_file), fflush(note_file);
     return true;
 }
@@ -10612,6 +10697,8 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
              std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - s0).count());
         // (not by the preparation's own process: warm_bounded.h leaves_marker)
         if (warm_bounded::leaves_marker(prepare_only, all, prepare_stopped())) precompile_built_write(total, compute_warm_plan().coverage());
+        if (warm_bounded::leaves_marker(prepare_only, all, prepare_stopped()) && precompile_save::in_file(pcache_save_outcome))
+            precompile_built_whole();
         driver_env_note();
         crash_markers::end(warming);
     }
@@ -10696,7 +10783,7 @@ void precompile_at_create(void (*progress)(size_t done, size_t total)) {
             if (!p.compute && list != pass->notes_of.end()) {
                 if (!in) in = fopen(pass->notes_path.c_str(), "rb");
                 for (const NoteRef& r : list->second) {
-                    if (r.variant != p.variant || !pipe_note_at(in, r.at, note.get())) continue;
+                    if (r.variant != p.variant || !pipe_note_at(in, r.at, note.get()) || !note_key_holds(p, *note)) continue;
                     bool cold = false;
                     // (from the caches alone, as a load at a create call: what none has is made when it is first drawn)
                     if (const VkPipeline pl = pipeline_from_caches(p, *note, &cold)) pass->kept_pipes += pipeline_keep_ready(r.key, pl);
@@ -10828,6 +10915,15 @@ bool notes_lost_by_driver() {
          lost ? ": it lost them (a driver update, or evicted): they are built again before the title"
               : "");
     return lost;
+}
+
+/// Whether the pipeline cache holds nothing its file lacks (precompile_save::unchanged)
+static bool pcache_in_file() {
+    if (!pcache || pcache_no_save) return false;
+    PcacheFetch lock(-1);
+    size_t n = 0;
+    const bool sized = lock.held() && vkGetPipelineCacheData(dev.device, pcache, &n, nullptr) == VK_SUCCESS;
+    return precompile_save::unchanged(sized, n, pcache_saved_size.load());
 }
 
 void precompile_run(void (*progress)(size_t done, size_t total)) {
@@ -10993,7 +11089,7 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
             } else {
                 PipeNote& n = *notes[i - computes.size() - fallbacks.size()];
                 const Program* p = program_find(n.prog, n.variant);
-                if (p) {
+                if (p && note_key_holds(*p, n)) {
                     // (the first graphics pipeline alone, the rest in parallel: after the library warm, NVIDIA's driver (621.14,
                     // RTX 4070 Ti Super) faulted (nvoglv64+0xde2515) when all the workers began theirs at once, in 14 of 100
                     // starts, and the start hung on the lock it held then)
@@ -11072,6 +11168,8 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), read_ms);
     logf("vk: precompile: compute pipelines: %zu kept ready (%zu from the pipeline caches, %zu compiled now), %zu not made",
          cs_cached + cs_compiled, cs_cached, cs_compiled, cs_failed);
+    if (const size_t moved = notes_key_moved.load())
+        logf("vk: precompile: %zu notes passed over: their key is another translator's (play notes them again)", moved);
     if (!gone_on && !prepare_stopped()) driver_env_note();   // (the environment the notes were built in, for later starts)
     // (every note built, by a run that got to its end: RX_VK_LOAD=create may load them from the caches from the next start on)
     if (!gone_on && !prepare_stopped()) precompile_built_write(graphics_n, plan.coverage());
@@ -11079,15 +11177,19 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     // precompile_warm does under RX_VK_LOAD=create; in play it would wait for 64 MB of growth: precompile_save.h)
     static const int save_s = precompile_save::after_s(getenv("RX_VK_PRECOMPILE_SAVE_S"));
     const double build_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - built0).count();
+    bool saved = false;
     if (precompile_save::due(build_s, save_s, gone_on, prepare_stopped(), env_on("LONGSHOT_PREPARE_ONLY"))) {
         const auto s0 = std::chrono::steady_clock::now();
         prepare_saving_now.store(true, std::memory_order_relaxed);
         pipeline_cache_save(true);
+        saved = precompile_save::in_file(pcache_save_outcome);
         prepare_saving_now.store(false, std::memory_order_relaxed);
         logf("vk: precompile: its pipelines took %.0f s (compiled, not found in the caches): the pipeline cache %s, in %.0f ms, "
              "before the title (RX_VK_PRECOMPILE_SAVE_S=0: not)", build_s, precompile_save::said(pcache_save_outcome).c_str(),
              std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - s0).count());
     }
+    // (not judged by how long it took: a quick pass can have compiled some, and its save can have failed)
+    if (!gone_on && !prepare_stopped() && (saved || pcache_in_file())) precompile_built_whole();
     predicted_check();
 }
 
@@ -12208,12 +12310,14 @@ std::vector<NoteRef> pipe_notes_refs(bool* whole) {
     FILE* f = fopen(pipe_notes_path().c_str(), "rb");
     if (!f) return refs;
     uint64_t head[2] = {0, 0};
-    if (fread(head, 8, 2, f) == 2 && pipelines_stamp_ok(head[0]) && head[1] == sizeof(PipeNote)) {
+    bool taken = false;
+    if (fread(head, 8, 2, f) == 2 && notes_stamp_ok(head[0]) && head[1] == sizeof(PipeNote)) {
+        taken = true;
         // (what a reference needs lies in two places of a note: its first words, and the vertex formats inside its state)
         constexpr size_t kFront = offsetof(PipeNote, s);
         constexpr size_t kVattr = offsetof(PipeNote, s) + offsetof(NvnState, vattr);
         static_assert(kFront >= 24 + 5 * 4 + 8 * 4, "a note's first words: its keys, targets and formats");
-        std::unordered_set<uint64_t> seen;
+        std::unordered_map<uint64_t, size_t> seen;   // (a key noted again is the later note's: note_key_passed)
         uint8_t front[kFront];
         PipeNote probe{};   // (only its targets are filled in, for note_color_types)
         for (int64_t at = 16;; at += (int64_t)sizeof(PipeNote)) {
@@ -12227,11 +12331,15 @@ std::vector<NoteRef> pipe_notes_refs(bool* whole) {
                 continue;
             r.key = probe.key, r.prog = probe.prog, r.variant = probe.variant, r.at = at;
             note_color_types(probe, r.color_types);
-            if (seen.insert(r.key).second) refs.push_back(r);
+            const auto [slot, fresh] = seen.try_emplace(r.key, refs.size());
+            if (fresh) refs.push_back(r);
+            else refs[slot->second] = r;
         }
     }
     if (whole) *whole = feof(f) && !ferror(f);   // (it ended at the file's end: not at a read or a seek that failed)
     fclose(f);
+    // (a start that only walks them, a preparation's: stamped as the notes' own too, or the next translator would drop them)
+    if (taken) notes_restamp(pipe_notes_path(), head[0]);
     return refs;
 }
 bool pipe_note_at(FILE* f, int64_t at, PipeNote* out) {
@@ -12454,4 +12562,5 @@ UniformUpload uniform_upload(uint64_t size) {
     return {{cur->stream, at, size, 0}, cur->mapped + at, cur->stream_alloc};
 }
 
+bool note_key_holds(const Program& p, const PipeNote& n) { return note_key_check(p, n); }   // (vk_pipelines.h)
 } // namespace mkwvk

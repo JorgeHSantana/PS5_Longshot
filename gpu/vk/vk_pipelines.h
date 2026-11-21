@@ -43,6 +43,9 @@ VkPipeline compute_pipeline_by_module_id(const Program& p, const uint8_t* id, ui
 /// A pipeline made ahead of its first draw: the draw's lookup takes it (graphics_pipeline). False: that key has one already,
 /// and pl is destroyed
 bool pipeline_keep_ready(uint64_t key, VkPipeline pl);
+/// Whether a note's key is the one this build makes of it from p (pipeline_key): a note is kept across a translator change, and
+/// one whose key is another's is not built under it (vk_draw.cpp)
+bool note_key_holds(const Program& p, const PipeNote& n);
 /// Remember a noted state whose cache probe the waiting draw can take on first use.
 void pipeline_defer(uint64_t key);
 void program_layout(Program& p);   // (ensure_layout)

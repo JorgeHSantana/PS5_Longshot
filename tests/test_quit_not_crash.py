@@ -98,6 +98,7 @@ Plan compute_warm_plan() { return {}; }
 void precompile_built_write(size_t n, uint64_t) {
     if (FILE* f = fopen(precompile_built_path().c_str(), "wb")) fprintf(f, "%u\n", (unsigned)n), fclose(f);
 }
+void precompile_built_whole() {}
 void pcache_init() {}
 void driver_env_note() {}   // (vk_draw.cpp: a completed build records its driver environment; nothing to record here)
 void pipeline_cache_save(bool) {}

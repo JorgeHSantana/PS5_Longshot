@@ -66,6 +66,8 @@ CACHES = ("longshot_programs.bin", "longshot_programs.idx", "longshot_programs.z
           "longshot_pipelines.bin.built",
           "longshot_computes.bin", "longshot_compute_variants.bin", "longshot_pipeline_states.bin",
           "longshot_pipeline_states_v1.bin", "longshot_prepared.bin", "longshot_vk_pipelines.bin", "longshot_vk_pipelines.stamp",
+          # (the size of the cache's one translator's pipelines, which bounds what another translator carries: pcache_stamp.h)
+          "longshot_vk_pipelines.base",
           # (the textures a draw has sampled, for RX_VK_TEX_AHEAD: gpu/vk/texture_ahead.h)
           "longshot_textures_drawn.bin")
 PLAY_FILES = re.compile(r"longshot_vk_pipelines_play_[0-9]+\.bin")   # (what play adds to the pipeline cache: gpu/vk/vk_draw.cpp play_path)
