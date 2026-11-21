@@ -67,7 +67,8 @@ struct Options {
     int hud_buttons_x = 0, hud_buttons_y = 0, hud_buttons_scale = 100;
     int hud_minimap_x = 0, hud_minimap_y = 0, hud_minimap_scale = 100;
     int wide_menus = 1;   // ultrawide: the pause, item and map menus 0 at full width (stretched), 1 in the middle 16:9 with the sides
-                          // blurred, 2 with black bars (nx2/oot_wide.py, vk_framegen.cpp)
+                          // blurred, 2 with black bars (nx2/oot_wide.py, vk_framegen.cpp), 3 Extended: at their
+                          // 16:9 size with their side panes at the screen's edges (host/hos_wide_ui.c)
     int show_fps = 0;     // (longshot) the FPS counter: 0 Off, 1 FPS, 2 Frame time, 3 Graph, 4 Breakdown (fps_stats.h; saved as fps_counter=, an old On is 1)
     int fps_corner = 0;   // (longshot) its corner: 0 top right, 1 top left, 2 bottom right, 3 bottom left
     int fps_size = 0;     // (longshot) its size: 0 Auto (the window's height and Menu size), 1 Small, 2 Medium, 3 Large (fixed)

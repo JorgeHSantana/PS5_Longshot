@@ -114,6 +114,9 @@ enum { HOS_HUD_DEFAULT_PLACEMENT = 16 | (16 << 6) | (100 << 12) };
    its voice coils only, as before. host/pad_sdl.c reads it by its number each poll. The existing option callback: no new
    member. 93: 62 to 70, 80, 88 and 90 are taken by open pull requests */
 enum { HOS_OPT_DS_HD_HAPTICS = 93 };
+/* (HOS_OPT_WIDE_MENUS, 102: Graphics' Ultrawide menus, host/hos_wide_ui.c reads it at each present by its number: 3 is Extended,
+   the menus at their 16:9 size with their side panes at the screen's edges. The existing option callback: no new member.) */
+enum { HOS_OPT_WIDE_MENUS = 102, HOS_WIDE_MENUS_EXTENDED = 3 };
 
 /* (longshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of longshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:

@@ -11,12 +11,13 @@ namespace mkwvk {
 
 namespace {
 const char* tx_wide_menus(int v) {
-    static const char* t[] = {"Full width", "Centred, blurred sides", "Centred, black bars"};
-    return t[std::min(std::max(v, 0), 2)];
+    static const char* t[] = {"Full width", "Centred, blurred sides", "Centred, black bars", "Extended"};
+    return t[std::min(std::max(v, 0), 3)];
 }
 MODULE_HINTS(hn_wide_menus, 0, "The menus stretched over the whole screen, as before.",
              "The menus in the middle 16:9; beside them, what the game draws there, out of focus.",
-             "The menus in the middle 16:9; black beside them.")
+             "The menus in the middle 16:9; black beside them.",
+             "The menus at their 16:9 size, what sits at their sides moved out to the screen's edges.")
 /// (the HUD layout row, HOS_OPT_HUD_LAYOUT: host/hos_wide_ui.c places the HUD by it at each present, #1133)
 std::atomic<int> hud_layout{0};
 std::atomic<int> hud_health{HOS_HUD_DEFAULT_PLACEMENT};
@@ -78,7 +79,7 @@ MENU_MODULE(widescreen) {
               .help = "With the Aspect ratio at the monitor's shape: the pause, item and map menus, and what shows beside them. Loading "
                       "screens and pre-rendered movies, which draw no world either, get the same sides. Changes at once.",
               .value = &opts.wide_menus,
-              .lo = 0, .hi = 2,
+              .lo = 0, .hi = 3,
               .preset_exempt = true,
               .text = [](int v) { return std::string(tx_wide_menus(v)); },
               .hint = hn_wide_menus}, menu::after("fullscreen_monitor").order(50))

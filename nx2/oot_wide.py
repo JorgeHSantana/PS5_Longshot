@@ -32,9 +32,11 @@ UI_M00, UI_M11 = "(2.0f / 3840.0f)", "(2.0f / 2160.0f)"   # (the UI's full-scree
 # cleared, that capture went into the middle at twice its width. By the class each vtable's factory makes:
 # UIShortCutBGScreen, UICommonScreen, UIEventFadeScreen, UILoadingFadeScreen)
 KEEP_VTABLES = (MAIN + 0x4bed098, MAIN + 0x4be4fb0, MAIN + 0x4be61c8, MAIN + 0x4be7b30)
-# (another screen that keeps one of those bits: UISystemOverlayScreen. Squeezed, the item quick select's background
-# went into the middle 16:9 from its first opening on)
-KEEP_ALSO = ((MAIN + 0x4bef4a0, 0),)
+# (another screen, bit 4 of its own: UISystemOverlayScreen, which draws the item quick select's background and the system menus'
+# header and buttons. Squeezed, that background went into the middle 16:9 from its first opening on, so it is kept whole; the
+# Ultrawide menus row at Extended clears the bit on a wider screen (host/hos_wide_ui.c), the screen then squeezed and its
+# layout placed as the menus': its spanning panes drawn the screen's width, its header and buttons at their own shape)
+KEEP_ALSO = ((MAIN + 0x4bef4a0, 4),)
 
 
 def _ratio(vreg, base=None):
@@ -110,6 +112,10 @@ THUMB = ("{ extern volatile float hos_wide_ratio; const float _r = hos_wide_rati
 # by is x0 after main+0x152cdd4; main+0x152cd98 is where every path without one joins. The translation is stored at
 # main+0x152ce64, before the stored transform is read back to tell whether the children need theirs remade. f_8154ac30 reads a
 # pane's size as drawn (ldp s0, s1, [x0, #0x58]). f_8154a730, the calculate pass, skips a pane with no dirty bits at all.
+# A picture's draw: f_815505b0 packs its record into the frame's constants (the call to f_8154f1c0 returns them at sp + 8,
+# read into x8, x9 at main+0x15306f4), the drawer keeps them at +0x48; f_81550720 (main+0x1530720) draws with them. The pause
+# menu's background is drawn in pieces there (Ultrawide menus: Extended). f_81545d60 builds a layout's panes (the layout x19
+# after it, main+0x1525ca0).
 UI_FORCE = ("{ extern volatile uint32_t hos_wide_ui_force; if (hos_wide_ui_force) c->x[8] |= 0x40; }"
             "   /* (nx2/oot_wide.py: every pane remakes its transform) */")
 # (the calculate pass, f_8154a730, returns at once for a pane with no dirty bits: a pane that never changes would never remake
@@ -122,6 +128,12 @@ UI_PLACED = ("{ extern void hos_wide_ui_placed(Ctx *c, uint64_t pane); hos_wide_
              "   /* (nx2/oot_wide.py: the HUD's side panes at the screen's edges) */")
 UI_SIZE = ("{ extern void hos_wide_ui_size(Ctx *c, uint64_t pane); hos_wide_ui_size(c, c->x[0]); }"
            "   /* (nx2/oot_wide.py: spanning panes the screen's width) */")
+UI_BG = ("{ extern void hos_wide_ui_bg(Ctx *c); hos_wide_ui_bg(c); }"
+         "   /* (nx2/oot_wide.py: the pause menu's background in pieces) */")
+UI_BG_DRAW = ("{ extern void hos_wide_ui_bg_draw(Ctx *c); hos_wide_ui_bg_draw(c); }"
+              "   /* (nx2/oot_wide.py: the pause menu's background in pieces) */")
+UI_BUILT = ("{ extern void hos_wide_ui_built(Ctx *c, uint64_t layout); hos_wide_ui_built(c, c->x[19]); }"
+            "   /* (nx2/oot_wide.py: a list widened as it is built) */")
 UI_SITES = (
     (0x152a730, 0xb9400008, UI_FORCE_PASS),         # ldr w8, [x0]: the calculate pass's first look at the dirty bits
     (0x152caa0, 0xb9400008, UI_FORCE),              # ldr w8, [x0]: the pane's dirty bits
@@ -129,6 +141,9 @@ UI_SITES = (
     (0x152cdd4, 0xb9403008, UI_PARENT % "c->x[0]"), # ldr w8, [x0, #0x30]: the parent's transform
     (0x152ce64, 0xfc04c263, UI_PLACED),             # stur d3, [x19, #0x4c]: the translation stored
     (0x152ac40, 0x2d4b0400, UI_SIZE),               # ldp s0, s1, [x0, #0x58]: the size as drawn
+    (0x15306f4, 0xa940a7e8, UI_BG),                 # ldp x8, x9, [sp, #8]: a picture's constants packed, before the drawer keeps them
+    (0x1530740, 0xaa0003f6, UI_BG_DRAW),            # mov x22, x0: a picture drawn (the drawer x0, x1 what it draws with)
+    (0x1525ca0, 0x91004260, UI_BUILT),              # add x0, x19, #0x10: a layout's panes built (f_81545d60 returned)
 )
 
 # AArch64 LDR (immediate, unsigned offset), 32-bit SIMD/FP: fixed fields and

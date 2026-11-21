@@ -1946,7 +1946,7 @@ int hos_camera_trace_enabled(void) {
     fclose(marker);
     return 1;
 }
-volatile uint32_t hos_wide_keep_mask = 0xf;   /* (nx2/oot_wide.py KEEP_VTABLES: the screens that keep the whole picture, a bit each; MkwVkHost.wide_menus) */
+volatile uint32_t hos_wide_keep_mask = 0x1f;   /* (nx2/oot_wide.py KEEP_VTABLES and KEEP_ALSO: the screens that keep the whole picture, a bit each; MkwVkHost.wide_menus) */
 /* Swap can keep a small Linux PC from running out of backing storage without keeping it responsive.
    Warn below the existing 10 GiB floor in physical RAM there too; this is not a promise that 10 GiB is enough.
    The game starts anyway, and headless runs only log the warning. Windows keeps its commit-limit check. */

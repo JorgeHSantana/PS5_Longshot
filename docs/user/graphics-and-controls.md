@@ -61,7 +61,8 @@ previous resolution. Other mode changes apply after a restart.
 - **DLSS and DLAA look softer** than the game's own upscaler: set **Sharpness** to around 80% with them.
 - **Ultrawide and 4:3:** leave **Aspect ratio** on your monitor's shape (the default). The 3D fills the screen while the
   HUD keeps its 16:9 size with its corners at the screen's edges (or in the middle, with **HUD layout**); movies stay in
-  the middle.
+  the middle. **Ultrawide menus** at Extended does the same for the menus: they keep their own size, and what sits at
+  their sides (the pause menu's panels, its pages, the item and map screens' side panes) moves out to the screen's edges.
 - **HDR:** turn on **HDR** (Expanded or Native), then set **HDR peak brightness** to your monitor's.
 
 ## Every setting
@@ -92,7 +93,7 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | Window scaling filter | Off, Catmull-Rom, Lanczos (shows "Not needed (window = output)" while the window is the Output resolution's size) | Off; a quality preset sets it |
 | | CRT filter | Off, Lottes aperture grille, Lottes consumer TV, Hyllian Fast, zfast CRT (changes at once; Native HDR bypasses it) | Off |
 | | CRT lines | 240, 480, 720 virtual lines (shown with a CRT filter on; changes at once; capped at half the destination height) | 240 |
-| | Ultrawide menus | Full width; Centred, blurred sides; Centred, black bars (with the Aspect ratio at the monitor's shape) | Centred, blurred sides |
+| | Ultrawide menus | Full width; Centred, blurred sides; Centred, black bars; Extended (with the Aspect ratio at the monitor's shape) | Centred, blurred sides |
 | | HUD layout | Screen's edges, Middle 16:9 or Custom. `HOS_WIDE_UI`, when set, overrides the choice | Screen's edges |
 | | Hearts and magic horizontal | From −15% to +15% of the picture's width (shown with HUD layout set to Custom and no `HOS_WIDE_UI` override) | 0% |
 | | Hearts and magic vertical | From −15% to +15% of the picture's height (shown with HUD layout set to Custom and no `HOS_WIDE_UI` override) | 0% |

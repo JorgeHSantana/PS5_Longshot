@@ -84,6 +84,7 @@ static void draw_map(Ctx *ctx) {
     putf(boss_key + 0x28, 1.0f), putf(boss_key + 0x38, 1.0f);
     putf(pause_key + 0x28, 1.0f), putf(pause_key + 0x38, 1.0f);
     place(maproot, 0, 0, 0);
+    place(mapicons, maproot, 0, 0);
     place(map_group, maproot, 100.0f, 100.0f);
     map_group_scale = getf(map_group + 0x28);
     map_group_x = px;
@@ -308,6 +309,68 @@ int main(void) {
     CHECK(update_count == 3 && drawn_minimap_scale == 0.001f && map_group_scale == 1.0f);
     CHECK(live_key_scale == 1.0f && boss_key_scale == 1.0f && pause_key_scale == 1.0f);
     hos_gameplay_hud_toggle();
+
+    /* In a dungeon the icon origin can match the pause page. Use the live screen state,
+       and move the minimap and key siblings by exactly the same physical-width correction. */
+    fixture_hud_layout = 0;
+    fixture_hud_map = HOS_HUD_DEFAULT_PLACEMENT;
+    hos_wide_ratio = 3440.0f / 1440.0f;
+    put32(MAP_SCREEN + 0x2350, 1);
+    hos_wide_ui_tick();
+    hos_gameplay_hud_screen(&c, draw_map);
+    hos_wide_ui_tick();
+    hos_gameplay_hud_screen(&c, draw_map);
+    CHECK(near(map_group_x, 760.0f) && near(live_key_x, 800.0f));
+
+    /* The same pane addresses can become the full map on the next draw. */
+    put32(MAP_SCREEN + 0x2350, 0);
+    hos_gameplay_hud_screen(&c, draw_map);
+    CHECK(near(map_group_x, 100.0f) && near(live_key_x, 140.0f));
+    CHECK(boss_key_scale == 1.0f && pause_key_scale == 1.0f);
+
+    fixture_hud_layout = 1;
+    hos_wide_ui_tick();
+    put32(MAP_SCREEN + 0x2350, 1);
+    hos_gameplay_hud_screen(&c, draw_map);
+    CHECK(near(map_group_x, 100.0f) && near(live_key_x, 140.0f));
+
+    fixture_hud_layout = 2;
+    fixture_hud_map = 6 | (16 << 6) | (100 << 12);
+    hos_wide_ui_tick();
+    hos_gameplay_hud_screen(&c, draw_map);
+    CHECK(near(map_group_x, 244.0f) && near(live_key_x, 284.0f));
+    fixture_hud_layout = 0;
+    hos_wide_ratio = 1.6f;
+    hos_wide_ui_tick();
+    hos_gameplay_hud_screen(&c, draw_map);
+    CHECK(near(map_group_x, -92.0f) && near(live_key_x, -52.0f));
+
+    /* Reuse the former full-map root's address before the next planner tick. */
+    put32(MAP_SCREEN + 0x2350, 0);
+    hos_gameplay_hud_screen(&c, draw_map);
+    const uint64_t reused_root = pane_at(STATUS, 11, "RootPane", 0, 0, 0);
+    const uint64_t reused_gauge = pane_at(STATUS, 24, "Pa_HeartGauge_00", 120, 120, 1);
+    CHECK(reused_root == maproot);
+    place(reused_root, 0, 0, 0);
+    CHECK(near(getf(reused_root + 0x28), 1.0f));
+    place(reused_gauge, reused_root, -1500.0f, 880.0f);
+    hos_wide_ui_tick();
+    place(reused_root, 0, 0, 0);
+    place(reused_gauge, reused_root, -1500.0f, 880.0f);
+    CHECK(near(px, -1308.0f));
+
+    maproot = pane_at(MAP, 11, "RootPane", 0, 0, 0);
+    hos_wide_ui_force = 0;
+    put32(MAP_SCREEN + 0x2350, 1);
+    hos_gameplay_hud_screen(&c, draw_map);
+    CHECK(hos_wide_ui_force >= 3);
+    hos_wide_ui_force = 0;
+    hos_gameplay_hud_screen(&c, draw_map);
+    CHECK(hos_wide_ui_force == 0);
+    put32(MAP_SCREEN + 0x2350, 0);
+    hos_gameplay_hud_screen(&c, draw_map);
+    CHECK(hos_wide_ui_force >= 3);
+    at(0.0f);
 
     /* Health, items, action prompts, control guides, horse and dive gauges retain their updates. */
     const uint64_t gameplay[] = {0x84c0b710ULL, 0x84c05a50ULL, 0x84c02d48ULL,
