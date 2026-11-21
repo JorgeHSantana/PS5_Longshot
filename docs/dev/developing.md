@@ -155,7 +155,7 @@ python -I scripts/dev.py queue run shots --mode shared --desc "menu font at 4K" 
 python -I scripts/dev.py queue run fps --mode timing --desc "RX_VK_ASYNC=0, Hyrule Field" -- <your measurement>
 python -I scripts/dev.py queue status           # who plays, what runs, what waits and why
 python -I scripts/dev.py queue history          # the last jobs, and how busy the PC was while a timed one measured
-python -I scripts/dev.py queue cancel <name>
+python -I scripts/dev.py queue cancel <name>   # the job and every process it started: a game it started too
 ```
 
 `--desc` says in a few words what a game run tests: it shows under the version in the menu (F1) and on the start-up
