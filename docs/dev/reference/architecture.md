@@ -415,6 +415,10 @@ Each line below is enforced by a game-free check under `tests/` ([run the checks
 - **Fog and exposure come from the game's own values.** No Longshot factor scales them.
 - **A program the driver's compiler faulted on is never sent to that driver again**, in this run or later ones
   (`gpu/vk/driver_faults.h`, `RX_VK_DRIVER_FAULTS`).
+- **The renderer's own compute pipelines are asked again without the optimizer** when the driver refuses the optimized
+  build (`extern_guarded_compute`; `texture_compute_pipeline` for the texture pipelines and the upscale helpers, through
+  the pipeline cache). Intel's Windows driver on the Arc A-series answered `VK_ERROR_UNKNOWN` for optimized builds it made
+  without the optimizer, and the GPU ASTC decoder was lost to it: every ASTC texture decoded on the CPU (#1874).
 - **Render conditions read reports from earlier in the same stream**, so they cannot be resolved at record time.
 - **Mesh compute fallback pipelines** use a static vertex stride. Binding one invalidates dynamic strides, so the draw
   path drops both vertex-bind skip caches at that bind.

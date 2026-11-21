@@ -4713,8 +4713,30 @@ std::atomic<int64_t> st_driver_out_of_memory{0};
 VkResult extern_guarded_graphics(VkPipelineCache cache, const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl) {
     return guarded_graphics(cache, ci, pl);
 }
+/// extern_guarded_compute makes the renderer's own compute pipelines (the texture pipelines, the upscale and mask helpers,
+/// the write-back diff, the late pages' fix, FSR 3's inputs, frame generation's passes): one the driver refuses with its
+/// optimizer is asked once more without it. Intel's Windows driver on the Arc A-series (an A580 on 101.9175, #1874) answered
+/// VK_ERROR_UNKNOWN (-13) for optimized builds it made without the optimizer: the ASTC decoder refused so, every ASTC texture
+/// was decoded on the CPU (a frame's uploads 30.9 s, the screen black after the opening cutscene); the write-back diff, the
+/// late pages' fix and the upscale helper standing in for a network left out were off. Where the optimized build is made
+/// (NVIDIA, AMD) nothing else is asked. The game's programs have their own path (compute_optimize)
 VkResult extern_guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
-    return guarded_compute(cache, ci, pl);
+    *pl = VK_NULL_HANDLE;
+    VkResult r = guarded_compute(cache, ci, pl);
+    if (r == VK_SUCCESS && *pl) return VK_SUCCESS;
+    *pl = VK_NULL_HANDLE;
+    if (r == VK_SUCCESS) r = VK_ERROR_UNKNOWN;   // (no pipeline is no success)
+    if (ci->flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT) return r;
+    VkComputePipelineCreateInfo plain = *ci;
+    plain.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+    const VkResult p = guarded_compute(cache, &plain, pl);
+    const bool made = p == VK_SUCCESS && *pl;
+    if (!made) *pl = VK_NULL_HANDLE;
+    static std::atomic<int> told{0};
+    if (told++ < 8)
+        logf("vk: one of the renderer's compute pipelines was not made with the driver's optimizer (%d): %s", (int)r,
+             made ? "made without it" : "nor without it");
+    return made ? VK_SUCCESS : p == VK_SUCCESS ? r : p;
 }
 VkResult extern_guarded_shader_module(const VkShaderModuleCreateInfo* ci, VkShaderModule* m) {
     return guarded_shader_module(ci, m);
@@ -8140,12 +8162,16 @@ void mask_stabilize(VkCommandBuffer cmd, Texture* tex, uint32_t level, uint32_t 
         const auto spv = BUILTIN_SPV(SHADOW_STAB_COMP_SPV);
         mi.codeSize = spv.size, mi.pCode = spv.code;
         VkShaderModule m{};
-        IntelDriverGate gate;
-        if (guarded_shader_module(&mi, &m) != VK_SUCCESS) m = VK_NULL_HANDLE;
+        {
+            IntelDriverGate gate;   // (the module's only: texture_compute_pipeline takes the same lock)
+            if (guarded_shader_module(&mi, &m) != VK_SUCCESS) m = VK_NULL_HANDLE;
+        }
         VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
         ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, m, "main", nullptr};
         ci.layout = layout;
-        if (!m || guarded_compute(VK_NULL_HANDLE, &ci, &pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
+        // (vk_texture.cpp: through the pipeline cache, and without the optimizer where the driver refuses it. Asked once,
+        // optimized, here: an Arc A580 on 101.9175 refused the typed upscale helper's, a network's output a blit, #1874)
+        if (!m || texture_compute_pipeline(ci, pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
         vkDestroyShaderModule(dev.device, m, nullptr);
         logf("vk: tree-shadow mask blend %s", pipe ? "ready" : "not made");
     }
@@ -9171,12 +9197,16 @@ bool movie_upscale(VkCommandBuffer cmd, uint32_t in_handle, uint32_t out_handle,
         const auto spv = BUILTIN_SPV(MOVIE_UPSCALE_COMP_SPV);
         mi.codeSize = spv.size, mi.pCode = spv.code;
         VkShaderModule m{};
-        IntelDriverGate gate;
-        if (guarded_shader_module(&mi, &m) != VK_SUCCESS) m = VK_NULL_HANDLE;
+        {
+            IntelDriverGate gate;   // (the module's only: texture_compute_pipeline takes the same lock)
+            if (guarded_shader_module(&mi, &m) != VK_SUCCESS) m = VK_NULL_HANDLE;
+        }
         VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
         ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, m, "main", nullptr};
         ci.layout = layout;
-        if (!m || guarded_compute(VK_NULL_HANDLE, &ci, &pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
+        // (vk_texture.cpp: through the pipeline cache, and without the optimizer where the driver refuses it. Asked once,
+        // optimized, here: an Arc A580 on 101.9175 refused the typed upscale helper's, a network's output a blit, #1874)
+        if (!m || texture_compute_pipeline(ci, pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
         vkDestroyShaderModule(dev.device, m, nullptr);
         VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
         si.magFilter = si.minFilter = VK_FILTER_LINEAR;
@@ -9476,12 +9506,16 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
         const auto spv = rgba ? BUILTIN_SPV(TAAU_UPSCALE_RGBA_COMP_SPV) : BUILTIN_SPV(TAAU_UPSCALE_COMP_SPV);
         mi.codeSize = spv.size, mi.pCode = spv.code;
         VkShaderModule m{};
-        IntelDriverGate gate;
-        if (guarded_shader_module(&mi, &m) != VK_SUCCESS) m = VK_NULL_HANDLE;
+        {
+            IntelDriverGate gate;   // (the module's only: texture_compute_pipeline takes the same lock)
+            if (guarded_shader_module(&mi, &m) != VK_SUCCESS) m = VK_NULL_HANDLE;
+        }
         VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
         ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, m, "main", nullptr};
         ci.layout = layout;
-        if (!m || guarded_compute(VK_NULL_HANDLE, &ci, &pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
+        // (vk_texture.cpp: through the pipeline cache, and without the optimizer where the driver refuses it. Asked once,
+        // optimized, here: an Arc A580 on 101.9175 refused the typed upscale helper's, a network's output a blit, #1874)
+        if (!m || texture_compute_pipeline(ci, pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
         vkDestroyShaderModule(dev.device, m, nullptr);
         VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
         si.magFilter = si.minFilter = VK_FILTER_LINEAR;
