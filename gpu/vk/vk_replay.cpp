@@ -5858,6 +5858,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     HT_SCOPE("present_image");
 #endif
     std::lock_guard lk(present_image_mu);
+    if (dev.closing.load(std::memory_order_acquire)) return;   // (the close retired the swapchain on purpose: making one again would take the window from under the compositor's final frames)
     static int hdr_was = -1;   // (the Insert menu's HDR as the swapchain was made for it; -1: not yet looked at)
     const bool hdr_changed = hdr_was >= 0 && hdr_was != opts.hdr;   // (turned on or off: the swapchain's format)
     if (hdr_was < 0) hdr_was = opts.hdr;
@@ -6532,16 +6533,33 @@ void present_hand_off(uint32_t index, VkFence done, uint64_t reflex_id) {
 }
 }  // namespace
 /// Waits until the presenter thread has made the present it was handed (none: at once). Before a swapchain is made again or destroyed,
-/// and never with dev.present_mu held (a resize must not wait on a present that waits for the window). Gives up after 5 s, said
-void present_thread_drain() {
+/// and never with dev.present_mu held (a resize must not wait on a present that waits for the window). Gives up after 5 s, said.
+/// The return is whether the presenter is idle: the close only destroys the swapchain when it is (a worker still mid-present
+/// would touch a chain being destroyed; vk_main.cpp's close leaves the chain to the process exit otherwise)
+bool present_thread_drain() {
 #ifdef TRACY_ENABLE
     HT_WAIT(ht_w, "present_thread_drain");
 #endif
     std::unique_lock lk(presenter.mu);
-    if (!presenter_wait_idle(lk, 5000)) {
-        presenter.ahead = false;   // (acquire ahead: none after a present the caller goes on without)
-        logf("vk: presenter thread: its present not made in 5 s; going on without it");
-    }
+    if (presenter_wait_idle(lk, 5000)) return true;
+    presenter.ahead = false;   // (acquire ahead: none after a present the caller goes on without)
+    logf("vk: presenter thread: its present not made in 5 s; going on without it");
+    return false;
+}
+}
+
+/// (the one rule, so every path that would retire the chain agrees) may this swapchain be let go
+/// and made again now? The presenter thread copies the image index and the chain at the hand-off
+/// (presenter_loop), works away from the presenter's mutex for as long as its fence and its
+/// vkWaitForPresent run, and then reads dev.swap_rendered[index] — while retire clears that vector
+/// and destroys its semaphores and the chain under it. A present still in the making therefore
+/// keeps its chain: the caller waits for the next frame (a wedge of the GPU shows up as the frame
+/// not being shown, which is what a wedged GPU already means, not as the presenter presenting a
+/// destroyed chain). The close asks the same question the same way (vk_main.cpp)
+bool swapchain_made_ready() {
+    if (present_thread_drain()) return true;
+    logf("vk: a present of this swapchain is still in the making on the presenter thread: the chain waits for it");
+    return false;
 }
 
 

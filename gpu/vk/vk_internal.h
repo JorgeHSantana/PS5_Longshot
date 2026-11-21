@@ -161,6 +161,10 @@ struct Device {
     std::vector<VkSemaphore> swap_rendered;   // present waits belong to acquired images, not frame slots
     QueueMutex present_mu;   // (the swapchain: presents and resizes; the replay's queue's submits)
     std::atomic<uint64_t> swap_resize{0};   // (a new window size, width << 32 | height: the next present makes the swapchain)
+    // (longshot) the window is closing (mkwvk_close_asked, host/display.c, host/posix/display_sdl.c): the close retires the
+    // swapchain itself and drains every presenter, so after that there is nothing to present to and present_image must not
+    // make a new chain. Only a close sets this (a window closed by the compositor's own death takes the lost-surface path)
+    std::atomic<bool> closing{false};
     // (longshot) a queue of a compute family for vkQueuePresentKHR alone (vk_main.cpp create_device; RX_VK_PRESENT_QUEUE=0 / 1).
     // VK_NULL_HANDLE: presents go on `queue` under present_mu. Its own lock: taken after present_mu, never before it
     VkQueue present_queue = VK_NULL_HANDLE;
@@ -574,7 +578,9 @@ std::string device_report_text();
 int shot_ask_next(const char* path, void (*done)(void* ctx, int64_t present, int ok), void* ctx);
 
 bool create_swapchain(uint32_t width, uint32_t height);
-void present_thread_drain();   // (vk_replay.cpp: the presenter thread's present made, RX_VK_PRESENT_THREAD)
+bool present_thread_drain();   // (vk_replay.cpp: the presenter thread's present made, RX_VK_PRESENT_THREAD. true: the presenter is idle, nothing mid-flight; false: gave up after 5 s — the close must not destroy under a present still running)
+bool swapchain_made_ready();   // (vk_replay.cpp: the same rule, factored: drain, and say whether the chain may be let go and made again now. The resize, out-of-date and startup-retry paths retire through create_swapchain, and retire clears the very vector the presenter thread reads — a present in the making keeps its chain)
+extern std::mutex present_image_mu;   // (vk_replay.cpp: one present at a time, direct or made; held over acquire and present)
 int swapchain_framegen();   // (vk_main.cpp: frame generation's fixed multiplier as the swapchain is made for it, 0 none)
 /// (longshot) present_image's frame slots (vk_replay.cpp frames[]), at most; ImGui keeps one more vertex buffer, and the
 /// overlays keep what they let go one more present (vk_imgui.cpp ImageCount, kFramesLater)

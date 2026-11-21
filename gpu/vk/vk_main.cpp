@@ -948,6 +948,15 @@ void retire_swapchain() {
 
 bool invalidate_lost_surface(VkResult result) {
     if (result != VK_ERROR_SURFACE_LOST_KHR) return false;
+    // (longshot, review) the same rule as the close and create_swapchain, at this third choke:
+    // retire clears the vector the presenter thread reads after its waits. A present in the making
+    // keeps surface and chain: handled anyway — the next frame asks again (acquire answers lost
+    // again, present_out reports again), so a wedge costs frames, never a destroyed chain
+    if (!swapchain_made_ready()) {
+        static unsigned told = 0;
+        if (told++ < 8) logf("vk: the surface is lost but a present is in the making: surface and chain wait for it");
+        return true;
+    }
     retire_swapchain();
     if (dev.surface) vkDestroySurfaceKHR(dev.instance, dev.surface, nullptr);
     dev.surface = VK_NULL_HANDLE;
@@ -964,7 +973,12 @@ int system_hdr_on(std::string* display);
 }
 
 bool create_swapchain(uint32_t width, uint32_t height) {
-    present_thread_drain();   // (no present of the old swapchain still being made on the presenter thread)
+    // (longshot, review) the drain's answer is not decoration: the presenter thread holds this
+    // chain's image index across its fence and shown-waits and reads dev.swap_rendered[index]
+    // after, and this function's retire (oldSwapchain passes even on a failed create) destroys the
+    // chain and clears that vector. A present still in the making keeps its chain: answer not-made,
+    // and the resize path re-publishes its request for the next frame (vk_replay.cpp)
+    if (!swapchain_made_ready()) return false;
     if (!dev.surface) {
         window_size(&width, &height);
         if (!width || !height) return false;
@@ -1858,7 +1872,15 @@ int start(void* hwnd) {
     if (!open_window_surface(true)) return 0;
     RECT r{};
     GetClientRect((HWND)hwnd, &r);
-    if (!create_swapchain((uint32_t)(r.right - r.left), (uint32_t)(r.bottom - r.top))) return 0;
+    {
+        // (longshot) the same guard as the SDL path below: hos_win runs the renderer on its own
+        // thread, so the window's close (display.c, main thread) can be asked while the initial
+        // chain is being made. The close takes present_image_mu through its retire; take it here
+        // and check its flag — a window already closing gets no chain.
+        std::lock_guard pi(present_image_mu);
+        if (dev.closing.load(std::memory_order_acquire)) return 0;
+        if (!create_swapchain((uint32_t)(r.right - r.left), (uint32_t)(r.bottom - r.top))) return 0;
+    }
 #else
     const MkwVkWindow* w = (const MkwVkWindow*)hwnd;
     prep_window = w;
@@ -1873,9 +1895,18 @@ int start(void* hwnd) {
         logf("vk: SDL returned zero drawable size %dx%d", width, height);
         return 0;
     }
-    if (!create_swapchain((uint32_t)width, (uint32_t)height)) {
-        logf("vk: swapchain creation failed for drawable %dx%d", width, height);
-        return 0;
+    {
+        // (longshot) the close (mkwvk_close_asked) can be asked while the renderer is still coming
+        // up: SDL runs it on the window's thread. present_image's guard covers presents, but the
+        // initial chain is made here, outside any present — so take the same lock the close takes
+        // and check its flag, the same order present_image uses (present_image_mu, then present_mu
+        // inside). A window already closing gets no chain: the host ends the process next either way.
+        std::lock_guard pi(present_image_mu);
+        if (dev.closing.load(std::memory_order_acquire)) return 0;
+        if (!create_swapchain((uint32_t)width, (uint32_t)height)) {
+            logf("vk: swapchain creation failed for drawable %dx%d", width, height);
+            return 0;
+        }
     }
 #endif
     if (!started_up()) {
@@ -1940,6 +1971,50 @@ void mkwvk_close_asked(void) {
         if (WaitForSingleObject(prep_ended, 10000) != WAIT_OBJECT_0) logf("vk: the preparation did not stop within 10 s: closing anyway");
     }
     dlss_fg_close();   // (NVIDIA DLSS Frame Generation through NGX: its feature let go before the process exits, vk_dlss.cpp)
+    // (longshot) let go of the window's swapchain and everything it pins while the process is still here. The compositor
+    // (gamescope on the Deck, any Wayland/X server) reprograms the display right as the window goes away, and on the Deck an
+    // atomic commit there failed with ENOMEM after a long run had this process holding most of the system's memory: the
+    // commit's own allocation failed, the modeset failed, and the player saw the emulator's last frames as garbage over the
+    // Game Mode UI until the display was rebuilt by a mode switch. Freeing the swapchain's images (the VRAM they hold) and
+    // idling the device before we exit is that headroom. Deliberate, not a crash path: dev.closing above tells every
+    // presenter not to make a chain again; the lost-surface path stays for when the compositor itself dies. The presenter
+    // thread is drained first and present_image_mu is held through the retire (the same lock order present_image itself
+    // uses: present_image_mu, then present_mu), so no present is mid-acquire on an image being destroyed.
+    dev.closing.store(true, std::memory_order_release);
+    // (longshot) a present can hold this mutex for as long as its fences run (the lost-window
+    // acquire waits UINT64_MAX under it): the close must not hang behind one and stop the window
+    // from closing at all. Take the mutex with a few seconds of patience; no mutex, or a presenter
+    // thread that does not land its hand-offed present, leaves the chain to the process exit —
+    // which is exactly what happened before this block existed — rather than destroy under a
+    // present that is still running (present_commit's swapchain check guards the stale one, not
+    // one mid-flight).
+    const auto give_up_at = std::chrono::steady_clock::now() + std::chrono::seconds(5);   // (one patience budget for both locks)
+    std::unique_lock pi(present_image_mu, std::try_to_lock);   // (vk_replay.cpp: every present, direct and frame generated, is under this)
+    for (int waited = 0; !pi.owns_lock() && waited < 5000; waited += 50) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::unique_lock attempt(present_image_mu, std::try_to_lock);
+        if (attempt.owns_lock()) pi = std::move(attempt);
+    }
+    if (!pi.owns_lock() || !present_thread_drain()) {
+        logf("vk: the window is closing with a present still running: the swapchain goes with the process, as it always did");
+        return;
+    }
+    // (longshot) and the queue's lock on the same patience: queue_flush holds dev.present_mu across
+    // vkQueueSubmit2 (vk_replay.cpp), so a submit the driver stalled leaves the image mutex free and the
+    // presenter idle: both checks above pass and an unbounded wait here would hold the window thread
+    // open instead of letting the window close. No lock: the chain goes with the process, as the two
+    // checks above already do (the DLSS close waits for this same mutex the same way).
+    std::unique_lock qk(dev.present_mu, std::defer_lock);
+    while (!qk.try_lock() && std::chrono::steady_clock::now() < give_up_at) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    if (!qk.owns_lock()) {
+        logf("vk: the window is closing with the queue busy: the swapchain goes with the process, as it always did");
+        return;
+    }
+    const bool had = dev.swapchain != VK_NULL_HANDLE;   // (a window that never presented: nothing was ever made)
+    retire_swapchain();   // (device_wait_idle_locked, the rendered semaphores, the chain: vk_main.cpp above)
+    if (had) logf("vk: the window is closing: the swapchain is let go with its images (what the compositor needs back for its final frames)");
 }
 
 static MkwVkHost host_storage;

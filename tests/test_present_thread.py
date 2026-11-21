@@ -66,7 +66,7 @@ def main():
     need("presenter.cv.wait(lk, idle);" in idle, "presenter_wait_idle does not wait for the presenter")
     need(give.index("presenter_wait_idle(lk);") < give.index("presenter.busy = true"),
          "a present is handed over before the one before is made")
-    need("presenter_wait_idle(lk, 5000)" in block(replay, "void present_thread_drain() {"), "present_thread_drain does not wait, or without a limit")
+    need("presenter_wait_idle(lk, 5000)" in block(replay, "bool present_thread_drain() {"), "present_thread_drain does not wait, or without a limit")
 
     loop = block(replay, "void presenter_loop() {")
     need("presenter.reflex_id = reflex_id;" in give and "const uint64_t reflex_id = presenter.reflex_id;" in loop,
@@ -112,8 +112,10 @@ def main():
     need(acq.index("present_thread_drain();") < acq.index("invalidate_lost_surface(res);"),
          "the acquire's lost surface is dropped with a present still out on the presenter")
     make = block(main_cpp, "bool create_swapchain(uint32_t width, uint32_t height) {")
-    need(make[make.index("{") + 1:].lstrip().startswith("present_thread_drain();"),
-         "create_swapchain does not wait for the presenter first")
+    first = next(l.strip() for l in make[make.index("{") + 1:].splitlines()
+                 if l.strip() and not l.strip().startswith("//"))   # (the comment lines name the why; the first statement is the pin)
+    need(first == "if (!swapchain_made_ready()) return false;",
+         "create_swapchain does not answer not-made while a present is in the making on the presenter thread")
     on = block(replay, "bool present_thread_on() {")
     need("getenv" not in on and "return true;" in on, "the presenter thread is not on on every PC")
     dev_make = block(main_cpp, "bool create_device() {")

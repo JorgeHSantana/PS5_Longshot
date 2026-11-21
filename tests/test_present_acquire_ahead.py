@@ -575,8 +575,8 @@ BROKEN = [
      "if (presenter.ahead && res == VK_SUCCESS) acquire_ahead(sc, generation);",
      "if (presenter.ahead) acquire_ahead(sc, generation);"),
     ("a drain that gave up leaves the ahead acquire on",
-     "        presenter.ahead = false;   // (acquire ahead: none after a present the caller goes on without)",
-     "        // (the ahead acquire left on)"),
+     "    presenter.ahead = false;   // (acquire ahead: none after a present the caller goes on without)",
+     "    // (the ahead acquire left on)"),
     ("present_image's drain of the presenter before its acquire removed",
      "    present_thread_drain();\n    const int64_t fence_t0 = fps_breakdown_on()",
      "    const int64_t fence_t0 = fps_breakdown_on()"),
@@ -659,7 +659,7 @@ def fixture(replay, windows, mode):
                 .replace("presenter.cv.wait(lk, idle);", "if (!model_wait(lk, idle)) problem(\"a hand-over waits without end\");"))
     hand = block(replay, "void present_hand_off(uint32_t index, VkFence done, uint64_t reflex_id) {")
     hand = hand.replace("std::thread(presenter_loop).detach();", "")
-    drain = block(replay, "void present_thread_drain() {")
+    drain = block(replay, "bool present_thread_drain() {")
     loop = block(replay, "void presenter_loop() {")
     head = cut(loop, "        const uint32_t index = presenter.index;", "        lk.unlock();", "presenter_loop's take of a hand-over")
     end = cut(loop, "        if (copied) present_finish(res, true);", "    }\n}", "presenter_loop's end of a present")
