@@ -3982,8 +3982,10 @@ void draw_startup(ui::Ctx& c) {
         float under = by;
         if (v.fraction >= 0) {   // (the bar as a value cell: a dark cell, gold inside, the percentage on it)
             const float bh = 26 * k, in = 4 * k, fx = x0 + in + (x1 - x0 - 2 * in) * (float)std::min(v.fraction, 1.0);
-            c.d->AddRectFilled(ImVec2(x0, by), ImVec2(x1, by + bh), ui::kCellDark);
-            c.d->AddRect(ImVec2(x0, by), ImVec2(x1, by + bh), ui::kEdge, 0, std::max(1.0f, s));
+            // (its corners: square in Classic; in Modern dark rounded around the fill's, ui::gold's, the same gap all round)
+            const float r = ui::kRound > 0 ? ui::kRound * s + in : 0;
+            c.d->AddRectFilled(ImVec2(x0, by), ImVec2(x1, by + bh), ui::kCellDark, r);
+            c.d->AddRect(ImVec2(x0, by), ImVec2(x1, by + bh), ui::kEdge, r, 0, std::max(1.0f, s));
             if (fx > x0 + in) ui::gold(c, ImVec2(x0 + in, by + in), ImVec2(fx, by + bh - in));
             // (the percentage in the middle of the whole bar, drawn twice: dark ink where the gold is under it, light where the
             // empty bar is, each clipped to its part, so every letter keeps its contrast as the edge passes through it)
