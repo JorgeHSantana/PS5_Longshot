@@ -64,6 +64,7 @@
 #include "linux_pressure.h"
 #include "pcache_stamp.h"
 #include "pcache_load.h"     // (longshot: whether the pipeline cache file is read)
+#include "nvidia_cache_limit.h"   // (longshot: how big NVIDIA's own shader cache may grow)
 #ifndef _WIN32
 #include <unistd.h>          // (sysconf: the RAM, pcache_load_off)
 #endif
@@ -1108,6 +1109,19 @@ VkResult create_cached(VkResult (*create)(VkPipelineCache, const CI*, VkPipeline
 bool play_cache_in_use() { return play_cache.load() != nullptr; }
 // ---- (end of the play caches) ----
 
+/// (longshot) The size NVIDIA's own driver lets its shader cache grow to (nvidia_cache_limit.h), read once a run: Windows' Shader
+/// Cache Size through the driver's settings, Linux's __GL_SHADER_DISK_CACHE_SIZE. Not known for other drivers
+static nvidia_cache_limit::Limit nvidia_limit() {
+    static const nvidia_cache_limit::Limit limit = [] {
+        if (dev.driver_id != VK_DRIVER_ID_NVIDIA_PROPRIETARY) return nvidia_cache_limit::Limit{};
+#ifdef _WIN32
+        return nvidia_cache_limit::windows_limit();
+#else
+        return nvidia_cache_limit::linux_limit(getenv("__GL_SHADER_DISK_CACHE_SIZE"));
+#endif
+    }();
+    return limit;
+}
 // (RX_VK_PCACHE_LOAD=0, an A/B of what the file costs in memory: its 2.5 GB read whole and held by the driver. The cache
 // starts empty and is not saved; the driver's own shader cache is all there is.) (longshot) Unset, the file is
 // not read either on a Linux PC with NVIDIA's own driver, 20 GB of RAM or less and programs loaded at their create calls,
@@ -1149,8 +1163,11 @@ bool pcache_load_off() {
             cache = pcache_load::nvidia_cache(c && *c && env_value_off(c), getenv("__GL_SHADER_DISK_CACHE_PATH"),
                                               getenv("XDG_CACHE_HOME"), getenv("HOME"), &dir);
         }
-        const pcache_load::Choice choice =
-            pcache_load::choose(sw, preparing, at_create, linux_nvidia, ram_mb, cache.cache, cache.bytes >> 20, windows_nvidia);
+        // (the size NVIDIA's cache may grow to: under 4 GB it drops pipelines as it fills, and the file answers them)
+        const nvidia_cache_limit::Limit limit = looked ? nvidia_limit() : nvidia_cache_limit::Limit{};
+        const uint64_t limit_mb = limit.off ? 0 : limit.mb;
+        const pcache_load::Choice choice = pcache_load::choose(sw, preparing, at_create, linux_nvidia, ram_mb, cache.cache,
+                                                               cache.bytes >> 20, windows_nvidia, limit_mb);
         std::string seen;   // (what was looked at: the switch, or the RAM and NVIDIA's cache where they were)
         if (sw >= 0) seen = std::string("RX_VK_PCACHE_LOAD=") + e;
         else if (choice.why == pcache_load::Why::kRam || looked)
@@ -1160,6 +1177,7 @@ bool pcache_load_off() {
             seen += cache.cache == pcache_load::Cache::kOff       ? std::string("off (__GL_SHADER_DISK_CACHE, or no folder for it)")
                     : cache.cache == pcache_load::Cache::kUnknown ? "not measured: " + dir + " could not be walked through"
                                                                   : std::to_string(cache.bytes >> 20) + " MB in " + dir;
+            if (limit_mb) seen += ", up to " + std::to_string(limit_mb) + " MB (" + limit.where + ")";
         }
         if (!choice.load && sw < 0) seen += "; RX_VK_PCACHE_LOAD=1 reads it";
         logf("vk: pipeline cache file %s: %s%s%s%s", choice.load ? "read" : "not read", pcache_load::why_text(choice.why),
@@ -11836,6 +11854,20 @@ void driver_cache_log(const char* when) {
     const uint64_t n = driver_cache_bytes(&where, &partial);
     logf("vk: driver shader cache %s: %s%llu MB (%s)", when, partial ? "at least " : "", (unsigned long long)(n >> 20),
          where.empty() ? "no folder found" : where.c_str());
+    // (NVIDIA's limit: under 4 GB the pipelines a start builds do not all stay, and are compiled again in play; the launcher
+    // raises Windows' to 10 GB, hos_main.c driver_cache_room Linux's)
+    if (strcmp(when, "at the start") == 0 && dev.device && dev.driver_id == VK_DRIVER_ID_NVIDIA_PROPRIETARY) {
+        const nvidia_cache_limit::Limit limit = nvidia_limit();
+        if (limit.off) logf("vk: driver shader cache: NVIDIA's is off (%s)", limit.where);
+        else if (!limit.mb) logf("vk: driver shader cache: NVIDIA's limit not known");
+        else if (nvidia_cache_limit::small(limit.mb))
+            logf_at(log_warn, "vk: driver shader cache: NVIDIA's holds at most %llu MB (%s), under the %llu MB a start's pipelines "
+                              "need: the ones it drops are compiled again in play. Raise it to 10 GB or Unlimited (the launcher "
+                              "does it before a build or a start)", (unsigned long long)limit.mb, limit.where,
+                    (unsigned long long)nvidia_cache_limit::kRoomMb);
+        else if (limit.mb == nvidia_cache_limit::kUnlimited) logf("vk: driver shader cache: NVIDIA's has no limit (%s)", limit.where);
+        else logf("vk: driver shader cache: NVIDIA's holds at most %llu MB (%s)", (unsigned long long)limit.mb, limit.where);
+    }
 #ifndef _WIN32
     if (strcmp(when, "at the start") != 0 || !dev.device) return;
     bool radv_vrs = false, forced = false;

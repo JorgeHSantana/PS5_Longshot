@@ -205,9 +205,12 @@ If it stutters everywhere, for a long time, and the log says `the shaders' prepa
 
 ### Windows, NVIDIA: it stutters on every start, in places you have seen
 
-The driver's shader cache is too small to keep them all (the first start builds about 2 GB). Open the **NVIDIA Control
-Panel**, then **Manage 3D settings**, and set **Shader Cache Size** to **Unlimited** (or 10 GB). On Linux the game raises
-the driver's limit itself.
+The driver's shader cache is too small to keep them all (the first start builds about 2 GB; the driver's default often holds
+only 1 GB, and it throws shaders out as it fills). The launcher raises a cache under 4 GB to 10 GB before a build or a start,
+and says so on Home; when Windows needs an administrator for it, Home's **Raise it to 10 GB** asks. To do it yourself: open
+the **NVIDIA Control Panel**, then **Manage 3D settings**, and set **Shader Cache Size** to **Unlimited** (or 10 GB). The
+log's `vk: driver shader cache: NVIDIA's holds at most` line says what the game found. On Linux the game raises the
+driver's limit itself.
 
 [Search stutter reports](https://longshot.magicbean.dev/progress/#problem-search?q=stutter)
 
