@@ -667,7 +667,7 @@ def fixture(replay, windows, mode):
     idle = (idle.replace("presenter.cv.wait_for(lk, std::chrono::milliseconds(limit_ms), idle)", "model_wait(lk, idle)")
                 .replace("presenter.cv.wait(lk, idle);", "if (!model_wait(lk, idle)) problem(\"a hand-over waits without end\");"))
     hand = block(replay, "void present_hand_off(uint32_t index, VkFence done, uint64_t reflex_id, OutputTrialFrame trial) {")
-    hand = hand.replace("std::thread(presenter_loop).detach();", "")
+    hand = hand.replace('::mkwvk::cxx_escape::spawn_needed("presenter", presenter_loop);', "")
     drain = block(replay, "bool present_thread_drain() {")
     loop = block(replay, "void presenter_loop() {")
     head = cut(loop, "        const uint32_t index = presenter.index;", "        lk.unlock();", "presenter_loop's take of a hand-over")

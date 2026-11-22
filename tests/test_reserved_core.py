@@ -338,7 +338,9 @@ def threads_check(cxx, cc):
     texture = (ROOT / 'gpu/vk/vk_texture.cpp').read_text(encoding='utf-8')
     gather = block(texture, 'const uint8_t* guest_bytes(uint64_t gpu, uint64_t n, std::vector<uint8_t>& scratch) {')
     helpers = block(texture, 'void helper_thread_start() {') + '\n' if 'void helper_thread_start() {' in texture else ''
-    fixture = THREADS.replace('@REPLAY@', pin).replace('@TEXTURE@', helpers + gather)
+    escape = (ROOT / 'gpu/vk/cxx_escape.h')   # (the gather's helper threads: fork_join)
+    escape = '#include "%s"\n' % escape.as_posix() if escape.exists() else ''
+    fixture = escape + THREADS.replace('@REPLAY@', pin).replace('@TEXTURE@', helpers + gather)
     with tempfile.TemporaryDirectory(prefix='reserved-core-threads-') as tmp:
         tmp = Path(tmp)
         (tmp / 'posix.c').write_text(counted, encoding='utf-8')

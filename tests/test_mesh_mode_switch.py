@@ -108,7 +108,7 @@ def check_source():
         raise SystemExit("FAIL: the compute path's line says there are no mesh shaders where the driver offers them")
     if "mesh_rule::device_note(dev.mesh_capable, dev.mesh_shader, mesh_mode, " not in device:
         raise SystemExit("FAIL: create_device does not note what the driver offers apart from what this run uses")
-    init = block(main_cpp, "const MkwVkRenderer* mkwvk_init(const MkwVkHost* h) {")
+    init = block(main_cpp, "static const MkwVkRenderer* init_body(const MkwVkHost* h) {")   # (mkwvk_init's work, behind its catch)
     line = init[init.index('logf("vk: %s, Vulkan %u.%u, driver %#x; mesh shaders %s'):]
     line = line[:line.index(";\n")]
     if 'dev.mesh_shader ? "yes" : "no"' in line or "mesh_note" not in line:

@@ -64,6 +64,7 @@
 #endif
 #include "vk_programs.h"
 #include "readback_late.h"
+#include "cxx_escape.h"   // (the replay's threads: their exceptions said, a start that fails at the commit limit stops as out of memory)
 #include "hold_gpu.h"   // (longshot: sync_watch's rule for queues stopped past hold_ms)
 #include "frame_overlap.h"   // (longshot: when the game's frame wait is answered, and where the presents are made)
 #include "submit_retry.h"    // (longshot, #1879: a submit refused for want of memory made again)
@@ -7001,7 +7002,7 @@ void present_hand_off(uint32_t index, VkFence done, uint64_t reflex_id, OutputTr
     std::unique_lock lk(presenter.mu);
     if (!presenter.started) {
         presenter.started = true;
-        std::thread(presenter_loop).detach();
+        ::mkwvk::cxx_escape::spawn_needed("presenter", presenter_loop);
     }
     presenter_wait_idle(lk);   // (the frame before's present made: one out at most; the presenter's own waits are bounded)
     presenter.index = index, presenter.swapchain = dev.swapchain, presenter.done = done, presenter.busy = true;
@@ -7723,7 +7724,7 @@ void enqueue(Job&& j) {
     static bool started;
     if (!started) {
         started = true;
-        std::thread(replay_thread_main).detach();
+        ::mkwvk::cxx_escape::spawn_needed("replay", replay_thread_main);
         logf("vk: the replay runs on a thread of its own, the render thread (RX_VK_ASYNC=0: on the submitting thread)");
     }
     if (j.kind == JOB_PRESENT) {   // (the game waits here while the present before it is not replayed: a frame ahead at most)
@@ -7855,7 +7856,7 @@ void submit_q(const uint64_t* handles, int n, uint64_t queue) {
         }
         if (sync_waits_on()) {
             static std::once_flag watch;
-            std::call_once(watch, [] { std::thread(sync_watch).detach(); });
+            std::call_once(watch, [] { ::mkwvk::cxx_escape::spawn_needed("order", sync_watch); });
             std::vector<uint64_t> h(handles, handles + std::max(n, 0));
             const uint64_t value = ++q_values;
             gf_note_value(value);

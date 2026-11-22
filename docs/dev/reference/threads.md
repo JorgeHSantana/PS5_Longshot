@@ -167,6 +167,28 @@ Elsewhere the call returns at once and the thread costs a hand-off.
 - Frame interpolation's presents are made by its display thread, as before.
 - **Acquire ahead** (on by default, `RX_VK_ACQUIRE_AHEAD=0` turns it off): after a game frame's present that came back `VK_SUCCESS`, the presenter asks for the next present's image at once (a timeout of 0), while the swapchain is still its own. With AMD's Windows driver `vkAcquireNextImageKHR` returns at once and the wait is in the acquire's fence, which the system signals at its next composition: in a window the render thread waited 2.3 to 2.7 ms a frame for it at its present (RX 9070 XT, a 1280x720 window on a 144 Hz desktop). Asked for a present ahead, the image is nearly always free when the next present comes. Drivers that wait in the acquire itself (NVIDIA's, Mesa's) answer the zero-timeout acquire at once, with an image or with none, so the presenter never waits there. The present still waits up to 250 ms for an image that is not, then holds it (#1376); a swapchain made again lets it go. An image held for 1 s is taken as never coming back and the present makes the swapchain again itself (then after 2 s, then every 4 s, while none comes back; `vk: the window's image was not given back in ... s: the swapchain made again`): the system lets an image go when another is shown, and while one is held nothing else is presented, so with frame generation on AMD's Windows driver one held after Alt+Tab, or after a hitch in full screen, froze the picture until F11 (#1482). Not under frame generation or FIFO, and not for the start-up screen. The log's first present says which way it went (`vk: acquire ahead: ...`).
 
+## A C++ exception out of a thread
+
+Nothing above the renderer catches a C++ exception: the host is C, and a thread's body is the top of its stack. One that
+got out ended the game with exception `0x20474343` (llvm-mingw's code for a C++ exception nothing caught) and "An
+unexpected error", with no word of what was thrown (#1280, #947). Now (`gpu/vk/cxx_escape.h`):
+
+- **Every function the renderer gives the host** (`MkwVkRenderer`, wrapped by `gpu/vk/renderer_guard.h` when
+  `mkwvk_init` returns the table) and `mkwvk_init` itself catch a `std::exception`.
+- **The render thread, the presenter and the order watch** (`sync_watch`) are started with `spawn_needed`: their bodies
+  catch one, and a thread that cannot be started stops the game as out of memory.
+- **The texture decode's helper threads** (the gather of a big texture's pages, the check for holes, the unswizzle) go
+  through `fork_join`: a helper that cannot be started (at the commit limit a thread's stack has no commit) leaves its part
+  to the thread that asked, which makes it after its own.
+
+What is caught is said in the log, `vk: a C++ exception came out of <where>: <type>: <what()>`, then the game stops:
+`std::bad_alloc`, or a `std::system_error` of no memory or a thread that could not be started, through the host's
+out-of-memory line and notice (as the renderer's `new_handler` does at the commit limit, #1291); anything else with
+the renderer's `vk: FATAL:` line (exit code 3). Only `std::exception` is caught, never `catch (...)`: an access
+violation or a driver's own exception (`0xe06d7363`) stays the crash record's, with its backtrace. The recorder thread
+and the background workers catch their own (`vk_recorder.h` `Recorder::main`, `vk_jobs.cpp` `run_guarded`). Game-free
+test: `tests/test_cxx_escape.py`.
+
 ## Measuring
 
 The log lines, in the order they come:

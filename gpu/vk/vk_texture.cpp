@@ -82,6 +82,7 @@
 #ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
 #include "longshot_env.h"
 #endif
+#include "cxx_escape.h"   // (fork_join: a helper that cannot be started at the commit limit leaves its part to the caller)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
@@ -1288,16 +1289,13 @@ const uint8_t* guest_bytes(uint64_t gpu, uint64_t n, std::vector<uint8_t>& scrat
         scratch.resize(n);
         const uint32_t nt = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 6u);
         const uint64_t per = ((n + nt - 1) / nt + 0xFFFF) & ~0xFFFFull;
-        std::vector<std::thread> pool;
         auto part = [&](uint32_t t) {
             const uint64_t a = (uint64_t)t * per, b = std::min(n, a + per);
             for (uint64_t at = a; at < b; at += 0x10000)
                 if (!host->gpu_read(gpu + at, scratch.data() + at, std::min<uint64_t>(0x10000, b - at)))
                     std::memset(scratch.data() + at, 0, std::min<uint64_t>(0x10000, b - at));
         };
-        for (uint32_t t = 1; t < nt; t++) pool.emplace_back([&part, t] { helper_thread_start(), part(t); });
-        part(0);
-        for (std::thread& t : pool) t.join();
+        ::mkwvk::cxx_escape::fork_join("texture gather", nt, part, helper_thread_start);
         return scratch.data();
     }
     scratch.assign(n, 0);
@@ -2139,10 +2137,7 @@ bool upload_all_zero(Texture& tex, uint64_t total, const Ranges* dirty, bool wid
         nread.fetch_add(mine, std::memory_order_relaxed);
     };
     if (nthreads > 1 && scanned) {   // (no helper threads when it is all holes: nothing to read)
-        std::vector<std::thread> th;
-        for (uint32_t t = 1; t < nthreads; t++) th.emplace_back([&part, t] { helper_thread_start(), part(t); });
-        part(0);
-        for (auto& x : th) x.join();
+        ::mkwvk::cxx_escape::fork_join("texture check", nthreads, part, helper_thread_start);
     } else {
         part(0);
     }
@@ -2346,10 +2341,7 @@ bool upload_inner(Texture& tex, const Ranges* dirty) {
                                     std::span<const uint8_t>(rows, rows_n), (u32)src_bpb, g.tw, h, 1, g.tile_h, 0);
                             }
                         };
-                        std::vector<std::thread> pool;
-                        for (uint32_t t = 1; t < nthreads; t++) pool.emplace_back([&part, t] { helper_thread_start(), part(t); });
-                        part(0);
-                        for (std::thread& t : pool) t.join();
+                        ::mkwvk::cxx_escape::fork_join("texture unswizzle", nthreads, part, helper_thread_start);
                         static const bool check = env_on("RX_VK_UNSWIZZLE_CHECK");   // (against one thread)
                         if (check && src) {
                             std::vector<uint8_t> ref(block_bytes);
