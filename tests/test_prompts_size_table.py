@@ -17,7 +17,7 @@ made-up tables, no game data:
 - two versions' tables in the RomFS: the one the game opens, not the one that sorts first;
 - a table name the RomFS has not (another game version): the game's own table and its own icons;
 - a table without a font entry: the game's own table and its own icons;
-- a font entry with room already: the game's own table, and the prompts' font;
+- a font entry with room already (the prompts' font no larger than the game's): the game's own table, and the prompts' font;
 - the layouts (prompts/Common.blarc): served when the size of the RomFS's, the game's own when not.
 
 python -I -B tests/test_prompts_size_table.py [--cc gcc]
@@ -60,9 +60,10 @@ def need(entry):
     return len(OUR_FONT) + entry - GAME_FONT
 
 
-def case(exe, tmp, name, romfs, opens, stale=None, blarc=None):
+def case(exe, tmp, name, romfs, opens, stale=None, blarc=None, game_font=GAME_FONT):
     """a game folder with the prompts and no mods: romfs {path: bytes}; stale: a prompts/rsizetable.zs the build made (from
-    another table); blarc: prompts/Common.blarc's bytes. {path: what was served}, the log, the folder"""
+    another table); blarc: prompts/Common.blarc's bytes; game_font: the RomFS's font's size. {path: what was served}, the
+    log, the folder"""
     top = tmp / name
     game = top / "game"
     (game / "prompts/xbox").mkdir(parents=True)
@@ -72,7 +73,7 @@ def case(exe, tmp, name, romfs, opens, stale=None, blarc=None):
         (game / "prompts/rsizetable.zs").write_bytes(fixture.frame(stale))
     if blarc is not None:
         (game / "prompts/Common.blarc").write_bytes(blarc)
-    files = {FONT: fixture.frame(bytes(GAME_FONT)), **romfs}
+    files = {FONT: fixture.frame(bytes(game_font)), **romfs}
     for rel, data in files.items():
         (game / "romfs" / rel).parent.mkdir(parents=True, exist_ok=True)
         (game / "romfs" / rel).write_bytes(data)
@@ -126,8 +127,9 @@ def checks(exe, tmp):
     # a table with no entry for the font: the game's own, and its own icons
     served, log, _ = case(exe, tmp, "no-entry", {TABLE: fixture.frame(table(font=None))}, (TABLE, FONT))
     expect("a table without a font entry", served, {TABLE: "(the game's)", FONT: "(the game's)"}, log)
-    # a font entry with room for ours: the game's own table, and the font
-    served, log, _ = case(exe, tmp, "room", {TABLE: fixture.frame(table(font=100000))}, (TABLE, FONT))
+    # a font entry with room for ours (the entry is the font's size and an allowance, hos_prompts_font_entry: room when ours
+    # is no larger than the game's): the game's own table, and the font
+    served, log, _ = case(exe, tmp, "room", {TABLE: fixture.frame(table(font=100000))}, (TABLE, FONT), game_font=len(OUR_FONT))
     expect("a font entry with room", served, {TABLE: "(the game's)", FONT: font}, log)
     # the layouts: the build's copy served when it is the size of the RomFS's, the game's own when not
     for name, size, want in (("layouts-same", 64, "game/cache/prompts/Common.blarc.zs"), ("layouts-other", 80, "(the game's)")):

@@ -102,7 +102,7 @@ constexpr uint32_t kCompressedKind = 16;
 // (the shader store, gpu/vk/spirv_pack.h, as vk_progcache.cpp has it: on when the runner names a folder for it, a second
 // argument. Each stage's SPIR-V is then a reference to it, and every read takes it from there)
 #include "../gpu/vk/spirv_pack.h"
-spirv_pack::Store store;
+spirv_pack::Store& store = *new spirv_pack::Store;   // (never destroyed, as there: its threads' read handles outlive it)
 bool store_on = false;
 constexpr uint64_t kStoreWords = 1ull << 63;
 constexpr int64_t kInStore = 1ll << 62;

@@ -200,9 +200,11 @@ def calm_after(g, want, start, limit_frames):
 
 
 # what in a refusal's message says that asking again will never do (host/hos_main.c oot_teleport's teleport.why: no map for
-# Link's age there, no such destination, a request the game could not build, Link's age not in its data); the rest (an event
-# playing, a map loading, another teleport in the last 8 s, the event manager not there yet) pass
-PERMANENT = ("no such destination", "has no map", "could not be", "not in the game's data", "out of memory")
+# Link's age there, no such destination, a request the game could not build, Link's age not in its data, an input recording
+# playing, which takes its own and none of the bridge's: host/input_movie.c); the rest (an event playing, a map loading,
+# another teleport in the last 8 s, the event manager not there yet) pass
+PERMANENT = ("no such destination", "has no map", "could not be", "not in the game's data", "out of memory",
+             "an input recording is playing")
 # (the refusal of a teleport within 8 s of the last, counted in wall time (hos_now_ns): waited out, not pressed at)
 COOLDOWN = "another teleport is still in progress"
 # (a sent request the game's event manager did not take: waited for this long before asking again, not arrive_s's 60 s)

@@ -81,7 +81,7 @@ bool bind_descriptors(VkCommandBuffer, int, Program&) { return true; }
 void push_constants(VkCommandBuffer, Program&, void*, uint32_t) {}
 void fallback_warp_counters(VkCommandBuffer, const FallbackBuffers&) {}
 template<class... T> void logf(const char*, T...) {}
-constexpr int log_debug = 0;
+enum LogLevel : int { log_error, log_warn, log_info, log_debug, log_trace };   // (vk_internal.h's)
 template<class... T> void logf_at(int, const char*, T...) {}
 
 #include "mesh_conv_real.inc"

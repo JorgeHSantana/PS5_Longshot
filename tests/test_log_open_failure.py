@@ -58,6 +58,8 @@ static DWORD hos_game_path_a(char *out, DWORD size) { snprintf(out, size, "%s", 
 static DWORD GetFileAttributesA(const char *p) { struct stat st; return stat(p, &st) ? INVALID_FILE_ATTRIBUTES : 0; }
 static int MoveFileExA(const char *from, const char *to, DWORD flags) { (void)flags; return rename(from, to) == 0; }
 static void hos_crash_record_prepare(const char *log_path) { (void)log_path; }
+/* (the run before's log redacted, host/log_redact.c: it opens no descriptor this run keeps) */
+static int hos_log_redact_file(const char *path, const char *run_id) { (void)path; (void)run_id; return 0; }
 static void open_log(void) {
 ''' + "{body}" + r'''
 }

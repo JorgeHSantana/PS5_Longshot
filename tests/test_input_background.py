@@ -165,7 +165,7 @@ static void player_used(void) { player_stamps++; }
              "-I" + str(folder), str(ROOT / "tests/input_background_test.c"), "-o", str(exe)])
         for case in ((a.case,) if a.case else CASES):
             case_env = dict(env)
-            if case not in ("live-background", "no-script-background", "live-frame", "reuse-frame", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle", "hold-taps", "menu-side-buttons", "deck-mouse", "deck-motion", "held-input", "sprint-toggle"):
+            if case not in ("live-background", "no-script-background", "live-frame", "reuse-frame", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle", "hold-taps", "menu-side-buttons", "deck-mouse", "deck-motion", "held-input", "sprint-toggle", "stick-directions"):
                 case_env["HOS_INPUT_SCRIPT"] = "0:A+LUP/200"
             if case in ("frame-hold", "live-frame", "reuse-frame"):
                 case_env["HOS_INPUT_FRAME_CLOCK"] = "1"

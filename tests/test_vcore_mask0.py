@@ -253,9 +253,12 @@ def main():
         (folder / "fixture.cpp").write_text(fixture, encoding="utf-8")
         exe = folder / ("fixture.exe" if os.name == "nt" else "fixture")
         flags = ["-pthread"] if os.name != "nt" else []
-        subprocess.run([compiler, "-std=c++17", "-O1", "-w", *flags, str(folder / "fixture.cpp"), "-o", str(exe)],
-                       check=True, timeout=120)
-        result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+        # (env_on_or, the switches' rule HOS_VCORES is read by: gpu/vk/compat/longshot_env.h, as hos_thread.c has it)
+        env_h = ROOT / "gpu/vk/compat/longshot_env.h"
+        subprocess.run([compiler, "-std=c++17", "-O1", "-w", *flags, "-include", str(env_h), str(folder / "fixture.cpp"),
+                        "-o", str(exe)], check=True, timeout=120)
+        env = {k: v for k, v in os.environ.items() if k != "HOS_VCORES"}   # (the default: the virtual cores on)
+        result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30, env=env)
         print(result.stdout, end="")
         if result.returncode or "ok" not in result.stdout:
             raise SystemExit("the virtual-core mask/TLS checks failed")

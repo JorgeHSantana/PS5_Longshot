@@ -77,9 +77,12 @@ int main() {
     const auto* preset = menu::find("reshade_preset");
     CHECK(preset && preset->hi == 26 && preset->choices.size() == 27);
     CHECK(value_of("graphics", "reshade_preset") == "User");
+    // (the numbers saved in longshot_options.ini, gpu/vk/reshade/fx_builtin.h: the Clarity looks from 7, the last at 26)
     opts.reshade = 4;
+    CHECK(value_of("graphics", "reshade_preset") == "HDR Vibrance");
+    opts.reshade = 7;
     CHECK(value_of("graphics", "reshade_preset") == "Serfrost (Recommended)");
-    opts.reshade = 23;
+    opts.reshade = 26;
     CHECK(value_of("graphics", "reshade_preset") == "Clarity Base");
     CHECK(value_of("graphics", "hdr") == "Native (the game's)" && value_of("graphics", "hdr_tone_mapper") == "PsychoV35");
     CHECK(!strcmp(tx_hdr(0), "Off") && !strcmp(tx_hdr(2), "Native (the game's)"));

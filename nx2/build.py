@@ -684,9 +684,14 @@ def header_package(cpm_name, probe, env=None, work=None):
     then common system prefixes (/usr/local, /usr). Distro vulkan-headers / spirv-headers install
     under /usr/include; this is what makes a source build find them without a CPM tree."""
     parts = probe.split("/")
+    need = HEADER_NEEDS.get(cpm_name)
 
     def ok(root):
-        return bool(root) and os.path.isfile(os.path.join(root, "include", *parts))
+        path = os.path.join(root, "include", *parts) if root else ""
+        if not path or not os.path.isfile(path):
+            return False
+        # (a header too old for the renderer is no header: the next place is tried, else it is missing)
+        return not need or header_declares(path, need)
 
     pkg = cpm_package(cpm_name, work)
     if ok(pkg):
@@ -697,15 +702,27 @@ def header_package(cpm_name, probe, env=None, work=None):
             e = os.path.abspath(e)
             if ok(e):
                 return e
-            if os.path.isfile(os.path.join(e, *parts)):
-                parent = os.path.dirname(e)
-                if os.path.normpath(os.path.join(parent, "include")) == os.path.normpath(e):
-                    return parent
+            parent = os.path.dirname(e)   # (e the include/ folder itself)
+            if os.path.normpath(os.path.join(parent, "include")) == os.path.normpath(e) and ok(parent):
+                return parent
     for prefix in ("/usr/local", "/usr"):
         if ok(prefix):
             return prefix
     return None
 
+
+def header_declares(path, text):
+    """whether the header at path has text in it (False when it cannot be read)"""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return text in f.read()
+    except OSError:
+        return False
+
+
+# (what a header package must declare to be taken: gpu/vk/vk_vma.cpp calls vmaGetAllocationInfo2, which is VMA 3.1, and a
+# distribution's VMA may be 3.0 (Ubuntu 24.04's): taken, it failed the renderer's build at vk_vma.cpp)
+HEADER_NEEDS = {"vulkanmemoryallocator": "vmaGetAllocationInfo2"}
 
 VK_HEADERS = (("Vulkan", "vulkanheaders", "vulkan/vulkan.h", "LONGSHOT_VULKAN_HEADERS"),
               ("SPIR-V", "spirv-headers", "spirv/unified1/spirv.h", "LONGSHOT_SPIRV_HEADERS"),

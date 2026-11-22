@@ -27,8 +27,7 @@ RUN_ALL_ARGS = ["--cc", "gcc"]
 ROOT = Path(__file__).resolve().parents[1]
 ENV_ON_H = str(ROOT / "gpu" / "vk" / "compat" / "longshot_env.h")
 
-PRELUDE = r"""#define _POSIX_C_SOURCE 200809L
-#include <pthread.h>
+PRELUDE = r"""#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -163,8 +162,10 @@ def main():
         src = Path(tmp) / "t.c"
         src.write_text(code, encoding="utf-8")
         exe = Path(tmp) / "t.exe"
-        subprocess.run([a.cc, "-std=c11", "-include", ENV_ON_H, "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
-                        "-pthread", "-o", str(exe), str(src)], check=True)
+        # (_POSIX_C_SOURCE before longshot_env.h's own includes, for pthread_rwlock_t; the state cut out of nn_hid.c has
+        # variables and functions only the rest of the file uses)
+        subprocess.run([a.cc, "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-include", ENV_ON_H, "-Wall", "-Wextra", "-Werror",
+                        "-Wno-unused-function", "-Wno-unused-variable", "-pthread", "-o", str(exe), str(src)], check=True)
         r = subprocess.run([str(exe)], capture_output=True, text=True)
         sys.stdout.write(r.stdout)
         sys.stderr.write(r.stderr)

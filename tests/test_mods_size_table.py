@@ -6,12 +6,12 @@ with the prompts' entries merged into it. On made-up tables, no game data:
 - merge_restbl, cut out of host/prompts.c: the mod's entries with the prompts' larger ones and those it lacks, hashed and
   named, sorted as the game's; tables it cannot merge refused (not a RESTBL, a wrong length, other name fields, out of order);
 - (Linux: host/posix's file calls) host/mods.c and host/prompts.c as they are, over real folders, with zstd's decoder: what the
-  game is served for the size table, the font and a mod's file with no mod, a mod with a table, a mod with two versions'
-  tables (only the game's table name seeds the merge, whether the font or table is opened first), a mod without one that grows
-  a file, two mods with tables (the one that sorts last is the base), a mod table that cannot be merged (served as it is, the
-  game's own icons), no table of the prompts' (the mod's as it is, the icons kept), a mod with its own font (its font, the
-  merged table), and, with the zstandard package, a table compressed as Clawshot writes it and one whose frame does not give
-  its size.
+  game is served for the size table, the font and a mod's file with no mod, a mod with a table (host/mods.c's merge: the
+  game's own table, the font's entry raised, with the mod's merged in, modcache/rsizetable.zs), a mod with two versions'
+  tables (only the game's table name's entries merged, whether the font or table is opened first), a mod without one that
+  grows a file (its entry raised), two mods with tables (both merged), a mod table that cannot be merged (served as it is, the
+  game's own icons), a font entry with room already, a mod with its own font (its font, the merged table), and, with the
+  zstandard package, a table compressed as Clawshot writes it and one whose frame does not give its size.
 
 The documented, authored file-mod example in docs/dev/reference/mods.md also goes through the same Linux filesystem fixture:
 discovery, whole-path order, disabling and restart, default/HOS_MODS roots, case/slash lookup and an ExeFS folder
@@ -308,7 +308,7 @@ int hos_xinput_pads(void) { return 0; } /* no controllers in this routing fixtur
 void hos_sdl_pad_first(char *out, size_t cap, int *type, int *sdl) { if (cap) *out = 0; if (type) *type = 0; if (sdl) *sdl = 0; }
 int hos_regions(uint64_t (*out)[2], int cap) { (void)out; (void)cap; return 0; }
 int64_t hos_now_ns(void) { return 0; }
-const char *hos_romfs_dir;   /* (no game RomFS here: mods.c merges no table of its own, the last mod's is the base) */
+const char *hos_romfs_dir;   /* (TEST_ROMFS: the game's table, the base mods.c merges the mods' into) */
 int rx_option(int id, int otherwise) { (void)id; return otherwise; }
 const char *hos_options_file(void) {   /* (host/options_path.c: beside the game, as for a game started without --user) */
     static char p[4096];
@@ -345,6 +345,7 @@ int main(int argc, char **argv) {
 def routing_checks(cc, tmp, zstandard, host):
     """mods.c and prompts.c as they are, over folders: what the game is served"""
     exe = build_fixture(cc, tmp, host)
+    MERGED = "game/modcache/rsizetable.zs"   # (host/mods.c's merged table: the game's, the font's entry raised, the mods')
 
     documented_example_checks(exe, tmp / "documented-example")
 
@@ -375,51 +376,64 @@ def routing_checks(cc, tmp, zstandard, host):
                 what = what.replace("\\", "/")
                 served[rel] = what if what == "(the game's)" else os.path.relpath(what, top).replace("\\", "/")
         table = served.get(TABLE, "")
-        content = unframe((top / table).read_bytes()) if table == "game/cache/prompts/rsizetable.mod.zs" else None
+        content = unframe((top / table).read_bytes()) if table in (MERGED, "game/cache/prompts/rsizetable.mod.zs") else None
         return served, content, out
+
+    def entries(t):
+        """a table's hashed entries, {CRC: size}"""
+        nh, = struct.unpack_from("<I", t, 14)
+        return dict(struct.unpack_from("<II", t, 22 + 8 * i) for i in range(nh))
 
     mod_file = "mods/%s/romfs/" + TABLE
     # no mod: our table (the RomFS's, the font's entry raised) and the font
     served, _, log = case("none", {})
     check(served == {TABLE: "game/cache/prompts/rsizetable.zs", FONT: "game/cache/prompts/External.bfotf.zs"}, "no mod: %s" % served)
-    # a mod with a table: the mod's with ours merged in, and the font; in either order of opening
+    # a mod with a table: the game's with the font's entry raised (ours) and the mod's merged in, and the font; in either
+    # order of opening
     for i, opens in enumerate(((TABLE, FONT), (FONT, TABLE))):
         served, content, log = case("one-%d" % i, {"seed": {TABLE: frame(MOD_B)}}, opens=opens)
-        check(served == {TABLE: "game/cache/prompts/rsizetable.mod.zs", FONT: "game/cache/prompts/External.bfotf.zs"},
+        check(served == {TABLE: MERGED, FONT: "game/cache/prompts/External.bfotf.zs"},
               "a mod with a table: %s\n%s" % (served, log))
         check(content == merged(MOD_B, OURS), "a mod with a table: the merged table's entries")
-        check("with the button prompts' sizes merged in" in log and "1 entries raised or added" in log, "its log:\n" + log)
+        check("1 tables of mods merged" in log and "served from modcache" in log, "its log:\n" + log)
     # Both tables are made up. The extra version sorts first in the old hash lookup.
     version_errors = []
     for i, opens in enumerate(((TABLE, FONT), (FONT, TABLE))):
         served, content, log = case("versions-%d" % i, {"seed": {TABLE: frame(MOD_B), OTHER: frame(MOD_A)}}, opens=opens)
-        if served != {TABLE: "game/cache/prompts/rsizetable.mod.zs", FONT: "game/cache/prompts/External.bfotf.zs"}:
+        if served != {TABLE: MERGED, FONT: "game/cache/prompts/External.bfotf.zs"}:
             version_errors.append("two table versions, %s first: %s\n%s" % ("table" if i == 0 else "font", served, log))
         if content != merged(MOD_B, OURS):
             version_errors.append("two table versions, %s first: the merge is not the opened table's" % ("table" if i == 0 else "font"))
         if "Product.110" in log:
             version_errors.append("two table versions: the other one was read:\n" + log)
     check(not version_errors, "\n".join(version_errors))
-    # a mod without a table that grows a file: our table (its entry is still the game's), its file, the font
-    served, _, log = case("grows", {"grown": {GROWN: frame(b"x" * 4096)}}, opens=(TABLE, GROWN, FONT))
-    check(served == {TABLE: "game/cache/prompts/rsizetable.zs", GROWN: mod_file.replace(TABLE, GROWN) % "grown",
+    # a mod without a table that grows a file: ours with the file's entry raised to fit it, its file, the font
+    served, content, log = case("grows", {"grown": {GROWN: frame(b"x" * 4096)}}, opens=(TABLE, GROWN, FONT))
+    check(served == {TABLE: MERGED, GROWN: mod_file.replace(TABLE, GROWN) % "grown",
                      FONT: "game/cache/prompts/External.bfotf.zs"}, "a mod without a table: %s" % served)
-    # two mods with tables: the one that sorts last is the base (its entries; the other's raise is not in it)
+    grown = {k: v for k, v in entries(content).items() if k not in entries(OURS)}
+    check({k: v for k, v in entries(content).items() if k in entries(OURS)} == entries(OURS) and
+          list(grown) == [zlib.crc32(GROWN[:-3].encode())] and grown[zlib.crc32(GROWN[:-3].encode())] >= 4096,
+          "a mod without a table: its file's entry: %s" % grown)
+    # two mods with tables: both merged into the game's (each entry the largest), so two mods that grow files load together
     served, content, log = case("two", {"01-a": {TABLE: frame(MOD_A)}, "02-b": {TABLE: frame(MOD_B)}})
-    check(served[TABLE] == "game/cache/prompts/rsizetable.mod.zs" and content == merged(MOD_B, OURS), "two mods: %s" % served)
-    check(("02-b" in log.split("with the button prompts' sizes")[0].splitlines()[-1]), "two mods: 02-b's table:\n" + log)
+    check(served[TABLE] == MERGED and content == merged(merged(MOD_A, MOD_B), OURS), "two mods: %s" % served)
+    check("2 tables of mods merged" in log, "two mods: both tables:\n" + log)
     check(served[FONT] == "game/cache/prompts/External.bfotf.zs", "two mods: the font")
     # a mod table that cannot take ours: as it is, and the game's own icons
     served, _, log = case("bad", {"bad": {TABLE: frame(b"NOT A TABLE" * 4)}})
     check(served == {TABLE: mod_file % "bad", FONT: "(the game's)"}, "a table that cannot be merged: %s" % served)
     check("not a resource size table as the game's" in log and "the game's own icons in texts" in log, "its log:\n" + log)
-    # no table of ours (the faces' fonts fit the game's entry): the mod's as it is, and the font
+    # a font entry with room for the faces' fonts already: the mod's merged into the game's, the font's room kept, and the font
     roomy = restbl([(0x10, 100), (0x20, 200), (0x40, 400), (FONT_CRC, 100000)], GAME[1])
-    served, _, log = case("no-ours", {"seed": {TABLE: frame(MOD_B)}}, game_table=roomy)
-    check(served == {TABLE: mod_file % "seed", FONT: "game/cache/prompts/External.bfotf.zs"}, "no table of ours: %s" % served)
+    served, content, log = case("no-ours", {"seed": {TABLE: frame(MOD_B)}}, game_table=roomy)
+    check(served == {TABLE: MERGED, FONT: "game/cache/prompts/External.bfotf.zs"}, "a font entry with room: %s" % served)
+    want = entries(merged(MOD_B, roomy))
+    got = entries(content)
+    check(got.pop(FONT_CRC) >= want.pop(FONT_CRC) and got == want, "a font entry with room: the merged table's entries")
     # a mod with a table and the font of its own: its font wins, its table still gets ours
     served, content, log = case("own-font", {"seed": {TABLE: frame(MOD_B), FONT: b"a mod's own font"}})
-    check(served == {TABLE: "game/cache/prompts/rsizetable.mod.zs", FONT: mod_file.replace(TABLE, FONT) % "seed"}
+    check(served == {TABLE: MERGED, FONT: mod_file.replace(TABLE, FONT) % "seed"}
           and content == merged(MOD_B, OURS), "a mod with its own font: %s" % served)
     # the texts' PC wording (host/texts.c): the build's file for a language it reworded and the game's own for one it did not;
     # a mod's own text file before ours; HOS_TEXTS=0
@@ -463,7 +477,7 @@ def routing_checks(cc, tmp, zstandard, host):
               "a frame without its size: %s" % served)
         n += 2
     print("ok: %d cases served as they should: no mod, a mod with a table, two table versions in both open orders, "
-          "one that grows a file without, two mods, a table that cannot be merged, no table of ours, a mod's own font, the texts' PC wording (ours, a mod's, off)%s"
+          "one that grows a file without, two mods, a table that cannot be merged, a font entry with room, a mod's own font, the texts' PC wording (ours, a mod's, off)%s"
           % (n, ", compressed and size-less frames" if zstandard else " (no zstandard: compressed frames not tried)"))
 
 

@@ -69,7 +69,9 @@ CACHES = ("longshot_programs.bin", "longshot_programs.idx", "longshot_programs.z
           # (the size of the cache's one translator's pipelines, which bounds what another translator carries: pcache_stamp.h)
           "longshot_vk_pipelines.base",
           # (the textures a draw has sampled, for RX_VK_TEX_AHEAD: gpu/vk/texture_ahead.h)
-          "longshot_textures_drawn.bin")
+          "longshot_textures_drawn.bin",
+          # (AMD FSR 4's unrolled layers' own pipeline cache: gpu/vk/vk_fsr4.cpp own_cache)
+          "longshot_fsr4_pipelines.bin")
 PLAY_FILES = re.compile(r"longshot_vk_pipelines_play_[0-9]+\.bin")   # (what play adds to the pipeline cache: gpu/vk/vk_draw.cpp play_path)
 # (what the game writes into its folder at run time, never a build's output: the caches (and the button prompts it makes) in
 # cache/, the logs in logs/ (host/game_layout.c)

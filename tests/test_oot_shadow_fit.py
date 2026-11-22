@@ -76,7 +76,8 @@ class InstallTests(unittest.TestCase):
 
     def test_lift_wiring(self):
         lift = (ROOT / "nx2/lift.py").read_text(encoding="utf-8")
-        standalone = lift[lift.index("if a.standalone:"):lift.index("L.discover(")]
+        # (installed before the functions are discovered: nx2/discover.py walks them, in new processes where there is no fork)
+        standalone = lift[lift.index("if a.standalone:"):lift.index("discover.discover(L,")]
         self.assertIn("oot_shadow_fit.install(", standalone)
 
 

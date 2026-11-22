@@ -46,6 +46,7 @@ def definition(text, name):
 FIXTURE = r"""
 #include "upscaler_rows.h"
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -78,6 +79,7 @@ void restart_values(int*) {}
 struct { void note(const int*) {} } restart_state;
 bool can_mic() { return false; }
 void mic_chosen() {}
+std::atomic<int> grass_distance_now{0};   // (the Grass distance row's hook in set_row: the game thread's copy)
 int output_pick;
 int monitor_pick;
 bool output_forced() { return false; }

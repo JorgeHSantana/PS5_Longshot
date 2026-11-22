@@ -6,9 +6,9 @@
 #include "vk_builtin_spv.h"
 #include "shaders/clear_vert_spv.h"
 #include "shaders/colour_vision_frag_spv.h"
-#include "vk_work.h"  // preserve the present command order under the recorder
-
 #include <unordered_map>
+
+#include "vk_work.h"  // preserve the present command order under the recorder (the last include: its macros)
 
 namespace mkwvk {
 namespace {

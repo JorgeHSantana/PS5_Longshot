@@ -78,8 +78,8 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | Custom output size | A size of your own, typed as `<width>x<height>` (most changes apply after a restart) | None |
 | | Profile | Docked, Handheld (after a restart) | Docked; a quality preset sets it |
 | | Upscaler | Game's own, NVIDIA DLSS (only in builds with NVIDIA's DLSS SDK, on NVIDIA RTX GPUs), AMD FSR 3.1 (every build, on GPUs it runs on), AMD FSR 4 (only in builds with FSR 4, on GPUs AMD's files cover), Off (no upscaling), Intel XeSS (Windows, with Intel's `libxess.dll` beside the game). NVIDIA DLAA, AMD FSR 4 Native AA and Intel XeSS Native AA are DLSS's, FSR 4's and XeSS's Native, chosen on the Render resolution row | Game's own; Auto (this PC) chooses DLSS or FSR 4 where they run, never XeSS |
-| | DLSS model | Transformer (K) (CNN (E) in its place on cards with less than 7 GB of video memory), Transformer 2 (M), Transformer 2 (L), NVIDIA default, CNN (E), CNN (F) (shown with DLSS or DLAA chosen as the Upscaler, where DLSS runs) | Transformer (K); CNN (E) under 7 GB |
-| | FSR 4 model | Auto (AMD's), Lite (INT8). Forcing Lite requires a supported Windows runtime with a verified provider; currently forcing is disabled. Linux retains a saved Lite value but uses Auto. | Auto (AMD's) |
+| | DLSS model | Transformer (K) (CNN (E) in its place on cards with less than 7 GB of video memory), Transformer 2 (M), Transformer 2 (L), NVIDIA default, CNN (E), CNN (F) (shown where DLSS runs, with DLSS or DLAA chosen as the Upscaler) | Transformer (K); CNN (E) under 7 GB |
+| | FSR 4 model | Auto (AMD's), Lite (INT8) (shown where FSR 4 runs, only in builds with FSR 4's Lite provider). Forcing Lite requires a supported Windows runtime with a verified provider; currently forcing is disabled. Linux retains a saved Lite value but uses Auto. | Auto (AMD's) |
 | | DLAA before the bloom | Off, On: where NVIDIA DLAA smooths the picture, after the game's bloom and tone map or before them (shown with NVIDIA DLSS; changeable with Render resolution Native (DLAA) only; changes at once; `RX_VK_DLSS_PRE_BLOOM` over it for one run) | Off |
 | | Render resolution | Auto (the game's own dynamic resolution), 100%, 75%, 67%, 50% (each with its size). With DLSS or FSR 4: Auto, Native (DLAA or FSR 4 Native AA: the 3D at full size), 92%, 83%, 75%, Quality (67%), Balanced (58%), Performance (50%), Ultra Performance (33%). With Intel XeSS the same stops, named by the XeSS mode each runs under: Native (XeSS Native AA), Ultra Quality Plus (92%, 83%), 75%, Ultra Quality (67%), Balanced (58%, 50%), Ultra Performance (33%). With FSR 3.1: Auto, 100% (its native AA), then the same as DLSS from 92%. With Off: Auto, 100%, 75%, 67%, 50%, 33% | Auto; a quality preset sets it |
 | | Sharpness | 0 to 100%, in steps of 10 | 0%; a quality preset sets it |
@@ -253,7 +253,7 @@ helper asks you to.
   to 6 GB, High at 8 GB, Highest from 12 GB). On Highest the nearest shadows shimmer less while the camera turns or
   Link walks: the map near Link stays put in the world instead of following the view. The steady fit is a little coarser
   than the game's own fit standing still, so below Highest the game's fit is kept ([developer switches](../dev/reference/switches.md)).
-- **Grass distance** sets how far the short grass blades reach: Kokiri Forest's tufts and the moss on its stones. The game
+- **Grass distance** sets how far the short grass blades reach: the starting forest's tufts and the moss on its stones. The game
   picks patches within 22 m of Link and thins blades by distance from the camera, from 12 m to about 20 m. 2x, 3x and 4x
   extend their radius and fades by that factor. Game's, the default, keeps the console's reach. The change applies at once.
   This row does not change the large-scale simulated turf controlled by **Simulated turf**. Saved as `grass_distance`;

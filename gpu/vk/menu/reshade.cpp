@@ -232,7 +232,9 @@ MENU_MODULE(reshade) {
               .help = "Copy INI files to reshade/presets and FX and FXH files to reshade/shaders, then rescan.",
               .value = &user_pick, .lo = 0, .hi = 0, .preset_exempt = true, .shown = [] { return opts.reshade == reshade::user_preset; },
               .text = MENU_HOOK(filename), .on_change = MENU_HOOK(user_picked)})
-        .row({.key = "reshade_rescan", .label = "Rescan ReShade presets", .kind = menu::Kind::Action,
+        .row({.key = "reshade_rescan", .label = "Rescan ReShade presets",
+              .help = "Refreshes the user preset list and reloads the selected file.",
+              .kind = menu::Kind::Action,
               .shown = [] { return opts.reshade == reshade::user_preset; }, .on_activate = MENU_HOOK(scan_presets)});
 }
 

@@ -73,6 +73,7 @@ FROZEN = {   # (a key: the value its row saves, as players' files hold them)
     "sim_turf_minimum_blades_multiplier": "&multipliers[2]",
     "gpu_device": "&opts.gpu_device",
     "gpu_slot_waits_line": "&opts.fps_dev_show[8]",
+    "grass_distance": "&opts.grass_distance",
     "handheld_profile": "&opts.handheld",
     "hdr": "&opts.hdr",
     "hdr_contrast": "&opts.hdr_contrast",

@@ -899,7 +899,7 @@ def logic_checks(exe, menu, tmp, form):
     q = parse_qs(urlsplit(url).query)
     assert (q["field:track"], q["field:where"], q["field:settings"]) == (["Release"], ["Kokiri Forest"], ["ultrawide=1\n"]), q
     template = (ROOT / ".forgejo/ISSUE_TEMPLATE/1-game-problem.yml").read_text(encoding="utf-8")
-    for option in ("Release", "Release candidate", "Nightly", "Built from source", "Crash, freeze or black screen"):
+    for option in ("Release", "Nightly", "Built from source", "Crash, freeze or black screen"):   # (no release candidates: #1768)
         assert re.search(r"^\s+- " + re.escape(option) + r"$", template, re.M), "the form's dropdowns have " + option
     long_url = run(exe, "url", "T", "v1", "G", "S", "w" * 3000).strip()
     assert len(long_url) <= 2000 and "field:what" not in parse_qs(urlsplit(long_url).query) and "field:version=v1" in long_url, \

@@ -68,8 +68,8 @@
 #include "hold_gpu.h"   // (longshot: sync_watch's rule for queues stopped past hold_ms)
 #include "frame_overlap.h"   // (longshot: when the game's frame wait is answered, and where the presents are made)
 #include "submit_retry.h"    // (longshot, #1879: a submit refused for want of memory made again)
-#include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 #include "shader_recompiler/backend/spirv/mma_layout.h"   // (graphics_table_loads, mesh_fallback_pages: replay_start)
+#include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
 extern std::recursive_mutex menu_mu;

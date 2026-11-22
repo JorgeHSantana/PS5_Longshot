@@ -202,7 +202,7 @@ static void stick_directions_case(void) {
     static const int32_t d[8][2] = {{0, 32767}, {0, -32767}, {-32767, 0}, {32767, 0},
                                     {-23170, 23170}, {23170, 23170}, {-23170, -23170}, {23170, -23170}};
     const uint64_t a = 1ULL << B_A;
-    front = bridge_active = 1;
+    controls_case = front = bridge_active = 1;   /* (no pad or key of the player's held: the bridge's input alone, then none) */
     for (int stick = 0; stick < 2; stick++)
         for (int k = 0; k < 8; k++) {
             memset(bridge_stick, 0, sizeof bridge_stick);

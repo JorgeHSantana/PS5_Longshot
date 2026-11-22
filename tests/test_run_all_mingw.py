@@ -36,6 +36,7 @@ class CloneLlvmMingw(unittest.TestCase):
             if compiler:
                 (tmp / "llvm-mingw" / "bin" / CLANG).write_bytes(b"")
             shutil.copy(ROOT / "tests" / "run_all.py", tmp / "tests" / "run_all.py")
+            shutil.copy(ROOT / "tests" / "compiler_command.py", tmp / "tests" / "compiler_command.py")   # (run_all.py imports it)
             (tmp / "tests" / "test_probe.py").write_text(PROBE, encoding="utf-8")
             out = tmp / "seen.txt"
             env = {k: v for k, v in os.environ.items()

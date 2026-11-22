@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <vector>
 
 static int failures = 0;
@@ -125,7 +126,12 @@ int main(int argc, char** argv) {
         spirv_pack::Store s;
         CHECK(s.open(sub));
         const int64_t at = s.put(a.data(), a.size());
-        CHECK(reads(s, at, a));
+        {   // (read back on a thread of its own: read's handle is the thread's, and this thread's would keep the words it read in
+            // its buffer, the C library's, past the change below)
+            bool read_back = false;
+            std::thread([&] { read_back = reads(s, at, a); }).join();
+            CHECK(read_back);
+        }
         {
             FILE* f = std::fopen((sub + "/spirv.pack").c_str(), "r+b");
             CHECK(f != nullptr);

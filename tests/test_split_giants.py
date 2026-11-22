@@ -493,7 +493,14 @@ class Programs:
 
     def hops(self, tag, text, prefix, direct):
         """the split file's assembly: direct, a piece reaches another by a jump (musttail), never a call; the trampoline,
-        a piece never names another (the dispatcher calls them)"""
+        a piece never names another (the dispatcher calls them). A Clang without preserve_none (before 19: Ubuntu 24.04's 18)
+        builds the direct pieces as the trampoline (split_giants.py DIRECT_IF), so there they are checked as that"""
+        probe = subprocess.run([self.cc, "-E", "-P", "-x", "c", "-"], input=SG.DIRECT_IF + "\nDIRECT\n#else\nTRAMPOLINE\n#endif\n",
+                               capture_output=True, text=True)
+        check(probe.returncode == 0, "%s: %s preprocesses split_giants.py's DIRECT_IF: %s" % (tag, self.cc, probe.stderr[-500:]))
+        if direct and "DIRECT" not in probe.stdout.split():
+            print("%s: %s has no preserve_none or musttail: the pieces go through the trampoline" % (tag, self.cc))
+            direct = False
         src, asm = os.path.join(self.d, "hops.c"), os.path.join(self.d, "hops.s")
         open(src, "w", newline="\n").write(text)
         r = subprocess.run([self.cc] + self.fl + ["-S", src, "-o", asm], capture_output=True, text=True)

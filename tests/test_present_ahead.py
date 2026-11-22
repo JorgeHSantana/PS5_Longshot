@@ -38,7 +38,8 @@ def main():
     require("if (!present_commit(" in display, "the display thread no longer shows deferred presents, or counts one not shown")
 
     image = block(replay, "void present_image_with_trial(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkImageView view, bool source_srgb, bool allow_scale, OutputTrialSource trial) {")
-    submit, defer, present = image.find("vkQueueSubmit2("), image.find("if (present_defer_into)"), image.find("present_out(index, qk, trial, preview_path)")
+    # (the copy's submit: vkQueueSubmit2 through submit_or_retry, which makes a submit refused for want of memory again, #2081)
+    submit, defer, present = image.find("submit_or_retry(si, f.done)"), image.find("if (present_defer_into)"), image.find("present_out(index, qk, trial, preview_path)")
     require(0 <= submit < defer < present, "present_image must submit the copy, then stop when deferred, before it presents")
     commit = block(replay, "bool present_commit(")
     require(0 <= commit.find("p.swapchain != dev.swapchain") < commit.find("present_out("),

@@ -114,7 +114,7 @@ def test_clone(d):
 def test_stamp_matches_build(d):
     """A runtime prepares again when its build's shader stamp moved: the files nx2/translator_files.py names (the same module
     nx2/build.py makes LONGSHOT_SHADER_STAMP with), read from the checkout packed, or that module itself; a checkout from before
-    it by the files that one stamped"""
+    it at any change"""
     src = (ROOT / "nx2" / "build.py").read_text(encoding="utf-8")
     check("nx2/build.py makes LONGSHOT_SHADER_STAMP with translator_files.stamp",
           'shader_stamp = "-DLONGSHOT_SHADER_STAMP=0x%sull" % translator_files.stamp(vk)' in src)
@@ -132,8 +132,9 @@ def test_stamp_matches_build(d):
         check("%s %s the runtime prepare again" % (path, "makes" if prepares else "does not make"),
               packs.translator_changed(str(tree), [path]) == prepares)
     check("nothing changed: no prepare", not packs.translator_changed(str(tree), []))
-    check("a checkout without nx2/translator_files.py prepares by the files it stamped (vk_api.h among them)",
-          packs.translator_changed(str(old), ["gpu/vk/vk_api.h"]) and not packs.translator_changed(str(old), ["gpu/vk/vk_draw.cpp"]))
+    # (a checkout too old to name its stamped files prepares again at any change, as packs.translator_changed says)
+    check("a checkout without nx2/translator_files.py prepares again",
+          packs.translator_changed(str(old), ["gpu/vk/vk_api.h"]) and packs.translator_changed(str(old), ["gpu/vk/vk_draw.cpp"]))
 
 
 def test_cache_format(d):

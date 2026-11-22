@@ -67,7 +67,9 @@ def check_sites(main):
     if "hos_alloc_gave_up(0, what)" not in block(backend, "static void host_out_of_memory(const char *what)"):
         raise SystemExit("FAIL: the host's out_of_memory is not hos_alloc_gave_up's line, notice and stop")
     replay = read("gpu/vk/vk_replay.cpp")
-    if not re.search(r"presents\+\+;\n\s*presents_now = presents;\n\s*new_refuse_test\(presents\);", replay):
+    # (the recorder's frame note may come between: it allocates nothing the check would be about)
+    if not re.search(r"presents\+\+;\n\s*presents_now = presents;\n(?:\s*rec::note_frame\(\);[^\n]*\n)?\s*new_refuse_test\(presents\);",
+                     replay):
         raise SystemExit("FAIL: HOS_TEST_ALLOC_REFUSE's allocation (new_refuse_test) is not run at the replay's present")
 
 

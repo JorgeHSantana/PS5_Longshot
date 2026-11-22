@@ -393,7 +393,8 @@ void test_native_preview_restart_state() {
     answer_native_preview(true);
     CHECK(opts.output_res == output_started && output_at(opts.output_res).w == 1024);
     CHECK(saves == 1 && !page && !output_preview_countdown && !output_preview_target.w);
-    CHECK(rows[1].hi >= opts.output_res && is(output_field, "1024x576", 8));
+    // (1024x576 is one of the screen's sizes, a choice the row offers: Custom output size, the player's own size, stays empty)
+    CHECK(rows[1].hi >= opts.output_res && opts.output_res < custom_index() && is(output_field, "", 0));
     CHECK(restart_state.start[1] == (1024 << 16 | 576) && !restart_changed(rows[1]));
     int now[mr::kMax] = {};
     restart_values(now);
@@ -422,7 +423,8 @@ void test_rebuild_after_keep() {
     CHECK(saves == 1 && !restart_changed(rows[1]));
     menu_output_rebuilt(1280, 720);
     CHECK(saves == 1 && output_at(opts.output_res).w == 1024);
-    CHECK(output_at(output_started).w == 1280 && is(output_field, "1024x576", 8));
+    // (a size the row offers: no size of the player's own in Custom output size)
+    CHECK(output_at(output_started).w == 1280 && is(output_field, "", 0));
     CHECK(restart_changed(rows[1]) && restart_ask());
 }
 void test_unavailable_preview_restart() {
@@ -444,13 +446,15 @@ void test_unavailable_preview_restart() {
     preview_tick();
     restart_values(now);
     CHECK(!restart_state.pending(now) && !saves && !output_preview_target.w);
-    // Both sizes are absent from the offered list; fallback must preserve the running custom choice.
+    // Both sizes are absent from the offered list (1024x576 is the screen's: 1152x648); fallback must preserve the running
+    // custom choice.
     startup("2400x1600", 1);
     CHECK(output_started == custom_index());
-    output_preview_target = {1024, 576};
+    CHECK(std::none_of(outputs().begin(), outputs().end(), [](Out o) { return o.w == 1152 && o.h == 648; }));
+    output_preview_target = {1152, 648};
     output_preview_from_field = true;
     unavailable_native_preview();
-    CHECK(output_at(opts.output_res).w == 1024 && custom_output.h == 576);
+    CHECK(output_at(opts.output_res).w == 1152 && custom_output.h == 648);
     CHECK(output_at(output_started).w == 2400 && output_at(output_started).h == 1600);
     const int back = output_for_aspect(aspect_started);
     CHECK(output_at(back).w == 2400 && output_at(back).h == 1600);
@@ -729,7 +733,9 @@ def main():
                      "extern Out output_preview_target;",
                      between(menu, "bool output_size_char(", "struct FieldRow {"),
                      between(menu, "TextField* editing =", "// ---- (longshot) the Controls page:")])
-    host_cut = between(backend, "enum { TEXT_QUEUE", "static const MkwVkHost vk_host")
+    # (the text queue, to its taker: what follows it in rx_backend.c, the input recordings' callbacks, is another check's)
+    host_cut = (between(backend, "enum { TEXT_QUEUE", "static int host_take_text(") +
+                block(backend, "static int host_take_text(") + "\n")
     focused = block(menu, "if (open_now.load() && editing) {")
     win = (ROOT / "host/display.c").read_text(encoding="utf-8")
     win_keys = block(win[win.index("case WM_KEYDOWN: {"):], "if (hos_text_focus()) {")

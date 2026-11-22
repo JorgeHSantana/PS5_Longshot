@@ -75,6 +75,7 @@ void end_pass(VkCommandBuffer) {}
 void flush_ub_updates(VkCommandBuffer) {}
 void memory_end_submission(VkCommandBuffer, uint64_t) {}
 void full_barrier(VkCommandBuffer, const char*) {}
+void host_read_barrier(VkCommandBuffer) {}
 void logf(const char*, ...) {}
 void device_lost() { need(false, "unexpected device loss"); }
 void note_timeline_sent(uint64_t) {}
@@ -101,6 +102,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(VkQueue, uint32_t count, const VkS
     }
     queued.push_back(q); return VK_SUCCESS;
 }
+// (vk_replay.cpp: the driver never refuses a submit here, so the retry for want of memory never runs: one vkQueueSubmit2)
+VkResult submit_or_retry(const VkSubmitInfo2& si, VkFence fence) { return vkQueueSubmit2(dev.queue, 1, &si, fence); }
 void advance() {
     need(!queued.empty(), "queued GPU work");
     auto q = queued.front(); queued.pop_front();

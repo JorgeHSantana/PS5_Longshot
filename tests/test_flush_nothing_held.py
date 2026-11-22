@@ -46,7 +46,8 @@ def main():
     if not plock < ppush < praised:
         raise SystemExit("part_submit: a held part must be in the list, under dev.present_mu, before it is said to be")
     wait = body(replay, "static void wait_rec_seq(uint64_t seq, uint64_t timeout_ns, int* ok) {")
-    if not 0 <= wait.find("wait_seq_submitted(seq);") < wait.find("queue_flush_for("):
+    # (the wait's time with it: a submit not made within it is a wait that timed out, and nothing is flushed for it)
+    if not 0 <= wait.find("if (!wait_seq_submitted(seq, timeout_ns)) {") < wait.find("queue_flush_for("):
         raise SystemExit("wait_rec_seq flushes before the recorder has made its recording's submit: a held part not in the list")
     lock, push, raised = (submit.index(x) for x in ("std::lock_guard lk(dev.present_mu);", "pend.cbs.push_back(cb[i]);", up))
     mapped = submit.index("if (seq) map_recording();", raised)

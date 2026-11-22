@@ -353,7 +353,7 @@ class Ships(unittest.TestCase):
         self.assertEqual(lock.count("[[package]]") - 1, len(rh.locked_crates(lock)))
         # (build.rs compiles libopus from vendor/opus, which the build fills from third_party/opus: the same release)
         self.assertIn('Path::new("vendor/opus")', (here / "build.rs").read_text(encoding="utf-8"))
-        self.assertIn('"1.5.2"', (here / "build.rs").read_text(encoding="utf-8"))
+        self.assertIn('.define("PACKAGE_VERSION", "\\"1.5.2\\"")', (here / "build.rs").read_text(encoding="utf-8"))
         self.assertIn("libopus 1.5.2", (ROOT / "third_party" / "opus" / "PROVENANCE.md").read_text(encoding="utf-8"))
         header = (here / "include" / "renhdrum.h").read_text(encoding="utf-8")
         self.assertIn("#define RENHDRUM_VERSION 0x000500", header)

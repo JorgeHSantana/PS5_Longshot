@@ -102,6 +102,9 @@ static VkResult vmaCreateBuffer(void*, const VkBufferCreateInfo* bi, const VmaAl
     return VK_ERROR_OUT_OF_DEVICE_MEMORY;
 }
 
+// (vk_internal.h's declaration: not dedicated unless asked)
+bool create_buffer(uint64_t size, VkBufferUsageFlags usage, bool host_visible, VkBuffer& buffer, VmaAllocation& allocation,
+                   void** mapped, bool dedicated = false);
 /* CREATE_BUFFER */
 
 static int failures = 0;

@@ -162,7 +162,7 @@ PCS = [
     dict(name="RX 9070 XT, RADV",
          facts=(0x1002, 0x7550, "MESA_RADV", 0, "DISCRETE_GPU", "Mesa 26.2.6", "AMD Radeon RX 9070 XT (RADV GFX1201)", 0, 0,
                 16304, 15300, 32600, 16, 16, 8, 1, 1, 1, 0, 0, 1, 1, 64, 64, 0xFF),
-         on="bc_small_runs fetch_bounds networks_left_out gather_offset position_invariant dma_buf_imports allowance_at_count_rule mirrors "
+         on="acquire_ahead bc_small_runs fetch_bounds networks_left_out gather_offset position_invariant dma_buf_imports allowance_at_count_rule mirrors "
             "split_ub_flush warp64 mma_unroll_try fsr4_tune room_in_blocks_rule rdna4 "
             "threaded_auto_render threaded_auto_recorder",
          num=(0, 2, 0, 1, 85, 4, 11000, 3072, 768, 512, 1912, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
@@ -732,7 +732,8 @@ def check_source():
         "inline_deku_web_loads": ("vrt.inline_global_128_loads = dev.policy.inline_deku_web_loads && vsc->key == kDekuWebVertexCode;",
                                   "dev.policy.inline_deku_web_loads ? 1u : 0u"),
         "networks_left_out": ("(Shader::Backend::SPIRV::mma_software || (dev.policy.networks_left_out && "
-                              "!(Shader::Backend::SPIRV::mma_wmma16 && Shader::Backend::SPIRV::Wmma16Fits(profile_pinned(), t->program))))",
+                              "!(Shader::Backend::SPIRV::mma_wmma16 && "
+                              "Shader::Backend::SPIRV::Wmma16Fits(profile_pinned(uint64_t(wg[0]) * wg[1] * wg[2]), t->program))))",
                               "dev.policy.networks_left_out ? 1u : 0u"),
     }
     for path in translator_files.files(str(VK)):

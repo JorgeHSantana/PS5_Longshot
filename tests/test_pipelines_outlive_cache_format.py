@@ -47,6 +47,10 @@ HARNESS = r"""
 #include <unordered_set>
 #include <vector>
 #include "pcache_stamp.h"
+#ifndef _WIN32   /* (the notes' open seeks past their head with _fseeki64: Windows has it, and no fseeko) */
+#define _fseeki64 fseeko
+#define _ftelli64 ftello
+#endif
 
 static const char* g_dir = nullptr;
 static uint64_t translator_stamp() { return TRANSLATOR; }

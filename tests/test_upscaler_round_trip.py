@@ -44,6 +44,7 @@ FIXTURE = r'''
 #include "upscaler_rows.h"
 #include "auto_settings.h"
 #include "monitor_choice.h"
+#include <atomic>
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -78,6 +79,7 @@ std::mutex options_save_mu;
 bool debug_warning = false;
 int debug_warning_choice = 0;
 void sync_transition_autosave() {}
+std::atomic<int> grass_distance_now{0};   // (vk_menu.cpp: the Grass distance row's value for the renderer)
 
 /* TABS */
 /* ROW */

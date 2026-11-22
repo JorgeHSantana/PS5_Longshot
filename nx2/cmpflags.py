@@ -44,9 +44,14 @@ def on():
     raise SystemExit("A64_SUB_V=%s: 1 or 0" % os.environ.get("A64_SUB_V"))
 
 
+def has_sub_v(text):
+    """whether text has SetFlags' subtraction V: its exact text, since "_fa^_fb" alone is in ADDS/CMN's ~(_fa^_fb) too"""
+    return OLD[64] in text or OLD[32] in text
+
+
 def rewrite(text):
     """an instruction's translated C with its subtraction V (if any) written as N xor (a <s b)"""
-    if "_fa^_fb" not in text:
+    if not has_sub_v(text):
         return text
     for width in (64, 32):
         text = text.replace(OLD[width], NEW[width])
@@ -68,7 +73,7 @@ def install():
 
     def translate(items, batch=65536):
         texts, flags = base_translate(items, batch)
-        if not any("_fa^_fb" in t for t in texts):
+        if not any(has_sub_v(t) for t in texts):
             return texts, flags
         return [rewrite(t) for t in texts], flags
 

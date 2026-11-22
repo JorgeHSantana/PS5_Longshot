@@ -198,7 +198,11 @@ void vkDestroyImage(VkDevice, VkImage i, const void*) { destroyed_images.push_ba
 uint8_t pool_pressure;
 uint64_t cap_bytes = 1ull << 30, st_pool_destroyed, st_pool_trim_cap, st_pool_trim_idle;
 uint64_t pool_cap() { return cap_bytes; }
-void destroy_image(VkImage i, VmaAllocation) { destroyed_images.push_back((uint64_t)(uintptr_t)i); }
+// (the reaper's thread destroys them later, vk_vma.cpp: counted here as destroyed when handed to it)
+void destroy_image_later(VkImage i, VmaAllocation, std::vector<VkImageView> views) {
+    destroyed_images.push_back((uint64_t)(uintptr_t)i);
+    for (const VkImageView v : views) destroyed_views.push_back((uint64_t)(uintptr_t)v);
+}
 struct FitInfo { uint64_t bytes, offset; uint32_t type; bool dedicated; };
 std::map<VmaAllocation, FitInfo> fit_info;
 bool allocation_fit_info(VmaAllocation a, uint64_t* bytes, uint64_t* offset, uint32_t* type, bool* dedicated) {
@@ -490,10 +494,14 @@ class ReuseMemoryTests(unittest.TestCase):
     def test_the_wrapper_needs_no_new_vma_and_refuses_memory_of_its_own(self):
         alias = block(self.vma, "bool create_aliasing_image(const VkImageCreateInfo& ci, VmaAllocation allocation, VkImage& image)")
         self.assertIn("vmaCreateAliasingImage(vma, allocation, &ci, &image)", alias)
-        # (only an allocation create_image made in the targets' blocks, which VMA never makes dedicated (an explicit block
-        # size), and told by the tag it gave it: vmaGetAllocationInfo2 is VMA 3.1, and a distribution's VMA may be 3.0)
-        self.assertNotIn("vmaGetAllocationInfo2", self.vma)
         info = block(self.vma, "bool allocation_fit_info(VmaAllocation allocation")
+        # (only an allocation create_image made in the targets' blocks, which VMA never makes dedicated (an explicit block
+        # size), and told by the tag it gave it, not by vmaGetAllocationInfo2: that is VMA 3.1, and a distribution's VMA may
+        # be 3.0. The reaper's allocation_dedicated calls it since #1914, so the build takes no VMA without it)
+        self.assertNotIn("vmaGetAllocationInfo2", info)
+        if "vmaGetAllocationInfo2" in self.vma:
+            build = (ROOT / "nx2" / "build.py").read_text(encoding="utf-8")
+            self.assertIn('HEADER_NEEDS = {"vulkanmemoryallocator": "vmaGetAllocationInfo2"}', build)
         self.assertIn("vmaGetAllocationInfo(vma, allocation, &info)", info)
         self.assertIn("info.pUserData != &target_blocks_tag", info)
         image = block(self.vma, "bool create_image(const VkImageCreateInfo& ci")

@@ -39,6 +39,7 @@ void operator delete(void* p,size_t) noexcept{std::free(p);}
 std::string keys_path;
 std::string predicted_keys_path(){return keys_path;}
 uint64_t program_cache_stamp(){return 42;}
+bool pipelines_stamp_ok(uint64_t stamp){return stamp==program_cache_stamp();}   // (vk_progcache.cpp: this one; no earlier format here)
 """+readers+r"""
 std::vector<int> calls;
 bool empty_states=false;
@@ -153,7 +154,9 @@ with tempfile.TemporaryDirectory(prefix='prepare-cache-') as tmp:
         for record in ('missing','zero'):
             for level in ('all','most'): check(mode,level,record,level=='all')
     check('recheck','all','missing',False)   # Missing -> valid zero -> truncated, in one process: no cached absence.
+    # (Most leaves the prediction's part out of the total from the start, #1618: a seed's states then are 4 of 6 parts' worth,
+    # not 4 of 8 with the prediction's guess in, which All has until it knows the prediction is not run)
     for mode, level, expected in [('fresh', 'all', ['0.714']), ('fresh', 'most', ['0.600']), ('refresh', 'all', ['0.125','0.500','0.750']),
-                                  ('refresh', 'most', ['0.125','0.500','0.750']), ('empty', 'all', ['0.500']), ('empty', 'most', ['0.500'])]:
+                                  ('refresh', 'most', ['0.166','0.666','0.750']), ('empty', 'all', ['0.500']), ('empty', 'most', ['0.500'])]:
         check(mode,level,'zero',mode=='fresh' and level=='all',expected)
     print("PASS: Builder upgrades Most to All, skips valid completed predictions (including zero keys), and preserves import/progress/save")

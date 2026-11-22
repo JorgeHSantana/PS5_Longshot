@@ -93,6 +93,8 @@ std::mutex options_save_mu;
 /* ROW */
 /* OUTPUTS */
 const char* tx(int) { return ""; }
+// (the FSR 4 model row is gpu/vk/menu/upscaler.cpp's: saved under its module's key)
+const menu::Setting fsr4_model_setting{.key = "fsr4_model", .label = "FSR 4 model", .value = &opts.fsr4_model};
 Row rows[] = {
     {TAB_GRAPHICS, "Frame generation", &opts.framegen, 0, 8, 1, tx, ""},
     {TAB_GRAPHICS, "Frame pacing", &opts.pace, 0, 1, 1, tx, ""},
@@ -100,7 +102,7 @@ Row rows[] = {
     {TAB_GRAPHICS, "Render resolution", &opts.resolution, 0, 6, 1, tx, ""},
     {TAB_GRAPHICS, "Window scaling filter", &opts.upscale, 0, 2, 1, tx, ""},
     {TAB_GRAPHICS, "Sharpness", &opts.sharpness, 0, 100, 10, tx, ""},
-    {TAB_GRAPHICS, "FSR 4 model", &opts.fsr4_model, 0, 1, 1, tx, ""},
+    {TAB_GRAPHICS, "FSR 4 model", &opts.fsr4_model, 0, 1, 1, tx, "", nullptr, false, false, -1, false, &fsr4_model_setting},
     {TAB_GAMEPLAY, "Game speed", &opts.realtime, 0, 1, 1, tx, ""},
 };
 std::string ini_file;

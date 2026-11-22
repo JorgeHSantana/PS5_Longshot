@@ -191,7 +191,7 @@ def check_fsr4():
     evaluate = function(fsr4, "bool evaluate(")
     if "d.flags = s.context->hdr ? 0u : (uint32_t)FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB;" not in evaluate:
         sys.exit("FAIL: FSR 4's dispatch calls HDR colour sRGB (it is linear light there)")
-    if "start, prepare, evaluate, release, memory, hdr}" not in fsr4:
+    if "start, prepare, evaluate, release, memory, hdr" not in fsr4:   # (fields may follow it)
         sys.exit("FAIL: vk_fsr4.cpp's engine does not tell the chain it takes HDR colour")
 
 

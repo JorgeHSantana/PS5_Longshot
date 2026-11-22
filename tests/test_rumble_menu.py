@@ -55,6 +55,7 @@ def one_line(text, head):
 
 FIXTURE = r"""
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -106,6 +107,7 @@ void monitor_chosen() {}  // Fullscreen selection is covered by test_fullscreen_
 /* (the Upscaler row's choices, which set_row steps through: the game's own only, here) */
 unsigned upscalers_available() { return 1; }
 void mic_chosen() {}
+std::atomic<int> grass_distance_now{0};   // (the Grass distance row's hook in set_row: the game thread's copy)
 void samplers_changed() {}
 int temporal_resets = 0;
 void temporal_reset_failure() { ++temporal_resets; }

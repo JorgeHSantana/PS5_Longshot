@@ -34,7 +34,7 @@ whether each started, and why not.
   fetches AMD's two DLLs into the game folder. On Linux, put a Vulkan FSR 4 library (`amd_fidelityfx_upscaler_vk.so`)
   beside the game yourself: AMD publishes none for Linux.
   **FSR 4 model** (`fsr4_model=0` or `1`; `RX_VK_FSR4_MODEL=auto` or `lite` for one run) chooses AMD's network: **Auto**
-  keeps AMD's own pick for the GPU (FP8 on RDNA 4, full INT8 on RDNA 3 and Strix Halo, the Navi 2 model on RX 6000, Lite
+  keeps AMD's own pick for the GPU (FP8 on RDNA 4, full INT8 on RDNA 3 and Strix Halo, the RDNA 2 model on RX 6000, Lite
   on Strix Point and Van Gogh). Forcing **Lite (INT8)** requires a supported Windows runtime with a verified Lite provider;
   the current build leaves forcing disabled until the provider ABI is verified. Linux can retain the saved Lite value but
   cannot force it, so Auto is used.

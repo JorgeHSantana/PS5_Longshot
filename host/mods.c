@@ -275,6 +275,7 @@ static Synced *synced;   /* the Mods tab's order and switches when the list was 
 static int nsynced;
 static int list_bad, unsaved;           /* mods.json is not a list; the last change could not be written: the Mods tab says so (mod_text) */
 static char old_state_path[MAX_PATH];   /* longshot_mods.txt in the game folder: the list of builds before mods.json */
+static char state_game_dir[MAX_PATH];   /* the game folder state_file was given: note_state_file's, after a write too */
 static char state_note[MAX_PATH];       /* modcache/mods_json.txt: where the list is, for the build (note_state_file) */
 
 /* A file under limit bytes, a NUL after it, *len its length. NULL with *why: it cannot be opened or held (which may pass), or
@@ -333,6 +334,7 @@ static void state_file(const char *game_dir) {
     if (n < 0 || n >= (int)sizeof state_path) snprintf(state_path, sizeof state_path, "%smods.json", game_dir);
     snprintf(old_state_path, sizeof old_state_path, "%slongshot_mods.txt", game_dir);
     snprintf(state_note, sizeof state_note, "%smodcache/mods_json.txt", game_dir);
+    snprintf(state_game_dir, sizeof state_game_dir, "%s", game_dir);
 }
 
 /* The game folder's list into the user folder, once: a player who started the game by itself and starts it through the
@@ -604,6 +606,7 @@ static int write_state(void) {
     if (ok) {
         sync_tab();
         list_bad = unsaved = 0;
+        note_state_file(state_game_dir);   /* (a list this write made first: the build is told now, not at the next start) */
         return 1;
     }
     hos_log("mods: cannot write %s: the change is kept and written at the next one", state_path);

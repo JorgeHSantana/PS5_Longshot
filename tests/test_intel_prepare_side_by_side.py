@@ -69,6 +69,7 @@ using VkResult = int;
 using VkPipeline = void*;
 using VkPipelineCache = void*;
 using VkPipelineCreateFlags = uint32_t;
+#define VK_NULL_HANDLE nullptr
 constexpr VkResult VK_SUCCESS = 0, VK_PIPELINE_COMPILE_REQUIRED = 1000297000, VK_ERROR_OUT_OF_HOST_MEMORY = -1;
 constexpr VkPipelineCreateFlags VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT = 0x100;
 struct VkGraphicsPipelineCreateInfo { VkPipelineCreateFlags flags = 0; };
