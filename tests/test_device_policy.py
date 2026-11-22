@@ -483,6 +483,13 @@ RULES = [
     ("(long long)policy_rule::equal_depth_bias(VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS, 0xB080u)", 64),
     ("(long long)policy_rule::equal_depth_bias(VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA, 0x9A49u)", 0),
     ("(long long)policy_rule::equal_depth_bias(VK_DRIVER_ID_NVIDIA_PROPRIETARY, 0x2204u)", 0),
+    # (DeviceFacts::arch() / amd_win() end-to-end, including AMD proprietary Windows GCN without radv_gcn)
+    ("(long long)[] { DeviceFacts f{}; f.vendor_id = 0x1002; f.device_id = 0x67B0; f.driver_id = VK_DRIVER_ID_AMD_PROPRIETARY; f.windows = true; return f.amd_win() && !f.radv_gcn() && f.arch() == GpuArch::AmdGcn; }()", 1),
+    ("(long long)[] { DeviceFacts f{}; f.vendor_id = 0x1002; f.device_id = 0x73DF; f.driver_id = VK_DRIVER_ID_AMD_PROPRIETARY; f.windows = true; return f.amd_win() && f.rdna2() && !f.rdna3() && !f.rdna4(); }()", 1),
+    ("(long long)[] { DeviceFacts f{}; f.vendor_id = 0x1002; f.device_id = 0x73DF; f.driver_id = VK_DRIVER_ID_AMD_PROPRIETARY; f.windows = false; return f.amd_win(); }()", 0),
+    ("(long long)[] { DeviceFacts f{}; f.vendor_id = 0x1002; f.device_id = 0x731F; f.driver_id = VK_DRIVER_ID_AMD_PROPRIETARY; f.windows = true; return f.rdna1(); }()", 1),
+    ("(long long)[] { DeviceFacts f{}; f.vendor_id = 0x1002; f.device_id = 0x1114; f.driver_id = VK_DRIVER_ID_AMD_PROPRIETARY; f.windows = true; return f.rdna3(); }()", 1),
+    ("(long long)[] { DeviceFacts f{}; f.vendor_id = 0x1002; f.device_id = 0x130F; f.driver_id = VK_DRIVER_ID_MESA_RADV; f.storage_io16 = false; return f.radv_gcn() && f.arch() == GpuArch::AmdGcn; }()", 1),
 ]
 
 FIXTURE = r"""
@@ -909,6 +916,26 @@ def main():
     amd = "".join(text for _, text in logs.get(names.index(AMD_WIN), []))
     if "on driver version 0x800161:" not in amd or "task_mesh_fallback=1(seen on 0x800161)" not in amd:
         failures.append("the log block does not say the driver's version and the one task_mesh_fallback was seen on: %s" % amd[:300])
+    # (DeviceFacts::arch() / arch_name() end-to-end on the facts log line across representative PCs)
+    for pc_name, want_arch in (
+        (NVIDIA, "nvidia_ampere"),
+        ("RTX 4070 Laptop (8 GB), NVIDIA's Windows driver", "nvidia_ada"),
+        ("GTX 1650 (4 GB), NVK", "nvidia_turing"),
+        (AMD_WIN, "amd_rdna2"),
+        ("RX 9070 XT, AMD's Windows driver (LLPC)", "amd_rdna4"),
+        ("RX 580 (8 GB), RADV on GCN", "amd_gcn"),
+        ("RX Vega 64 (8 GB), RADV on GFX9", "amd_vega"),
+        ("Steam Deck (LCD), RADV", "amd_rdna2"),
+        ("RX 5700 (8 GB), AMD's Windows driver (RDNA 1 compiler)", "amd_rdna1"),
+        ("Radeon 860M (0x1002:0x1114), AMD's Windows driver 26.10.1 (LLPC)", "amd_rdna3"),
+        (UHD, "intel_gen12"),
+        (B580, "intel_battlemage"),
+        ("Arc A750, Intel's Windows driver 101.9175", "intel_alchemist"),
+        ("llvmpipe", "unknown"),
+    ):
+        facts_line = logs.get(names.index(pc_name), [(0, "")])[0][1]
+        if "(arch %s)" % want_arch not in facts_line:
+            failures.append("%s: facts line missing (arch %s): %s" % (pc_name, want_arch, facts_line[:200]))
     for i, (expr, want) in enumerate(RULES):
         if rule_values.get(i) != want:
             failures.append("%s is %s, expected %d" % (expr, rule_values.get(i), want))

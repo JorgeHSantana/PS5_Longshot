@@ -272,7 +272,8 @@ The check has blind spots:
 driver, VRAM, RAM, CPU count and OS. `tests/test_device_policy.py` runs every rule on made-up PCs.
 
 - **`DeviceFacts`** is what `create_device` (`vk_main.cpp`) learns once, before the device is made. Rules ask the
-  facts, never Vulkan.
+  facts (including `arch()` / `arch_name()` from [`gpu/vk/gpu_arch.h`](../../../gpu/vk/gpu_arch.h), plus `rdna1()`..`rdna4()`
+  and `amd_win()`), never Vulkan.
 - **`device_policy(facts)`** gives each rule's default for this PC.
 - **`device_policy_env(policy, facts, get)`** applies the switches and records which fields a switch set. The result is
   `dev.policy`.
