@@ -285,13 +285,13 @@ helper asks you to.
   ears. **Microphone** is what the game hears when its own microphone option is on; **Test microphone**
   shows its level.
 - **Controller speaker** (a page on the Audio tab) plays chosen kinds of the game's sounds on a DualSense's own speaker:
-  Navi's voice and her flight, Z-targeting, the ocarina, pick-ups, items, fairies, the menus' sounds, the Stone of Agony,
+  the companion's voice and flight, Z-targeting, the instrument, pick-ups, items, fairies, the menus' sounds, the Stone of Agony,
   the low-health alarm, fishing and bottles, each Off, Controller only (no longer on the TV) or Controller + TV, with a
   volume for the speaker. **Controller sync** lines the two up: below 0 the TV's copy of the Controller + TV sounds waits
   for a controller that plays later, above 0 the controller waits for a TV that plays later. With headphones in the
   controller's jack, **Headphones on the controller** decides: All sound (as on the console) plays the whole game on them
   and the TV is silent, Controller sounds sends them only what would play on the speaker, Off leaves them out; they have
-  their own volume. While an ocarina sound plays on the speaker the vibration is at half, as the motors would shake it into
+  their own volume. While an instrument's sound plays on the speaker the vibration is at half, as the motors would shake it into
   crackling. With **DualSense HD Haptics** on, its taps play on the speaker together with these sounds; off, the speaker
   plays these sounds alone. On Windows, the controller must be on a USB cable and Windows must identify its sound card as
   belonging to it. The speaker is unavailable when the two cannot be matched, including on Linux for now; the vibration
