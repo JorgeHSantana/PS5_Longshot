@@ -1391,7 +1391,10 @@ bool hud_layer_wanted() {
     }();
     return on;
 }
-bool hudless_wanted() {
+bool hudless_wanted(bool native_pq) {
+    // The game captures the HUD's linear target before its HDR encode. Treating that colour as PQ
+    // corrupts both the HUD-less input and the learned layer. Use the mask with the game's PQ present.
+    if (native_pq) return false;
     static const bool on = [] {
         const char* e = getenv("RX_VK_FSR_FG_HUDLESS");
         return !(e && *e && atoi(e) == 0);
@@ -1402,7 +1405,7 @@ bool hudless_wanted() {
 /// The HUD layer of this present (hud.layer, shaders/fg_hud_layer.comp), from this frame's pictures and the frame before's:
 /// how see-through the HUD is where it is known. False: none (the HUD laid over the made frames whole, as presented)
 bool hud_layer(VkCommandBuffer cmd, int x0, int y0, uint32_t w, uint32_t h) {
-    if (hud.layer_failed || !hud_layer_wanted() || !hudless_wanted()) return false;
+    if (hud.layer_failed || !hud_layer_wanted()) return false;
     const VkDescriptorType S = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, I = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     if (!hud.fit_pipe.pipe && (!make_pipe(hud.fit_pipe, BUILTIN_SPV_ARGS(FG_HUD_LAYER_COMP_SPV), {S, S, S, S, I, I}, 20) ||
                                !make_pipe(hud.over_pipe, BUILTIN_SPV_ARGS(FG_HUD_COMPOSITE_COMP_SPV), {I, S, S}, 12))) {
@@ -1486,9 +1489,9 @@ bool hud_source(VkCommandBuffer cmd, int cur, uint32_t sw, uint32_t sh, int x0, 
         logf("vk: fsr3fi: the HUD marked for it: what the game drew over its picture after the upscale (%ux%u, format %d)",
              sw, sh, (int)hud.format);
     }
-    hud.layered = hud_layer(cmd, x0, y0, w, h);
-    // (this frame's pictures are the next one's frame before; the next copies go into the other pair)
-    hud.prev = true;
+    hud.layered = hudless_wanted(pq) && hud_layer(cmd, x0, y0, w, h);
+    // (a fit uses the preceding pair only if its layer ran; a Native HDR capture must not feed the next sRGB fit)
+    hud.prev = hud.layered;
     hud.k ^= 1;
     hud.marked++;
     return hud.ready = true;
@@ -1549,7 +1552,7 @@ int fsr3fi_frames(VkCommandBuffer cmd, OutSet& set, int cur, uint32_t uw, uint32
     fsr3fi::Inputs in;
     in.color = fg.frames[cur].view;
     in.color_image = fg.frames[cur].image;
-    const bool hudless = hudless_wanted();
+    const bool hudless = hudless_wanted(native_pq);
     // (the HUD layer: FSR 3.1 given the HUD-less colour as its present too, so it lays nothing over the made frames, and the
     // HUD goes over them below by how see-through it is)
     const bool layered = hud.ready && hudless && hud.layered;

@@ -244,14 +244,15 @@ The game draws its HUD into the same picture as the scene, after the gameplay up
 
 1. `framegen_hud_before` copies the picture right after the upscale writes it, whoever drew the upscale.
 2. At the present, `hud_source` (`shaders/fg_hud.comp`) finds the HUD as what the game drew since.
-3. By default (`RX_VK_FSR_FG_HUDLESS`, on) FSR 3.1 interpolates the HUD-less copy, and the HUD is laid over each made
-   frame. With `=0`, the HUD is instead marked in the source's alpha (`Inputs::hud_mask`) and kept in place.
-4. The HUD layer (`RX_VK_FSR_FG_HUD_LAYER`, on): the game blends its HUD as `D = B + T × S`, so from this frame's and
-   the frame before's pictures before and after the HUD, `hud_layer` (`shaders/fg_hud_layer.comp`) fits per pixel how
+3. In SDR and Expanded HDR, by default (`RX_VK_FSR_FG_HUDLESS`, on) FSR 3.1 interpolates the HUD-less copy, and the HUD
+   is laid over each made frame. With `=0`, the HUD is instead marked in the source's alpha (`Inputs::hud_mask`) and kept
+   in place. Native HDR uses the marked, presented PQ frame when a copy is available, regardless of this switch.
+4. In SDR and Expanded HDR, the HUD layer (`RX_VK_FSR_FG_HUD_LAYER`, on): the game blends its HUD as `D = B + T × S`, so
+   from this frame's and the frame before's pictures before and after the HUD, `hud_layer` (`shaders/fg_hud_layer.comp`) fits per pixel how
    see-through the HUD is (T) and its colour (B), kept from frame to frame. FSR 3.1 is given the HUD-less colour as its
    present, and `shaders/fg_hud_composite.comp` lays `B + T ×` the made frame's own scene over each made frame; where T
    isn't known yet, the presented pixel. With `=0`, the presented frame is laid over as it is, and the real frame's
-   scene shows through the HUD's see-through parts.
+   scene shows through the HUD's see-through parts. Native HDR does not use the layer, regardless of this switch.
 5. With no copy this frame (no gameplay upscale, or a picture that is not the presented size), the patched passes guess
    the HUD as pixels unchanged while the scene moves. `RX_VK_FSR_FG_HUD=0` runs AMD's passes unpatched, the HUD moving
    with the scene.
