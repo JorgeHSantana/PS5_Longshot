@@ -487,8 +487,11 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
 #endif
     // (the memory types this pointer can be imported as: asked for each pointer, the driver answers per pointer)
     VkMemoryHostPointerPropertiesEXT hp{VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT};
-    if (vkGetMemoryHostPointerPropertiesEXT(dev.device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, ptr, &hp) !=
-        VK_SUCCESS) {
+    // (#859: each driver refusal leaves its VkResult in import_result, for pool_lookup's "not imported" line)
+    if (const VkResult r = vkGetMemoryHostPointerPropertiesEXT(dev.device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+                                                               ptr, &hp);
+        r != VK_SUCCESS) {
+        import_result = r;
         import_remember_failure(lo, hi);
         return false;
     }
@@ -499,7 +502,8 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
     bi.pNext = &eb;
     bi.size = bytes;
     bi.usage = kUsage;
-    if (vkCreateBuffer(dev.device, &bi, nullptr, &p.buffer) != VK_SUCCESS) {
+    if (const VkResult r = vkCreateBuffer(dev.device, &bi, nullptr, &p.buffer); r != VK_SUCCESS) {
+        import_result = r;
         import_remember_failure(lo, hi);
         return false;
     }
@@ -3815,6 +3819,11 @@ std::deque<std::pair<uint64_t, uint64_t>> bg_queue;
 std::map<uint64_t, uint64_t> bg_inflight;   // [lo, hi) queued or being imported, under bg_mu
 std::vector<std::pair<uint64_t, Pool>> bg_ready;
 int64_t st_bg_imports, st_bg_waits, st_prefetch_sent, st_prefetch_used, st_prefetch_dropped;
+// (longshot, #859) pool_lookup's import attempts, counted apart by how they ended: made, refused by the driver (import_pool
+// failed after asking it), or held: the range failed within ImportHolds::kGapMs, so import_pool returned at once without
+// asking the driver. A held retry is no import: counted as one, a range the driver refused showed as a million imports in
+// 0.0 ms. Read at close (import_stats_log) from another thread, so atomic.
+std::atomic<int64_t> st_imports_made{0}, st_imports_refused{0}, st_imports_held{0};
 void bg_main();
 void bg_start() {   // (bg_mu held)
     static bool started;
@@ -4068,26 +4077,46 @@ Pool* pool_lookup(uint64_t guest, uint64_t size) {
             }
             const auto t0 = std::chrono::steady_clock::now();
             ok = import_pool(lo, hi, p);
-            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-            static double total_ms;
-            static int n, logged;
-            total_ms += ms, n++;
-            if ((ms >= 2.0 && logged++ < 200) || n % 256 == 0)
-                logf("vk: pool %#llx+%#llx imported in %.1f ms as %#llx..%#llx (%d imports, %.0f ms in all)",
-                     (unsigned long long)range.lo, (unsigned long long)(range.hi - range.lo), ms, (unsigned long long)lo,
-                     (unsigned long long)hi, n, total_ms);
-        }
-        if (!ok) {
-            if (!import_cooling && failures++ < 16) {
-                if (import_result != VK_SUCCESS)
-                    logf("vk: pool %#llx+%#llx not imported (VkResult %d)", (unsigned long long)range.lo,
-                         (unsigned long long)(range.hi - range.lo), (int)import_result);
-                else
-                    logf("vk: pool %#llx+%#llx not imported", (unsigned long long)range.lo,
-                         (unsigned long long)(range.hi - range.lo));
+            if (!ok && import_cooling) {   // (held: no driver call, no time spent; the first and every 65536th logged)
+                const int64_t held = ++st_imports_held;
+                if (held == 1 || held % 65536 == 0)
+                    logf("vk: pool %#llx+%#llx: its import as %#llx..%#llx failed less than %lld s ago, not tried again yet "
+                         "(%lld lookups waited on a held range)",
+                         (unsigned long long)range.lo, (unsigned long long)(range.hi - range.lo), (unsigned long long)lo,
+                         (unsigned long long)hi, (long long)(ImportHolds::kGapMs / 1000), (long long)held);
+                continue;
             }
-            return nullptr;
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            static double total_ms;   // (the driver attempts' time, made or refused)
+            static int n, logged;
+            total_ms += ms;
+            if (!ok) {   // (refused: its VkResult, the first 16 refusals; held for ImportHolds::kGapMs from now)
+                const int64_t refused = ++st_imports_refused;
+                if (failures++ < 16) {
+                    if (import_result != VK_SUCCESS)
+                        logf("vk: pool %#llx+%#llx not imported as %#llx..%#llx in %.1f ms (VkResult %d; %lld refused)",
+                             (unsigned long long)range.lo, (unsigned long long)(range.hi - range.lo), (unsigned long long)lo,
+                             (unsigned long long)hi, ms, (int)import_result, (long long)refused);
+                    else
+                        logf("vk: pool %#llx+%#llx not imported as %#llx..%#llx in %.1f ms (%lld refused)",
+                             (unsigned long long)range.lo, (unsigned long long)(range.hi - range.lo), (unsigned long long)lo,
+                             (unsigned long long)hi, ms, (long long)refused);
+                }
+                continue;
+            }
+            n++, st_imports_made++;
+            if ((ms >= 2.0 && logged++ < 200) || n % 256 == 0) {
+                // (as before when nothing was refused or held; else how many, so the count of imports reads true)
+                const int64_t refused = st_imports_refused, held = st_imports_held;
+                char also[96] = "";
+                if (refused || held)
+                    snprintf(also, sizeof also, "; %lld refused, %lld lookups held", (long long)refused, (long long)held);
+                logf("vk: pool %#llx+%#llx imported in %.1f ms as %#llx..%#llx (%d imports, %.0f ms in all%s)",
+                     (unsigned long long)range.lo, (unsigned long long)(range.hi - range.lo), ms, (unsigned long long)lo,
+                     (unsigned long long)hi, n, total_ms, also);
+            }
         }
+        if (!ok) return nullptr;   // (each attempt counted and logged above)
         for (uint64_t k : overlapped) {   // (the pools it took in)
             auto o = imported.find(k);
             if (o != imported.end())   // (their mirrors' contents come with them; and how often the range was trimmed: mirror_trim.h)
@@ -4187,6 +4216,10 @@ bool import_in_background(uint64_t guest, uint64_t size) {
     return true;
 }
 } // namespace
+void import_stats_log(const char* when) {
+    logf("vk: imports at %s: %lld made, %lld refused by the driver, %lld lookups waited on a held range", when,
+         (long long)st_imports_made.load(), (long long)st_imports_refused.load(), (long long)st_imports_held.load());
+}
 bool pools_mirrored() { return mirror_on(); }
 uint64_t test_vram_bytes(uint64_t heap) {
     static const uint64_t cap = getenv("RX_VK_TEST_VRAM_MB") ? (uint64_t)std::max(0, atoi(getenv("RX_VK_TEST_VRAM_MB"))) << 20 : 0;

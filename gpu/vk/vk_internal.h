@@ -297,6 +297,7 @@ void memory_table_begin();                         // (longshot: a recording's p
 bool memory_table_flush();
 uint64_t memory_guest_pages();                        // (longshot: the device address of guest memory's page table, 0: none)
 void page_table_census_log(const char* when);         // (longshot: the guest pools outside the page table's windows, page_table_census.h)
+void import_stats_log(const char* when);              // (longshot, #859: guest-memory imports made, refused by the driver, held)
 void memory_sync();                                   // (at each submit: pools the game made or let go)
 extern std::atomic<int> native_zstd_default;          // (HOS_OPT_NATIVE_ZSTD: 1 or 2 once the device's policy is made, 0 before)
 extern std::atomic<int64_t> memsync_lock_wait_ns;     // (longshot, diagnostics: time memory_sync waited for its two locks; the slow-submit line)
