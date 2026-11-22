@@ -213,8 +213,8 @@ helper asks you to.
   density, Minimum blades and Far power directly; turn it on to scale every area's installed values instead. **Reset
   current area** removes only the current area's edits. Setting Fade start and Minimum blades to 0 disables its simulated
   turf for lower-end systems; flowers, shrubs and the short decorative blades controlled by **Grass distance** can remain.
-  The renderer measures the resulting turf-list demand and holds only the needed record capacity plus headroom; sustained
-  lower demand can release that capacity down to zero.
+  The renderer measures the resulting turf-list demand and grows its record capacity with headroom when an area needs
+  more than the game's own lists hold; sustained lower demand releases that extra capacity, down to the game's own size.
 - **Auto (this PC)** chooses for the PC it runs on: the memory tier from the card's video memory (Minimum on an
   integrated GPU, a Steam Deck or a card without mesh shaders), DLSS on an NVIDIA RTX card or FSR 4 on an AMD RDNA 4 card (RX 9000)
   where the build has them. In the first minute of play it lowers the Render resolution a step while frames are missed

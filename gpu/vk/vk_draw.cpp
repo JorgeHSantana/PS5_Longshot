@@ -453,9 +453,14 @@ struct SimTurfPrivate {
     uint64_t size = 0;   // the exact descriptor range: address prefix, header, then capacity() records
     uint32_t demand_peak = 0;   // raw reservations since the last periodic tally (including clipped records)
     sim_turf_capacity::Policy policy;
+    // (the floor is the game's own size: a list shrunk below it in an area without turf, Market, came back to Hyrule Field
+    // empty and grew list by list, and each growth's first copy into the game's records was a new write-back that a
+    // capture waited 250 ms for, with seconds-long submissions. Lists grow above stock for dense settings; below it they
+    // saved only about 28 MB)
     SimTurfPrivate(bool pool, uint32_t maximum)
         : policy(pool ? Shader::Optimization::kSimTurfPoolCap : Shader::Optimization::kSimTurfBladeCap,
-                 pool ? 32u : 64u, maximum, 0u) {}
+                 pool ? 32u : 64u, maximum,
+                 pool ? Shader::Optimization::kSimTurfPoolCap : Shader::Optimization::kSimTurfBladeCap) {}
 };
 struct SimTurfRetired { VkBuffer buf; VmaAllocation mem; uint64_t after; };
 struct SimTurfSample { uint64_t addr, frame; bool pool; };
