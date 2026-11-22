@@ -41,7 +41,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VK = ROOT / "gpu" / "vk"
 
 # The yes/no fields, in DevicePolicy's order
-BOOLS = """fetch_bounds nan_bits mesh_fallback_strict_fmul gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer
+BOOLS = """fetch_bounds nan_bits mesh_fallback_strict_fmul bc_copy_per_layer gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer
 amd_retry_no_optimizer amd_cloth_no_optimizer fault_gate_serial task_mesh_fallback intel_compile_gate compute_builds_serial
 pcache_fetch_lock split_before_draw astc_on_cpu inline_deku_web_loads networks_left_out dma_buf_imports nv_checkpoints
 allowance_at_count_rule
@@ -119,7 +119,7 @@ PCS = [
     dict(name="RX 6700 XT, AMD's Windows driver (RDNA 2 compiler)",
          facts=(0x1002, 0x73DF, "AMD_PROPRIETARY", 0x800161, "DISCRETE_GPU", "26.10.1 " + AMD_OLD, "AMD Radeon RX 6700 XT", 1, 0,
                 12272, 11500, 32600, 12, 12, 6, 1, 1, 0, 0, 0, 1, 1, 64, 64, 0xFF),
-         on="acquire_ahead fetch_bounds networks_left_out nan_bits mesh_fallback_strict_fmul gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
+         on="bc_small_runs acquire_ahead fetch_bounds networks_left_out nan_bits mesh_fallback_strict_fmul bc_copy_per_layer gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_retry_no_optimizer amd_cloth_no_optimizer fault_gate_serial task_mesh_fallback allowance_at_count_rule "
             "mirrors split_ub_flush warp64 fsr4_tune room_in_blocks_rule threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 0, 4, 7158, 2048, 768, 512, 1437, -1, 256, 24, 64, 32, 97, 4, 4, 4, 6, 6, 3)),
@@ -129,7 +129,7 @@ PCS = [
     dict(name="RX 9070 XT, AMD's Windows driver (LLPC)",
          facts=(0x1002, 0x7550, "AMD_PROPRIETARY", 0x800161, "DISCRETE_GPU", "26.10.1 (LLPC)", "AMD Radeon RX 9070 XT", 1, 0,
                 16304, 15300, 32600, 16, 16, 8, 1, 1, 1, 1, 0, 1, 1, 64, 64, 0xFF),
-         on="acquire_ahead fetch_bounds networks_left_out gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer amd_cloth_no_optimizer "
+         on="bc_small_runs acquire_ahead fetch_bounds networks_left_out bc_copy_per_layer gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer amd_cloth_no_optimizer "
             "fault_gate_serial allowance_at_count_rule mirrors split_ub_flush warp64 mma_unroll_try fsr4_tune room_in_blocks_rule rdna4 "
             "threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 0, 4, 11000, 3072, 768, 512, 1912, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
@@ -137,7 +137,7 @@ PCS = [
     dict(name="Radeon AI PRO R9700, AMD's Windows driver (LLPC)",
          facts=(0x1002, 0x7551, "AMD_PROPRIETARY", 0x800161, "DISCRETE_GPU", "26.10.1 (LLPC)", "AMD Radeon AI PRO R9700", 1, 0,
                 16304, 15300, 32600, 16, 16, 8, 1, 1, 1, 1, 0, 1, 1, 64, 64, 0xFF),
-         on="acquire_ahead fetch_bounds networks_left_out gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer amd_cloth_no_optimizer "
+         on="bc_small_runs acquire_ahead fetch_bounds networks_left_out bc_copy_per_layer gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer amd_cloth_no_optimizer "
             "fault_gate_serial allowance_at_count_rule mirrors split_ub_flush warp64 mma_unroll_try fsr4_tune room_in_blocks_rule rdna4 "
             "threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 0, 4, 11000, 3072, 768, 512, 1912, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
@@ -283,7 +283,7 @@ PCS = [
     dict(name="RX 5700 (8 GB), AMD's Windows driver (RDNA 1 compiler)",
          facts=(0x1002, 0x731F, "AMD_PROPRIETARY", 0x800161, "DISCRETE_GPU", "25.9.1 " + AMD_OLD, "AMD Radeon RX 5700", 1, 0,
                 8176, 7378, 16300, 12, 12, 6, 0, 1, 0, 0, 0, 1, 1, 64, 64, 0x20),
-         on="acquire_ahead fetch_bounds networks_left_out nan_bits mesh_fallback_strict_fmul gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
+         on="bc_small_runs acquire_ahead fetch_bounds networks_left_out nan_bits mesh_fallback_strict_fmul bc_copy_per_layer gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_cloth_no_optimizer fault_gate_serial allowance_at_count_rule mirrors split_ub_flush warp64 fsr4_tune "
             "astc_bc_all room_in_blocks_rule squeeze_damped threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 0, 4, 4769, 2044, 614, 461, 922, -1, 256, 12, 32, 16, 97, 1, 4, 4, 6, 6, 3)),
@@ -293,7 +293,7 @@ PCS = [
     dict(name="Ryzen 9 7900X's graphics (32 GB), AMD's Windows driver, on 8 of 24 threads",
          facts=(0x1002, 0x164E, "AMD_PROPRIETARY", 0x800161, "INTEGRATED_GPU", "26.10.1 " + AMD_OLD, "AMD Radeon(TM) Graphics", 1, 0,
                 16300, 10232, 32600, 24, 8, 4, 1, 1, 0, 0, 0, 1, 1, 64, 64, 0xFF),
-         on="acquire_ahead fetch_bounds networks_left_out nan_bits mesh_fallback_strict_fmul gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
+         on="bc_small_runs acquire_ahead fetch_bounds networks_left_out nan_bits mesh_fallback_strict_fmul bc_copy_per_layer gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_cloth_no_optimizer fault_gate_serial allowance_at_count_rule split_ub_flush warp64 fsr4_tune "
             "astc_bc_all threaded_auto_render",
          num=(0, 0, 0, 2, 0, 16, 4096, 3072, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 6, 4, 8, 6, 4)),
@@ -301,7 +301,7 @@ PCS = [
     dict(name="Radeon 860M (0x1002:0x1114), AMD's Windows driver 26.10.1 (LLPC)",
          facts=(0x1002, 0x1114, "AMD_PROPRIETARY", 0x8001a0, "INTEGRATED_GPU", "26.10.1 (LLPC)", "AMD Radeon(TM) 860M Graphics", 1, 0,
                 6144, 12288, 26283, 16, 16, 8, 1, 1, 1, 1, 0, 1, 1, 64, 64, 0xF0),
-         on="acquire_ahead fetch_bounds networks_left_out gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
+         on="bc_small_runs acquire_ahead fetch_bounds networks_left_out bc_copy_per_layer gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_cloth_no_optimizer fault_gate_serial allowance_at_count_rule split_ub_flush native_float_add warp64 fsr4_tune "
             "astc_bc_all dlss_cnn threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 0, 16, 4096, 1700, 768, 512, 512, -1, 256, 0, 32, 16, 90, 1, 6, 4, 8, 6, 4)),
@@ -311,7 +311,7 @@ PCS = [
 # else the cases look at: the import chunk (which follows the mirrors) and the texture budget (which follows astc_on_cpu)
 SW = ["astc_on_cpu", "batch_submits", "compute_builds_serial", "pcache_fetch_lock", "split_before_draw", "ub_snapshot",
       "split_ub_flush", "occ_copy", "mirrors", "fsr4_tune", "position_invariant", "equal_depth_bias", "cap_spare_max",
-      "staging_keep", "workers", "acquire_ahead", "mesh_fallback_strict_fmul"]
+      "staging_keep", "workers", "acquire_ahead", "mesh_fallback_strict_fmul", "bc_copy_per_layer"]
 ENV_FIELDS = SW + ["import_chunk_mb", "texture_budget"]
 NVIDIA, RADV, B580, UHD, AMD_WIN, RAPHAEL, SMALL = (
     "RTX 3090 (24 GB), NVIDIA's Linux driver, 24 threads", "RX 6800 XT, RADV", "Arc B580, Intel's Windows driver 101.9154",
@@ -335,6 +335,9 @@ ENV = [
     (NVIDIA, {"RX_VK_COMPUTE_SERIAL": "2"}, {"compute_builds_serial": 1}, ["compute_builds_serial"], []),      # (was off)
     (AMD_WIN, {"RX_VK_MESH_STRICT_FMUL": "0"}, {"mesh_fallback_strict_fmul": 0}, ["mesh_fallback_strict_fmul"], []),
     (NVIDIA, {"RX_VK_MESH_STRICT_FMUL": "1"}, {"mesh_fallback_strict_fmul": 1}, ["mesh_fallback_strict_fmul"], []),
+    (AMD_WIN, {"RX_VK_BC_COPY_PER_LAYER": "0"}, {"bc_copy_per_layer": 0}, ["bc_copy_per_layer"], []),
+    (AMD_WIN, {"RX_VK_BC_COPY_PER_LAYER": ""}, {}, [], []),
+    (NVIDIA, {"RX_VK_BC_COPY_PER_LAYER": "1"}, {"bc_copy_per_layer": 1}, ["bc_copy_per_layer"], []),
     (UHD, {"RX_VK_COMPUTE_SERIAL": "0"}, {"compute_builds_serial": 0}, ["compute_builds_serial"], []),
     (UHD, {"RX_VK_COMPUTE_SERIAL": "off"}, {"compute_builds_serial": 0}, ["compute_builds_serial"], []),
     (UHD, {"RX_VK_COMPUTE_SERIAL": ""}, {}, [], []),                                   # (was off)
@@ -551,11 +554,11 @@ static void env_case(int i, const D& d) {
     device_policy_env(p, f, get);
     std::printf("ENV %d astc_on_cpu=%d batch_submits=%d compute_builds_serial=%d pcache_fetch_lock=%d split_before_draw=%d "
                 "ub_snapshot=%d split_ub_flush=%d occ_copy=%d mirrors=%d fsr4_tune=%d position_invariant=%d equal_depth_bias=%g "
-                "cap_spare_max=%lld staging_keep=%lld workers=%u acquire_ahead=%d mesh_fallback_strict_fmul=%d import_chunk_mb=%u texture_budget=%lld set=%u notes=%s\n",
+                "cap_spare_max=%lld staging_keep=%lld workers=%u acquire_ahead=%d mesh_fallback_strict_fmul=%d bc_copy_per_layer=%d import_chunk_mb=%u texture_budget=%lld set=%u notes=%s\n",
                 i, (int)p.astc_on_cpu, (int)p.batch_submits, (int)p.compute_builds_serial, (int)p.pcache_fetch_lock,
                 (int)p.split_before_draw, (int)p.ub_snapshot, (int)p.split_ub_flush, (int)p.occ_copy, (int)p.mirrors, (int)p.fsr4_tune,
                 (int)p.position_invariant, (double)p.equal_depth_bias, mbs(p.cap_spare_max), mbs(p.staging_keep), p.workers, (int)p.acquire_ahead,
-                (int)p.mesh_fallback_strict_fmul,
+                (int)p.mesh_fallback_strict_fmul, (int)p.bc_copy_per_layer,
                 (unsigned)p.import_chunk_mb, mbs(p.texture_budget), (unsigned)p.set_by_switch, p.switch_notes);
     if (i == 0 || p.set_by_switch) log_block(1000 + i, p, f);   // (the block with switches set: still six lines under their length)
 }
@@ -590,7 +593,8 @@ int main() {
         for (const char* name : {"RX_VK_MIRROR", "RX_VK_SPLIT_UBFLUSH", "RX_VK_UB_SNAPSHOT", "RX_VK_ASTC_CPU", "RX_VK_BATCH",
                                  "RX_VK_COMPUTE_SERIAL", "RX_VK_PCACHE_FETCH_LOCK", "RX_VK_SPLIT_BEFORE_DRAW", "RX_VK_OCC_COPY",
                                  "RX_VK_FSR4_TUNE", "RX_VK_NO_INVARIANT", "RX_VK_EQ_BIAS", "RX_VK_CAP_SPARE_MB",
-                                 "RX_VK_STAGING_KEEP_MB", "RX_VK_WORKERS", "RX_VK_ACQUIRE_AHEAD", "RX_VK_MESH_STRICT_FMUL"})
+                                 "RX_VK_STAGING_KEEP_MB", "RX_VK_WORKERS", "RX_VK_ACQUIRE_AHEAD", "RX_VK_MESH_STRICT_FMUL",
+                                 "RX_VK_BC_COPY_PER_LAYER"})
             env[name] = wordy;
         const DeviceFacts f = facts_of(devices[0]);
         DevicePolicy p = device_policy(f);
@@ -659,6 +663,7 @@ def check_source():
     for path, marker, needs in (
         ("vk_texture.cpp", "bool astc_on_cpu() {", ("const bool v = dev.policy.astc_on_cpu;",)),
         ("vk_texture.cpp", "uint32_t bc_small_layers() {", (": dev.policy.bc_small_runs ? kBcLayers : 1u;",)),
+        ("vk_texture.cpp", "void bc_encode_into(VkCommandBuffer cmd,", ("if (dev.policy.bc_copy_per_layer &&",)),
         ("vk_texture.cpp", "void texture_frame(uint64_t completed)",
          ("if (dev.policy.set(Sw::staging_keep)) return dev.policy.staging_keep;",
           "return policy_rule::staging_keep(vram_usage(&used, &allowed) ? allowed : 0);",
