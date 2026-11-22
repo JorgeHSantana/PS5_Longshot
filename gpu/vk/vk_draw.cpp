@@ -12779,7 +12779,29 @@ int64_t draw_slotgen_saves() {   // (Descriptor reuse: of those, what the global
 }
 
 void pipeline_cache_play() {
+    pcache_init();
     play_cache_begin();
+    // (longshot) When precompile_run() did not run (RX_VK_PRECOMPILE=0 or dev build), still index kept programs and notes
+    // for RX_VK_LOAD=create (zero compilation) so create calls load kept programs and noted pipelines from caches ahead of
+    // first use instead of discarding them before the index is ready.
+    if (!precompile_wanted() && !env_on("LONGSHOT_PREPARE_ONLY") && !env_on("RX_VK_NO_PROGRAM_CACHE") &&
+        programs_load_at_create() && !program_cache_kept_keys().empty()) {
+        std::vector<NoteRef> refs = start_note_refs(true);
+        {
+            std::lock_guard lk(note_mu);
+            if (!note_file) {
+                for (const NoteRef& r : refs) noted.insert(r.key);
+                const std::vector<std::unique_ptr<PipeNote>> none;
+                notes_open_locked(&none);
+            }
+        }
+        if (!env_on("RX_VK_NO_STATE_LIST")) {
+            std::lock_guard lk(state_mu);
+            if (!state_file) state_open_locked();
+        }
+        const ComputePlan plan = computes_plan(precompile_computes_which(), !env_on("RX_VK_NO_STATE_LIST"));
+        programs_index(std::move(refs), plan.none ? std::unordered_set<uint64_t>{} : plan.keys);
+    }
     programs_play_begin();   // (the census: what is made from here on is made in play)
 #ifdef __linux__
     // (longshot) On Linux with <= 20 GB of RAM (the Steam Deck's 16 GB shared memory and 16 GB PCs) or when memory pressure is
