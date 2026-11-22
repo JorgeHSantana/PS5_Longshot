@@ -126,6 +126,14 @@ test('missing tables, incomplete cells, added/removed/reordered rows stop public
   assert.throws(() => readGraphicsSettings(page, menu.replace('"Resolution and upscaling", nullptr', '"Resolution and upscaling", NULL')), /coverage mismatch/);
 });
 
+test('ReShade actions and user selector are accounted for', () => {
+  const settings = readGraphicsSettings(page, menu).flatMap(group => group.settings);
+  for (const name of ['Compare ReShade Preset', 'User preset file', 'Rescan ReShade presets'])
+    assert(settings.some(setting => setting.name === name));
+  assert.throws(() => readGraphicsSettings(page, menu.replace('MENU_HOOK(scan_presets)', 'MENU_HOOK(other_action)')), /coverage mismatch at Rescan ReShade presets/);
+  assert.throws(() => readGraphicsSettings(page.replaceAll('with User selected', 'when selected'), menu), /no condition for User preset file/);
+});
+
 test('the menu table reader joins C strings, reads escapes and skips comments', () => {
   const rows = readMenuRows(`Row rows[] = {
     // {TAB_GRAPHICS, "Commented out", &opts.x},

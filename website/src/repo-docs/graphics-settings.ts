@@ -25,6 +25,7 @@ export const BADGES = [
   { test: /\bshown with HUD layout set to Custom and no `HOS_WIDE_UI` override\b/i, label: 'Custom HUD layout without a HOS_WIDE_UI override', shown: true },
   { test: /while HDR is on/i, label: 'While HDR is on', shown: true },
   { test: /\bwith HDR set to Native\b/i, label: 'With HDR on Native', shown: true },
+  { test: /\bwith User selected\b/i, label: 'With User selected', shown: true },
   { test: /only in builds with/i, label: 'Depends on GPU and build', shown: true },
   { test: /(?:quality )?preset (?:sets|turns) it/i, label: 'Set by quality presets', both: true },
   { test: /on the Controls page/i, label: 'On the Controls page' },
@@ -255,7 +256,12 @@ export function readGraphicsSettings(page, menu) {
     if (!row) throw new Error(`table/menu graphics coverage mismatch at ${setting.name}`);
     const hudReset = row.key === 'reset_hud_placement' && row.name === 'Reset HUD placement' && row.value === 'nullptr' &&
       row.kind === 'menu::Kind::Action' && row.activate === 'MENU_HOOK(reset_hud_placement)';
-    if (!row.value.startsWith('&opts.') && !row.textField && !row.monitorSelector && !hudReset)
+    const reshadeAction = row.value === 'nullptr' && row.kind === 'menu::Kind::Action' &&
+      ((row.key === 'reshade_compare' && row.name === 'Compare ReShade Preset' && row.activate === 'MENU_HOOK(start_comparison)') ||
+       (row.key === 'reshade_rescan' && row.name === 'Rescan ReShade presets' && row.activate === 'MENU_HOOK(scan_presets)'));
+    const reshadeFile = row.key === 'reshade_user_pick' && row.name === 'User preset file' && row.value === '&user_pick' &&
+      row.text === 'MENU_HOOK(filename)';
+    if (!row.value.startsWith('&opts.') && !row.textField && !row.monitorSelector && !hudReset && !reshadeAction && !reshadeFile)
       throw new Error(`table/menu graphics coverage mismatch at ${row.name}`);
     if (row.section !== groups.at(-1).section) {
       if (!titles.has(row.section) || groups.some(group => group.section === row.section)) throw new Error(`table/menu graphics order mismatch at ${row.name}`);

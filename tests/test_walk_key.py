@@ -168,7 +168,9 @@ static void poll(void) {
     uint64_t taps = 0;
     read_input(&buttons, &taps, st);
     CHECK(oc_consumed_pads == 0);   /* the inactive note layer must not consume the controller while walking */
-    CHECK(!sprint_toggle_frame && !sprint_excluded);   /* no toggle or exclusive input in these cases */
+    /* Sprint's Toggle as the controls left it (on by default: it does nothing with the Sprint row off, as here); no
+       exclusive input in these cases */
+    CHECK(sprint_toggle_frame == (int)sprint_toggle_mode && sprint_toggle_frame == 1 && !sprint_excluded);
 }
 static void release(void) { memset(held, 0, sizeof held); }
 static int near_share(int32_t v, int percent) {   /* (a straight tilt: percent of 32767, within one step) */

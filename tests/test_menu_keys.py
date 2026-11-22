@@ -78,6 +78,8 @@ static bool control_column_enabled(int row, int col) {
 // CONTROL_NAVIGATION
 // CONFIRMATION_STATE
 static struct { int button; } controls[kControls] = {{HOS_SW_A}, {HOS_SW_B}};
+static bool keys_only(int) { return false; }
+// REAL_CONTROL_COLUMN_ENABLED
 static int blocked_reset_row = -1;
 // REBIND_CONTROL
 
@@ -105,6 +107,16 @@ static void test_confirmations() {
     host = &queue_host;
     host->version = 44;
     opts = Options{};
+    controls[2].button = HOS_KEY_SPRINT;
+    CHECK(!real_control_column_enabled(2, kCtlReset));
+    toggle_set(HOS_KEY_SPRINT, false);
+    CHECK(real_control_column_enabled(2, kCtlReset));
+    toggle_set(HOS_KEY_SPRINT, true);
+    CHECK(!real_control_column_enabled(2, kCtlReset));
+    CHECK(!real_control_column_enabled(0, kCtlReset));
+    toggle_set(HOS_SW_A, true);
+    CHECK(real_control_column_enabled(0, kCtlReset));
+    toggle_set(HOS_SW_A, false);
     reset_rows = 0b11;
     binding_a = 'T';
     binding_b = 'X';
@@ -134,7 +146,8 @@ static void test_confirmations() {
     CHECK(binding_a == 'T' && binding_b == 'E' && toggle_on(HOS_SW_A) && toggle_on(HOS_KEY_SPRINT));
     control_confirmation = {ControlAction::ResetAll};
     CHECK(answer_controls(false, false, false, 1));
-    CHECK(binding_a == 'E' && binding_b == 'V' && !opts.hold_toggle && !host_sprint_toggle && !opts.sprint_toggle);
+    // (Sprint's Toggle back on, its default; the buttons' off)
+    CHECK(binding_a == 'E' && binding_b == 'V' && !opts.hold_toggle && host_sprint_toggle == 1 && opts.sprint_toggle == 1);
 
     rebind_control(0, HOS_BIND_KEY, 0, 'V');
     CHECK(control_confirmation.action == ControlAction::Rebind);
@@ -238,6 +251,9 @@ static int reset_binding_test(int button) {
     binding_a = 'E';
     return 1;
 }
+static int binding_is_default_test(int button) {
+    return button == HOS_SW_A ? binding_a == 'E' : button == HOS_SW_B ? binding_b == 'V' : 1;
+}
 static int rebind_test(int set, int button, int slot, int code, uint64_t approved, uint64_t* conflicts) {
     CHECK(set == HOS_BIND_KEY && button == HOS_SW_A && slot == 0 && code == 'V');
     const uint64_t owner = UINT64_C(1) << HOS_SW_B;
@@ -257,8 +273,9 @@ static struct {
     int (*binding)(int, int, int);
     int (*reset_binding)(int);
     int (*rebind_control)(int, int, int, int, uint64_t, uint64_t*);
+    int (*binding_is_default)(int);
 } queue_host{40, bind_test, take_key_press, nullptr, nullptr, nullptr, nullptr, binding_test,
-             reset_binding_test, rebind_test}, *host;
+             reset_binding_test, rebind_test, binding_is_default_test}, *host;
 
 static bool keyboard_toggle(int mode, int key, bool queued, bool has_focus = true) {
     opts.menu_shortcut = mode;
@@ -465,11 +482,26 @@ static void test_saved() {
     opts = Options{}; host_sprint_toggle = -1;
     reload();
     CHECK(opts.sprint_toggle == 1 && host_sprint_toggle == 1 && input_option(HOS_OPT_SPRINT_TOGGLE) == 1);
+    toggle_set(HOS_KEY_SPRINT, false);
     reset_controls();
-    CHECK(opts.sprint_toggle == 0 && host_sprint_toggle == 0 && input_option(HOS_OPT_SPRINT_TOGGLE) == 0);
-    opts.sprint_toggle = 1; host_sprint_toggle = -1;
+    CHECK(opts.sprint_toggle == 1 && host_sprint_toggle == 1 && input_option(HOS_OPT_SPRINT_TOGGLE) == 1);
+    opts.sprint_toggle = 0; host_sprint_toggle = -1;
     reload();
-    CHECK(opts.sprint_toggle == 0 && host_sprint_toggle == 0 && input_option(HOS_OPT_SPRINT_TOGGLE) == 0);
+    CHECK(opts.sprint_toggle == 1 && host_sprint_toggle == 1 && input_option(HOS_OPT_SPRINT_TOGGLE) == 1);
+    // (Sprint's Toggle is on by default: no line, on, and the host told so; Hold chosen in a file saved now, kept; a
+    // file from before options_version 7 wrote toggle_sprint=0, the held default then, whether chosen or not: on)
+    CHECK(Options{}.sprint_toggle == 1);
+    host_sprint_toggle = -1;
+    loaded_as(2, SAVED_VERSION);
+    CHECK(opts.sprint_toggle == 1 && host_sprint_toggle == 1);
+    loaded_as(2, SAVED_VERSION, "toggle_sprint=0\n");
+    CHECK(opts.sprint_toggle == 0 && host_sprint_toggle == 0);
+    for (int old = -1; old < 7; old++) {
+        host_sprint_toggle = -1;
+        loaded_as(2, old, "toggle_sprint=0\n");
+        CHECK(opts.sprint_toggle == 1 && host_sprint_toggle == 1);
+    }
+    CHECK(SAVED_VERSION >= 7);
     // (from before the version Esc came with, ESC_FROM (-1, no line: before 2): Insert or F1 was the default, written
     // whether chosen or not, and moves to Insert, F1 or Esc; F1 only was chosen and stays; no line: the default)
     for (int old = -1; old < ESC_FROM; old++) {
@@ -548,6 +580,7 @@ def main():
     fixture = (FIXTURE.replace("// API_ENUMS", "\n".join(enums)).replace("// KEYBOARD_FIXTURE", keyboard)
                .replace("// CONTROL_NAVIGATION", block(menu, "int next_control_selection("))
                .replace("// CONFIRMATION_STATE", menu[menu.index("enum class ControlAction"):menu.index("bool control_column_enabled(")])
+               .replace("// REAL_CONTROL_COLUMN_ENABLED", block(menu, "bool control_column_enabled(").replace("control_column_enabled(", "real_control_column_enabled(", 1))
                .replace("// REBIND_CONTROL", block(menu, "void rebind_control(int row,"))
                .replace("// CONFIRMATION_BRANCH", block(tick, "else if (control_confirmation.action != ControlAction::None)").removeprefix("else ")))
     with tempfile.TemporaryDirectory(prefix="menu-keys-") as tmp:
@@ -566,8 +599,8 @@ def main():
     need(menu, r"const bool disabled = !control_column_enabled\(i, col\);",
          "Controls cells must use the same enabled columns as keyboard navigation")
     need(block(menu, "bool control_column_enabled("),
-         r"\(has_toggle\(button\) && toggle_on\(button\)\) \|\| !host->binding_is_default\(button\)",
-         "a row at its binding defaults must be resettable only if its supported Toggle is on")
+         r"\(has_toggle\(button\) && toggle_on\(button\) != toggle_default\(button\)\) \|\| !host->binding_is_default\(button\)",
+         "a row at its binding defaults must be resettable when its Toggle differs from its default")
     need(block(menu, "void draw_controls("), r"if \(!disabled\) hits.add\([^;]+kCtlCell",
          "disabled Toggle and Reset cells must not appear in the hit map")
     need(tick, r"const bool cell = hit.part == menu_hit::kCtlCell && control_column_enabled\(hit.index, hit.side\);",

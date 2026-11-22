@@ -342,12 +342,27 @@ int hos_mem_region(uint64_t a, uint64_t size) {
 #define G64(a) get(a)
 #define G32(a) ((uint32_t)get(a))
 volatile uint32_t hos_frame_seconds_bits;
+static int menu_open;
+int hos_oot_menu_sprint_active(void) { return menu_open; }
+#include <stdarg.h>
+/* (hos_log: the toggled sprint's starts and ends, each a line; counted, and shown when an assert fails) */
+static int starts, ends;
+void hos_log(const char *fmt, ...) {
+    char line[256];
+    va_list a;
+    va_start(a, fmt), vsnprintf(line, sizeof line, fmt, a), va_end(a);
+    starts += strstr(line, "sprint starts") != NULL, ends += strstr(line, "sprint ends") != NULL;
+    puts(line);
+}
 """
 
 ENGINE_GAME = r"""
 enum { LINK = 0x1000, CHAIN_A = 0x2000, CHAIN_B = 0x3000, CHAIN_C = 0x4000, CHAIN_D = 0x5000, MGR = 0x6000, CTL = 0x7000,
        EVENTS = 0x8000, OTHER_A = 0x9000 };
-enum { S_WALK = 1, S_JUMP = 13, S_LAND = 32, S_SLIDE = 35, S_ROLL = 99, S_WAIT = 40, S_ATTACK = 7 };
+/* (the game's own ids, the names its state table gives them) */
+enum { S_WALK = 1, S_JUMP = 13, S_LAND = 32, S_SLIDE = 35, S_ROLL = 99, S_WAIT = 40, S_ATTACK = 112, S_LOCK_ON = 65,
+       S_CLIMB = 70, S_LADDER = 71, S_CLIFF = 25, S_TALK = 75, S_SWIM = 84, S_ITEM = 238, S_MUSIC = 235, S_RIDE = 24,
+       S_TURN_AROUND = 21, S_TURN = 22, S_QUICK_TURN = 188 };
 #define BIT_A (1ull << 0)
 #define BIT_LS (1ull << 4)
 #define BIT_ZL (1ull << 8)
@@ -361,14 +376,26 @@ static void game(void) {
 }
 static void state(int id) { put(CHAIN_D + 0x28, (uint64_t)id); }
 static void event(int on) { put(EVENTS + 0x68, on ? 0x1234 : 0); }
+/* Link's place across the ground (x and z at +0x31c and +0x324 in the actor at Link +0x18): each frame he goes pace
+   metres along x, 0.1 a 60th of a second (6 m/s, a sprint) unless a check stands him still */
+static float link_x, pace = 0.1f;
+static void walk_on(void) {
+    uint32_t bits;
+    link_x += pace;
+    memcpy(&bits, &link_x, 4), put(CHAIN_A + 0x31c, bits);
+    put(CHAIN_A + 0x324, 0);
+}
 
 /* What npad_states hands over this frame (the Sprint row, its Toggle, the left stick's press as Sprint's input) */
+/* (blocked: host/oot_sprint.c's SPRINT_BLOCKED and SPRINT_AWAY; Insert open is both, the focus lost AWAY) */
+enum { BLOCKED = 1, AWAY = 2, PAUSE = 4 };   /* (and PAUSE: Plus or Minus pressed) */
 static int on = 1, toggle, l3 = 1, blocked, reset;
 /* one frame: the controller read with Sprint held or not and these buttons (what reaches the game in *game_saw), then
    Link's two updates; 1 when both found the dash input */
 static int frame(int sprint, uint64_t buttons, uint64_t *game_saw) {
     const uint64_t seen = hos_sprint_input(buttons, on, sprint, l3 && sprint, toggle, reset, blocked);
     if (game_saw) *game_saw = seen;
+    walk_on();
     Ctx c;
     memset(&c, 0, sizeof c);
     c.x[19] = LINK, c.x[10] = 0x1, c.x[8] = 0x1;   /* (other flags stay) */
@@ -405,6 +432,11 @@ int main(void) {
     assert(!frame(0, 0, NULL));
     state(S_ATTACK), assert(!frame(1, 0, NULL));   /* (held into an attack: off) */
     frame(0, 0, NULL), state(S_WALK);
+    /* ... Insert open (blocked, away) ends it as before, and the press held on when it closes is not Sprint's */
+    assert(!frame(0, 0, NULL) && frame(1, 0, NULL));
+    blocked = BLOCKED | AWAY, assert(!frame(1, 0, NULL)), blocked = 0;
+    assert(!frame(1, 0, NULL));
+    frame(0, 0, NULL);
 
     /* Toggle: a press while walking starts it; it goes on through jumps, landings, slides and rolls */
     toggle = 1;
@@ -415,29 +447,129 @@ int main(void) {
     for (int i = 0; i < 5; i++) state(keep[i]), assert(frame(0, 0, NULL));
     /* the next press ends it */
     assert(!tap());
-    /* any other state ends it at once */
-    assert(tap());
-    state(S_ATTACK), assert(!frame(0, 0, NULL));
-    state(S_WALK), assert(!frame(0, 0, NULL));
+    /* any other state ends it at once: an attack, Z-targeting, climbing, a ledge, talking, swimming, an item, the
+       ocarina, Epona */
+    int other[] = {S_ATTACK, S_LOCK_ON, S_CLIMB, S_LADDER, S_CLIFF, S_TALK, S_SWIM, S_ITEM, S_MUSIC, S_RIDE};
+    for (int i = 0; i < 10; i++) {
+        assert(tap());
+        state(other[i]), assert(!frame(0, 0, NULL));
+        state(S_WALK), assert(!frame(0, 0, NULL));
+    }
     /* ZL held ends it */
     assert(tap());
     assert(!frame(0, BIT_ZL, NULL)), assert(!frame(0, 0, NULL));
-    /* the host's reset (Insert opened, Plus or Minus, the focus lost) ends it */
+    /* the host's reset (the row turned off, the bindings laid out again) ends it */
     assert(tap());
     reset = 1, assert(!frame(0, 0, NULL)), reset = 0;
     assert(!frame(0, 0, NULL));
-    /* Blocking and events end an existing toggle, including before the next Link update. */
+    /* Blocked with the player still there (the ocarina waiting for a note, a test run's own input keeping the player's
+       Sprint out): no press is Sprint's, and the sprint is Link's state's to end (the ocarina's is PlayMusic, which does).
+       Events (a conversation, a cutscene) end it, including before the next Link update. */
     assert(tap());
-    blocked = 1, assert(!frame(0, 0, NULL)), blocked = 0;
+    blocked = BLOCKED;
+    for (int i = 0; i < 10; i++) assert(frame(0, 0, NULL));
+    assert(frame(1, 0, NULL) && frame(0, 0, NULL));   /* (a press then: not Sprint's, the sprint goes on) */
+    state(S_MUSIC), assert(!frame(0, 0, NULL)), state(S_WALK), blocked = 0;
     assert(!frame(0, 0, NULL));
     assert(tap());
     event(1), assert(!frame(0, 0, NULL)), event(0);
     assert(!frame(0, 0, NULL));
-    /* standing still: four 60 Hz frames are kept, the fifth ends it */
+    /* Insert open or the focus lost (blocked and away): the sprint is held as it is, however long Link stands there
+       (the game goes on without the player's input); a press then is neither Sprint's nor eaten later: held on as the
+       menu closes it starts nothing, and the next press is the one that ends the sprint */
+    assert(tap());
+    blocked = BLOCKED | AWAY;
+    state(S_WAIT);
+    for (int i = 0; i < 300; i++) assert(frame(0, 0, NULL));
+    assert(frame(1, 0, NULL));
+    blocked = AWAY;   /* (the menu closed, the focus still elsewhere) */
+    for (int i = 0; i < 100; i++) assert(frame(0, 0, NULL));
+    assert(frame(1, 0, NULL));
+    blocked = 0;
+    assert(frame(1, 0, NULL) && frame(0, 0, NULL));
+    /* ... back, standing: the time a press gives to start moving (90 frames), then four frames once he has */
+    for (int i = 0; i < 80; i++) assert(frame(0, 0, NULL));
+    state(S_WALK), assert(frame(0, 0, NULL));
+    state(S_WAIT);
+    for (int i = 0; i < 4; i++) assert(frame(0, 0, NULL));
+    assert(!frame(0, 0, NULL));
+    /* ... and an event while away ends it all the same */
+    state(S_WALK), assert(tap());
+    blocked = AWAY, event(1), assert(!frame(0, 0, NULL)), event(0), blocked = 0;
+    assert(!frame(0, 0, NULL));
+    /* The game's screen holds the sprint for as long as it is open. */
+    state(S_WALK), assert(tap());
+    blocked = PAUSE, assert(frame(0, 0, NULL)), blocked = 0;   /* (Plus: the pause opens a few frames later) */
+    for (int i = 0; i < 3; i++) assert(frame(0, 0, NULL));
+    pace = 0.0f, state(S_WAIT), menu_open = 1;
+    for (int i = 0; i < 180; i++) assert(frame(0, i >= 2 && i < 10 ? BIT_ZL : 0, NULL));
+    assert(frame(1, 0, NULL) && frame(0, 0, NULL));
+    menu_open = 0; /* close without Plus or Minus, no state or position change */
+    for (int i = 0; i < 80; i++) assert(frame(0, 0, NULL));
+    pace = 0.1f, state(S_WALK), assert(frame(0, 0, NULL));
+    state(S_WAIT);
+    for (int i = 0; i < 4; i++) assert(frame(0, 0, NULL));
+    assert(!frame(0, 0, NULL));
+    /* ... the stick let go for Plus: Link stands while the pause opens (here, ten frames): not a stop */
+    state(S_WALK), assert(tap());
+    blocked = PAUSE, assert(frame(0, 0, NULL)), blocked = 0;
+    state(S_WAIT);
+    for (int i = 0; i < 10; i++) assert(frame(0, 0, NULL));
+    pace = 0.0f, menu_open = 1;
+    for (int i = 0; i < 40; i++) assert(frame(0, 0, NULL));
+    menu_open = 0, pace = 0.1f, state(S_WALK);   /* (closed, running on) */
+    for (int i = 0; i < 60; i++) assert(frame(0, 0, NULL));
+    assert(!tap());
+    /* Closing without moving accepts the next Sprint press immediately. */
+    state(S_WAIT), pace = 0.0f, assert(tap());
+    blocked = PAUSE, assert(frame(0, 0, NULL)), blocked = 0;
+    menu_open = 1;
+    for (int i = 0; i < 180; i++) assert(frame(0, 0, NULL));
+    menu_open = 0;
+    assert(!frame(1, 0, NULL));
+    frame(0, 0, NULL);
+    /* ZL also takes effect on the first stationary update after closing. */
+    assert(tap());
+    menu_open = 1, assert(frame(0, 0, NULL));
+    menu_open = 0, assert(!frame(0, BIT_ZL, NULL));
+    assert(tap());
+    menu_open = 1, assert(frame(0, 0, NULL));
+    menu_open = 0;
+    for (int i = 0; i < 90; i++) assert(frame(0, 0, NULL));
+    assert(!frame(0, 0, NULL));
+    pace = 0.1f;
+    /* ... Plus or Minus with no pause after it (Link goes on running): nothing held, standing in Walk ends it as ever */
+    state(S_WALK), assert(tap());
+    blocked = PAUSE, assert(frame(0, 0, NULL)), blocked = 0;
+    for (int i = 0; i < 40; i++) assert(frame(0, 0, NULL));
+    pace = 0.001f;
+    for (int i = 0; i < 20; i++) assert(frame(0, 0, NULL));
+    assert(!frame(0, 0, NULL));
+    pace = 0.1f;
+    /* a load (no update of Link for eight reads or more): the sprint goes on, with the time a press gives to start
+       moving again */
+    assert(tap());
+    for (int i = 0; i < 40; i++) hos_sprint_input(0, on, 0, 0, toggle, 0, 0);
+    state(S_WAIT);
+    for (int i = 0; i < 80; i++) assert(frame(0, 0, NULL));
+    state(S_WALK), assert(frame(0, 0, NULL));
+    state(S_WAIT);
+    for (int i = 0; i < 4; i++) assert(frame(0, 0, NULL));
+    assert(!frame(0, 0, NULL));
+    /* ... a load that ends with Link left standing: ninety frames, then it ends */
+    state(S_WALK), assert(tap());
+    for (int i = 0; i < 40; i++) hos_sprint_input(0, on, 0, 0, toggle, 0, 0);
+    state(S_WAIT);
+    for (int i = 0; i < 90; i++) assert(frame(0, 0, NULL));
+    assert(!frame(0, 0, NULL));
+    state(S_WALK);
+    /* standing still: four 60 Hz frames are kept, the fifth ends it (said once, starting and ending) */
+    const int starts_was = starts, ends_was = ends;
     assert(tap());
     state(S_WAIT);
     for (int i = 0; i < 4; i++) assert(frame(0, 0, NULL));
     assert(!frame(0, 0, NULL));
+    assert(starts == starts_was + 1 && ends == ends_was + 1);
     /* ... at 240 fps by the frames' time, not by updates: 16 updates of a 240th are four 60 Hz frames */
     {
         float quarter = 1.0f / 240.0f;
@@ -449,6 +581,31 @@ int main(void) {
         assert(!frame(0, 0, NULL));
         hos_frame_seconds_bits = 0;
     }
+    /* standing in Walk (held against a wall, a stick resting a little off its centre: 0.06 m/s): standing all the same,
+       once it lasts sixteen frames, then the four */
+    state(S_WALK), assert(tap());
+    pace = 0.001f;
+    for (int i = 0; i < 20; i++) assert(frame(0, 0, NULL));
+    assert(!frame(0, 0, NULL));
+    /* ... a U-turn stands him still in Walk for about six frames, then he runs back: the sprint goes on; so do the turn
+       states */
+    pace = 0.1f;
+    assert(tap());
+    for (int i = 0; i < 30; i++) assert(frame(0, 0, NULL));
+    pace = 0.0f;
+    for (int i = 0; i < 8; i++) assert(frame(0, 0, NULL));
+    pace = 0.1f;
+    for (int i = 0; i < 100; i++) assert(frame(0, 0, NULL));
+    int turns[] = {S_TURN_AROUND, S_TURN, S_QUICK_TURN};
+    for (int i = 0; i < 3; i++) state(turns[i]), assert(frame(0, 0, NULL) && frame(0, 0, NULL));
+    state(S_WALK), assert(frame(0, 0, NULL));
+    assert(!tap());
+    /* ... a slow walk (the Walk key's, 2 m/s) is moving: the sprint goes on, and the next press ends it */
+    pace = 2.0f / 60.0f;
+    assert(tap());
+    for (int i = 0; i < 200; i++) assert(frame(0, 0, NULL));
+    assert(!tap());
+    pace = 0.1f;
     /* a press while standing: ninety frames to start moving */
     state(S_WAIT);
     assert(tap());
@@ -555,8 +712,10 @@ class SprintEngineTests(unittest.TestCase):
                       "the Controls page has no Toggle for Sprint")
         self.assertIn('if (i < HOS_SW_N || i == HOS_KEY_SPRINT) fprintf(f, "toggle_%s=%d\\n"', menu,
                       "the menu does not save toggle_sprint")
-        self.assertIn("ends when Link stops, attacks, uses an item, swims or climbs", menu,
+        self.assertIn("A toggled sprint ends when Link stops, attacks, targets with ZL", menu,
                       "the Toggle's help does not say Link's state ends a toggled sprint")
+        self.assertIn("opening Insert, pausing or losing focus does not", menu,
+                      "the Toggle's help does not say a menu, a pause or the focus lost leave a toggled sprint on")
         replay = (ROOT / "gpu" / "vk" / "vk_replay.cpp").read_text(encoding="utf-8")
         self.assertIn("host->binding(HOS_BIND_SPRINT_TOGGLE, 0, 0)", replay, "the host cannot see Sprint's Toggle")
 

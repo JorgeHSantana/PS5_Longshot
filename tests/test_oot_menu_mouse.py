@@ -44,9 +44,12 @@ extern uint8_t *fake_heap;
 #define FAKE_BASE 0x100000ULL
 #define HOS_GUEST_SPACE (FAKE_BASE + (4ULL << 20))
 #define GP(a) ((void *)(fake_heap + ((uint64_t)(a) - FAKE_BASE)))
+#define G64(a) (*(uint64_t *)GP(a))
+#define g_module_base 0ull
 static inline void *hos_guest_range(uint64_t a, uint64_t n) {
     return a >= FAKE_BASE && n <= HOS_GUEST_SPACE - FAKE_BASE && a - FAKE_BASE <= HOS_GUEST_SPACE - FAKE_BASE - n ? GP(a) : NULL;
 }
+static inline int hos_mem_region(uint64_t a, uint64_t n) { return hos_guest_range(a, n) != NULL; }
 void hos_log(const char *fmt, ...);
 int64_t hos_now_ns(void);
 """
@@ -79,6 +82,7 @@ void hos_log(const char *fmt, ...) { va_list a; va_start(a, fmt); vfprintf(stder
 int64_t hos_now_ns(void) { return clock_ns; }
 void hos_oot_menu_focus(Ctx *c, uint64_t screen, uint64_t pane, uint64_t lr);
 void hos_oot_menu_tick(Ctx *c, uint64_t screen);
+int hos_oot_menu_sprint_active(void);
 
 /* the window: 3840 x 2160, so a pixel is a unit of the layout's (x right of the centre, y up) */
 static int ptr_x = 1920, ptr_y = 1080, wheel_next;
@@ -211,6 +215,8 @@ int main(void) {
     focused(b, 1);
     hos_oot_menu_focus(&ctx, pause, b, 0);
     frame(pause, 0, 200);   /* (the screen seen, its focus found: the mouse is for it) */
+    CHECK(hos_oot_menu_sprint_active());
+    CHECK(!hos_oot_menu_sprint_active());   /* no new screen update: the menu has stopped */
     reset();
     frame(pause, -500, 210);
     CHECK(focus_calls == 1 && focus_asked == a && focus_screen == pause);   /* hover: the setter, on that button */

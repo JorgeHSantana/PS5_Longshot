@@ -258,8 +258,8 @@ static void hold_toggle_case(void) {
 }
 
 /* Sprint's input as npad_states hands it to host/oot_sprint.c (a spy here): Sprint never presses A, so the game's buttons
-   are the player's own; held, toggled, ended by Insert, the focus lost or a bridge's exclusive input, and a bridge's
-   SPRINT counted as its key */
+   are the player's own; held, toggled, a toggled sprint held (never ended) by Insert, Plus and the focus lost, a bridge's
+   exclusive input keeping the player's Sprint out, and a bridge's SPRINT counted as its key, behind other windows too */
 #define SPY(on, down, toggle, reset, blocked) \
     CHECK(spy_sprint_on == (on) && spy_sprint_down == (down) && spy_sprint_toggle == (toggle) && \
           spy_sprint_reset == (reset) && spy_sprint_blocked == (blocked) && !spy_sprint_l3)
@@ -273,20 +273,29 @@ static void sprint_toggle_case(void) {
     SPY(1, 0, 1, 0, 0);
     held_keys['G'] = 1; packet(0, 0, 32767, 0);   /* (no A from Sprint: the game's run comes from Link's flags) */
     SPY(1, 1, 1, 0, 0);
-    menu_open = 1; packet(0, 0, 0, 0);            /* Insert open: no press is Sprint's, and a toggled sprint ends */
-    CHECK(spy_sprint_reset && spy_sprint_blocked);   /* (the keys may go to the menu then) */
+    menu_open = 1; packet(0, 0, 0, 0);            /* Insert open: no press is Sprint's, a toggled sprint is held */
+    CHECK(!spy_sprint_reset && spy_sprint_blocked == (SPRINT_BLOCKED | SPRINT_AWAY));   /* (the keys may go to the menu) */
     menu_open = 0; packet(0, 0, 32767, 0);
     SPY(1, 1, 1, 0, 0);
     held_keys['G'] = 0; packet(0, 0, 32767, 0);
     SPY(1, 0, 1, 0, 0);
     physical_buttons = a; packet(a, 0, 32767, 0); /* the player's own A: theirs, untouched */
     physical_buttons = 0; packet(0, 0, 32767, 0);
-    front = 0; packet(0, 0, 0, 0);                /* the focus lost: a toggled sprint ends */
-    CHECK(spy_sprint_reset && spy_sprint_blocked);
+    physical_buttons = 1ULL << B_PLUS; packet(1ULL << B_PLUS, 0, 32767, 0);   /* the game's pause: nothing ended, */
+    SPY(1, 0, 1, 0, SPRINT_PAUSE);                /* (its press said, for the hold while the game stops under it) */
+    packet(1ULL << B_PLUS, 0, 32767, 0);          /* (held: said once) */
+    SPY(1, 0, 1, 0, 0);
+    physical_buttons = 0; packet(0, 0, 32767, 0);
+    front = 0; packet(0, 0, 0, 0);                /* the focus lost: away, a toggled sprint held, nothing ended */
+    SPY(1, 0, 1, 0, SPRINT_AWAY);
     front = 1; packet(0, 0, 32767, 0);
+    SPY(1, 0, 1, 0, 0);
     sprint_toggle_mode = 0;                       /* Toggle off: Sprint while held */
     held_keys['G'] = 1; packet(0, 0, 32767, 0);
     SPY(1, 1, 0, 0, 0);
+    front = 0; packet(0, 0, 0, 0);                /* (held: the focus lost is not away, as before) */
+    SPY(1, 0, 0, 0, 0);
+    front = 1; packet(0, 0, 32767, 0);
     held_keys['G'] = 0;
     bridge_up = 1; bridge_active = 1; bridge_buttons = 1ULL << B_SPRINT; packet(0, 0, 32767, 0);
     CHECK(spy_sprint_down && !spy_sprint_blocked);   /* a bridge's SPRINT is Sprint's key, even exclusive */

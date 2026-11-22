@@ -1088,8 +1088,9 @@ void save() {
         // (2: game_speed below 2 was only ever the old default, see menu_init; 3: the mouse's buttons are bindings, see
         // host/nn_hid.c binds_load; 4: Descriptor reuse on by default, see menu_init and vk_draw.cpp desc_slotgen_on; 5: the
         // Menu shortcut "Insert, F1 or Esc" by default, see menu_init; 6: the Aspect ratio's 16:9 from before moves on a
-        // screen narrower than 16:9, see menu_init and host/hos_wide_size.h)
-        fprintf(f, "options_version=6\n");
+        // screen narrower than 16:9, see menu_init and host/hos_wide_size.h; 7: Sprint's Toggle on by default, see
+        // menu_init)
+        fprintf(f, "options_version=7\n");
         fputs(others.c_str(), f);
         if (!can_bind()) fputs(kept.c_str(), f);
         else if (const int sprint_auto = host->binding(HOS_BIND_SPRINT_AUTO, 0, 0))
@@ -1556,6 +1557,8 @@ bool has_toggle(int button) {
     return (button < HOS_SW_N && button != HOS_SW_PLUS && button != HOS_SW_MINUS) || button == HOS_KEY_SPRINT;
 }
 bool toggle_on(int button) { return button == HOS_KEY_SPRINT ? opts.sprint_toggle != 0 : ((opts.hold_toggle >> button) & 1) != 0; }
+// (a control's Toggle as Reset puts it: on for Sprint, off for the buttons)
+bool toggle_default(int button) { return button == HOS_KEY_SPRINT; }
 void toggle_set(int button, bool on) {
     if (button == HOS_KEY_SPRINT) {
         opts.sprint_toggle = on;
@@ -1666,7 +1669,7 @@ bool control_column_enabled(int row, int col) {
     if (col == kCtlReset) {
         const int button = controls[row].button;
         return host && host->version >= 44 && host->reset_binding && host->binding_is_default &&
-               ((has_toggle(button) && toggle_on(button)) || !host->binding_is_default(button));
+               ((has_toggle(button) && toggle_on(button) != toggle_default(button)) || !host->binding_is_default(button));
     }
     if (col == kCtlToggle) return has_toggle(controls[row].button);
     return col == kCtlKeyboard || !keys_only(row);
@@ -2847,12 +2850,13 @@ void draw_controls(ui::Ctx& c) {
                        : sel_i < kControls && selected_col == kCtlReset
                            ? (blocked_reset_row == sel_i
                                   ? "Another control uses one of these defaults. Clear that binding first."
-                                  : "Restore this control's default gamepad and keyboard bindings and turn off its Toggle.")
+                                  : "Restore this control's default gamepad and keyboard bindings and its default Toggle (on for "
+                                    "Sprint, off for the others).")
                        : sel_i < kControls && controls[sel_i].button == HOS_KEY_SPRINT && selected_col == kCtlToggle
                            ? "Toggle for Sprint: On, a press of its key or button starts Sprint and the next ends it; Off, Link "
-                             "sprints only while you hold it. Opening Insert, pressing Plus or Minus or focus loss ends it. It also "
-                             "ends when Link stops, attacks, uses an item, swims or climbs, or while ZL is held; a roll keeps it. "
-                             "Off by default."
+                             "sprints only while you hold it. A toggled sprint ends when Link stops, attacks, targets with ZL, uses "
+                             "an item, talks, swims or climbs; a roll keeps it, and opening Insert, pausing or losing focus does not "
+                             "end it. On by default."
                        : sel_i < kControls && controls[sel_i].button == HOS_KEY_SPRINT
                            ? "Enable Sprint in the Controls tab to sprint without rolling. With Toggle off, hold the assigned input "
                              "while moving. With Toggle on, press it to start or stop. Enabling Sprint moves L3 to Sprint if Sprint "
@@ -4263,7 +4267,11 @@ void menu_init() {
             const float started = host->aspect_ratio();
             if (started > 1.0f && started < 16.0f / 9.0f * 0.99f) opts.ultrawide = 1;
         }
+        // (Sprint's Toggle is on by default from options_version 7: a file from before wrote toggle_sprint=0, the held
+        // default then, whether chosen or not)
+        if (version < 7) opts.sprint_toggle = 1;
     }
+    toggle_set(HOS_KEY_SPRINT, opts.sprint_toggle != 0);   // (the host's as loaded: the default with no line)
     first_start = !has_options;
     sim_turf_settings_init();
     menu_colour_vision_changed(opts.colour_vision);
@@ -5319,14 +5327,14 @@ void menu_tick() {
                         host->bind(HOS_BIND_PAD, -1, 0, 0);
                         opts.pad_layout = 0;
                         opts.hold_toggle = 0;
-                        toggle_set(HOS_KEY_SPRINT, false);
+                        toggle_set(HOS_KEY_SPRINT, toggle_default(HOS_KEY_SPRINT));
                         if (opts.sprint) apply_sprint_layout(true);
                         save();
                     } else if (control_column_enabled(ask.row, kCtlReset)) {
                         const int button = controls[ask.row].button;
                         if (host->reset_binding(button)) {
                             blocked_reset_row = -1;
-                            if (has_toggle(button)) toggle_set(button, false);
+                            if (has_toggle(button)) toggle_set(button, toggle_default(button));
                             opts.pad_layout = detect_pad_layout();
                             save();
                         } else blocked_reset_row = ask.row;

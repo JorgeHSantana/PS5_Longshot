@@ -7,12 +7,15 @@
    camera and every rule that ends it. A is never touched: the player's own A (a roll, talking, opening, picking up) is
    theirs whether Sprint runs or not.
 
-   Toggle off (the default): Link sprints while Sprint's key or button is held.
-   Toggle on: a press starts the sprint, the next press or Link's state ends it. A toggled sprint goes on through jumps,
-   slides, rolls and landings (a roll keeps it, and it goes on when the roll ends) and ends when Link's state is anything
-   else (an attack, an item, swimming, climbing, a cutscene), when ZL is held, or after WAIT_STOP_FRAMES 60 Hz frames
-   standing still (WAIT_START_FRAMES after a press made while standing, before Link has moved), at any frame rate. Opening
-   Insert, Plus or Minus and the focus lost end it too, as they end the buttons' toggles (host/nn_hid.c's reset).
+   Toggle off: Link sprints while Sprint's key or button is held.
+   Toggle on (the default; its rules as Hotoni's sprint mod describes them): a press starts the sprint, the next press or
+   Link's state ends it. A toggled sprint goes on through jumps, slides, rolls and landings (a roll keeps it, and it goes on
+   when the roll ends) and ends when Link's state is anything else (an attack, Z-targeting, an item, talking, swimming,
+   climbing, a ledge, Epona, a cutscene), when ZL is held, or after WAIT_STOP_FRAMES 60 Hz frames standing still
+   (WAIT_START_FRAMES after a press made while standing, before Link has moved), at any frame rate. It is Link's state's to
+   end, not the input's: Insert open and the focus lost hold it as it is (SPRINT_AWAY), the game's pause and its panel too
+   (their screen updates signal that they are open), and a load, which stops Link's update; back, Link has
+   WAIT_START_FRAMES to move again, as after a press. A turn, a U-turn too, keeps it.
 
    A press counts for Sprint only when it begins in gameplay: Link updated within GAMEPLAY_POLLS reads and no event (a
    conversation, a cutscene) running. Link's update goes on during a conversation, where the left stick's press hides the
@@ -31,6 +34,8 @@ extern volatile uint32_t hos_frame_seconds_bits;   /* host/nn_vi.c: the frame's 
 #define BIT_LS (1ull << 4)   /* (host/nn_hid.c's B_LS and B_ZL) */
 #define BIT_ZL (1ull << 8)
 
+enum { SPRINT_BLOCKED = 1, SPRINT_AWAY = 2, SPRINT_PAUSE = 4 };   /* (hos_sprint_input's blocked; host/nn_hid.c's) */
+
 #define DASH_INPUT 0x10u
 #define LINK_CLASS 0x84b6dfc0ull      /* Link's actor class */
 #define ACTOR_MGR 0x84c9e0d0ull       /* the pointer to the actor manager pointer */
@@ -43,12 +48,23 @@ extern volatile uint32_t hos_frame_seconds_bits;   /* host/nn_vi.c: the frame's 
    updates would end the sprint on any short stop at 240 fps (four updates are 17 ms there). */
 #define WAIT_STOP_FRAMES 4.0
 #define WAIT_START_FRAMES 90.0
+/* Link in Walk below this speed across the ground (metres a second) for STILL_WALK_FRAMES 60 Hz frames stands still (then
+   WAIT_STOP_FRAMES more end the sprint): held against a wall, or with a stick resting a little off its centre, Walk never
+   becomes Wait. A run is 4.5 (child) to 5.3, a walk at the Walk key's 45% about 2. A U-turn stands Link still in Walk for
+   about 6 frames before he runs back: a turn keeps the sprint. His position: x, y, z floats at +0x31c in the actor at
+   Link +0x18 (host/oot_state_tap.c's). */
+#define STILL_SPEED 0.5
+#define STILL_WALK_FRAMES 16.0
+/* Allow the game's pause or panel time to open after Plus or Minus. */
+#define PAUSE_OPEN_FRAMES 30.0
+#define LINK_POS 0x31c
 
 /* What Link's state does to a sprint: MOVE and KEEP keep it, WAIT ends it after a few frames, STOP ends it at once. A state
-   not listed stops it too. */
+   not listed stops it too. The ids are the game's state table's (its names in the comments). */
 enum { MOVE, KEEP, WAIT, STOP };
+enum { ID_WALK = 1 };
 static const struct { int32_t id; uint8_t kind; } states[] = {
-    {1, MOVE},     /* Walk (also running) */
+    {ID_WALK, MOVE},  /* Walk (also running; standing still in it is WAIT: state_kind) */
     {13, MOVE},    /* Jump */
     {32, MOVE},    /* Land */
     {33, MOVE},    /* Fall */
@@ -57,6 +73,9 @@ static const struct { int32_t id; uint8_t kind; } states[] = {
     {35, KEEP},    /* Slide */
     {36, KEEP},    /* SlideLand */
     {99, KEEP},    /* Rolling: a roll keeps a toggled sprint, which goes on when it ends */
+    {21, KEEP},    /* TurnAround: a turn keeps it (a U-turn in Walk stands him still a few frames: STILL_WALK_FRAMES) */
+    {22, KEEP},    /* Turn */
+    {188, KEEP},   /* QuickTurn */
     {40, WAIT},    /* Wait */
 };
 
@@ -70,6 +89,10 @@ static volatile int latched;        /* the press now held began in gameplay: Spr
 static volatile int zl_held;        /* ZL (targeting) held at the last read */
 static volatile int polls = GAMEPLAY_POLLS;   /* reads since Link's last update (none yet: not gameplay) */
 static volatile int active;         /* the sprint is on: the dash input goes in */
+static volatile int holding;        /* toggled, Insert open or the focus lost: the sprint held as it is */
+static volatile int pause_pressed;  /* toggled, Plus or Minus pressed since Link's last update */
+static int paused;                 /* hos_sprint_step only: the menu was open at the last update */
+static double pause_wait;          /* hos_sprint_step only: 60 Hz frames left for the menu to open */
 static int moved;                   /* hos_sprint_step only: the sprint has moved since it started */
 static double wait_frames;          /* hos_sprint_step only: 60 Hz frames stood still */
 
@@ -108,31 +131,65 @@ static int event_running(void) {
     return m && rd64(m + 0x68);
 }
 
-static int state_kind(uint64_t link) {
+/* 1 when Link has stood still for STILL_WALK_FRAMES. after: there is no last place to compare with. */
+static int stood_still(uint64_t link, int after) {
+    static float last_x, last_z;
+    static int have;
+    static double still_for;
+    const uint64_t a = rd64(link + 0x18);
+    if (!a || !hos_mem_region(a + LINK_POS, 12)) return have = 0, still_for = 0, 0;
+    const uint32_t bx = G32(a + LINK_POS), bz = G32(a + LINK_POS + 8);
+    float x, z;
+    memcpy(&x, &bx, 4), memcpy(&z, &bz, 4);
+    const double step = frame_step_frames(), reach = STILL_SPEED * step / 60.0;
+    const double dx = (double)x - last_x, dz = (double)z - last_z;
+    still_for = have && !after && dx * dx + dz * dz < reach * reach ? still_for + step : 0;
+    last_x = x, last_z = z, have = 1;
+    return still_for > STILL_WALK_FRAMES;
+}
+
+static volatile int32_t state_id = -1;   /* Link's state at his last update (-1: none read), for the log */
+
+/* A toggled sprint started or ended, and why: one log line each (rare: a press, a stop, another action) */
+static void said(int on, const char *why) {
+    hos_log("input: a toggled sprint %s: %s (Link's state %d)", on ? "starts" : "ends", why, (int)LOAD(state_id));
+}
+
+/* What Link's state does to a sprint this update: Walk without moving is standing (WAIT). */
+static int state_kind(uint64_t link, int after) {
     uint64_t p = rd64(link + 0x18);
     if (p) p = rd64(p + 0x270);
     if (p) p = rd64(p + 0x188);
     if (p) p = rd64(p + 0x1c0);
+    const int still = stood_still(link, after);
+    STORE(state_id, -1);
     if (!p) return STOP;
     int32_t id = rd32(p + 0x28);
     if (id == 0x11a) id = rd32(p + 0x4c);
+    STORE(state_id, id);
     for (size_t i = 0; i < sizeof states / sizeof *states; i++)
-        if (states[i].id == id) return states[i].kind;
+        if (states[i].id == id) return id == ID_WALK && still ? WAIT : states[i].kind;
     return STOP;
 }
 
 /* host/nn_hid.c npad_states, the game's thread: each read of the controllers. buttons: what the game gets; on: the Sprint
    row; down: Sprint's key, gamepad input or a test run's SPRINT held; l3: that gamepad input is the left stick's press;
-   toggle: Sprint's Toggle; reset: a toggled sprint ends (Insert opened, Plus or Minus, the focus lost); blocked: no press
-   is Sprint's or the game's now (Insert open, the ocarina waiting for a note, a test run that keeps the player out).
-   Returns the buttons, with LS while a press of the left stick that began outside gameplay is held. */
+   toggle: Sprint's Toggle; reset: a toggled sprint ends (the row turned off, the bindings laid out again); blocked: 0, or
+   why no press is Sprint's or the game's now: SPRINT_BLOCKED (Insert open, the ocarina waiting for a note, a test run that
+   keeps the player out), which ends a held sprint and not a toggled one, and SPRINT_AWAY (toggled, the player's input
+   does not reach the game: Insert open, the focus lost), which also holds a toggled sprint as it is. Returns the buttons,
+   with LS while a press of the left stick that began outside gameplay is held. And SPRINT_PAUSE: Plus or Minus pressed at
+   this read (the game's pause or its panel opens), which holds a toggled sprint while the game stops under them. */
 uint64_t hos_sprint_input(uint64_t buttons, int on, int down, int l3, int toggle, int reset, int blocked) {
     static int was_down, passing;
+    const int away = (blocked & SPRINT_AWAY) != 0;
+    if ((blocked & SPRINT_PAUSE) && toggle) STORE(pause_pressed, 1);
+    blocked = (blocked & (SPRINT_BLOCKED | SPRINT_AWAY)) != 0;
     down = down != 0;
     if (!on || toggle != LOAD(toggled)) STORE(active, 0), STORE(pressed, 0);
     STORE(enabled, on), STORE(toggled, toggle);
     if (!on) {
-        STORE(latched, 0), STORE(held, 0);
+        STORE(latched, 0), STORE(held, 0), STORE(holding, 0);
         STORE(polls, GAMEPLAY_POLLS);
         was_down = down, passing = 0;
         return buttons;
@@ -152,10 +209,18 @@ uint64_t hos_sprint_input(uint64_t buttons, int on, int down, int l3, int toggle
         STORE(latched, 0);
         passing = 0;
     }
+    /* A toggled sprint is Link's state's to end, not the input's: blocked ends none (the ocarina's note wait is Link's
+       PlayMusic, which does; a test run's input keeps the player's Sprint out, not its own sprint), and Insert open and the
+       focus lost hold it as it is, as the game's pause does (hos_sprint_step). An event (a conversation, a cutscene) is
+       Link's state: it ends it. */
+    const int hold = toggle && away && !event;
     if (blocked || event) {
-        STORE(latched, 0), STORE(active, 0), STORE(pressed, 0);
+        STORE(latched, 0);
+        if (event && toggle && LOAD(active)) said(0, "an event (a conversation, a cutscene)");
+        if (event || !toggle) STORE(active, 0), STORE(pressed, 0);
         if (blocked) passing = 0;
     }
+    STORE(holding, hold);
     was_down = down;
     if (reset) STORE(reset_pending, 1), STORE(pressed, 0);
     STORE(held, down);
@@ -163,27 +228,56 @@ uint64_t hos_sprint_input(uint64_t buttons, int on, int down, int l3, int toggle
     return passing ? buttons | BIT_LS : buttons;
 }
 
-/* The sprint for this update of Link, from his state and Sprint's presses: 1 when it is on. */
-int hos_sprint_step(int kind) {
-    const int press = __atomic_exchange_n(&pressed, 0, __ATOMIC_RELAXED);
+/* The sprint for this update of Link, from his state and Sprint's presses: 1 when it is on. resumed: Link was not updated
+   for a while before this update (a load). menu: the game's pause or panel screen updated. */
+int hos_sprint_step(int kind, int resumed, int menu) {
     int on = LOAD(active);
-    if (__atomic_exchange_n(&reset_pending, 0, __ATOMIC_RELAXED)) on = 0;
-    if (LOAD(zl_held)) kind = STOP;
+    const int was = on;
+    const char *why = NULL;
+    if (__atomic_exchange_n(&reset_pending, 0, __ATOMIC_RELAXED)) on = 0, why = "the row turned off or the controls laid out";
+    if (LOAD(toggled) && LOAD(holding)) {
+        /* Insert open or the focus lost: the sprint as it is, a press kept for later; back, the time a press gives to start
+           moving again, as after a pause or a load, so a player who stopped in the menu is not stopped by it */
+        if (on) moved = 0, wait_frames = 0;
+        if (was && !on && why) said(0, why);
+        STORE(active, on);
+        return on;
+    }
+    /* Screen updates, not Link's position, tell us when the menu is open and when it closes. */
+    if (__atomic_exchange_n(&pause_pressed, 0, __ATOMIC_RELAXED) && !paused && LOAD(toggled) && on)
+        pause_wait = PAUSE_OPEN_FRAMES;
+    if (menu && LOAD(toggled)) {
+        paused = 1, pause_wait = 0, moved = 0, wait_frames = 0;
+        STORE(pressed, 0);
+        STORE(active, on);
+        return on;
+    }
+    if (paused) paused = 0, resumed = 1;
+    if (pause_wait > 0) {
+        pause_wait -= frame_step_frames();
+        if (kind == WAIT) kind = KEEP;
+    }
+    const int press = __atomic_exchange_n(&pressed, 0, __ATOMIC_RELAXED);
+    const int zl = LOAD(zl_held);
+    if (zl) kind = STOP;
     if (!LOAD(enabled)) on = 0;
     else if (!LOAD(toggled)) on = LOAD(held) && LOAD(latched) && kind != STOP;
     else if (press) {
-        if (on) on = 0;
-        else if (kind != STOP) on = 1, moved = kind == MOVE, wait_frames = 0;
+        if (on) on = 0, why = "the next press";
+        else if (kind != STOP) on = 1, moved = kind == MOVE, wait_frames = 0, why = "a press";
     } else if (on) {
-        if (kind == STOP) on = 0;
+        if (resumed) moved = 0, wait_frames = 0;
+        if (kind == STOP) on = 0, why = zl ? "ZL held" : "Link's state, another action";
         else if (kind == WAIT) {
             wait_frames += frame_step_frames();
-            if (wait_frames > (moved ? WAIT_STOP_FRAMES : WAIT_START_FRAMES)) on = 0;
+            if (wait_frames > (moved ? WAIT_STOP_FRAMES : WAIT_START_FRAMES))
+                on = 0, why = moved ? "Link stopped" : "Link did not start moving after the press";
         } else {
             wait_frames = 0;
             moved |= kind == MOVE;
         }
     }
+    if (LOAD(toggled) && on != was && why) said(on, why);
     STORE(active, on);
     return on;
 }
@@ -191,10 +285,13 @@ int hos_sprint_step(int kind) {
 /* (nx2/oot_patches.py) f_804caa80 at 0x804ce798, after its load of Link's input flags into x10 (Link in x19): the flags
    for the sprint's start and keep tests. */
 void hos_sprint_link(Ctx *c) {
+    int hos_oot_menu_sprint_active(void);
     if (!LOAD(enabled)) return;
     if (!is_link(c->x[19])) return;
+    const int resumed = LOAD(polls) >= GAMEPLAY_POLLS;   /* (no update of Link for that many reads: a pause, a load) */
     STORE(polls, 0);
-    if (hos_sprint_step(state_kind(c->x[19]))) c->x[10] |= DASH_INPUT;
+    const int kind = state_kind(c->x[19], resumed);
+    if (hos_sprint_step(kind, resumed, hos_oot_menu_sprint_active())) c->x[10] |= DASH_INPUT;
 }
 
 /* (nx2/oot_patches.py) f_80c225d0 at 0x80c27f3c, after its load of the same flags' low byte into x8 (Link in x19): the

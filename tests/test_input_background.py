@@ -75,6 +75,7 @@ def main():
     api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
     constants = block(hid, "enum { B_A") + ";\n" + block(api, "enum { HOS_SW_A") + ";\n"
     constants += block(hid, "enum { B_SPRINT") + ";\n"   # (a script's SPRINT: Sprint's key)
+    constants += block(hid, "enum { SPRINT_BLOCKED") + ";\n"   # (why Sprint takes no press: host/oot_sprint.c's)
     constants += block(api, "enum { HOS_PAD_SOUTH") + ";\n"   # (Sprint's gamepad input)
     constants += block(api, "enum { HOS_KEY_MOVE_UP") + ";\n"   # (the keys-only controls, and Sprint)
     constants += block(api, "enum { HOS_OPT_CHEAT_HEARTS") + ";\n"

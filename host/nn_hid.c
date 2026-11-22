@@ -590,7 +590,7 @@ static _Thread_local int sprint_frame, sprint_toggle_frame, sprint_excluded, inp
 static int pad_bind[HOS_KEY_N][2];   /* (-1 for the keys-only controls, !has_pad) */
 static volatile LONG sprint_auto;
 /* Sprint and its bindings are read together under input_bind_lock. */
-static volatile LONG sprint_on, sprint_toggle_mode;
+static volatile LONG sprint_on, sprint_toggle_mode = 1;   /* (the Toggle on by default: the menu publishes the saved one) */
 static volatile LONG key_bind[HOS_KEY_N][2];   /* (the menu changes them as the game reads them) */
 static _Thread_local int input_snapshot_active;
 static _Thread_local int input_keys[HOS_KEY_N][2], input_pads[HOS_KEY_N][2];
@@ -1218,6 +1218,7 @@ static int pad_sprint_down(void) {
    runs, and never touches A. npad_states hands it Sprint's input each read; it hands back the buttons, with LS while a
    press of the left stick that is not Sprint's (a conversation's, which hides the text box) is held. */
 uint64_t hos_sprint_input(uint64_t buttons, int on, int down, int l3, int toggle, int reset, int blocked);
+enum { SPRINT_BLOCKED = 1, SPRINT_AWAY = 2, SPRINT_PAUSE = 4 };   /* (its blocked: host/oot_sprint.c's) */
 
 uint64_t hos_flight_input(void) {
     return __atomic_load_n(&flight_input, __ATOMIC_RELAXED);
@@ -1618,8 +1619,9 @@ static void npad_states(Ctx *c) {
         const int menu_open = rx_option(1, 0);
         const uint64_t enabled = (uint32_t)rx_option(HOS_OPT_HOLD_TOGGLE, 0) &
                                  ~((1ULL << B_PLUS) | (1ULL << B_MINUS));
+        const int pads_behind = pads_in_background(getenv("HOS_INPUT_BACKGROUND"), rx_option(4, 0));
         const int reset = InterlockedExchange(&toggle_reset, 0) || menu_open || (enabled && !(sprint_excluded ? game_in_front() : input_in_front) &&
-                          !pads_in_background(getenv("HOS_INPUT_BACKGROUND"), rx_option(4, 0)));
+                          !pads_behind);
         /* Pause/map must release shield/aim before the game's menu reads input. */
         const uint64_t pause = buttons & ~toggles.previous & ((1ULL << B_PLUS) | (1ULL << B_MINUS));
         buttons = hold_toggle_apply(&toggles, buttons, enabled, reset || pause) | taps;
@@ -1643,16 +1645,19 @@ static void npad_states(Ctx *c) {
         __atomic_store_n(&move_stick_held, steered, __ATOMIC_RELAXED);
         /* Sprint (the Controls page's line; the Controls tab's Sprint row on gives it Shift and the left stick's press):
            host/oot_sprint.c, the game's dash input while Sprint's key or button is held, or from a press to the next with
-           its Toggle (the Controls page). The Toggle's sprint ends as the buttons' toggles are (opening Insert, Plus or
-           Minus, the focus lost). The row off (the default): its key and button do nothing */
+           its Toggle (the Controls page, on by default). The Toggle's sprint is Link's state's to end, not the buttons'
+           toggles': opening Insert or the game's pause and the focus lost hold it as it is (away), and only the row turned
+           off or the bindings laid out again end it here. The row off (the default): its key and button do nothing */
         const int sprint_toggle = sprint_enabled && sprint_toggle_frame;
         const int sprint_front = sprint_excluded ? game_in_front() : input_in_front;
-        const int sprint_reset = InterlockedExchange(&sprint_reset_pending, 0) || reset || pause != 0 ||
-                                 (sprint_toggle && !sprint_front);
+        const int sprint_reset = InterlockedExchange(&sprint_reset_pending, 0);
+        /* (away: the player's input does not reach the game, Insert open or the focus lost with no pads behind other
+           windows; a test run's own input, which keeps the player out, reaches it behind them) */
+        const int sprint_away = menu_open || (!sprint_excluded && !sprint_front && !pads_behind);
         const int sprint_down = (sprint_enabled ? sprint_now : 0) | (sprint_enabled && synthetic_sprint ? SPRINT_KEY : 0);
         /* (the ocarina's note wait, as oc_notes left it this read: Sprint holds nothing there) */
-        const int sprint_blocked = menu_open || hos_oc_wait == 1 || (sprint_excluded && !synthetic_sprint) ||
-                                   (sprint_toggle && !sprint_front);
+        const int sprint_blocked = (menu_open || hos_oc_wait == 1 || (sprint_excluded && !synthetic_sprint) ? SPRINT_BLOCKED : 0) |
+                                   (sprint_toggle && sprint_away ? SPRINT_AWAY : 0) | (pause ? SPRINT_PAUSE : 0);
         buttons = hos_sprint_input(buttons, sprint_enabled, sprint_down & (SPRINT_KEY | SPRINT_PAD),
                                    (sprint_down & SPRINT_L3) && !(sprint_down & SPRINT_KEY), sprint_toggle, sprint_reset,
                                    sprint_blocked);

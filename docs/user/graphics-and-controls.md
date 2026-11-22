@@ -113,9 +113,9 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's; with HDR set to Native). Compatible DLSS/DLAA, FSR 4/native AA and shared-chain FSR 3.1 upscaling run automatically; `RX_VK_PSYCHOV35_DLSS=0` disables that compatibility route. Off and the spatial/FXAA TAAU replacement support PsychoV35 directly. FSR 3.1 FG remains separately opt-in and 2x only; legacy own-input FSR upscaling remains unsupported | Vanilla |
 | | Colour vision correction | Off, Protan (red-green), Deutan (red-green), Tritan (blue-yellow). Changes apply immediately. | Off |
 | | ReShade preset | Applies a built-in or imported preset to the gameplay scene before the HUD. Includes twenty Clarity looks for Zelda, depth effects and an HDR preset. See [ReShade FX presets](reshade-presets.md). | Off |
-| | Compare ReShade Preset | Opens a compact toolbar to toggle the effect and browse presets. User adds a row for imported INI files. | |
+| | Compare ReShade Preset | Opens a compact toolbar to toggle the effect and browse presets. User adds a row for imported INI files. | — |
 | | User preset file | A ReShade INI from the profile's `reshade/presets` folder (with User selected). | No preset |
-| | Rescan ReShade presets | Refreshes the user preset list and reloads the selected file. | |
+| | Rescan ReShade presets | Refreshes the user preset list and reloads the selected file (with User selected). | — |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
 | | Grass distance | Game's, 2x, 3x, 4x: how far the short grass blades reach | Game's |
 | | Simulated turf | Opens the area's six-row simulated-turf page: Use global multipliers; Fade start; Turf density; Minimum blades; Far power; Reset current area. With global multipliers on, the four value rows become multipliers of each area's installed profile. Fade start and Minimum blades can both be 0 for no simulated turf. Changes apply at once and save per area in `sim_turf_settings.ini`. | Each area's installed profile |
@@ -164,7 +164,7 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | Motion | Opens the Motion page: Motion controls (Off, On; On), Motion sensitivity X (10% to 600%) and Y (10% to 300%, in steps of 10; 100%), Invert motion X and Y (Off, On; Off), Motion deadzone (Low, Standard, High; Standard) | |
 | | Walk mode | Hold, Toggle | Hold |
 | | Walk speed | 15% to 90%, in steps of 5 | 45% |
-| | Sprint | Off, On (by default, Link runs while you move and hold <kbd>Shift</kbd> or the left stick pressed in, without rolling; the Controls page's Toggle cell changes this to a press; turning Sprint on moves Shift and the left stick's press to Sprint) | Off |
+| | Sprint | Off, On (a press of <kbd>Shift</kbd> or the left stick pressed in makes Link run, without rolling, until he stops or does something else; the Controls page's Toggle cell, on by default, turns off to sprint only while you hold it; turning Sprint on moves Shift and the left stick's press to Sprint) | Off |
 | | Controls | Opens the Controls page | |
 | | Menu shortcut | Insert or F1; F1 only; Insert, F1 or Esc | Insert, F1 or Esc |
 | | Controller menu button | None, Home, Back left (GL), Back right (GR) | Home |
@@ -313,9 +313,13 @@ helper asks you to.
 - **Walk mode** and **Walk speed:** while the Walk key is held (<kbd>Caps Lock</kbd> unless you change it), the movement
   keys tilt the stick only Walk speed of the way. With Toggle, one press walks and the next runs.
 - **Sprint** (Controls tab, off by default): Link runs the game's own run, the one after a roll, without the roll.
-  By default, hold <kbd>Shift</kbd> while you move, or on a controller hold the left stick pressed in; let go and he moves
-  as before. With Sprint On, its **Toggle** cell on the Controls page instead starts it with a press; the next press ends
-  it, and so does Link stopping, attacking, using an item, swimming or climbing, or holding ZL. A roll or a jump keeps it.
+  By default (its **Toggle** cell on the Controls page on), press <kbd>Shift</kbd>, or on a controller press the left
+  stick in, and run: he sprints until he stops (a few frames standing still, or a second and a half after a press made
+  standing still, to start moving), or until he attacks, targets with ZL, uses an item, talks, swims, climbs or rides, or
+  you press it again. A roll, a jump or a turn, a U-turn too, keeps it. Opening Insert or the game's pause, or
+  switching to another window, does not end it: back in the game, he has the same second and a half to move on. With
+  the Toggle cell off, hold <kbd>Shift</kbd> or the left stick pressed in while you move instead; let go and he moves as
+  before.
   Sprint never presses A: he runs past people, signs and pots without talking, reading or picking up, and A rolls or acts
   as usual, sprinting or not. In a conversation or a cutscene the left stick's press is the game's again (it hides the
   text box) and starts no sprint. Sprint is disabled while the instrument is waiting for a note. Turning the row on moves <kbd>Shift</kbd> from B
@@ -357,13 +361,14 @@ over any gameplay action on the same key or button.
 <kbd>Enter</kbd> (or the bottom face button), then the new button or key. <kbd>Esc</kbd> cancels, <kbd>Delete</kbd>
 clears it. With a controller, use the face button shown next to **Clear**. Use the curved arrow at the end of a row
 to restore that control's default gamepad and keyboard
-bindings and turn off its Toggle. The arrow is disabled when the row already matches its defaults. Up and Down skip
+bindings and its Toggle's default (on for Sprint, off for the buttons). The arrow is disabled when the row already
+matches its defaults. Up and Down skip
 unavailable Toggle cells and reset buttons. If another control already uses a required input, free it
 first. **Reset to defaults** at the bottom
 restores all controls together. Both resets ask for confirmation. If a new binding is already in use, the menu names
 the input and the affected control. Confirm to remove the old assignment and apply the new one. The **Toggle** column
-makes a Switch button stay held from one press to the next, and Sprint run from one press to
-the next instead of while held, when the Controls tab's Sprint setting is On. The five note rows (the
+makes a Switch button stay held from one press to the next (off by default), and Sprint run from a press until
+Link stops or the next press instead of while held (on by default), when the Controls tab's Sprint setting is On. The five note rows (the
 instrument's notes) are unset until you bind them to inputs of your own.
 
 **Mouse in the game's menus (Windows):** the title screen, the pause menu, the map and the save dialogs free the mouse.
@@ -407,7 +412,7 @@ keys only, the left stick's and the camera's directions and walking: `move_up` `
 `cam_up` `cam_down` `cam_left` `cam_right` `walk`; and the five notes, which also take a `pad_` line:
 `note_l` `note_r` `note_a` `note_y` `note_x`; and `sprint`, which takes both lines (none by default; the Sprint row
 gives it Shift and the left stick's press). A button the file leaves out keeps its default. `toggle_<button>=1` turns
-that button's Toggle on (not for `plus`, `minus`, the stick directions, `walk` or the notes; `toggle_sprint=1` for Sprint).
+that button's Toggle on (not for `plus`, `minus`, the stick directions, `walk` or the notes; `toggle_sprint=0` holds Sprint instead, on by default).
 
 </details>
 
