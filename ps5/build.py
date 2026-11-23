@@ -87,6 +87,13 @@ def tree_digest(*dirs, ext=(".h", ".hpp", ".inc")):
     return h.hexdigest()
 
 
+def uses_rtti(path):
+    """Whether a renderer source classifies a C++ exception by its type (gpu/vk/cxx_escape.h: dynamic_cast, typeid).
+    The console's compiler has RTTI off unless asked; the exception types' own type information is the C++ library's"""
+    text = open(path, encoding="utf-8", errors="replace").read()
+    return '"cxx_escape.h"' in text or '"renderer_guard.h"' in text
+
+
 def jobs_for(rt64, gen_dir):
     """(source, object, flags, header digest) of everything the title links"""
     out = []
@@ -163,19 +170,23 @@ def jobs_for(rt64, gen_dir):
     # (the start-up screen's logo, gen/longshot_logo.h, is in vk_imgui.cpp's key: a new picture compiles it again)
     logo_h = os.path.join(gen_dir, "longshot_logo.h")
     logo_digest = hashlib.sha1(open(logo_h, "rb").read()).hexdigest() if os.path.exists(logo_h) else ""
+    # (the files that draw with Dear ImGui, as nx2/build.py's imgui_users; the crash window is not built here)
+    IMGUI_USERS = ("vk_imgui.cpp", "vk_menu.cpp", "reshade.cpp")
     for s in upstream.vk_sources():
-        if os.path.basename(s) == "vk_ngx_msvc_rt.cpp":
+        # (vk_crash_window.cpp: the crash helper's window on a PC, drawn through SDL; the console has no such window)
+        if os.path.basename(s) in ("vk_ngx_msvc_rt.cpp", "vk_crash_window.cpp"):
             continue
         rel = os.path.relpath(s, os.path.join(ROOT, "gpu")).replace(os.sep, "_")[:-4]
         lib = os.path.relpath(s, VK).split(os.sep)[0] in ("eden", "sirit")
         fl = vfl + ([shader_stamp] if os.path.basename(s) == "vk_shader.cpp" else []) + \
             ([stamp] if os.path.basename(s) == "vk_menu.cpp" else []) + \
             (lsfg_fl if os.path.basename(s) == "vk_framegen.cpp" else []) + \
-            (imgui_fl if os.path.basename(s) in ("vk_imgui.cpp", "vk_menu.cpp") else []) + \
+            (imgui_fl if os.path.basename(s) in IMGUI_USERS else []) + \
+            (["-frtti"] if uses_rtti(s) else []) + \
             (["-DHOOKSHOT_MIHAWKGEN", "-I" + os.path.join(MIHAWKGEN, "framegen", "include")]
              if HAS_MIHAWKGEN and os.path.basename(s) == "vk_framegen.cpp" else [])
         out.append((s, os.path.join(OUT, "obj", "vk_" + rel + ".o"), fl,
-                    lib_digest if lib else vk_digest + (imgui_digest if os.path.basename(s) in ("vk_imgui.cpp", "vk_menu.cpp") else "") +
+                    lib_digest if lib else vk_digest + (imgui_digest if os.path.basename(s) in IMGUI_USERS else "") +
                     (logo_digest if os.path.basename(s) == "vk_imgui.cpp" else "")))
     # (Lossless Scaling's frame generation from the player's own Lossless.dll: third_party/lsfg, PS5SX2's port as it is, and
     # gpu/vk/lsfg, its three files changed for Longshot, found first: their names are the same)
