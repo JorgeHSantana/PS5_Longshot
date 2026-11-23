@@ -538,8 +538,9 @@ struct DevicePolicy {
     unsigned texture_threads = 1, texture_gather_threads = 1;
     // The preparation's workers in play (policy_rule::program_workers_in_play). No switch. Read (vk_draw.cpp prepare_run)
     unsigned program_workers_in_play = 2;
-    // Threaded rendering's Auto by the cores the process may use, where the mode is safe on this run (threaded_rendering.h):
-    // the render thread from 4 cores, the recorder thread too from 6. Site (vk_menu.cpp), step 7
+    // Threaded rendering's Auto by the cores the process may use alone (threaded_rendering.h auto_picks): the render thread
+    // and the recorder thread from 4 cores. The menu still turns Auto off where the mode is not safe on the run (no mirrors,
+    // the capture off, ...), which these flags do not say. Site (vk_menu.cpp), step 7
     bool threaded_auto_render = false, threaded_auto_recorder = false;
     // Linux with 20 GB of RAM or less: the shader modules are let go after the precompile (1.5-1.8 GB); a memory shortfall
     // then does the same on any PC, at the site. RX_VK_DROP_MODULES, RX_VK_KEEP_MODULES. Site (vk_draw.cpp), step 2

@@ -83,7 +83,7 @@ AMD_OLD = "(AMD proprietary shader compiler)"
 # The facts' columns, in the fixture's struct D's order:
 #   vendor, device, driver id, driver version, device type, driverInfo, the GPU's name, windows, SteamDeck=1,
 #   VRAM heap MB, allowed at the start MB, RAM MB, CPUs, usable CPUs, the physical cores among those (SMT siblings once:
-#   Threaded rendering's Auto counts by them, the render thread from 4 and the recorder thread too from 6),
+#   Threaded rendering's Auto counts by them, the render thread and the recorder thread from 4),
 #   mesh shaders, buffer device addresses, float add, cooperative matrices, NV checkpoints, 16-bit stage inputs,
 #   dynamic indexing of storage buffer arrays, lanes, most lanes, the stages pinned to 32
 # num: the numbers in NUM_NAMES' order:
@@ -113,7 +113,7 @@ PCS = [
                 4096, 3900, 16000, 8, 8, 4, 0, 1, 0, 0, 0, 1, 1, 32, 32, 0),
          on="acquire_ahead inline_deku_web_loads dma_buf_imports allowance_at_count_rule mirrors split_ub_flush "
             "small_vram_textures astc_bc_all room_in_blocks_rule squeeze_damped dlss_cnn threaded_auto_render "
-            "drop_modules_small_ram",
+            "threaded_auto_recorder drop_modules_small_ram",
          num=(0, 0, 0, 1, 85, 4, 2200, 1365, 325, 243, 487, 32, 128, 10, 32, 16, 97, 1, 2, 2, 4, 4, 2)),
     # (Navi 22: task + mesh draws on the compute fallback, and with it the retry without the optimizer)
     dict(name="RX 6700 XT, AMD's Windows driver (RDNA 2 compiler)",
@@ -174,12 +174,12 @@ PCS = [
                 8192, 8000, 16000, 8, 8, 4, 0, 1, 1, 0, 0, 0, 1, 64, 64, 0),
          on="bc_small_runs acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant dma_buf_imports allowance_at_count_rule mirrors "
             "split_ub_flush warp64 mma_unroll_try fsr4_tune astc_bc_all room_in_blocks_rule squeeze_damped "
-            "threaded_auto_render drop_modules_small_ram",
+            "threaded_auto_render threaded_auto_recorder drop_modules_small_ram",
          num=(0, 2, 50000, 1, 85, 4, 4778, 2048, 666, 500, 1000, -1, 256, 24, 32, 16, 97, 1, 2, 2, 4, 4, 2)),
     # (corrected: batched submits are on. Vega is GFX9, not GCN 1-4: it has 16-bit stage inputs, which is the one
     # definition of GCN (DeviceFacts::radv_gcn); batch_on's own, no stage pinned to 32 lanes and 64-lane waves, took it
     # for GCN and left them off. Nothing was measured on Vega either way. Its CPU here has 8 cores without SMT: Threaded
-    # rendering's Auto gives it both threads, where 8 threads of 4 cores (the RX 580's, the same count) get the render thread)
+    # rendering's Auto gives it both threads, as it does 8 threads of 4 cores (the RX 580's, the same count))
     dict(name="RX Vega 64 (8 GB), RADV on GFX9",
          facts=(0x1002, 0x687F, "MESA_RADV", 0, "DISCRETE_GPU", "Mesa 26.2.5", "AMD Radeon RX Vega (RADV VEGA10)", 0, 0,
                 8176, 7900, 16000, 8, 8, 8, 0, 1, 1, 0, 0, 1, 1, 64, 64, 0),
@@ -190,13 +190,13 @@ PCS = [
     # (no mirrors, so 16 MB chunks; the mirrors' budget is worked out all the same, by the heap. Uniform updates are still
     # written at each part's end and no snapshot is taken, which the study doubts for every GPU without mirrors.
     # Corrected: fault_gate_serial is off on RADV. Its 4 cores and 8 threads: Threaded rendering's Auto by the 4 cores is the
-    # render thread alone, which the menu then turns off all the same, as the pools have no mirrors)
+    # render thread and the recorder thread, which the menu then turns off all the same, as the pools have no mirrors)
     dict(name="Steam Deck (LCD), RADV",
          facts=(0x1002, 0x163F, "MESA_RADV", 0, "INTEGRATED_GPU", "Mesa 25.1.0", "AMD Custom GPU 0405 (RADV VANGOGH)", 0, 1,
                 7168, 6800, 14800, 8, 8, 4, 1, 1, 1, 0, 0, 1, 1, 64, 64, 0xFF),
          on="bc_small_runs acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant dma_buf_imports allowance_at_count_rule "
             "split_ub_flush warp64 batch_submits mma_unroll_try fsr4_tune gpu_clock_peak readback_late_newest small_vram_textures astc_bc_all "
-            "squeeze_damped linux_hold_caps_budget threaded_auto_render drop_modules_small_ram",
+            "squeeze_damped linux_hold_caps_budget threaded_auto_render threaded_auto_recorder drop_modules_small_ram",
          num=(0, 2, 0, 1, 85, 16, 2560, 1792, 566, 425, 512, -1, 256, 0, 32, 16, 90, 1, 2, 2, 4, 4, 2)),
     # (corrected, twice: mesh_mode is Automatic (0), so its own mesh shaders, as the deadlock of issue 2245 is RADV's and
     # the rule now asks for RADV; "AMD off Windows" gave AMDVLK Compute. And fault_gate_serial is off, as on RADV.
@@ -254,7 +254,7 @@ PCS = [
                 11850, 10000, 15800, 8, 8, 4, 0, 1, 1, 0, 0, 1, 1, 32, 32, 0xFF),
          on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant split_before_draw dma_buf_imports "
             "allowance_at_count_rule ub_snapshot global_table_loop small_vram_textures astc_bc_all linux_hold_caps_budget "
-            "threaded_auto_render drop_modules_small_ram native_zstd_keep_core",
+            "threaded_auto_render threaded_auto_recorder drop_modules_small_ram native_zstd_keep_core",
          num=(0, 0, 20000, 1, 85, 16, 2560, 2048, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 2, 2, 4, 4, 2)),
     # (neither discrete nor integrated: no mirrors, yet a dedicated card's budgets, blocks at the start and 97% line.
     # The study doubts it: the two tests are not a partition)
@@ -288,14 +288,14 @@ PCS = [
             "astc_bc_all room_in_blocks_rule squeeze_damped threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 0, 4, 4769, 2044, 614, 461, 922, -1, 256, 12, 32, 16, 97, 1, 4, 4, 6, 6, 3)),
     # (ASTC on the GPU in bounded chunks: 4,096 MB cap for 32 GB RAM; RX_VK_ASTC_CPU=1 raises it to 7,162 MB. The process may
-    # use 8 of the PC's 24 threads: the workers go by the 24, Threaded rendering's Auto by the 4 cores of those 8 (the render
-    # thread alone), which the study names as two ways of counting)
+    # use 8 of the PC's 24 threads: the workers go by the 24, Threaded rendering's Auto by the 4 cores of those 8 (both
+    # threads), which the study names as two ways of counting)
     dict(name="Ryzen 9 7900X's graphics (32 GB), AMD's Windows driver, on 8 of 24 threads",
          facts=(0x1002, 0x164E, "AMD_PROPRIETARY", 0x800161, "INTEGRATED_GPU", "26.10.1 " + AMD_OLD, "AMD Radeon(TM) Graphics", 1, 0,
                 16300, 10232, 32600, 24, 8, 4, 1, 1, 0, 0, 0, 1, 1, 64, 64, 0xFF),
          on="bc_small_runs acquire_ahead fetch_bounds networks_left_out nan_bits mesh_fallback_strict_fmul bc_copy_per_layer gather_offset frag_shuffle_fallback position_invariant mesh_no_optimizer "
             "amd_cloth_no_optimizer fault_gate_serial allowance_at_count_rule split_ub_flush warp64 fsr4_tune "
-            "astc_bc_all threaded_auto_render",
+            "astc_bc_all threaded_auto_render threaded_auto_recorder",
          num=(0, 0, 0, 2, 0, 16, 4096, 3072, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 6, 4, 8, 6, 4)),
     # (Krackan Point gfx1152: native mesh and native float atomics from 0x8001a0 on Windows)
     dict(name="Radeon 860M (0x1002:0x1114), AMD's Windows driver 26.10.1 (LLPC)",

@@ -20,7 +20,7 @@ in [switches.md](switches.md).
 |---|---|---|
 | The game's threads | the game's own (main thread, Presentation Thread, job threads) | Record NVN command streams into guest memory. At each submit the host takes the capture of the pages written since the last one and hands the render thread a job (`submit_q`); a present is a job too, handed over after the main thread's CPU signal for its frame |
 | Render thread | `mkw_vk replay` (`replay_thread_main`) | Runs the jobs in hand-over order: the memory work (mirror syncs, write-backs), the replay of each command buffer into recordings, every queue submit (with the recorder thread, each part's submit decided here and made there), the frame's copy into the window. Off (Threaded rendering Off, or Auto under 4 cores): the replay runs on the game's submitting thread instead |
-| Recorder thread | `mkw_vk recorder` (`vk_recorder.h` `Recorder::loop`) | Makes the driver's `vkCmd*` calls the render thread packed into its ring, in order, then each part's two `vkEndCommandBuffer` and its `vkQueueSubmit2`, while the render thread goes on into the next part ([the hand-off by part](#the-hand-off-by-part)). Threaded rendering On, or Auto from 6 cores (`RX_VK_RECORDER`) |
+| Recorder thread | `mkw_vk recorder` (`vk_recorder.h` `Recorder::loop`) | Makes the driver's `vkCmd*` calls the render thread packed into its ring, in order, then each part's two `vkEndCommandBuffer` and its `vkQueueSubmit2`, while the render thread goes on into the next part ([the hand-off by part](#the-hand-off-by-part)). Threaded rendering On, or Auto from 4 cores where its mode is safe (`RX_VK_RECORDER`) |
 | Presenter | `mkw_vk presenter` (`presenter_loop`) | Waits for the copy's fence, then makes the present. On every PC |
 
 Not covered here: frame interpolation's display thread (`gpu/vk/vk_framegen.cpp` `display_main`, which makes its own
@@ -29,8 +29,9 @@ the texture threads.
 
 ## Who records
 
-The render thread replays every command buffer; from 6 cores (`threaded::kAutoRecorderCores`) the recorder thread makes
-the driver's calls for it.
+The render thread replays every command buffer; from 4 cores (`threaded::kAutoCores`), where Auto's mode is safe (the
+buffer pools mirrored, as a discrete GPU's are by default; the capture on: `vk_menu.cpp` `threaded_choice`), the recorder thread makes the driver's
+calls for it.
 
 - **The recorder thread** (`RX_VK_RECORDER=thread`) takes the replay's Vulkan calls as packets through a ring and makes
   them in order. It was removed on 2026-11-19 and brought back the same day: without it the render thread makes every one
@@ -193,8 +194,9 @@ test: `tests/test_cxx_escape.py`.
 
 The log lines, in the order they come:
 
-- `vk: Threaded rendering: ...` at the start: the row, Auto's tier, and the cores and logical processors it counted
-  (`Auto: the render thread (...)`).
+- `vk: Threaded rendering: ...` at the start: the row, Auto's tier and why, and the cores and logical processors it
+  counted, but for a run where the mode is not safe (`Auto: on, the render thread and the recorder thread (4 cores of 8
+  logical processors)`, `Auto: off (2 cores of 4 logical processors; ...)`, `Auto: off (not safe on this run: ...)`).
 - `vk: presenter thread: each present made on a thread of its own once its copy is done`, and `vk: the presenter thread
   waits for its presents to be shown: yes (VK_KHR_present_wait)` or `no`. Every 600 presents: `vk: presenter thread: the
   copy's fence X ms, the present Y ms`, with how long after it the frame was shown under FIFO.
