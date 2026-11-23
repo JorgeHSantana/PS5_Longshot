@@ -316,6 +316,7 @@ The memory budget and its `vk: budget:` lines are in [architecture](architecture
 |---|---|
 | `RX_VK_MOVIE_UPSCALE=linear` | The movies' neural upscale always replaced by a linear one (by default only where the networks can't run or measure too slow). `RX_VK_NETWORK_KEEP=all` wins over it |
 | `HOS_VIDEO_NO_CATCHUP=1` | Never skip pictures that are behind the movie's sound (by default they are, decoding ahead at most a picture's time in a frame, and not while the decoder is slower than the movie) |
+| `HOS_VIDEO_NO_HOLD=1` | Hand a movie's next picture out whenever the game asks for it, even when it is ahead of the movie's clock (by default one more than 25 ms early waits, and the last picture is shown again: issue 1964) |
 | `HOS_VIDEO_ACQUIRE_TRIES=1` | Wait for a picture by 50 sleeps of 2 ms (about 250 ms, as sleeps overrun) instead of about 100 ms by the clock. Either way there is no wait after a stop or flush with nothing submitted since |
 | `HOS_DAV1D_THREADS=<n>` | The decoder's threads (one per logical core; 2 with 4 or fewer) |
 | `HOS_VIDEO_LOG=1` | `video:` lines: how long each picture took to decode |
