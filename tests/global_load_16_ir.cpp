@@ -842,13 +842,19 @@ static void check_table_loop() {
 // (mma_layout.h graphics_table_loads, RX_VK_GP_TABLE) a stage's global loads through the guest page table: 0 searches the bound
 // storage buffer, 1 reads the table alone (no search left in the load helpers), 2 keeps the search and records a load the two read
 // otherwise in the miss buffer (c0+0xff0). In every stage that takes it, each OpSelectionMerge right before its branch: the check's
-// condition once came between them and RADV crashed compiling those modules. CI validates every module written
+// condition once came between them and RADV crashed compiling those modules. Native task and mesh stages too, whose load helpers
+// are inlined at every load (#994): there the table's address comes in the push block, the member at GUEST_PAGES_PUSH_OFFSET. CI
+// validates every module written
 static void check_table_loads(Stage stage, int mode, const char* name) {
     ObjectPool<IR::Inst> inst_pool;
     IR::Block block{inst_pool};
     IR::Program program;
     program.stage = stage;
     program.workgroup_size = {1, 1, 1};
+    program.output_vertices = stage == Stage::Mesh ? 1 : 0;
+    program.mesh.max_vertices = stage == Stage::Mesh ? 1 : 0;
+    program.mesh.max_primitives = stage == Stage::Mesh ? 1 : 0;
+    program.mesh.payload_words = stage == Stage::Mesh || stage == Stage::Task ? 1 : 0;
     program.blocks.push_back(&block);
     program.post_order_blocks.push_back(&block);
     IR::AbstractSyntaxNode node{};
@@ -882,9 +888,13 @@ static void check_table_loads(Stage stage, int mode, const char* name) {
     std::map<u32, std::pair<bool, bool>> holds;   // (function: a buffer search (OpArrayLength), a table read (OpConvertUToPtr))
     std::vector<u32> called;
     bool record = false;
+    bool pages_member = false;   // (a push block member at GUEST_PAGES_PUSH_OFFSET: the table's address)
     u32 current = 0;
     for (size_t i = 0; i < module.instructions.size(); i++) {
         const auto& inst = module.instructions[i];
+        if (inst.op == spv::Op::OpMemberDecorate && inst.words.size() >= 4 && inst.words[2] == spv::DecorationOffset &&
+            inst.words[3] == Shader::Backend::SPIRV::GUEST_PAGES_PUSH_OFFSET)
+            pages_member = true;
         if (inst.op == spv::Op::OpFunction) current = inst.words[1];
         if (inst.op == spv::Op::OpFunctionEnd) current = 0;
         if (inst.op == spv::Op::OpArrayLength && current) holds[current].first = true;
@@ -904,6 +914,7 @@ static void check_table_loads(Stage stage, int mode, const char* name) {
         if (mode == 2 && !table) fail("RX_VK_GP_TABLE=2: a load helper does not read the table to compare");
     }
     if (mode == 2 && !record) fail("RX_VK_GP_TABLE=2: no load that differs is recorded");
+    if (mode != 0 && !pages_member) fail("the push block has no member for the page table's address");
     std::printf("PASS: %s\n", name);
 }
 
@@ -950,7 +961,8 @@ int main(int argc, char** argv) {
     check_vertex_load_controls(true, "vertex-global-load-inline128");
     check_table_loop();
     for (const auto& [stage, label] : {std::pair{Stage::VertexB, "vertex"}, std::pair{Stage::Fragment, "fragment"},
-                                       std::pair{Stage::Compute, "compute"}})
+                                       std::pair{Stage::Compute, "compute"}, std::pair{Stage::Task, "task"},
+                                       std::pair{Stage::Mesh, "mesh"}})
         for (int mode = 0; mode <= 2; mode++)
             check_table_loads(stage, mode, (std::string("table-loads-") + label + "-" + std::to_string(mode)).c_str());
 }
