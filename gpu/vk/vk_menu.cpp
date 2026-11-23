@@ -4383,8 +4383,10 @@ int menu_vsync() { static const int run = env_on("RX_VK_FIFO") ? 1 : env_on("RX_
 /// logical count where the cores cannot be read) and, for Auto, whether the mode is safe on this run. Known at the start and
 /// read here: the capture off (RX_VK_CAPTURE=0: a replay behind the game is right only from the capture),
 /// RX_VK_LOW_SPEC, a frame dump (RX_VK_DUMP), a benchmark replay (RX_VK_BENCH), and buffer pools with no mirrors at all
-/// (pools_mirrored: RX_VK_MIRROR=0, an integrated GPU, GCN), asked last and only when Auto would otherwise pick the threads,
-/// since it reads the device. Not known at the start, so not here: one pool refused its mirror or over the
+/// (pools_mirrored: an integrated GPU where !f.discrete(), or RX_VK_MIRROR=0), asked last and only when Auto would otherwise
+/// pick the threads, since it reads the device. When only mirrors are absent, without_mirrors(c, cores) keeps the recorder
+/// thread alone at kAutoRecorderOnlyCores (6) or more physical cores while leaving the render thread off, and turns both off
+/// below that threshold. Not known at the start, so not here: one pool refused its mirror or over the
 /// mirrors' budget while the game runs (that needs the run-time fallback, which is not written). On is the player's word:
 /// nothing is checked for it. Each reader takes its half: menu_render_thread, menu_recorder_thread
 static const threaded::Choice& threaded_choice() {
@@ -4398,7 +4400,7 @@ static const threaded::Choice& threaded_choice() {
                              getenv("RX_VK_BENCH") ? "RX_VK_BENCH" : nullptr;
         threaded::Choice c = threaded::choose(opts.threaded_rendering, cores, unsafe != nullptr);
         if (threaded::auto_picked(c) && !pools_mirrored()) {
-            c = threaded::Choice{false, false, threaded::Why::AutoUnsafe};
+            c = threaded::without_mirrors(c, cores);
             unsafe = "the buffer pools have no mirrors";
         }
         char line[256];
