@@ -167,8 +167,8 @@ screen, so a screenshot or a stream says which change it is (default: the job's 
 
 | Mode | For | Runs beside |
 |---|---|---|
-| `build` | `make_game.py`, `dev.py packs base` / `pack` | 2 at once; never a timed run |
-| `light` | Game-free checks, renderer-only builds, copies | 4 at once |
+| `build` | `make_game.py`, `dev.py packs base` / `pack`, the test suites (`mise run test`, `tests/run_all.py`) and any compile-and-run check | 2 at once; never a timed run |
+| `light` | Small game-free work: a copy, one quick check, `dev.py vk` | 4 at once; never a timed run |
 | `shared` | A game run that is not a number: screenshots, logs, checks | 3 at once, each with its own game and data folder |
 | `gpu` | The game alone on the GPU, not a measurement | Builds |
 | `timing` | fps, frame times, hitches | Nothing heavy; own CPUs; memory not swapped; not while you play |
@@ -176,6 +176,11 @@ screen, so a screenshot or a stream says which change it is (default: the job's 
 | `profile` | A profile recorded in the game | As `timing` |
 
 - **Measure with `timing`, run everything else with `shared`.** Keep each GPU job short: a long batch holds the queue.
+- **A timed run says when the PC was busy.** While it measures, the queue samples the rest of the PC every 2 s: CPU,
+  memory and disk stalls, swapping, the other CPUs' use, builds outside the queue and jobs beside it. A run past any
+  limit (`NOISY` in `scripts/devtools/jobqueue.py`) is marked NOISY in `dev.py queue history`, and `dev.py ab` adds a
+  **Noisy:** line naming it, judged on its measured stretch only (`--noise FILE` gives a caller the samples). Run a noisy
+  run again; its numbers are not the change's.
 - **Nothing on a RAM file system.** Builds, game folders, work folders and test output go on a disk, never in `/tmp` or
   another tmpfs. The queue moves a job's `TMPDIR` off tmpfs, and `dev.py`'s builds refuse such a folder.
 - **One base per commit of main**, shared in your development folder's `bases/` ([where dev data
