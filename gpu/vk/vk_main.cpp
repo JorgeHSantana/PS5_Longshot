@@ -700,9 +700,12 @@ bool create_device() {
         sc.pNext = &drv;
         VkPhysicalDeviceSubgroupProperties sg{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
         sg.pNext = &sc;
+        VkPhysicalDeviceMeshShaderPropertiesEXT mesh_props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT};
         VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
         p2.pNext = &sg;
+        if (dev.mesh_shader) fc.pNext = &mesh_props;   // (with the extension on only)
         vkGetPhysicalDeviceProperties2(dev.physical, &p2);
+        if (dev.mesh_shader) dev.max_mesh_groups = std::min(mesh_props.maxMeshWorkGroupCount[0], mesh_props.maxMeshWorkGroupTotalCount);
         const bool pin = f13.subgroupSizeControl && sc.minSubgroupSize <= 32 && sc.maxSubgroupSize >= 32 && !env_on("RX_VK_NO_SUBGROUP_PIN");
         dev.sg32_stages = pin ? sc.requiredSubgroupSizeStages : 0;
         dev.max_workgroup_subgroups = sc.maxComputeWorkgroupSubgroups;

@@ -131,6 +131,7 @@ struct Device {
     uint32_t subgroup_min = 0;            // (the fewest lanes a stage can be held to: fallback_lanes.h)
     uint32_t subgroup_size = 32, subgroup_max = 32;   // (the lanes a stage not pinned runs at, and the most it can have)
     uint32_t max_workgroup_subgroups = 0;   // (maxComputeWorkgroupSubgroups: a workgroup held to 32 lanes has at most 32 times this)
+    uint32_t max_mesh_groups = UINT32_MAX;   // (the workgroups {x, 1, 1} a native mesh draw may ask for: sim_turf_max_records)
     VkDriverId driver_id{};
     bool radv_gcn = false;   // (longshot) RADV on a GCN 1-4 card (GFX6-8: RX 400/500, R9 2xx/3xx/Fury): fallback_size_policy.h
     // (longshot) what create_device learnt of this PC and the defaults it gets by it (device_policy.h); driver is what facts'

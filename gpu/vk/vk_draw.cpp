@@ -491,7 +491,11 @@ uint32_t sim_turf_max_records(bool pool, uint64_t salign) {
     const uint64_t stride = pool ? 48 : 8, group = pool ? 32 : 64;
     const uint64_t room = dev.props.limits.maxStorageBufferRange > salign + Shader::Optimization::kSimTurfListHeader
                               ? dev.props.limits.maxStorageBufferRange - salign - Shader::Optimization::kSimTurfListHeader : 0;
-    return (uint32_t)std::min<uint64_t>(UINT32_MAX, room / stride / group * group);
+    // (a list's reader runs a workgroup for every `group` records, in one indirect command the game's program writes from the
+    // list's length: a pool's mesh draw (its compute fallback's dispatch), a blade list's dispatch. Past what the device takes in
+    // one the command is invalid: AMD's 65535 groups are 2,097,120 pool records, and a longer pool's turf flickered all over)
+    const uint64_t groups = pool && !dev.uses_mesh_fallback(false) ? dev.max_mesh_groups : dev.props.limits.maxComputeWorkGroupCount[0];
+    return (uint32_t)std::min<uint64_t>({UINT32_MAX, room / stride / group * group, groups * group});
 }
 void sim_turf_reap() {
     const uint64_t completed = vk_timeline_completed();
