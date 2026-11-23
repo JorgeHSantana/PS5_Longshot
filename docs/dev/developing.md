@@ -189,8 +189,15 @@ mise run test                                   # every check, --strict (a missi
 python -I -B tests/run_all.py ub_               # only the checks whose path contains "ub_"
 mise run test-changed                           # only the checks that read a file your branch changed (before you push)
 mise run lint                                   # pre-commit and ruff on what the branch changed, and actionlint
+mise run test --container                       # Linux: the same in a container with CI's tools (Podman or Docker)
 mise run ci                                     # what CI checks: the pinned test tools, every check and the website
 ```
+
+A check whose tool this PC lacks (clang, spirv-val, glslang, .NET, a sanitizer) fails in `mise run test`. Install the tool,
+or use `--container`: `scripts/linux/checks.sh` builds an image with the tools and versions of CI's job (Ubuntu 24.04,
+~3 GB, once) and runs the checks in it as your user, with no network and only the checkout to write.
+With `--container`, a `--junit` report must be inside the checkout; relative paths are resolved from the directory
+where you invoked the command. Other destinations are rejected before the image is built.
 
 `tests/run_all.py` runs every `tests/test_*.py` and `nx2/test_*.py` in its own process, the C++ unit tests under
 `gpu/vk/tests` and a byte-compile of every tracked Python file. It keeps going after a failure and ends with a table and
