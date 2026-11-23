@@ -60,8 +60,9 @@ previous resolution. Other mode changes apply after a restart.
   Anti-Lag 2** cut the added delay.
 - **DLSS and DLAA look softer** than the game's own upscaler: set **Sharpness** to around 80% with them.
 - **Ultrawide and 4:3:** leave **Aspect ratio** on your monitor's shape (the default). The 3D fills the screen while the
-  HUD keeps its 16:9 size with its corners at the screen's edges (or in the middle, with **HUD layout**); movies stay in
-  the middle. **Ultrawide menus** at Extended does the same for the menus: they keep their own size, and what sits at
+  HUD keeps its 16:9 size with its corners at the screen's edges (or in the middle, with **HUD layout**). Movies keep
+  their 16:9 shape, with bars at the sides on wider screens and above and below on narrower screens like 16:10 and 4:3.
+  **Ultrawide menus** at Extended does the same for the menus: they keep their own size, and what sits at
   their sides (the pause menu's panels, its pages, the item and map screens' side panes) moves out to the screen's edges.
 - **HDR:** turn on **HDR** (Expanded or Native), then set **HDR peak brightness** to your monitor's.
 
