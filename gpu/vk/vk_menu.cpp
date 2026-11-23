@@ -1089,8 +1089,8 @@ void save() {
         // host/nn_hid.c binds_load; 4: Descriptor reuse on by default, see menu_init and vk_draw.cpp desc_slotgen_on; 5: the
         // Menu shortcut "Insert, F1 or Esc" by default, see menu_init; 6: the Aspect ratio's 16:9 from before moves on a
         // screen narrower than 16:9, see menu_init and host/hos_wide_size.h; 7: Sprint's Toggle on by default, see
-        // menu_init)
-        fprintf(f, "options_version=7\n");
+        // menu_init; 8: Plus is Tab alone, Enter no longer its second key, see host/nn_hid.c binds_load)
+        fprintf(f, "options_version=8\n");
         fputs(others.c_str(), f);
         if (!can_bind()) fputs(kept.c_str(), f);
         else if (const int sprint_auto = host->binding(HOS_BIND_SPRINT_AUTO, 0, 0))

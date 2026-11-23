@@ -354,6 +354,10 @@ Use a controller, or the keyboard and mouse. On the keyboard, <kbd>W</kbd> <kbd>
 (hold <kbd>Caps Lock</kbd> to walk), the arrow keys (or <kbd>I</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd>) turn the
 camera, and <kbd>E</kbd> is A (it selects **New Game** on the title screen).
 
+**Plus (the game's pause) is <kbd>Tab</kbd>**, and the pad's Start is Plus. <kbd>Enter</kbd> does not pause any more:
+Enter is the key Steam Input's Desktop layout sends for a pad's A when the game is started outside Steam, so it used to
+open the pause menu on every A press (#1992). A controls file that chose Enter for Plus on purpose keeps it.
+
 **Toggle HUD** starts unbound. Assign a key or controller input on the **Controls** page to hide or show the gameplay HUD
 during the current session. The dungeon's small-key count follows the minimap's placement and visibility. The full map
 stays available with its own small-key count and the Boss Key icon when owned. While assigned, the shortcut takes priority

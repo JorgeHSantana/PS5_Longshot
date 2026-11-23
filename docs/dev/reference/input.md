@@ -16,6 +16,15 @@ Switch's bottom one, B). The player's bindings come from the Insert menu's Contr
 Controllers also count while the window is in the background when Controller in background is on
 (`HOS_INPUT_BACKGROUND`).
 
+Controller software can also send the game *keys*: Steam Input's Desktop Layout, active over a game launched outside
+Steam, sends a pad's A as Enter, B and Menu as Escape and View as Tab. The keyboard is read globally, so those presses are
+the player's. Plus is Tab alone for that reason, a **deliberate default change** (Enter was its second key until
+options_version 8: a pad's A opened the pause menu,
+[#1992](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/1992)): an old file's default pair moves to Tab, a Plus
+chosen otherwise keeps its keys, and Tab and the pad's Start always pause. The general rule for every synthesized key, a
+Keyboard row that can leave the keyboard out while a controller is connected, is
+[#152](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/152).
+
 ## Vibration
 
 The game sends a value per side: a low and a high band, an amplitude and a frequency each.
@@ -224,6 +233,7 @@ Scripted input for test runs (`HOS_INPUT_SCRIPT`, `HOS_INPUT_LIVE`) is in [devel
 | `tests/test_display_pointer.py` | Pointer sampling and consumption on both hosts, DPI ratios, concurrent samples |
 | `tests/test_menu_hit.py`, `tests/test_game_menu_mouse_buttons.py` | Menu hit regions and the game-menu mailbox |
 | `tests/test_steam_pads.py` | Steam's ignore list |
+| `tests/test_plus_binding.py` | Plus's default keys and a pad's A: Enter (Steam Input's Desktop layout key for A) does not open the pause, the pad still maps by position |
 | `tests/test_input_movie.py` | Input recordings: the format, the recorder, playback, the frame alignment, loads, actions and rows, drift correction and divergence, starting and stopping at run time, routes |
 | `tests/test_routes.py` | Routes hold only what a route may (`assets/routes/`) |
 
