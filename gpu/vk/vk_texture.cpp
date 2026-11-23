@@ -730,7 +730,13 @@ Staging staging(uint64_t n, uint64_t align = 256) {
 struct AstcPush {
     uint32_t block_dims[2], layer_stride, block_size, x_shift, block_height, block_height_mask, native_tiling;
     uint32_t blocks_x, blocks_y;
+    uint32_t srgb;   // 1: the sRGB decode mode (an sRGB NVN format), endpoints widened as (v << 8) | 0x80 rather than v * 257
 };
+/// The NVN ASTC formats' sRGB half (0x87 to 0x94, as view_format_of reads them): decoded in the specification's sRGB mode, which
+/// is what their R8G8B8A8_SRGB view samples
+bool astc_nvn_srgb(int nvn) {
+    return nvn >= 0x87 && nvn <= 0x94;
+}
 VkDescriptorSetLayout astc_set = VK_NULL_HANDLE;
 VkPipelineLayout astc_layout = VK_NULL_HANDLE;
 VkPipeline astc_pipe = VK_NULL_HANDLE;
@@ -906,6 +912,9 @@ bool bc7_enabled() {
 VkImage bc_scratch = VK_NULL_HANDLE;
 VmaAllocation bc_scratch_alloc = nullptr;
 VkImageView bc_scratch_view = VK_NULL_HANDLE;
+// (the three scratch views' R8G8B8A8_UINT twins, which the ASTC decoder writes: it stores the bytes as integers, an integer format
+// keeping the bits as they are. The scratch images are MUTABLE_FORMAT; the BC encoders read the UNORM views)
+VkImageView bc_scratch_uview = VK_NULL_HANDLE, bc_small_uview = VK_NULL_HANDLE;
 VkBuffer bc_out = VK_NULL_HANDLE;
 VmaAllocation bc_out_alloc = nullptr;
 VkImage bc_small = VK_NULL_HANDLE;   // (the small scratch, made and given back with the first; none at RX_VK_BC_SMALL_LAYERS=1)
@@ -914,6 +923,7 @@ VkImageView bc_small_view = VK_NULL_HANDLE;
 // (a view of each of the small scratch's layers: a single-layer texture's levels are decoded one into each. RX_VK_BC_LEVELS=0:
 // none, each level a run of its own, and no small scratch on a card of small VRAM, as before)
 VkImageView bc_small_layer[8] = {};
+VkImageView bc_small_layer_u[8] = {};   // (and their UINT twins)
 bool bc_levels_on() {
     static const bool on = !getenv("RX_VK_BC_LEVELS") || atoi(getenv("RX_VK_BC_LEVELS")) != 0;
     return on;
@@ -952,6 +962,7 @@ bool bc_scratch_make() {   // (bc_mu held)
     ii.arrayLayers = bc_layers();
     ii.samples = VK_SAMPLE_COUNT_1_BIT;
     ii.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    ii.flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;   // (written through a UINT view, read through a UNORM one)
     static const bool pool = env_on("RX_VK_BC_POOL");
     if (!create_image(ii, bc_scratch, bc_scratch_alloc, !pool)) return false;
     VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -959,6 +970,13 @@ bool bc_scratch_make() {   // (bc_mu held)
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     vi.format = VK_FORMAT_R8G8B8A8_UNORM;
     vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, bc_layers()};
+    // (the same view as R8G8B8A8_UINT)
+    const auto uview = [](VkImageViewCreateInfo v, VkImageView& out) {
+        v.format = VK_FORMAT_R8G8B8A8_UINT;
+        if (vkCreateImageView(dev.device, &v, nullptr, &out) == VK_SUCCESS) return true;
+        out = VK_NULL_HANDLE;
+        return false;
+    };
     const bool tiny = low_vram_texture_mips() && bc_levels_on();   // (a card of small VRAM: the 256 x 256 one)
     if (bc_small_layers() > 1 && (!low_vram_texture_mips() || tiny)) {   // (not made: its levels go through the first scratch, one layer a run)
         bc_small_px = tiny ? kBcTinyDim : kBcSmallDim;
@@ -972,26 +990,29 @@ bool bc_scratch_make() {   // (bc_mu held)
             VkImageViewCreateInfo sv = vi;
             sv.image = bc_small;
             sv.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, bc_small_layers()};
-            if (vkCreateImageView(dev.device, &sv, nullptr, &bc_small_view) != VK_SUCCESS) why = "has no view";
+            if (vkCreateImageView(dev.device, &sv, nullptr, &bc_small_view) != VK_SUCCESS || !uview(sv, bc_small_uview)) why = "has no view";
             for (uint32_t l = 0; !why && bc_levels_on() && l < bc_small_layers(); l++) {   // (a view a layer: a group's levels)
                 sv.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, l, 1};
-                if (vkCreateImageView(dev.device, &sv, nullptr, &bc_small_layer[l]) != VK_SUCCESS) {
-                    for (VkImageView& v : bc_small_layer) {
-                        if (v) vkDestroyImageView(dev.device, v, nullptr);
-                        v = VK_NULL_HANDLE;
+                if (vkCreateImageView(dev.device, &sv, nullptr, &bc_small_layer[l]) != VK_SUCCESS || !uview(sv, bc_small_layer_u[l])) {
+                    for (uint32_t k = 0; k < 8; k++) {
+                        if (bc_small_layer[k]) vkDestroyImageView(dev.device, bc_small_layer[k], nullptr);
+                        if (bc_small_layer_u[k]) vkDestroyImageView(dev.device, bc_small_layer_u[k], nullptr);
+                        bc_small_layer[k] = bc_small_layer_u[k] = VK_NULL_HANDLE;
                     }
                     break;
                 }
             }
         }
         if (why) {
-            for (VkImageView& v : bc_small_layer) {
-                if (v) vkDestroyImageView(dev.device, v, nullptr);
-                v = VK_NULL_HANDLE;
+            for (uint32_t k = 0; k < 8; k++) {
+                if (bc_small_layer[k]) vkDestroyImageView(dev.device, bc_small_layer[k], nullptr);
+                if (bc_small_layer_u[k]) vkDestroyImageView(dev.device, bc_small_layer_u[k], nullptr);
+                bc_small_layer[k] = bc_small_layer_u[k] = VK_NULL_HANDLE;
             }
             if (bc_small_view) vkDestroyImageView(dev.device, bc_small_view, nullptr);
+            if (bc_small_uview) vkDestroyImageView(dev.device, bc_small_uview, nullptr);
             if (bc_small) destroy_image(bc_small, bc_small_alloc);
-            bc_small = VK_NULL_HANDLE, bc_small_alloc = nullptr, bc_small_view = VK_NULL_HANDLE;
+            bc_small = VK_NULL_HANDLE, bc_small_alloc = nullptr, bc_small_view = VK_NULL_HANDLE, bc_small_uview = VK_NULL_HANDLE;
             static std::atomic<int> told{0};
             if (told++ < 2) logf("vk: the small BC3 scratch %s: its levels go one layer a run", why);
         } else {
@@ -1015,17 +1036,20 @@ bool bc_scratch_make() {   // (bc_mu held)
         if (told++ < 4) logf("vk: VRAM full: the BC3 scratch's output buffer (%llu MB) in system memory", (unsigned long long)(out >> 20));
         return true;
     };
-    if (vkCreateImageView(dev.device, &vi, nullptr, &bc_scratch_view) != VK_SUCCESS || !make_out()) {
+    if (vkCreateImageView(dev.device, &vi, nullptr, &bc_scratch_view) != VK_SUCCESS || !uview(vi, bc_scratch_uview) || !make_out()) {
         if (bc_scratch_view) vkDestroyImageView(dev.device, bc_scratch_view, nullptr);
+        if (bc_scratch_uview) vkDestroyImageView(dev.device, bc_scratch_uview, nullptr);
         destroy_image(bc_scratch, bc_scratch_alloc);
-        bc_scratch = VK_NULL_HANDLE, bc_scratch_view = VK_NULL_HANDLE;
-        for (VkImageView& v : bc_small_layer) {
-            if (v) vkDestroyImageView(dev.device, v, nullptr);
-            v = VK_NULL_HANDLE;
+        bc_scratch = VK_NULL_HANDLE, bc_scratch_view = VK_NULL_HANDLE, bc_scratch_uview = VK_NULL_HANDLE;
+        for (uint32_t k = 0; k < 8; k++) {
+            if (bc_small_layer[k]) vkDestroyImageView(dev.device, bc_small_layer[k], nullptr);
+            if (bc_small_layer_u[k]) vkDestroyImageView(dev.device, bc_small_layer_u[k], nullptr);
+            bc_small_layer[k] = bc_small_layer_u[k] = VK_NULL_HANDLE;
         }
         if (bc_small_view) vkDestroyImageView(dev.device, bc_small_view, nullptr);
+        if (bc_small_uview) vkDestroyImageView(dev.device, bc_small_uview, nullptr);
         if (bc_small) destroy_image(bc_small, bc_small_alloc);
-        bc_small = VK_NULL_HANDLE, bc_small_alloc = nullptr, bc_small_view = VK_NULL_HANDLE;
+        bc_small = VK_NULL_HANDLE, bc_small_alloc = nullptr, bc_small_view = VK_NULL_HANDLE, bc_small_uview = VK_NULL_HANDLE;
         return false;
     }
     bc_scratch_fresh = true;
@@ -1232,20 +1256,22 @@ void bc_scratch_idle() {
     std::lock_guard lk(bc_mu);
     if (!bc_have || std::chrono::steady_clock::now() - bc_used_at < std::chrono::seconds(bc_idle_s())) return;
     uint64_t freed = allocation_size(bc_scratch_alloc) + allocation_size(bc_out_alloc);
-    Dead d{bc_last_value, bc_scratch, bc_scratch_alloc, {bc_scratch_view}, {}};
+    Dead d{bc_last_value, bc_scratch, bc_scratch_alloc, {bc_scratch_view, bc_scratch_uview}, {}};
     d.buffer = bc_out, d.buffer_alloc = bc_out_alloc;
     dead.push_back(std::move(d));
-    bc_scratch = VK_NULL_HANDLE, bc_scratch_alloc = nullptr, bc_scratch_view = VK_NULL_HANDLE, bc_out = VK_NULL_HANDLE, bc_out_alloc = nullptr;
+    bc_scratch = VK_NULL_HANDLE, bc_scratch_alloc = nullptr, bc_scratch_view = VK_NULL_HANDLE, bc_scratch_uview = VK_NULL_HANDLE,
+    bc_out = VK_NULL_HANDLE, bc_out_alloc = nullptr;
     bc_have = false, bc_scratch_fresh = false;
     if (bc_small) {
         freed += allocation_size(bc_small_alloc);
-        Dead ds{bc_last_value, bc_small, bc_small_alloc, {bc_small_view}, {}};
-        for (VkImageView& v : bc_small_layer) {
-            if (v) ds.views.push_back(v);
-            v = VK_NULL_HANDLE;
+        Dead ds{bc_last_value, bc_small, bc_small_alloc, {bc_small_view, bc_small_uview}, {}};
+        for (uint32_t k = 0; k < 8; k++) {
+            if (bc_small_layer[k]) ds.views.push_back(bc_small_layer[k]);
+            if (bc_small_layer_u[k]) ds.views.push_back(bc_small_layer_u[k]);
+            bc_small_layer[k] = bc_small_layer_u[k] = VK_NULL_HANDLE;
         }
         dead.push_back(std::move(ds));
-        bc_small = VK_NULL_HANDLE, bc_small_alloc = nullptr, bc_small_view = VK_NULL_HANDLE;
+        bc_small = VK_NULL_HANDLE, bc_small_alloc = nullptr, bc_small_view = VK_NULL_HANDLE, bc_small_uview = VK_NULL_HANDLE;
     }
     const bool second = bc_scratch2 != VK_NULL_HANDLE;
     if (second) {   // (longshot-amd: the second scratch, 16 MB a layer, with it)
@@ -1256,11 +1282,13 @@ void bc_scratch_idle() {
     logf("vk: the BC3 scratch (%u MB%s) unused for %u s: given back", (unsigned)(freed >> 20), second ? ", both" : "", bc_idle_s());
 }
 
-/// The storage view of one level (every layer) the ASTC decoder writes
+/// The storage view of one level (every layer) the ASTC decoder writes: R8G8B8A8_UINT, through which it stores its bytes as they are
+/// (a UNORM store of n / 255 is exact only where the GPU rounds to nearest, which Vulkan recommends but does not require). The
+/// decoded textures are MUTABLE_FORMAT, and storage use of this format is mandatory
 VkImageView astc_target_view(Texture* tex, uint32_t level) {
     const uint64_t key = mix(0xA57C, level);
     return cached_image_view(tex, key, [&](VkResult* result) {
-        return make_view(tex, VK_IMAGE_VIEW_TYPE_2D_ARRAY, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT,
+        return make_view(tex, VK_IMAGE_VIEW_TYPE_2D_ARRAY, VK_FORMAT_R8G8B8A8_UINT, VK_IMAGE_ASPECT_COLOR_BIT,
                          level, 1, 0, tex->layers, {}, VK_IMAGE_USAGE_STORAGE_BIT, result);
     });
 }
@@ -1352,12 +1380,12 @@ bool overlaps(const Ranges* dirty, uint64_t a, uint64_t b) {
     return false;
 }
 
-/// The view of one level the ASTC decoder writes: every layer, or one (layer)
+/// The view of one level the ASTC decoder writes: every layer, or one (layer); R8G8B8A8_UINT as astc_target_view's
 VkImageView astc_level_view(Texture* tex, uint32_t level, uint32_t layer) {
     if (layer == ~0u) return astc_target_view(tex, level);
     const uint64_t key = mix(mix(0xA57D, level), layer);
     return cached_image_view(tex, key, [&](VkResult* result) {
-        return make_view(tex, VK_IMAGE_VIEW_TYPE_2D_ARRAY, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT,
+        return make_view(tex, VK_IMAGE_VIEW_TYPE_2D_ARRAY, VK_FORMAT_R8G8B8A8_UINT, VK_IMAGE_ASPECT_COLOR_BIT,
                          level, 1, layer, 1, {}, VK_IMAGE_USAGE_STORAGE_BIT, result);
     });
 }
@@ -1559,6 +1587,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
         pc.block_height = g.tile_h;
         pc.block_height_mask = (1u << g.tile_h) - 1;
         pc.native_tiling = 1;
+        pc.srgb = astc_nvn_srgb(tex.nvn_format) ? 1u : 0u;
         for (size_t k0 = 0; k0 < layers.size();) {
             const uint32_t run = tex.bc ? bc_run : all ? tex.layers : 1;
             size_t k1 = k0 + 1;
@@ -1585,14 +1614,17 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
                 if ((!small && group_big) || (!group.empty() && group_off + need > group_cap)) group_flush();
             }
             const int64_t view_t0 = step_now();
+            // (a BC texture's scratch: the decoder writes it through its UINT view, `target`; the encoder reads its UNORM one, `view`)
             VkImageView view = in_group ? (small ? bc_small_layer[group_small] : bc_scratch_view)
                                : tex.bc ? (small ? bc_small_view : bc_scratch_view)
                                : astc_level_view(&tex, level, n == tex.layers ? ~0u : layers[k0]);
+            VkImageView target = in_group ? (small ? bc_small_layer_u[group_small] : bc_scratch_uview)
+                                 : tex.bc ? (small ? bc_small_uview : bc_scratch_uview) : view;
             if (view_t0) {
                 const int64_t d = step_now() - view_t0;
                 step_ns[4].fetch_add(d, std::memory_order_relaxed), record_out += d;
             }
-            if (!view) {
+            if (!view || !target) {
                 astc_fail = "no view of a level";
                 return false;
             }
@@ -1615,9 +1647,12 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
                 span.emplace(cmd, span_label);
                 up_astc_texels = 0;
             }
-            if (in_group) view = small ? bc_small_layer[group_small] : bc_scratch_view;   // (the hand-over above emptied the group)
+            if (in_group) {   // (the hand-over above emptied the group)
+                view = small ? bc_small_layer[group_small] : bc_scratch_view;
+                target = small ? bc_small_layer_u[group_small] : bc_scratch_uview;
+            }
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, astc_pipe);
-            VkDescriptorImageInfo ii{VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_GENERAL};
+            VkDescriptorImageInfo ii{VK_NULL_HANDLE, target, VK_IMAGE_LAYOUT_GENERAL};
             VkWriteDescriptorSet w[2]{{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
             w[0].dstBinding = 0, w[0].descriptorCount = 1, w[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             w[0].pBufferInfo = &bi;
@@ -2202,11 +2237,6 @@ void unswizzle_upload(std::span<uint8_t> dest, std::span<const uint8_t> src, uin
         std::memset(dest.data(), 0, dest.size());   // (never what the staging memory held before)
         texdecode_refused("unswizzle", "the texels are zero");
     }
-}
-/// The NVN ASTC formats' sRGB half (0x87 to 0x94, as view_format_of reads them): decoded in the specification's sRGB mode, which
-/// is what their R8G8B8A8_SRGB view samples
-bool astc_nvn_srgb(int nvn) {
-    return nvn >= 0x87 && nvn <= 0x94;
 }
 /// An ASTC texture's blocks the specification calls illegal (the decoder wrote transparent black for each, as main's decoder and the GPU shader do): its count, said once per
 /// texture and for the first 16 textures only. Counts only, never texel values
