@@ -18,7 +18,9 @@ PC's shared bases through the queue; the Test Farm runs them on its own, so thei
         hot list stay the same, and without the renderer when the change cannot reach it (renderer_untouched:
         RX_GAME_ONLY); it reads the romfs where it is (pack_env; LONGSHOT_PACK_ROMFS=copy links it, for a change that
         writes into the romfs). The pack keeps a module when an object it is linked from differs from the base's
-        (module_changed), and every other file of the game folder that differs.
+        (module_changed), and every other file of the game folder that differs. A base and its packs build with the
+        upscalers the environment names (upscaler_args: LONGSHOT_NGX_SDK, LONGSHOT_FSR, LONGSHOT_FFX_SDK,
+        LONGSHOT_XESS_SDK), the same for both.
     dev.py packs rt DIR RUNTIME [PACK...]
         A game folder to run: the base's (romfs hard-linked, none for a --romfs-in-place base; the rest copied, as clones where the file system has them: the
         game writes its caches), the packs' files over it, the shaders prepared again when a pack changed the translator,
@@ -521,9 +523,29 @@ def runtime_romfs(rt):
     return romfs if isinstance(romfs, str) and not os.path.isdir(os.path.join(rt, "romfs")) else None
 
 
+def upscaler_args(environ):
+    """make_game.py's upscaler options for a base's or a pack's build, from the environment, which make_game.py does not
+    take them from itself (the Test Farm builds with them when a tester accepted the vendor's license):
+    - LONGSHOT_FSR=1: AMD FSR 4 (--fsr: make_game.py clears the variable otherwise, and build.py reads it). A renderer-only
+      pack builds with build.py, which reads it as it is.
+    - LONGSHOT_FFX_SDK with LONGSHOT_FSR=1, LONGSHOT_XESS_SDK: AMD's FSR runtime and Intel's XeSS library, fetched into those
+      folders by scripts/fetch.py under the vendor's license, accepted then, go into the game folder (--fetch-*-runtime: each
+      file is there and checked, so nothing is downloaded).
+    NVIDIA DLSS needs nothing here: make_game.py and build.py read LONGSHOT_NGX_SDK, which run() passes on"""
+    args = []
+    if environ.get("LONGSHOT_FSR", "0") not in ("", "0"):
+        args.append("--fsr")
+        if environ.get("LONGSHOT_FFX_SDK"):
+            args += ["--fetch-fsr-runtime", "--accept-amd-license"]
+    if environ.get("LONGSHOT_XESS_SDK"):
+        args += ["--fetch-xess-runtime", "--accept-intel-license"]
+    return args
+
+
 def make_game(tree, b, work, game, env):
     run([sys.executable, "-I", "nx2/make_game.py", "--romfs", b["romfs"], "--exefs", b["exefs"], "--work", work, "--out", game,
-         "--language", b.get("language", "en-US")], tree, dict(env, LONGSHOT_KEEP_BUILD_FILES="1"))
+         "--language", b.get("language", "en-US")] + upscaler_args(dict(os.environ, **env)), tree,
+        dict(env, LONGSHOT_KEEP_BUILD_FILES="1"))
 
 
 def read_base(d):

@@ -98,6 +98,10 @@ python -I scripts/dev.py packs warm ../base-main --run "<command that plays {run
   Windows sandbox, where the hard link is refused and becomes a 26 GB copy.
 - A pack that builds the game reads the romfs where it is, so its game folder has none and nothing of it is compared
   with the base. `LONGSHOT_PACK_ROMFS=copy` links it instead, for a change that writes into the romfs.
+- Upscalers come from the environment, the same for a base and its packs: `LONGSHOT_NGX_SDK` (NVIDIA DLSS, as
+  `make_game.py` reads it), `LONGSHOT_FSR=1` (AMD FSR 4: `--fsr`), and `LONGSHOT_FFX_SDK` or `LONGSHOT_XESS_SDK` (AMD's FSR
+  runtime or Intel's XeSS library, already fetched there by `scripts/fetch.py`, whose license was accepted then: copied into
+  the game folder, nothing downloaded). A base built without one makes packs without it too, so build a new base to change them.
 - `warm` plays a pack-less runtime and copies the caches it grew back into the base, so no runtime compiles pipelines
   for those scenes again.
 - One job at a time per base: `base`, `pack`, `rt` and `warm` hold `<dir>/dev_packs.busy` (`dev.py pack` and `rt` wait for the base instead).
