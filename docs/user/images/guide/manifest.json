@@ -960,7 +960,7 @@
       },
       "reviewed_source": {
         "repository": "https://git.magicbean.dev/MagicBeanDev/Longshot",
-        "revision": "sha256:94018d485b6a785be68dcb6daaf8e28b1e569191b7dfb7c54b91935d92577848",
+        "revision": "sha256:55485e138ed564082ee7bd4823b56ccfa4b838ad5d5d770af7888babe8a8b6cd",
         "files": {
           "assets/longshot.png": "9186c5ea9c3c5d4b22725d3dbffd4eb81a8965f66cebbcfa1c492423b9defb2b",
           "gpu/render/nvn_api.h": "f40e44b4b63aa20892399547167d367a652c1ed0793ca4a0f9299a8988289b82",
@@ -968,11 +968,12 @@
           "gpu/vk/astc_bc_policy.h": "a6e0dd80a463e2ab6a8d7029bee303dc278e0fac2590bb3622f191b81ff8b5be",
           "gpu/vk/auto_settings.h": "a71f31cd0061f1d0af7fec591db702262785c14db337fb5f1bca79eea26026f4",
           "gpu/vk/compat/longshot_env.h": "c94ec5b5dbf99b0e365e1efc6cab3306db99d7c12a872b049630b0035d9b7bbc",
-          "gpu/vk/device_policy.h": "e89da31853b1e7f3c44a0ca7459c2c335c06632346fc01d90f0a4588ab999262",
+          "gpu/vk/device_policy.h": "e3c9c6ae3bd758fe261028e8e366ba5f33aa24f458be8b5921fa4bc5ef4bb492",
           "gpu/vk/display_modes.h": "beea7b04494ed72b564eb462be979029c4aa81cc661154ec88c28b7050149c3f",
           "gpu/vk/fallback_size_policy.h": "c64e49b0786cd9b4964e803f628e2296c70b7249887dfd0aeb8ffa00dee78ed4",
           "gpu/vk/fps_stats.h": "306cfb01489d4e793dbc1174b59d65fa79b699caeab16c29e092f9b037787da9",
           "gpu/vk/fsr3_math.h": "6ab06be58fa0706a9c1fbdbf5fd693d3c510b8076f92f7df3403c879ff07392e",
+          "gpu/vk/gpu_arch.h": "78f068a6cfdf71c368d35be362e9c1310ca671e8ea578c9ef547d1963fe6ad65",
           "gpu/vk/gpu_choice.h": "4f3b7f78846e0c8ceb5ca8eb3f27537764197f9a48b26956938b4bf0527aacc6",
           "gpu/vk/gpu_clock.h": "33f8ddc7cf07892bd26ca45c1efe7f69826bf49e9a1c6adf4ede46274b9c8a08",
           "gpu/vk/gpu_wait_stats.h": "97c189f40758484dcb85e155f2aaa9f4a442c20e0c792cd0285be708e47c1fb2",
@@ -1117,7 +1118,7 @@
         "contains_save_data": false,
         "contains_private_paths": false,
         "font_source": "Bundled Libertinus Sans Regular/Bold and Serif Semibold; third_party/fonts/libertinus/OFL.txt.",
-        "notes": "Retained after reviewing eight changed UI-source inputs against the pictured Graphics view and guide. Threaded rendering's Auto rule and help changed below the pictured rows; device policy, the Windows Vulkan loader interface, and DLSS retry documentation do not change the pictured view. The PNG, capture provenance and fixture files are unchanged. No fresh rendering, pixel comparison, game run or new capture is claimed. See docs/user/images/guide/source-review-94018d48.md and source-review-35be7b3d.md."
+        "notes": "Retained after reviewing eight changed UI-source inputs against the pictured Graphics view and guide. Threaded rendering's Auto rule and help changed below the pictured rows; device policy, the Windows Vulkan loader interface, and DLSS retry documentation do not change the pictured view. The GPU architecture tests moved from device_policy.h to gpu_arch.h, alongside BC copy rules for AMD's Windows driver; API version 45 added the vulkan_loader_proc callback in vk_api.h. No file of the menu names them. The PNG, capture provenance and fixture files are unchanged. No fresh rendering, pixel comparison, game run, live GPU check or new capture is claimed. See docs/user/images/guide/source-review-94018d48.md, source-review-35be7b3d.md and source-review-81e8a6ba.md."
       }
     },
     {

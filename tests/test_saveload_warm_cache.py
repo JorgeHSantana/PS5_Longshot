@@ -183,10 +183,10 @@ static ComputePlan stub_compute_plan;
 
 int stub_build_calls = 0;
 static int stub_build_probe_calls = 0;
-static int stub_build_probe_ask_start_first = 0;
+[[maybe_unused]] static int stub_build_probe_ask_start_first = 0;
 static int stub_jobs_pushed = 0;
-static int stub_predicted_use_calls = 0;
-static int stub_predicted_use_how = 0;
+[[maybe_unused]] static int stub_predicted_use_calls = 0;
+[[maybe_unused]] static int stub_predicted_use_how = 0;
 int64_t st_link_us = 0, st_links = 0;
 static int fake_pipe_token = 1;
 

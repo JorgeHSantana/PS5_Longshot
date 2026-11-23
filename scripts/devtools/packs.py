@@ -264,10 +264,13 @@ def renderer_untouched(paths, lift_files, environ):
 
 def build_scripts(root):
     """nx2/build.py and every Python module it imports (as make_game.lift_sources finds the lift's: a64-kit's folders, then nx2/),
-    and nx2/make_game.py, which sets build.py's environment (the hot order, the profile)"""
+    and nx2/make_game.py, which sets build.py's environment (the hot order, the profile). Of the modules it imports, only what
+    they import at their top: build.py takes chunks.py's cut, and not the functions of it that import the lift's oot_patches.py
+    and poll.py, nor nup.py's reading of a .nup"""
     kit = os.path.join(root, "third_party", "a64-kit")
     path = [os.path.join(kit, d) for d in ("rt", "hos", "tools", "lift")] + [os.path.join(root, "nx2")]
-    todo, seen = [os.path.join(root, "nx2", "build.py")], set()
+    build = os.path.join(root, "nx2", "build.py")
+    todo, seen = [build], set()
     while todo:
         f = todo.pop()
         if f in seen:
@@ -275,13 +278,16 @@ def build_scripts(root):
         seen.add(f)
         with open(f, "rb") as src:
             tree = ast.parse(src.read(), f)
-        for node in ast.walk(tree):
+        nodes = [tree]
+        while nodes:
+            node = nodes.pop()
+            names = []
             if isinstance(node, ast.Import):
                 names = [n.name for n in node.names]
             elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
                 names = [node.module]
-            else:
-                continue
+            elif f == build or not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                nodes += ast.iter_child_nodes(node)
             for name in names:
                 for d in path:
                     m = os.path.join(d, name.split(".")[0] + ".py")

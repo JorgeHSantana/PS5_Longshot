@@ -215,7 +215,10 @@ def test_inputs_beside_the_objects():
     build = packs.build_scripts(str(ROOT))
     for f in ("nx2/build.py", "nx2/win_manifest.py", "nx2/version.py", "third_party/a64-kit/tools/toolchain.py"):
         check("%s found among the build's scripts (%s)" % (f, sorted(build)), f in build)
+    check("what build.py imports in a function (chunks.py, split_giants.py), and what those import at their top",
+          {"nx2/chunks.py", "nx2/split_giants.py", "nx2/lifted_c.py"} <= build)
     check("the lift's own scripts are not the build's", "nx2/lift.py" not in build)
+    check("nor what chunks.py's functions for the lift import (%s)" % sorted(build), not {"nx2/oot_patches.py", "nx2/poll.py"} & build)
     lic = lambda *p: packs.link_inputs_changed(list(p), lift, build)
     check("a game patch shows in the objects", not lic("nx2/oot_patches.py", "host/hos_thread.c"))
     check("toolchain.py's link options, though the lift reads it too: both modules", lic("third_party/a64-kit/tools/toolchain.py"))
@@ -498,7 +501,8 @@ def test_rt_refresh(d):
     check("a module that differs is replaced", (rt / packs.GAME).read_bytes() == b"base game")
     check("...and the base's is untouched", (game / packs.GAME).read_bytes() == b"base game")
     # (a runtime from before the layout: no files list. Everything but its play state is made again)
-    made.pop("layout"); made.pop("files")
+    made.pop("layout")
+    made.pop("files")
     (rt / "dev_packs.json").write_text(json.dumps(made))
     write(rt / "stale-from-an-old-pack.bin", b"old")
     packs_main(["rt", str(base_dir), str(rt)])
