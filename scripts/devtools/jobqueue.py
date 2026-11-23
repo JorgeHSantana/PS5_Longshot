@@ -27,8 +27,8 @@ lift key hashes those: a variable naming the job would give every build its own 
 system; for the GPU modes its own NVIDIA shader cache folder (LONGSHOT_QUEUE_NV_CACHE); on Linux its own systemd scope (the
 OOM killer stops that job, not your terminal) and CPU affinity while a timed run measures. Every job also waits for memory
 (LONGSHOT_QUEUE_MIN_FREE_GB, _MAX_PRESSURE, _MAX_SWAP_GB), and a timed run for builds outside the queue. While a timed run
-measures, the queue samples how busy the rest of the PC is every 2 s (Noise: CPU, memory and disk stalls, swapping, the
-other CPUs' use, builds outside the queue, jobs beside it); `--noise FILE` writes the samples as JSON lines, and the
+measures, the queue samples every 2 s what its processes stalled on (Noise: CPU, memory and disk, its job's cgroup's PSI),
+the swapping, the other CPUs' use, builds outside the queue, jobs beside it); `--noise FILE` writes the samples as JSON lines, and the
 history keeps their summary and says to run it again when it was noisy (NOISY).
 
 Settings (DEFAULTS): environment variables, or the same names in job_queue.json in the development folder's config/
@@ -68,9 +68,10 @@ MODES = {
 }
 MEASURING = ("timing", "timing-cpu", "profile")
 # (a timed run is noisy, and to be run again, past any of these over what it measured: PSI cpu "some" and memory and io
-# "full" avg10 at their worst (%), swap traffic (MB/s: what idle programs page in now and then is a few), the other CPUs'
-# mean use (%). An idle desktop stays well under each; a test suite beside a timed run swapped 20 to 180 MB/s)
-NOISY = {"cpu_pressure_max": 20.0, "memory_stall_max": 1.0, "io_stall_max": 10.0, "swap_mb_s": 8.0, "other_cpus_busy": 50.0}
+# "full" avg10 at their worst (%), the run's own (its job's cgroup: what its processes waited for) where it has one, else
+# the PC's; the other CPUs' mean use (%). The swap rate is kept but judges nothing: a game holding 18 GB it can't swap
+# (MemorySwapMax=0) pushes the rest of a 32 GB PC into swap at 100 MB/s while its own stalls stay at 0.05 %)
+NOISY = {"cpu_pressure_max": 20.0, "memory_stall_max": 1.0, "io_stall_max": 10.0, "other_cpus_busy": 50.0}
 # (what an LONGSHOT_JOB variable must never be: the lift key hashes these, make_game.py lift_key)
 LIFT_KEY_PREFIXES = ("A64_", "OOT_", "RX_")
 DEFAULTS = {
@@ -327,9 +328,10 @@ def meminfo():
         return {}
 
 
-def pressure(kind="memory", line="full"):
+def pressure(kind="memory", line="full", cgroup=None):
+    """PSI avg10 of kind (memory, cpu, io) and line (some, full): the whole PC's, or a cgroup's (a folder of /sys/fs/cgroup)"""
     try:
-        with open("/proc/pressure/%s" % kind) as f:
+        with open(os.path.join(cgroup, "%s.pressure" % kind) if cgroup else "/proc/pressure/%s" % kind) as f:
             for l in f:
                 if l.startswith(line + " "):
                     return float(dict(kv.split("=") for kv in l.split()[1:])["avg10"])
@@ -582,6 +584,19 @@ def swap_pages():
         return None
 
 
+def cgroup_of(pid):
+    """The cgroup v2 folder of process pid (its job's systemd scope), or None"""
+    try:
+        with open("/proc/%d/cgroup" % pid) as f:
+            for l in f:
+                if l.startswith("0::"):
+                    d = "/sys/fs/cgroup" + l[3:].strip()
+                    return d if os.path.isfile(os.path.join(d, "memory.pressure")) else None
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def cpu_times(cpus):
     """(busy, total) jiffies of the CPUs cpus (/proc/stat), or None"""
     try:
@@ -603,17 +618,20 @@ class Noise:
     """For a timed run: how busy the rest of the PC was while it measured, a sample every 2 s (PSI cpu "some", memory and
     io "full" avg10, the load, the swap counter, the other CPUs' use, builds outside the queue moved off its CPUs, jobs of
     the queue beside it). The history keeps their summary (noise_summary) so a noisy measurement shows; path: the samples
-    as JSON lines too, for a caller that judges only its own measured stretch (dev.py ab)"""
+    as JSON lines too, for a caller that judges only its own measured stretch (dev.py ab). cgroup: the job's own, whose
+    stalls are sampled instead of the PC's"""
 
-    def __init__(self, other_cpus=None, path=None):
-        self.other_cpus, self.path = other_cpus, path
+    def __init__(self, other_cpus=None, path=None, cgroup=None):
+        self.other_cpus, self.path, self.cgroup = other_cpus, path, cgroup
         self.samples = []
         self.strays = set()
         self.last = cpu_times(other_cpus) if other_cpus else None
 
     def sample(self, strays=(), beside=()):
-        x = {"t": round(time.time(), 2), "cpu": pressure("cpu", "some"), "memory": pressure("memory", "full"),
-             "io": pressure("io", "full"), "swap_pages": swap_pages(), "strays": len(strays), "beside": sorted(beside)}
+        g = self.cgroup if self.cgroup and os.path.isdir(self.cgroup) else None
+        x = {"t": round(time.time(), 2), "cpu": pressure("cpu", "some", g), "memory": pressure("memory", "full", g),
+             "io": pressure("io", "full", g), "own": bool(g), "swap_pages": swap_pages(), "strays": len(strays),
+             "beside": sorted(beside)}
         try:
             x["load"] = os.getloadavg()[0]
         except (OSError, AttributeError):
@@ -661,8 +679,7 @@ def noise_reasons(rec):
     if rec.get("beside"):
         out.append("beside: %s" % ", ".join(rec["beside"]))
     for k, what in (("cpu_pressure_max", "CPU stalls %.0f%%"), ("memory_stall_max", "memory stalls %.1f%%"),
-                    ("io_stall_max", "disk stalls %.0f%%"), ("swap_mb_s", "swapping %.0f MB/s"),
-                    ("other_cpus_busy", "the other CPUs %.0f%% busy")):
+                    ("io_stall_max", "disk stalls %.0f%%"), ("other_cpus_busy", "the other CPUs %.0f%% busy")):
         if (rec.get(k) or 0) > NOISY[k]:
             out.append(what % rec[k])
     return out
@@ -778,6 +795,8 @@ def run(name, mode, cmd, environ=None, s=None, cwd=None, desc=None, noise_file=N
         else:
             child = subprocess.Popen(run_cmd, cwd=cwd, env=env, preexec_fn=pre)
         me.update(child=child.pid, child_start=procs.proc_start(child.pid))
+        if cpu == "quiet" and not common.WINDOWS:
+            noise.cgroup = cgroup_of(child.pid)
         with common.Lock(lock):
             write_ticket(qdir, me)
         if (timing_cpus or cpu == "quiet") and not common.WINDOWS:

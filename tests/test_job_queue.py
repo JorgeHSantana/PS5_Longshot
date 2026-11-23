@@ -128,13 +128,29 @@ class NoiseOfARun(unittest.TestCase):
         for i, x in enumerate(trickle):
             x["swap_pages"] = 1000 + i * 300   # (an idle PC's few MB/s: no noise)
         self.assertEqual(q.noise_reasons(q.noise_summary(trickle)), [])
-        cases = [(swapping, "swapping 78 MB/s"), (self.samples(memory=3.6), "memory stalls"), (self.samples(cpu=40.0), "CPU stalls"),
+        # (swapping alone is no noise: the game's own size swaps the rest of the PC out while it stalls on nothing)
+        self.assertEqual(q.noise_summary(swapping)["swap_mb_s"], 78.0)
+        self.assertEqual(q.noise_reasons(q.noise_summary(swapping)), [])
+        cases = [(self.samples(memory=3.6), "memory stalls"), (self.samples(cpu=40.0), "CPU stalls"),
                  (self.samples(io=30.0), "disk stalls"), (self.samples(other_cpus=85.0), "other CPUs 85% busy"),
                  (self.samples(strays=1), "builds outside"), (self.samples(beside=["gb-3-tests (light)"]), "gb-3-tests")]
         for samples, said in cases:
             reasons = q.noise_reasons(q.noise_summary(samples))
             self.assertEqual(len(reasons), 1, reasons)
             self.assertIn(said, reasons[0])
+
+    def test_the_runs_own_stalls(self):
+        # (a job's cgroup: its own PSI, read from <cgroup>/<kind>.pressure)
+        with tempfile.TemporaryDirectory() as d:
+            for kind, full in (("memory", 0.05), ("io", 0.23), ("cpu", 0.06)):
+                with open(os.path.join(d, kind + ".pressure"), "w") as f:
+                    f.write("some avg10=0.50 avg60=0.0 avg300=0.0 total=1\nfull avg10=%.2f avg60=0.0 avg300=0.0 total=1\n" % full)
+            self.assertEqual(q.pressure("memory", "full", d), 0.05)
+            self.assertEqual(q.pressure("cpu", "some", d), 0.5)
+            n = q.Noise(None, None, d)
+            n.sample()
+            self.assertTrue(n.samples[0]["own"])
+            self.assertEqual(n.samples[0]["io"], 0.23)
 
     def test_samples_written_for_the_caller(self):
         with tempfile.TemporaryDirectory() as d:
