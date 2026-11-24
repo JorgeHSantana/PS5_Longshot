@@ -5,6 +5,8 @@
 // testing and not a player's choice: Frame pacing, when each made frame is shown (vk_framegen.cpp).
 #include "menu_module.h"
 
+#include "framegen_rows.h"
+
 #ifndef MENU_LAYOUT_ONLY
 #include "menu/framegen.h"
 #include "fg_by.h"   // (PS5: the Frame generation by row's two more values)
@@ -21,6 +23,8 @@
 
 namespace mkwvk {
 
+namespace fgr = framegen_rows;
+
 #ifndef MENU_LAYOUT_ONLY
 int display_refresh_mhz();   // (vk_main.cpp: the window's display, mHz. PS5: the Frame generation row's names)
 /// (PS5) The display's refresh rate in whole Hz (59.94 is 60), 60 when not known
@@ -29,13 +33,11 @@ int console_hz() {
     return hz > 0 ? hz : 60;
 }
 const char* tx_framegen(int v) {
-    static const char* t[] = {"Off", "Auto", "2x", "3x", "4x", "5x", "6x", "7x", "8x"};
 #ifdef __PROSPERO__   // (the console's display takes a frame at each refresh, so Auto leaves the game at its own rate and
-                     // fills the refreshes it misses, and Nx holds the game at the refresh rate over N. Named for what
-                     // each does to the game: "Auto" and "2x" said neither, and the row below had an Auto of its own)
-    static char b[9][48];
-    if (v == 1) return snprintf(b[1], sizeof b[1], "Fill to %d fps", console_hz()), b[1];
-    if (v >= 2 && v <= 8) return snprintf(b[v], sizeof b[v], "%dx (game at %d fps)", v, console_hz() / v), b[v];
+                     // fills the refreshes it misses: named for what it does to the game. The fixed multipliers' names,
+                     // which hold the game at the refresh rate over N, are tx_framegen_mult's)
+    static char fill[48];
+    if (v == 1) return snprintf(fill, sizeof fill, "Fill to %d fps", console_hz()), fill;
 #endif
     // (Auto, chosen: who makes its frames now (vk_framegen.cpp framegen_maker, as the FPS counter names it). NVIDIA DLSS FG
     // makes fixed multipliers only, so they are AMD FSR 3.1's or the built-in one's; none made lately (the game keeps up with
@@ -45,8 +47,18 @@ const char* tx_framegen(int v) {
         if (m == FgMaker::Fsr3) return "Auto (FSR 3.1 FG)";
         if (m == FgMaker::BuiltIn) return "Auto (Built-in FG)";
     }
-    // (as it runs: a saved value past DLSS FG's top while it makes the frames shows as the top, vk_framegen.h framegen_capped)
-    return t[framegen_capped(v, dlss_fg_most())];
+    if (v <= 0) return "Off";
+    if (v == 1) return "Auto";
+    return "Fixed";
+}
+const char* tx_framegen_mult(int v) {
+    static const char* const t[] = {"2x", "3x", "4x", "5x", "6x", "7x", "8x"};
+    const int capped = framegen_capped(std::clamp(v, 2, 8), dlss_fg_most());
+#ifdef __PROSPERO__   // (the console: Nx holds the game at the refresh rate over N, and the name says so)
+    static char b[9][48];
+    return snprintf(b[capped], sizeof b[capped], "%dx (game at %d fps)", capped, console_hz() / capped), b[capped];
+#endif
+    return t[std::clamp(capped, 2, 8) - 2];
 }
 /// (longshot) Whether the Frame generation by row offers DLSS FG: where DLSS-G can run in this process as far as is known
 /// (vk_dlss.cpp dlss_fg_unavailable). Where it cannot, the row has FSR 3.1 FG (0, the default, and 2 the same) and Built-in
@@ -57,39 +69,43 @@ bool framegen_by_fixed() { return dlss_fg_forced(); }
 #endif
 
 namespace {
+int fg_mult_ui = 2;    // (UI-only mirror of active fixed multiplier 2..8; unsaved, synced from opts.framegen)
 MODULE_HINTS(hn_pace, 0,
              "As soon as it is ready. Frame generation's fixed multipliers show each frame at its own time.",
              "At an even interval: less stutter, at up to one frame of delay. Frame generation's fixed multipliers show each "
              "frame at its own time.")
 #ifndef MENU_LAYOUT_ONLY
-/// Frame generation: how many frames are made for each of the game's
+int fg_last_fixed = 2; // (remembered fixed multiplier across Off/Auto/Fixed mode switches)
+/// Frame generation mode: Off, Auto, or Fixed
 const char* hn_framegen(int v, int variant) {
 #ifdef __PROSPERO__   // (the console: what each value does to the game's own rate there, as its name says: tx_framegen)
     if (v >= 1 && variant == 1) return "The console's memory is very short: no frames are made until there is memory to spare again.";
     if (variant > 0) return nullptr;
     if (v >= 1 && variant < 0 && framegen_memory_level() >= 2) return "The console's memory is very short: no frames are made until there is memory to spare again.";
     if (v == 1) return "The game runs at its own rate, and frames are made only for the display's refreshes it does not reach: the least input delay.";
-    if (v >= 2) {
-        static char h[9][160];
-        v = std::min(v, 8);
-        if (v == 2) return snprintf(h[v], sizeof h[v], "The game is held at %d fps at most, with one made frame between each two of its own: more input delay.", console_hz() / v), h[v];
-        return snprintf(h[v], sizeof h[v], "The game is held at %d fps at most, with %d made frames between each two of its own: more input delay.", console_hz() / v, v - 1), h[v];
-    }
 #endif
-    const int dlss_most = variant < 0 ? dlss_fg_most() : 0;
-    if (variant < 0) v = framegen_capped(v, dlss_most);   // (the value shown: DLSS FG's top for a saved one past it)
-    // (2x: by AMD FSR 3.1 where it makes the frame, from the scene's depth and motion: vk_framegen.cpp. Not while NVIDIA
-    // DLSS FG makes it (dlss_fg_most: chosen, on a temporal Upscaler, its runtime's answer a yes, not given up): FSR 3.1 is
-    // asked then too (fsr3fi::frames_wanted), but only for the sets DLSS-G does not make. Variant 1 is that text)
-    if (v == 2 && (variant < 0 ? dlss_most == 0 && fsr3fi::frames_wanted() != 0 : variant == 1))
-        return "One made frame between each two of the game's, by AMD FSR 3.1 from the scene's depth and motion.";
     if (variant > 0) return nullptr;
     if (v <= 0) return "Only the game's own frames: no added delay.";
     if (v == 1) return "A frame for each of the display's refreshes: none made when the game keeps up. Frame pacing does not apply.";
-    static char b[9][96];
-    snprintf(b[v], sizeof b[v], "%s between each two of the game's.", v == 2 ? "One made frame" : v == 3 ? "Two made frames" : v == 4 ? "Three made frames"
-             : v == 5 ? "Four made frames" : v == 6 ? "Five made frames" : v == 7 ? "Six made frames" : "Seven made frames");
-    return b[std::clamp(v, 2, 8)];
+    return "A fixed multiplier of made frames between each two of the game's: choose 2x to 8x below.";
+}
+/// Frame generation multiplier (2x..8x): how many frames are made for each of the game's
+const char* hn_framegen_mult(int v, int variant) {
+    const int dlss_most = variant < 0 ? dlss_fg_most() : 0;
+    if (variant < 0) v = framegen_capped(std::clamp(v, 2, 8), dlss_most);
+    if (v == 2 && (variant < 0 ? dlss_most == 0 && fsr3fi::frames_wanted() != 0 : variant == 1))
+        return "One made frame between each two of the game's, by AMD FSR 3.1 from the scene's depth and motion.";
+    if (variant > 0) return nullptr;
+    static char b[9][160];
+    const int clamped = std::clamp(v, 2, 8);
+#ifdef __PROSPERO__   // (the console: the game is held at the refresh rate over the multiplier)
+    if (clamped == 2) return snprintf(b[clamped], sizeof b[clamped], "The game is held at %d fps at most, with one made frame between each two of its own: more input delay.", console_hz() / clamped), b[clamped];
+    return snprintf(b[clamped], sizeof b[clamped], "The game is held at %d fps at most, with %d made frames between each two of its own: more input delay.", console_hz() / clamped, clamped - 1), b[clamped];
+#endif
+    snprintf(b[clamped], sizeof b[clamped], "%s between each two of the game's.",
+             clamped == 2 ? "One made frame" : clamped == 3 ? "Two made frames" : clamped == 4 ? "Three made frames"
+             : clamped == 5 ? "Four made frames" : clamped == 6 ? "Five made frames" : clamped == 7 ? "Six made frames" : "Seven made frames");
+    return b[clamped];
 }
 /// Frame generation by: the choice, DLSS FG (0), Built-in FG (1) or FSR 3.1 FG (2); where DLSS FG cannot run, 0 is FSR 3.1
 /// FG (AMD FSR 3.1's frame interpolation, vk_fsr3fi.cpp asked); DLSS FG with RX_VK_DLSS_FG=1.
@@ -238,17 +254,12 @@ const char* hn_antilag(int v, int variant) {
     static const char* const t[] = {"The game as without it.", "The driver delays each frame's start for less latency."};
     return variant <= 0 ? t[v ? 1 : 0] : nullptr;
 }
-/// (the step past DLSS FG's top: set_row's, as it was) Frame generation while NVIDIA DLSS FG makes the frames ends at its
-/// runtime's most made frames + 1 (vk_framegen.h framegen_capped: 6x on an RTX 50's runtime, 2x on an RTX 40's), as if that
-/// were its last value. A saved value past it shows as that top (tx_framegen), so an arrow steps from the value shown; past
-/// the top it goes round to Off and down from Off to the top, as at 8x. A value set as it is (the control bridge's) is kept
-/// as asked (step_fn is for the arrows alone): past the top it runs as the top
+/// Steps the Frame generation Mode row (Off / Auto / Fixed, wrapping), remembering the last fixed multiplier.
 int framegen_step(int now, int dir) {
-    const int most = dlss_fg_most(), top = framegen_capped(8, most);
-    int v = now >= 2 ? framegen_capped(now, most) + dir : now + dir;
-    if (v > top) v = 0;
-    else if (v < 0) v = top;
-    return v;
+    return fgr::step_mode(now, dir, &fg_last_fixed, dlss_fg_most());
+}
+int framegen_mult_step(int now, int dir) {
+    return fgr::step_multiplier(now, dir, dlss_fg_most());
 }
 #endif
 const char* tx_fps_cap(int v) {
@@ -271,7 +282,33 @@ MENU_MODULE(framegen) {
               .preset_exempt = true,
               .text = MENU_HOOK([](int v) { return std::string(tx_framegen(v)); }),
               .hint = MENU_HOOK(hn_framegen),
-              .step_fn = MENU_HOOK(framegen_step)})
+              .step_fn = MENU_HOOK(framegen_step),
+              .on_change = MENU_HOOK([](int v) {
+                  if (v >= 2) fg_last_fixed = std::clamp(v, 2, 8);
+              })})
+        .row({.key = "frame_generation_multiplier",
+              .label = "Frame generation multiplier",
+              .help = "How many total frames are shown for each of the game's when Frame generation is Fixed. With NVIDIA DLSS Frame "
+                      "Generation it stops at what NVIDIA's runtime makes on this GPU: 6x on an RTX 50, 2x on an RTX 40.",
+              .kind = menu::Kind::Slider,
+              .value = &fg_mult_ui,
+              .lo = 2, .hi = 8, .step = 1,
+              .preset_exempt = true,
+              .shown = MENU_HOOK([] { return fgr::mode_of(opts.framegen) == fgr::MODE_FIXED; }),
+              .locked = MENU_HOOK([] { return fgr::fixed_top(dlss_fg_most()) <= 2 ? "DLSS Frame Generation runs at 2x on this GPU." : nullptr; }),
+              .text = MENU_HOOK([](int v) { return std::string(tx_framegen_mult(v)); }),
+              .hint = MENU_HOOK(hn_framegen_mult),
+              .step_fn = MENU_HOOK(framegen_mult_step),
+              .on_change = MENU_HOOK([](int v) {
+                  const int clamped = std::clamp(v, 2, fgr::fixed_top(dlss_fg_most()));
+                  opts.framegen = clamped;
+                  fg_last_fixed = clamped;
+              }),
+              .commit_on_release = true,
+              .unsaved = true,
+              .sync = MENU_HOOK([] { return fgr::active_multiplier(opts.framegen, dlss_fg_most()); }),
+              .slider_permille = MENU_HOOK([](int v) { return fgr::multiplier_permille(v, dlss_fg_most()); }),
+              .slider_value = MENU_HOOK([](int p) { return fgr::multiplier_from_permille(p, dlss_fg_most()); })})
         .row({.key = "frame_generation_by",
               .label = "Frame generation by",
               .help = "Who makes the frames at 2x and up. NVIDIA DLSS Frame Generation needs a temporal Upscaler (DLSS, DLAA or FSR) for "
