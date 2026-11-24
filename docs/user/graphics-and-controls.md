@@ -21,7 +21,7 @@ A and B on. Beside the rows, the help says what the row does and what the chosen
 
 </a>
 
-*UI-only example in the Modern dark theme, from 124e4a4d (after nightly 695) on Linux. The Custom values shown are illustrative, not recommended defaults.*
+*UI-only example in the Modern dark theme, from e78aa33d (after nightly 798) on Linux. The Custom values shown are illustrative, not recommended defaults.*
 
 Your choices are saved as you go, in `longshot_options.ini`: in `%APPDATA%\Longshot` when the launcher starts the game
 on Windows, so every version shares them, otherwise in the game folder ([where the files go](updates-and-saves.md#where-the-files-go)).
@@ -80,9 +80,9 @@ after a restart, only on some GPUs or builds, only while HDR is on, or set for y
 | | Profile | Docked, Handheld (after a restart) | Docked; a quality preset sets it |
 | | Upscaler | Game's own, NVIDIA DLSS (only in builds with NVIDIA's DLSS SDK, on NVIDIA RTX GPUs), AMD FSR 3.1 (every build, on GPUs it runs on), AMD FSR 4 (only in builds with FSR 4, on GPUs AMD's files cover), Off (no upscaling), Intel XeSS (Windows, with Intel's `libxess.dll` beside the game). NVIDIA DLAA, AMD FSR 4 Native AA and Intel XeSS Native AA are DLSS's, FSR 4's and XeSS's Native, chosen on the Render resolution row | Game's own; Auto (this PC) chooses DLSS or FSR 4 where they run, never XeSS |
 | | DLSS model | Transformer (K) (CNN (E) in its place on cards with less than 7 GB of video memory), Transformer 2 (M), Transformer 2 (L), NVIDIA default, CNN (E), CNN (F) (shown where DLSS runs, with DLSS or DLAA chosen as the Upscaler) | Transformer (K); CNN (E) under 7 GB |
-| | FSR 4 model | Auto (AMD's), Lite (INT8). Shown on Windows with an AMD GPU that runs FSR 4 and FSR SDK 2.4's upscaler DLL (the one the build fetches, checked by its SHA-256). On a GPU AMD lists no FSR 4 model for, Lite stands in and the row is not shown. Linux retains a saved Lite value but uses Auto. | Auto (AMD's) |
+| | FSR 4 model | Auto (AMD's), Lite (INT8). Shown only on AMD GPUs that run FSR 4, on Windows with FSR SDK 2.4's upscaler DLL (the one the build fetches, checked by its SHA-256). On a GPU AMD lists no FSR 4 model for, Lite stands in and the row is not shown. Linux retains a saved Lite value but uses Auto. | Auto (AMD's) |
 | | DLAA before the bloom | Off, On: where NVIDIA DLAA smooths the picture, after the game's bloom and tone map or before them (shown with NVIDIA DLSS; changeable with Render resolution Native (DLAA) only; changes at once; `RX_VK_DLSS_PRE_BLOOM` over it for one run) | Off |
-| | Dynamic resolution | Off, On: lets the game lower the 3D resolution automatically when the GPU is busy (hides the fixed Render resolution slider while On) | On; a quality preset sets it |
+| | Dynamic resolution | Off, On: lets the game lower the 3D resolution automatically when the GPU is busy (shown unless the Upscaler fixes the render size; hides the fixed Render resolution slider while On) | On; a quality preset sets it |
 | | Render resolution | Stepped slider of fixed render scales (shown while Dynamic resolution is Off). Game's own: 50%, 67%, 75%, 100% (each with its size). With DLSS or FSR 4: Ultra Performance (33%), Performance (50%), Balanced (58%), Quality (67%), 75%, 83%, 92%, Native (DLAA or FSR 4 Native AA: the 3D at full size). With Intel XeSS the same stops, named by the XeSS mode each runs under: Ultra Performance (33%), Balanced (50%, 58%), Ultra Quality (67%, 75%), Ultra Quality Plus (83%, 92%), Native (XeSS Native AA). With FSR 3.1: 33% to 92%, 100% (its native AA). With Off: 33%, 50%, 67%, 75%, 100% | Quality (67%) when Dynamic resolution is turned Off; a quality preset sets it |
 | | Sharpness | 0 to 100%, in steps of 10 | 0%; a quality preset sets it |
 | | Frame generation | Off, Auto (it shows who makes its frames: FSR 3.1 FG or Built-in FG), Fixed | Off |

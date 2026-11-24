@@ -310,8 +310,12 @@ def check_sources():
     # the Python names the options as the menu does
     m = re.search(r"const char\* tx_upscaler\(int\) \{\s*static const char\* t\[ur::kUpscalers\] = \{(.*?)\};", menu, re.S)
     assert m and tuple(re.findall(r'"([^"]*)"', m.group(1))) == share.UPSCALERS, "the Upscaler's names differ from the menu's"
-    m = re.search(r"const char\* tx_framegen\(int v\) \{\s*static const char\* t\[\] = \{(.*?)\};", menu, re.S)
-    assert m and tuple(re.findall(r'"([^"]*)"', m.group(1))) == share.FRAMEGEN, "Frame generation's names differ from the menu's"
+    # (frame_generation= 0 Off, 1 Auto, 2..8 Fixed: the menu names the mode in tx_framegen and the Fixed multiplier in
+    # tx_framegen_mult, gpu/vk/menu/framegen.cpp, #2383)
+    m = re.search(r'const char\* tx_framegen\(int v\) \{.*?if \(v <= 0\) return "([^"]*)";\s*if \(v == 1\) return "([^"]*)";', menu, re.S)
+    mult = re.search(r"const char\* tx_framegen_mult\(int v\) \{\s*static const char\* const t\[\] = \{(.*?)\};", menu, re.S)
+    assert m and mult and (m.group(1), m.group(2), *re.findall(r'"([^"]*)"', mult.group(1))) == share.FRAMEGEN, \
+        "Frame generation's names differ from the menu's"
     hdr = (ROOT / "gpu" / "vk" / "menu" / "hdr.cpp").read_text(encoding="utf-8")   # (the HDR rows' module, #1633)
     m = re.search(r'const char\* tx_hdr\(int v\) \{ return v == 1 \? "([^"]*)" : v == 2 \? "([^"]*)" : "([^"]*)"; \}', hdr)
     assert m and (m.group(3), m.group(1), m.group(2)) == share.HDR, "HDR's names differ from the menu's"
