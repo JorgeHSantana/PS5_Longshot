@@ -332,7 +332,9 @@ What a repository needs before its first release (the organization's secret is s
 | Symptom | Fix |
 |---|---|
 | *SHA256SUMS, signed*: "the sealed secret is empty" | `RELEASE_SIGNING_KEY_SEALED` isn't set or visible to the repository ([one-time setup](#one-time-setup), step 2) |
-| *SHA256SUMS, signed*: "no /run/magicbean-secrets/seal.key" | the job ran on a runner without `seal.key`: only the server's quick runner should carry `deploy` ([CI](ci.md#secrets-only-our-runners-can-open)) |
+| *SHA256SUMS, signed*: "the seal broker gave no key (refused: ...)" | the broker's reason follows: a run that isn't main's or a `v*` tag's, or another repository ([CI](ci.md#secrets-only-our-runners-can-open)) |
+| *SHA256SUMS, signed*: "the seal broker gave no key ()", or curl can't connect | the job ran on a runner that can't reach the broker (only the server's quick runner should carry `deploy`), or `SEAL_BROKER_PIN` doesn't match the broker's certificate |
+| *SHA256SUMS, signed*: "no ID token" | the publish job lost `enable-openid-connect: true` |
 | *SHA256SUMS, signed*: "bad decrypt" | the secret was sealed with another `seal.key`: seal it again with the server's |
 | `verify`: "not signed by a trusted key" | the secret's key isn't in `release_keys.json`: set the matching key, or rotate |
 | *Publish*: HTTP 413 or a cut connection | an upload over Cloudflare's 100 MB limit: set `RELEASE_UPLOAD_API` |

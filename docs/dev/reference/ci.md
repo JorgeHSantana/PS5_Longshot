@@ -78,7 +78,7 @@ started under Wine. The labels the workflows ask for, all on the image `docker:/
 | `ubuntu-latest`, `ubuntu-24.04` | the checks. No secrets: a runner anyone in the team lends can carry these |
 | `quick` | jobs of a few minutes (title, description, third-party, actionlint, guide screenshots), on a runner kept for them so they never wait behind a build |
 | `release` | the builders' builds, on a runner that carries no other label, so CI never takes it. It needs about 50 GB of disk |
-| `deploy` | the jobs that sign, publish or deploy: a release's version and publish, the website's deploy and previews. Only the server's quick runner, which alone has `seal.key` ([below](#secrets-only-our-runners-can-open)) |
+| `deploy` | the jobs that sign, publish or deploy: a release's version and publish, the website's deploy and preview upload. Only the server's quick runner, on the seal broker's network ([below](#secrets-only-our-runners-can-open)). A pull request's own code never runs on it |
 
 Register a runner with `forgejo-runner register --instance https://git.magicbean.dev --token <token> --labels ...` from
 MagicBeanDev's *Settings > Actions > Runners*, and run `forgejo-runner daemon`. A runner lent by someone else gets
@@ -91,12 +91,25 @@ setup](releases.md#one-time-setup)).
 A label only routes a job: a runner says its own labels each time it starts, so anyone's runner can ask for `deploy`
 or `release`, and Forgejo hands it the job and the job's secrets. So the secrets that sign or deploy are kept in
 Forgejo **sealed** ([scripts/ci_secret.sh](../../../scripts/ci_secret.sh), AES-256 with PBKDF2), and the key that
-opens them, `seal.key`, is a file on the server only: in the runners' Docker (dind) at `/magicbean-secrets/seal.key`,
-which only the quick runner lets a job mount (`container.valid_volumes`, MagicBeanDev/Infra's `runner/quick/config.yml`).
-A `deploy` job mounts it at `/run/magicbean-secrets` and opens its secret there.
+opens them, `seal.key`, is on the server only, in the **seal broker** (MagicBeanDev/Infra's README, *The seal
+broker*). The broker hands it to a job of **main or a `v*` tag** and to no other, and it knows which run a job is from
+by the ID token Forgejo signs for the job, not by anything the workflow says: a workflow on another branch, or a pull
+request's copy of one, sets its own env, steps and container, and a label only routes it. A job that unseals:
 
-- A runner without `seal.key` that takes such a job gets text it can't open: the job fails, and signs or deploys nothing.
-- A job that can mount `seal.key` but gets no secrets (a fork's pull request) has nothing to open.
+- has `enable-openid-connect: true` (that job only: any step of it can ask for the token) and
+  `SEAL_BROKER_PIN: ${{ vars.SEAL_BROKER_PIN }}` (the broker's pinned key, an organization variable);
+- runs `scripts/ci_secret.sh unseal`, which fetches the key from the broker the first time (to `$RUNNER_TEMP`);
+- runs only code of main or the tag: a job that checks out a pull request must not turn on `enable-openid-connect`.
+  The website's preview is two jobs for that reason: the PR is built on `ubuntu-latest`, and main's code uploads its
+  `dist/` from `deploy` (`website.yml`).
+
+The broker gives the key to `push` on main or a `v*` tag, `schedule` and `workflow_dispatch` on main, and
+`pull_request_target` (main's own workflow file) for Longshot only; anything else gets a refusal that says why. This
+rests on main and the `v*` tags being protected: whoever may push to main or push a `v*` tag may have the key.
+
+- A runner that takes such a job and can't reach the broker (anyone else's) gets text it can't open: the job fails, and
+  signs or deploys nothing.
+- A job of a branch, or of a pull request, gets no key, on any runner.
 
 | Secret (organization) | Sealed | Used by |
 |---|---|---|
@@ -110,10 +123,9 @@ A `deploy` job mounts it at `/run/magicbean-secrets` and opens its secret there.
 
 What sealing doesn't cover:
 
-- A fork's pull request runs its own copy of the workflows, so it can ask for `deploy` and mount `seal.key`. It gets no
-  secrets to open, but `seal.key` itself would leave with it; whoever also has the sealed text (a runner that took a
-  `deploy` job) could then open it. So a fork's run waits for a maintainer's approval: read its `.forgejo/` changes
-  before you approve one, and don't mark a fork's author as always trusted.
+- A pull request's or a branch's run may still ask for `deploy` and run there: it gets no key, but it shares the runner
+  (and its Docker) with the real deploy jobs. A fork's run waits for a maintainer's approval: read its `.forgejo/`
+  changes before you approve one, and don't mark a fork's author as always trusted.
 - A job's own token (`forgejo.token`) comes with every job, whichever runner takes it, and on a push it may write to
   the repository (releases, tags).
 - A builder that asks for `release` builds the files publish signs.
