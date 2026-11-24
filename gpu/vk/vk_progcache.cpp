@@ -865,7 +865,15 @@ bool complete_from(Program& p, FILE* in, std::mutex* mu, bool* busy = nullptr) {
     std::vector<uint32_t> spirv((size_t)words);
     p.code_words = 0;
     Stage& st = p.stages[0];
-    const bool ok = read_code(in, mu, code_at, st, spirv);   // (from the file, or the shader store)
+    bool ok;
+    if (code_at < 0) {   // (a compressed record, the console's: read whole and unpacked again, the code taken from it)
+        std::vector<uint8_t> plain;
+        const size_t off = (size_t)(packed >> 32);
+        ok = in != nullptr && zstd_record_plain(in, mu, p.key, -code_at - 1, plain) && off + words * 4 <= plain.size();
+        if (ok) std::memcpy(spirv.data(), plain.data() + off, (size_t)words * 4);
+    } else {
+        ok = read_code(in, mu, code_at, st, spirv);   // (from the file, or the shader store)
+    }
     if (ok) st.module = make_module(spirv, p.key, busy);
     if (ok && !st.module && busy && *busy) {   // (not made yet, not failed: a worker completes it, behind the gate)
         p.code_at = code_at, p.code_words = packed;
