@@ -72,7 +72,7 @@ EXPORTS = tuple("renhdrum_" + n for n in (
     "valve_grip_build_report", "valve_grip_mode_tick", "valve_grip_mode_off", "xbox_rumble_create",
     "xbox_rumble_destroy",
     "xbox_rumble_push_half_sample", "xbox_rumble_tick", "engine_create", "engine_destroy", "engine_push_half_sample",
-    "engine_tick"))
+    "settings_resolve_pure", "engine_apply_settings", "engine_tick"))
 # (Windows' own: present on every Windows 10 and 11, as they are for longshot.exe, which llvm-mingw links to the UCRT too)
 SYSTEM_IMPORT = re.compile(r"^(kernel32|ntdll|advapi32|bcrypt|bcryptprimitives|userenv|ws2_32|ucrtbase|"
                            r"api-ms-win-[a-z0-9-]+)\.dll$")

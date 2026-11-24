@@ -1863,12 +1863,20 @@ static void rumble_map(const float v[4], float motor[2]) {
     motor[0] = heavy[0] > heavy[1] ? heavy[0] : heavy[1];
     motor[1] = light[0] > light[1] ? light[0] : light[1];
 }
+static SRWLOCK vibration_send_lock = SRWLOCK_INIT;
+static volatile LONG vibration_permitted = 1;
+static float vibration_amp[2][2];
+
 static void vibration_send(uint64_t handle, uint64_t value) {
-    static float amp[2][2];
+    AcquireSRWLockExclusive(&vibration_send_lock);
+    if (!vibration_permitted) {
+        ReleaseSRWLockExclusive(&vibration_send_lock);
+        return;
+    }
     float v[4];
     memcpy(v, GP(value), sizeof v);
     const int dev = (G32(handle) >> 16) & 1;
-    rumble_map(v, amp[dev]);
+    rumble_map(v, vibration_amp[dev]);
     {   /* (longshot) what the game asks for: the first values, then a count now and then */
         static long long n, strong;
         static float peak;
@@ -1885,14 +1893,41 @@ static void vibration_send(uint64_t handle, uint64_t value) {
     void rh_push(int side, const float value[4]);
     rh_push(dev, v);
     void hos_sdl_rumble(float low, float high);   /* pad_sdl.c */
-    hos_sdl_rumble(amp[0][0] > amp[1][0] ? amp[0][0] : amp[1][0], amp[0][1] > amp[1][1] ? amp[0][1] : amp[1][1]);
+    hos_sdl_rumble(fmaxf(vibration_amp[0][0], vibration_amp[1][0]), fmaxf(vibration_amp[0][1], vibration_amp[1][1]));
+    ReleaseSRWLockExclusive(&vibration_send_lock);
 }
 static void vibration_value_idle(uint64_t v) {   /* VibrationValue {f32 amp_low, freq_low, amp_high, freq_high} */
     float idle[4] = {0.0f, 160.0f, 0.0f, 320.0f};
     memcpy(GP(v), idle, sizeof idle);
 }
-HLE(_ZN2nn3hid6detail15PermitVibrationEb) { RET(0); }
-HLE(_ZN2nn3hid6detail20IsVibrationPermittedEPb) { *(uint8_t *)GP(ARG(0)) = 1; RET(0); }
+HLE(_ZN2nn3hid6detail15PermitVibrationEb) {
+    const int permit = (ARG(0) & 1) != 0;
+    AcquireSRWLockExclusive(&vibration_send_lock);
+    if (!permit) {
+        const float idle[4] = {0.0f, 160.0f, 0.0f, 320.0f};
+        void hos_sdl_rumble(float low, float high);
+        void hos_sdl_rumble_hd(int side, const float value[4]);
+        void rh_push(int side, const float value[4]);
+        memset(vibration_amp, 0, sizeof vibration_amp);
+        hos_sdl_rumble(0, 0);
+        for (int side = 0; side < 2; side++) {
+            hos_sdl_rumble_hd(side, idle);
+            rh_push(side, idle);
+        }
+    }
+    InterlockedExchange(&vibration_permitted, permit);
+    ReleaseSRWLockExclusive(&vibration_send_lock);
+    RET(0);
+}
+HLE(_ZN2nn3hid6detail20IsVibrationPermittedEPb) {
+    *(uint8_t *)GP(ARG(0)) = (uint8_t)InterlockedCompareExchange(&vibration_permitted, 0, 0);
+    RET(0);
+}
+HLE(_ZN2nn3hid29IsOunceVibrationDeviceMountedERKNS0_21VibrationDeviceHandleE) { RET(1); }
+HLE(_ZN2nn3hid6detail29IsOunceVibrationDeviceMountedEPbRKNS0_21VibrationDeviceHandleE) {
+    *(uint8_t *)GP(ARG(0)) = 1;
+    RET(0);
+}
 HLE(_ZN2nn3hid6detail27BeginPermitVibrationSessionEv) { RET(0); }
 HLE(_ZN2nn3hid6detail25EndPermitVibrationSessionEv) { RET(0); }
 HLE(_ZN2nn3hid6detail25InitializeVibrationDeviceERKNS0_21VibrationDeviceHandleE) { RET(0); }

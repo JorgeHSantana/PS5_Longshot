@@ -32,7 +32,7 @@ The game sends a value per side: a low and a high band, an amplitude and a frequ
 
 | Vibration row | Plays |
 |---|---|
-| Auto (default) | Through RenHDrum, every pad it plays: a DualSense's voice coils (on a cable its own sound card, over Bluetooth HID report `0x36`), an Xbox One or Series pad's four motors, a Switch Pro Controller's or Joy-Con pair's HD rumble, a Steam Controller (2026)'s grips (HID report `0x88`, experimental in RenHDrum). Without RenHDrum, or what it needs: a Switch pad (and a Joy-Con alone, always) its own HD rumble, every other pad its two motors (`rumble_map` in `nn_hid.c`) |
+| Auto (default) | Through RenHDrum, every pad it plays: a DualSense's voice coils (on a cable its own sound card, over Bluetooth HID report `0x36`), a Microsoft Xbox One or Series pad's four motors, an original Nintendo Switch Pro Controller's HD rumble, a Steam Controller (2026)'s grips (HID report `0x88`, experimental in RenHDrum). Switch pads outside the RenHDrum path use Longshot's HD rumble where SDL accepts the reports. Controllers whose driver refuses the reports use their motors (`rumble_map` in `nn_hid.c`) |
 | Basic | Every pad's motors |
 | Off | Nothing |
 
@@ -218,7 +218,7 @@ the game or copied for a recording.
 | `HOS_XINPUT=1` | Poll XInput as well as SDL |
 | `HOS_SWITCH2=0` | Leave a Switch 2 Pro Controller to a bridge program |
 | `HOS_INPUT_BACKGROUND` | Controllers count in the background (1) or never (0), over the menu |
-| `HOS_RUMBLE_BACKEND` | `renhdrum`: also a Joy-Con alone, and a DualSense whose connection SDL can't tell, through RenHDrum; `motors`: every pad's motors; `hd`: no RenHDrum (a Switch pad its own HD rumble) |
+| `HOS_RUMBLE_BACKEND` | `renhdrum`: also a DualSense whose connection SDL can't tell, through RenHDrum; `motors`: every pad's motors; `hd`: no RenHDrum (a Switch pad its own HD rumble) |
 | `HOS_MOUSE_NATIVE`, `HOS_MOUSE_SENS`, `HOS_MOUSE_INVERT_X`, `HOS_MOUSE_INVERT_Y` | Mouse camera settings over the menu |
 
 Scripted input for test runs (`HOS_INPUT_SCRIPT`, `HOS_INPUT_LIVE`) is in [developing](../developing.md#scripted-input). The full list is in
