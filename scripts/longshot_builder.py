@@ -5,20 +5,25 @@ library only.
 
     python -I scripts/longshot_builder.py build [--target linux|windows] [--profile dist|release] [--llvm-mingw <folder>]
                                               [--linker <cc>] [--cache <folder>] [--out <file>] [--jobs N]
-                                              [--sources <pack>]
     python -I scripts/longshot_builder.py check <file> [--target linux|windows]
     python -I scripts/longshot_builder.py llvm-mingw [<folder>] [--name] [--host linux]
+    python -I scripts/longshot_builder.py link-tools <folder>
 
 Only what must run before there is a longshot-builder stays here; the rest of a release's packaging is the builder's own,
 `longshot-builder dev release` (builder/crates/longshot-builder/src/dev/release_cmd.rs: the pack it carries, `sources`
 and `unpack`, whose one writer and reader is build-driver's sources.rs; `dry-run`; the earlier releases' files, the
 deltas and the manifest, `fetch-bases`, `deltas`, `files`; RecompLauncher's zip, `recomplauncher`). CI runs it with the
-runner's own longshot-builder, built first by `build --target linux --profile release`.
+Linux job's shipped longshot-builder before its pack is attached (`build --target linux`, the dist profile); the Windows
+job takes that program from the Linux job as its tool.
 - `build`: the program itself, from nothing but the pinned Rust (a builder cannot build its first self).
 - `llvm-mingw`: llvm-mingw unpacked into <folder>, its SHA-256 checked, and its folder printed (--name: only its name, a
   cache key): the Linux build of tools.lock's release (builder/tools/pins.sh pins it), which links the Windows
   longshot-builder, so it is needed before that program exists. (On Windows, tools.lock's own llvm-mingw:
   `longshot-builder dev tools install . --system windows-x64 --only llvm-mingw`.)
+- `link-tools`: tools.lock's linux-x64 `llvm` and `sysroot` from Longshot's store, each archive checked by its size and
+  SHA-256 and unpacked into <folder>/<name>, each printed as `<name>=<folder>`: what links the Linux longshot-builder
+  (`build --linker <llvm>/bin/clang --sysroot <sysroot>`), needed before there is a builder to install them with
+  (`longshot-builder dev tools install`). Needs the zstd program (the archives are .tar.zst).
 - `check`: a built program's headers, as `build` checks its own output: x86-64, and a Linux program that loads glibc's
   libraries only (GLIBC_2.35 at most: the game's floor, Ubuntu 22.04), a Windows one with Windows' own only. It reads the program before anything runs it (a Windows one cannot run on
   the Linux runner that built it) and shares scripts/renhdrum.py's readers of ELF and PE headers.
@@ -32,8 +37,9 @@ units; release, a developer's quicker one):
   program can't; it loads glibc's own libraries and libgcc_s only;
 - windows (the default on Windows): x86_64-pc-windows-gnullvm, linked by llvm-mingw (--llvm-mingw, else LONGSHOT_MINGW),
   the one the game is built with, its unwinder linked in and the C runtime Windows' own UCRT.
-No time stamp and no path of this machine go in. --sources: the pack it carries (`longshot-builder dev release sources`
-makes it; builder/crates/longshot-builder/build.rs embeds it). Its output (--out, default
+No time stamp and no path of this machine go in, and no pack: a release's program carries its pack appended after the
+link (`longshot-builder dev release sources` makes it, `dev release attach` appends it: build-driver's sources.rs). Its
+output (--out, default
 build-<system>/longshot-builder[.exe]) is checked as `check` checks it.
 
 The release builds both in CI (.forgejo/workflows/build-linux.yml, build-windows.yml) and publishes them as they are:
@@ -122,13 +128,31 @@ def problems(data, target, this_pc=False):
     return out
 
 
+# (the trailer after the pack a release's program carries: build-driver's sources.rs, TRAILER_MAGIC and TRAILER_LEN)
+TRAILER_MAGIC = b"LSPKEND\n"
+TRAILER_LEN = 64
+
+
+def program_part(data):
+    """A program's bytes without the pack appended to it, and the pack's size (0 when it carries none): its headers are
+    checked, not the pack's compressed bytes"""
+    if len(data) >= TRAILER_LEN and data[-TRAILER_LEN:].startswith(TRAILER_MAGIC):
+        offset = int.from_bytes(data[-TRAILER_LEN + 16:-TRAILER_LEN + 24], "little")
+        if offset <= len(data) - TRAILER_LEN:
+            return data[:offset], len(data) - TRAILER_LEN - offset
+    return data, 0
+
+
 def cmd_check(a):
     if not os.path.isfile(a.file):
         fail("%s is not there (python -I scripts/longshot_builder.py build makes it)" % a.file)
     with open(a.file, "rb") as f:
-        data = f.read()
+        whole = f.read()
+    data, pack = program_part(whole)
+    if pack:
+        print("%s: carries a pack of %d bytes (the program's own headers checked)" % (a.file, pack))
     target = a.target or ("windows" if a.file.lower().endswith(".exe") else "linux")
-    print("%s: %d bytes, sha256 %s" % (a.file, len(data), hashlib.sha256(data).hexdigest()))
+    print("%s: %d bytes, sha256 %s" % (a.file, len(whole), hashlib.sha256(whole).hexdigest()))
     bad = problems(data, target)
     for p in bad:
         print("  " + p)
@@ -163,6 +187,61 @@ def cmd_llvm_mingw(a):
         with open(stamp, "w", encoding="utf-8") as f:
             f.write(sha256 + "\n")
     print(folder)
+    return 0
+
+
+LINK_TOOLS = ("llvm", "sysroot")
+
+
+def lock_lines(names, system):
+    """{name: (sha256, size, urls)} of tools.lock's lines for these tools on this system"""
+    found = {}
+    with open(os.path.join(ROOT, "tools.lock"), encoding="utf-8") as f:
+        for line in f:
+            w = line.split()
+            if len(w) >= 9 and w[0] == "tool" and w[1] in names and w[3] == system:
+                if w[7] != "-":
+                    fail("tools.lock's %s line has a prefix (%s): link-tools takes a tool's own files only" % (w[1], w[7]))
+                found[w[1]] = (w[4], int(w[5]), w[8:])
+    missing = [n for n in names if n not in found]
+    if missing:
+        fail("tools.lock has no %s line for %s" % (", ".join(missing), system))
+    return found
+
+
+def cmd_link_tools(a):
+    zstd = shutil.which("zstd")
+    if not zstd:
+        fail("link-tools needs the zstd program (the archives are .tar.zst)")
+    for name, (sha256, size, urls) in sorted(lock_lines(LINK_TOOLS, "linux-x64").items()):
+        folder = os.path.join(a.folder, name)
+        # (as llvm-mingw: the archive kept in <folder>/.cache, checked by its size and SHA-256 each time; the unpacked
+        # folder taken only when its stamp, written last, names that SHA-256. CI keeps only .cache)
+        archive = os.path.join(a.folder, ".cache", sha256 + ".tar.zst")
+        try:
+            helpers.download(urls, archive, sha256, size=size, tries=3)
+        except (OSError, ValueError) as e:
+            fail("%s: %s" % (name, e))
+        if os.path.getsize(archive) != size:
+            fail("%s: %d bytes, not tools.lock's %d" % (name, os.path.getsize(archive), size))
+        stamp = os.path.join(folder, ".archive-sha256")
+        try:
+            with open(stamp, encoding="utf-8") as f:
+                fresh = f.read().strip() != sha256
+        except OSError:
+            fresh = True
+        if fresh:
+            shutil.rmtree(folder, ignore_errors=True)
+            tar = os.path.join(a.folder, ".cache", sha256 + ".tar")
+            if subprocess.run([zstd, "-d", "-q", "-f", archive, "-o", tar]).returncode:
+                fail("%s: zstd could not unpack %s" % (name, archive))
+            try:
+                helpers.extract(tar, folder)
+            finally:
+                os.remove(tar)
+            with open(stamp, "w", encoding="utf-8") as f:
+                f.write(sha256 + "\n")
+        print("%s=%s" % (name, folder))
     return 0
 
 
@@ -223,10 +302,9 @@ def cmd_build(a):
         "CARGO_TARGET_DIR": os.path.join(work, "target"),
         "CARGO_TARGET_%s_LINKER" % under.upper(): linker,
         "RUSTFLAGS": flags,
-        # (the sources it carries: builder/crates/longshot-builder/build.rs; none, a program that builds from --root)
-        "LONGSHOT_SOURCES": os.path.abspath(a.sources) if a.sources else "",
     })
-    for k in ("RUSTUP_TOOLCHAIN", "CARGO_BUILD_TARGET", "CARGO_ENCODED_RUSTFLAGS", "CARGO_PROFILE_DIST_LTO"):
+    for k in ("RUSTUP_TOOLCHAIN", "CARGO_BUILD_TARGET", "CARGO_ENCODED_RUSTFLAGS", "CARGO_PROFILE_DIST_LTO",
+              "LONGSHOT_SOURCES"):
         env.pop(k, None)
     cmd = [os.path.join(bin_dir, "cargo" + exe), "build", "--profile", a.profile, "--locked", "--offline",
            "-p", "longshot-builder", "--target", triple] + (["--jobs", str(a.jobs)] if a.jobs else [])
@@ -321,13 +399,15 @@ def main(argv=None):
     b.add_argument("--this-pc", action="store_true",
                    help="linux: a builder for this machine only (a runner's own), never shipped: the glibc floor does not "
                         "apply, every other check does")
-    b.add_argument("--sources", help="the pack it carries (`longshot-builder dev release sources` makes it): a release's")
     b.set_defaults(fn=cmd_build)
     m = s.add_parser("llvm-mingw", help="llvm-mingw unpacked, its folder printed")
     m.add_argument("folder", nargs="?", default="")
     m.add_argument("--name", action="store_true")
     m.add_argument("--host", choices=("linux",), default="linux")
     m.set_defaults(fn=cmd_llvm_mingw)
+    t = s.add_parser("link-tools", help="tools.lock's linux-x64 llvm and sysroot unpacked, each printed as <name>=<folder>")
+    t.add_argument("folder")
+    t.set_defaults(fn=cmd_link_tools)
     g = s.add_parser("game-rust", help="liblongshot_rs.a, the game's Rust, with the pinned Rust (for the release)")
     g.add_argument("--target", choices=sorted(GAME_RUST_TARGETS), help="linux or windows (default: this system's)")
     g.add_argument("--cache", help="the pinned Rust's and the crates' downloads (default: build/longshot-builder-rust)")

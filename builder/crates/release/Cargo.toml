@@ -6,6 +6,10 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+# (trust::tests' keys and signatures for other crates' tests)
+testkit = []
+
 [dependencies]
 build-core.workspace = true
 p256.workspace = true

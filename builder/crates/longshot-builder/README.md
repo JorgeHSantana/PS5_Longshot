@@ -23,11 +23,12 @@ with. It parses the command line and hands the work to `build-driver`.
   longshot-builder doctor [--profile <dir>]                  (what could stop Longshot here, with fixes: src/doctor.rs)
   longshot-builder dev discover | sites | lift | profile | site-hooks | words | decode ...   (the lifter's own)
   longshot-builder dev tools check | install | add | missing | publish | make  (tools.lock: developers, CI, the release)
-  longshot-builder dev release sources | unpack | dry-run | fetch-bases | deltas | files | recomplauncher   (the release's)
+  longshot-builder dev release sources | unpack | attach | dry-run | fetch-bases | deltas | files | recomplauncher   (the release's)
   ```
 
-- [`build.rs`](build.rs): embeds the pack the file `LONGSHOT_SOURCES` names (made by `longshot-builder dev release
-  sources`); a developer's build, with it unset, carries none and builds from `--root` or its checkout.
+- No pack is compiled in: a release's program carries its pack appended after the link (`longshot-builder dev release
+  sources` makes it, `dev release attach` appends it; build-driver's `sources.rs` reads it from the program's own file).
+  A developer's build carries none and builds from `--root` or its checkout.
 - [`src/dev/`](src/dev): `longshot-builder dev`, the lifter and its parts run alone, over a work folder's image, without
   the rest of a build (players never run it; `longshot-builder lift --work <dir>` is the lift as a build runs it). It is
   left out of the main usage; `longshot-builder dev --help` lists it:

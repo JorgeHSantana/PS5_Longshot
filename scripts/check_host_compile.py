@@ -89,6 +89,8 @@ def main(argv=None):
     p.add_argument("--work", required=True, help="a scratch folder (its gen/ and build/ are made again)")
     p.add_argument("--cargo", default="cargo")
     p.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
+    p.add_argument("--launcher", help="a program each compile runs under, e.g. ccache (CI: ccache, with CCACHE_BASEDIR "
+                                      "the checkout and --work in it, so the commands are the same every run)")
     a = p.parse_args(argv)
     work = os.path.abspath(a.work)
     synthetic_gen(work)
@@ -104,7 +106,8 @@ def main(argv=None):
         return 1
 
     def one(unit):
-        r = subprocess.run(syntax_only(unit[1]), capture_output=True, text=True, errors="replace")
+        cmd = syntax_only(unit[1])
+        r = subprocess.run(([a.launcher] if a.launcher else []) + cmd, capture_output=True, text=True, errors="replace")
         return unit[0], r.returncode, r.stdout + r.stderr
 
     failed = 0

@@ -23,7 +23,8 @@
 #    longshot-builder-<v>-<p> (.exe on Windows), the deltas to it from the channel's last 5 releases,
 #    longshot-builder-<from>-to-<v>-<p>.zst-patch, its manifest, longshot-builder-<v>-<p>.json, and RecompLauncher's
 #    longshot-builder-<v>-<p>-recomplauncher.zip (the program as Longshot.exe or Longshot.x86_64, and recomplauncher.json)
-#    (`longshot-builder dev release files` and `recomplauncher`, run by each job's own Linux longshot-builder), uploaded
+#    (`longshot-builder dev release files` and `recomplauncher`, run by the Linux job's longshot-builder before its pack
+#    is attached; windows runs after linux and takes that program as its tool), uploaded
 #    before any build check runs. They run only on the server's release runner (scripts/ci_release_runner.sh) and restore
 #    only the release's own cache, of downloads each checked by its SHA-256 when used (docs/dev/reference/ci.md).
 # 3. publish: SHA256SUMS over the builds' files and tools.lock, SHA256SUMS.sig (the release key), the notes (git-cliff,
@@ -145,7 +146,9 @@ jobs:
 
   windows:
     name: longshot-builder (Windows)
-    needs: version
+    # (after linux: its longshot-builder, before its pack, is this job's tool, so a release compiles the builder once per
+    # platform)
+    needs: [version, linux]
     if: needs.version.outputs.tag != ''
     uses: ./.forgejo/workflows/build-windows.yml
     with:

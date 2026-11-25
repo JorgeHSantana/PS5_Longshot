@@ -1,7 +1,7 @@
 """Game-free checks of the release's workflows (.forgejo/workflows/release.yml, build-linux.yml, build-windows.yml;
 docs/dev/reference/releases.md) and of the Make tools workflow (tools.yml): the jobs on the deploy runner, which opens the
 sealed secrets, compile no Rust and run no program the checkout builds, and give each secret to the steps that use it
-only; the jobs that make the release's files run only on the server's release runner, restore only their own cache of downloads and upload
+only; the jobs that make the release's files run only on the server's release runner, restore only their own caches (downloads, and the builder's compiled Rust for trusted runs) and upload
 the release's files before any build check runs; each build checks tools.lock before it uploads anything; a release uploads no tool and stops on a line whose archive is not in the store;
 tools.yml uploads only on main, what its make job made twice; and scripts/ci_tools_publish.py refuses an archive whose
 version tools.lock names with other bytes before it uploads anything. Reads the files, runs nothing over the network.
@@ -103,16 +103,29 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 # (the server's release runner only, checked before anything is built)
                 guard = workflow.index("run: scripts/ci_release_runner.sh")
                 self.assertLess(guard, workflow.index("longshot_builder.py build"))
-                # (the release's own cache: its own keys, main's and the tags' runs only, downloads only, each checked by
-                # its SHA-256 when used; never an unpacked Rust, a target folder or a key the checks write)
+                # (the release's own caches, main's and the tags' runs only: the downloads, each checked by its SHA-256
+                # when used, never an unpacked Rust; and the shipped builder's compiled Rust alone (cargo's target folder,
+                # trusted runs only: ci.md, The release's cache), never a key the checks write)
+                kinds = set()
                 for m in re.finditer(r"uses: https://github.com/actions/cache/(?:restore|save)@", workflow):
                     step = workflow[workflow.rindex("\n      - ", 0, m.start()):m.end() + 600].split("\n      - ")[1]
-                    self.assertRegex(step, r"key: release-downloads-")
                     self.assertIn("github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')", step)
+                    if "key: release-rust-target-" in step:
+                        kinds.add("rust-target")
+                        self.assertIn("path: ${{ runner.temp }}/rust-work/target\n", step)
+                        self.assertRegex(step, r"key: release-rust-target-(linux|windows)-dist-[a-z0-9_-]+-\$\{\{ hashFiles\('scripts/renhdrum\.py'\) \}\}-\$\{\{ hashFiles\('Cargo\.lock'\) \}\}\n")
+                        continue
+                    self.assertRegex(step, r"key: release-downloads-")
+                    kinds.add("downloads")
                     # (one path a line: a path starts with ${{ runner.temp }}, which has spaces)
                     paths = [p.strip() for p in re.search(r"path: \|\n((?:            .*\n)+)", step).group(1).splitlines()]
                     for path in paths:
-                        self.assertRegex(path, r"/(rust/\*\.tar\.xz|rust/crates|tools-cache|llvm/\.cache)$")
+                        self.assertRegex(path, r"/(rust/\*\.tar\.xz|rust/crates|tools-cache|llvm/\.cache|link-tools/\.cache)$")
+                self.assertEqual(kinds, {"downloads", "rust-target"})
+                # (the compiled Rust restored right before the shipped builder's one compile, and saved right after it)
+                build = workflow.index("longshot_builder.py build --target")
+                self.assertLess(workflow.index("id: rust-target"), build)
+                self.assertLess(build, workflow.index("key: release-rust-target-", workflow.index("id: rust-target") + 300))
                 upload = workflow.index("name: " + artifact)
                 for made in ("dev release files", "dev release recomplauncher"):
                     self.assertLess(workflow.index(made), upload)
@@ -120,6 +133,48 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 for check in re.finditer(r"compile --only renderer", workflow):
                     self.assertGreater(check.start(), upload)
         self.assertEqual(sorted(jobs(text("build-windows.yml"))), ["package"])
+
+    def test_the_builder_is_compiled_once_per_platform(self):
+        # (each job compiles the program it ships once, the dist profile, and attaches its pack to it after the link: no
+        # second builder for the runner, no pack compiled in. Windows runs after Linux and takes the Linux program, before
+        # its pack, as its tool: an artifact of the same run, fetched after the release runner's guard)
+        for name, target in (("build-linux.yml", "linux"), ("build-windows.yml", "windows")):
+            wf = text(name)
+            with self.subTest(name):
+                builds = re.findall(r"^(?![ \t]*#).*longshot_builder\.py build .*", wf, re.M)
+                self.assertEqual(len(builds), 1, builds)
+                self.assertIn("--target %s --profile dist" % target, builds[0])
+                for gone in ("--this-pc", "--sources", "--profile release", "LONGSHOT_SOURCES"):
+                    self.assertNotIn(gone, wf)
+                self.assertIn("dev release attach", wf)
+                attach, check = wf.index("dev release attach"), wf.index("scripts/longshot_builder.py check")
+                self.assertLess(attach, check)
+        # (the shipped Linux program linked as the game is: tools.lock's clang and sysroot, fetched before the compile)
+        linux = text("build-linux.yml")
+        self.assertIn('--linker "$RUNNER_TEMP/link-tools/llvm/bin/clang" --sysroot "$RUNNER_TEMP/link-tools/sysroot"', linux)
+        self.assertLess(linux.index("longshot_builder.py link-tools"), linux.index("longshot_builder.py build --target"))
+        linux, windows = text("build-linux.yml"), text("build-windows.yml")
+        self.assertIn("name: longshot-builder-linux-tool\n          path: ${{ runner.temp }}/host/longshot-builder", linux)
+        tool = windows.index("name: longshot-builder-linux-tool")
+        self.assertLess(windows.index("run: scripts/ci_release_runner.sh"), tool)
+        self.assertLess(tool, windows.index("- name: The tools"))
+        self.assertIn("needs: [version, linux]", jobs(text("release.yml"))["windows"])
+        # (publish takes the release's files only, never the tool)
+        self.assertNotIn("longshot-builder-linux-tool", text("release.yml"))
+
+    def test_the_third_party_objects_seed_from_the_last_signed_release(self):
+        # (dev release last-objects checks the release's signed SHA256SUMS first; the set it writes reaches the one
+        # compile that makes the release's set, never a later step (the build checks compile everything themselves))
+        for name, platform in (("build-linux.yml", "linux-x64"), ("build-windows.yml", "windows-x64")):
+            wf = text(name)
+            with self.subTest(name):
+                step = wf[wf.index("- name: The third-party objects"):]
+                step = step[:step.index("\n      - ", 1)]
+                self.assertIn('dev release last-objects --version "$TAG" --platform %s' % platform, step)
+                self.assertLess(step.index("last-objects"), step.index("--third-party-objects"))
+                self.assertIn('LONGSHOT_THIRD_PARTY_OBJECTS="$last"', step)
+                self.assertNotIn("GITHUB_ENV", step)
+                self.assertEqual(wf.count("LONGSHOT_THIRD_PARTY_OBJECTS"), 1)
 
     def test_the_version_builds_nothing(self):
         version = jobs(text("release.yml"))["version"]

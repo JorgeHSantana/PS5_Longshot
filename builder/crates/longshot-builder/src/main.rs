@@ -625,8 +625,9 @@ fn mod_cmd(
                 return failed;
             }
         };
-        let release = build_driver::sources::carried_release(carried::SOURCES).map(|(release, _)| release);
-        let builder = builder_stamp(exe, carried::SOURCES);
+        let carried = build_driver::sources::embedded();
+        let release = build_driver::sources::carried_release(carried).map(|(release, _)| release);
+        let builder = builder_stamp(exe, carried);
         let status = play::run_with(exe, &play_args, run_build, release.as_deref(), &builder, &extra);
         u8::try_from(status).map_or(failed, ExitCode::from)
     };
@@ -649,7 +650,8 @@ fn doctor_cmd(a: &Args, exe: &Path) -> ExitCode {
         None => build_driver::play::default_profile(&version),
     };
     let cache = layout::cache_root(build_driver::env_os);
-    let unpack = !carried::SOURCES.is_empty() && build_driver::sources::unpacks_now(carried::SOURCES, &cache);
+    let carried = build_driver::sources::embedded();
+    let unpack = !carried.is_empty() && build_driver::sources::unpacks_now(carried, &cache);
     let places = doctor::Places { version, cache, profile };
     if doctor::run(&places, exe, unpack, &Reporter::stdout(format(a))) { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
@@ -902,11 +904,6 @@ fn usage_error(why: String, json: bool) -> ExitCode {
     ExitCode::from(2)
 }
 
-/// The sources this program carries (build.rs: `LONGSHOT_SOURCES`).
-mod carried {
-    include!(concat!(env!("OUT_DIR"), "/sources.rs"));
-}
-
 /// The stamp of this builder that play's fast check compares (build_driver::play): the release it carries
 /// and its sources' hash; a developer's build's crate version and the program's size and time (each build its own).
 fn builder_stamp(exe: &Path, pack: &[u8]) -> String {
@@ -929,7 +926,7 @@ fn builder_stamp(exe: &Path, pack: &[u8]) -> String {
 /// The cache of a release's program run with no cache named (no `--cache`, no `LONGSHOT_CACHE`): `cache/` beside the
 /// program, its version folder's own, so a version folder is whole by itself (portable: the unpacked tools and
 /// sources, the work folders, the stores, the runtimes; the licences' note stays this PC's, build_driver::layout's
-/// data folder). None for a developer's build (`carries`: a pack inside; without one the per-user cache, shared with
+/// data folder). None for a developer's build (`carries`: a pack at its end; without one the per-user cache, shared with
 /// every other developer's build), for `dev`, `--version` and the usage, and when that folder can't be made there (a
 /// program in a folder the player can't write: the per-user cache). `get`: the environment.
 fn portable_cache(
@@ -963,13 +960,24 @@ fn main() -> ExitCode {
     // (Windows: the builder in its own job, so all it starts is from its creation and ends with it; the game breaks
     // away, play.rs)
     build_core::join_job();
-    build_driver::sources::set_embedded(carried::SOURCES);
+    // (the pack this program carries, at the end of its own file: build_driver::sources)
+    let damaged = build_driver::sources::load_carried().err();
     let args: Vec<String> = match unicode_args(std::env::args_os().skip(1)) {
         Ok(a) => a,
         Err(why) => return usage_error(why, false),
     };
+    // (a program cut short or damaged does nothing but say so, as an `error` event with `--output json`, so a launcher
+    // downloads it again; `dev`, `self-update` and the usage still run)
+    if let Some(e) = damaged
+        && !matches!(args.first().map(String::as_str), Some("dev" | "self-update" | "--help" | "-h" | "help"))
+    {
+        let json = args.windows(2).any(|w| w[0] == "--output" && w[1] == "json");
+        say_error(&Reporter::stdout(if json { Format::Json } else { Format::Text }), e, None);
+        return ExitCode::FAILURE;
+    }
+    let carried = build_driver::sources::embedded();
     let exe = std::env::current_exe().unwrap_or_default();
-    if let Some(cache) = portable_cache(&exe, &args, !carried::SOURCES.is_empty(), |k| std::env::var_os(k)) {
+    if let Some(cache) = portable_cache(&exe, &args, !carried.is_empty(), |k| std::env::var_os(k)) {
         // (a folder whose name is not Unicode: said, not changed into another folder's name)
         match cache.to_str() {
             Some(c) => build_driver::set_flag("LONGSHOT_CACHE", c),
@@ -989,8 +997,8 @@ fn main() -> ExitCode {
         eprintln!("longshot-builder: {done}");
     }
     if let Some(game_args) = play::wanted(&exe, &args) {
-        let release = build_driver::sources::carried_release(carried::SOURCES).map(|(release, _)| release);
-        let builder = builder_stamp(&exe, carried::SOURCES);
+        let release = build_driver::sources::carried_release(carried).map(|(release, _)| release);
+        let builder = builder_stamp(&exe, carried);
         // (the game's status as it is: on Windows a 32-bit one)
         std::process::exit(play::run(&exe, &game_args, run_build, release.as_deref(), &builder));
     }
@@ -1000,12 +1008,12 @@ fn main() -> ExitCode {
         Some("diagnostics") => return ExitCode::from(after::diagnostics(&exe, &args[1..]) as u8),
         Some("fetch") => return fetch_cmd::run(&args[1..]),
         Some("self-update") => {
-            let release = build_driver::sources::carried_release(carried::SOURCES).map(|(release, _)| release);
+            let release = build_driver::sources::carried_release(carried).map(|(release, _)| release);
             return self_update::run(&args[1..], release.as_deref());
         }
         Some("info") => {
-            let carries = build_driver::sources::carried_release(carried::SOURCES);
-            let stamp = builder_stamp(&exe, carried::SOURCES);
+            let carries = build_driver::sources::carried_release(carried);
+            let stamp = builder_stamp(&exe, carried);
             let me = info::Me {
                 exe: &exe,
                 release: carries.as_ref().map(|(r, _)| r.as_str()),
@@ -1015,7 +1023,7 @@ fn main() -> ExitCode {
             return info::run(&args[1..], &me);
         }
         Some("--version") => {
-            println!("{}", version_line(carried::SOURCES));
+            println!("{}", version_line(carried));
             return ExitCode::SUCCESS;
         }
         Some("--help" | "-h" | "help") => {
@@ -1039,14 +1047,14 @@ fn main() -> ExitCode {
     }
     // (the first run of a release unpacks what it carries before anything: said, so a launcher shows it)
     if unpacks_carried(&a, env)
-        && build_driver::sources::unpacks_now(carried::SOURCES, &layout::cache_root(build_driver::env_os))
-        && !carried::SOURCES.is_empty()
+        && build_driver::sources::unpacks_now(carried, &layout::cache_root(build_driver::env_os))
+        && !carried.is_empty()
     {
         Reporter::stdout(format(&a)).stage(Stage::Tools, "Unpacking the builder's tools (once for this release)");
     }
     if matches!(a.command.as_str(), "build" | "update") {
-        let release = build_driver::sources::carried_release(carried::SOURCES).map(|(release, _)| release);
-        let builder = builder_stamp(&exe, carried::SOURCES);
+        let release = build_driver::sources::carried_release(carried).map(|(release, _)| release);
+        let builder = builder_stamp(&exe, carried);
         return build_cmd(&a, release.as_deref(), &builder, exe.parent().unwrap_or(Path::new(".")));
     }
     if a.command == "verify" {

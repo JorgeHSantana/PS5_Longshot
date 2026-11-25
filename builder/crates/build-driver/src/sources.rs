@@ -1,8 +1,8 @@
 //! What a release's longshot-builder carries: everything a player's PC builds the game with. The sources the compile
 //! reads (host/, gpu/, the third-party code and assets the build reads, the release's name), the prebuilt third-party
-//! objects, and the build tools, embedded in the program as one pack (`longshot-builder dev release sources` makes it,
-//! with [`write`] here; the longshot-builder crate's build.rs embeds the file `LONGSHOT_SOURCES` names). A developer's build carries none and
-//! builds from a checkout (`--root`, `LONGSHOT_ROOT`, or the checkout the program is in).
+//! objects, and the build tools, as one pack appended to the program after it is linked (`longshot-builder dev release
+//! sources` makes it, with [`write`] here; `dev release attach` appends it, with [`attach`]). A developer's build carries
+//! none and builds from a checkout (`--root`, `LONGSHOT_ROOT`, or the checkout the program is in).
 //!
 //! The pack is made of members, each a zstd frame of its own, so that a release whose tools (or most of whose sources)
 //! did not change has the same bytes for those members, and a delta from the last release (`zstd --patch-from`) is
@@ -29,6 +29,21 @@
 //!              u64 the number of files (LE)
 //! ```
 //!
+//! The program carries its pack at the end of its file, past everything its headers name (Linux: the ELF's segments,
+//! sections and section headers; Windows: the PE's overlay, past its sections), then a trailer of [`TRAILER_LEN`]
+//! bytes, the file's last ([`trailer`]):
+//!
+//! ```text
+//! the trailer: TRAILER_MAGIC, u32 TRAILER_VERSION (LE), u32 0, u64 the pack's offset in the file, u64 its length (LE),
+//!              32 bytes SHA-256 of the pack; the pack ends where the trailer starts
+//! ```
+//!
+//! The running program maps its own file ([`load_carried`]) and reads its pack there, nothing read whole. A file with no
+//! trailer and nothing past its image carries no pack (a developer's build). One with bytes past its image but no whole
+//! trailer, or whose pack fails its SHA-256 (checked when something is first unpacked from it), is damaged, a download
+//! cut short, and says so (`tools_incomplete`: download it again). The pack ends at the same place relative to the
+//! file's end in every release, so a delta from the last release (`zstd --patch-from`) stays small.
+//!
 //! This file is the format's one writer ([`write`], [`tree_entries`], [`tool_entries`]) and its one reader ([`unpack`],
 //! [`unpack_into`]). The writer compresses each member with the zstd program at [`MEMBER_ZSTD`] (one thread, the
 //! frame's checksum), so the same files give the same bytes, and a release's members that did not change keep theirs.
@@ -49,17 +64,235 @@ pub const COMPLETE: &str = ".complete";
 /// In an unpacked folder: touched by each use (its time is the folder's last use).
 pub const USED: &str = ".used";
 
-static EMBEDDED: OnceLock<&'static [u8]> = OnceLock::new();
+/// The trailer's first bytes, its format's version in them.
+pub const TRAILER_MAGIC: &[u8; 8] = b"LSPKEND\n";
+/// The trailer's version (after its magic).
+pub const TRAILER_VERSION: u32 = 1;
+/// The trailer's size: the last bytes of a program that carries a pack.
+pub const TRAILER_LEN: usize = 64;
+
+/// The pack the running program carries: its bytes, and the SHA-256 its trailer gives them.
+static CARRIED: OnceLock<(&'static [u8], [u8; 32])> = OnceLock::new();
+/// The carried pack's SHA-256 checked (once a process): why not, when it is wrong.
+static CARRIED_CHECKED: OnceLock<std::result::Result<(), String>> = OnceLock::new();
 static TOOLS: Mutex<BTreeMap<String, PathBuf>> = Mutex::new(BTreeMap::new());
 
-/// The pack the program carries (the longshot-builder binary sets it first thing; a developer's build, nothing).
-pub fn set_embedded(pack: &'static [u8]) {
-    let _ = EMBEDDED.set(pack);
+/// The pack the program carries; empty when it carries none (a developer's build, or before [`load_carried`]).
+pub fn embedded() -> &'static [u8] {
+    CARRIED.get().map_or(&[], |c| c.0)
 }
 
-/// The pack the program carries; empty when it carries none.
-pub fn embedded() -> &'static [u8] {
-    EMBEDDED.get().copied().unwrap_or(&[])
+/// The pack the running program carries, found at the end of its own file (std::env::current_exe), mapped, not read:
+/// the longshot-builder binary calls this first thing. Ok with nothing carried for a program with no trailer and nothing
+/// past its image (a developer's build); an error (`tools_incomplete`) for a file cut short or damaged.
+pub fn load_carried() -> Result<()> {
+    if CARRIED.get().is_some() {
+        return Ok(());
+    }
+    let exe = std::env::current_exe().map_err(|e| bad(format!("this program's file: {e}")))?;
+    let file = std::fs::File::open(&exe).at(&exe)?;
+    if file.metadata().at(&exe)?.len() < TRAILER_LEN as u64 {
+        return Ok(());
+    }
+    let map: &'static memmap2::Mmap = Box::leak(Box::new(map_file(&file).at(&exe)?));
+    if let Some((range, sha)) = carried_in(map)? {
+        let _ = CARRIED.set((&map[range], sha));
+    }
+    Ok(())
+}
+
+/// `file` mapped read only. A program's own file: nothing writes it while it runs (Linux refuses, ETXTBSY; Windows
+/// holds it open), and a self-update renames it, which a mapping outlives.
+#[allow(unsafe_code)]
+fn map_file(file: &std::fs::File) -> std::io::Result<memmap2::Mmap> {
+    // SAFETY: read only, of the running program's own file, which nothing changes under it (above).
+    unsafe { memmap2::Mmap::map(file) }
+}
+
+/// The carried pack's SHA-256 checked against its trailer's, once a process (it hashes the pack whole, so only when
+/// something is unpacked from it). Ok when the program carries none.
+fn check_carried() -> Result<()> {
+    let Some((pack, want)) = CARRIED.get() else { return Ok(()) };
+    CARRIED_CHECKED
+        .get_or_init(|| if Sha256::digest(pack).as_slice() == want { Ok(()) } else { Err(DAMAGED.into()) })
+        .clone()
+        .map_err(bad)
+}
+
+/// Why a pack whose SHA-256 is wrong is refused.
+const DAMAGED: &str = "its SHA-256 is not the one it was made with: the download is damaged";
+
+/// The trailer of a pack of `pack`'s bytes at `offset` in the file.
+pub fn trailer(offset: u64, pack: &[u8]) -> [u8; TRAILER_LEN] {
+    let mut t = [0u8; TRAILER_LEN];
+    t[..8].copy_from_slice(TRAILER_MAGIC);
+    t[8..12].copy_from_slice(&TRAILER_VERSION.to_le_bytes());
+    t[16..24].copy_from_slice(&offset.to_le_bytes());
+    t[24..32].copy_from_slice(&(pack.len() as u64).to_le_bytes());
+    t[32..].copy_from_slice(&Sha256::digest(pack));
+    t
+}
+
+/// `program` (a linked longshot-builder that carries none) with `pack` appended and its trailer after it. Refused for a
+/// program that carries something past its image already, or whose headers this does not read.
+pub fn attach(program: &[u8], pack: &[u8]) -> std::result::Result<Vec<u8>, String> {
+    if pack.get(..8) != Some(&PACK_MAGIC[..]) {
+        return Err("not a pack of this format".into());
+    }
+    match image_end(program) {
+        None => return Err("not a Linux (ELF) or Windows (PE) program this reads".into()),
+        Some(end) if end != program.len() || has_trailer(program) => {
+            return Err("it carries something past its image already: attach to a program that carries no pack".into());
+        }
+        Some(_) => {}
+    }
+    let mut out = Vec::with_capacity(program.len() + pack.len() + TRAILER_LEN);
+    out.extend_from_slice(program);
+    out.extend_from_slice(pack);
+    out.extend_from_slice(&trailer(program.len() as u64, pack));
+    Ok(out)
+}
+
+/// Whether `file` ends with a trailer's magic.
+fn has_trailer(file: &[u8]) -> bool {
+    file.len() >= TRAILER_LEN && file[file.len() - TRAILER_LEN..].starts_with(TRAILER_MAGIC)
+}
+
+/// Where in `file` (a program's bytes) its pack is, and the SHA-256 its trailer gives it: None when it carries none (no
+/// trailer, nothing past its image). An error for a file cut short or damaged: bytes past its image but no trailer, a
+/// trailer of another version, or one naming bytes the file has not. The pack's SHA-256 is not checked here
+/// ([`verify`] does).
+pub fn carried_in(file: &[u8]) -> Result<Option<(std::ops::Range<usize>, [u8; 32])>> {
+    let cut = || bad("the program's file is cut short or damaged: a download that did not end");
+    if !has_trailer(file) {
+        return match image_end(file) {
+            Some(end) if end != file.len() => Err(cut()),
+            _ => Ok(None),
+        };
+    }
+    let at = file.len() - TRAILER_LEN;
+    let t = &file[at..];
+    if u32::from_le_bytes(t[8..12].try_into().unwrap_or_default()) != TRAILER_VERSION {
+        return Err(bad("its pack's trailer is of another version"));
+    }
+    let (off, n) = (le_u64(&t[16..24]), le_u64(&t[24..32]));
+    let start = usize::try_from(off).map_err(|_| cut())?;
+    if off.checked_add(n) != Some(at as u64) || image_end(file).is_some_and(|end| end > start) {
+        return Err(cut());
+    }
+    let mut sha = [0u8; 32];
+    sha.copy_from_slice(&t[32..]);
+    Ok(Some((start..at, sha)))
+}
+
+/// `file`'s carried pack checked whole: found ([`carried_in`]), its SHA-256 its trailer's, its table read. Its bytes.
+pub fn verify(file: &[u8]) -> Result<&[u8]> {
+    let (range, want) = carried_in(file)?.ok_or_else(|| bad("it carries no pack"))?;
+    let pack = &file[range];
+    if Sha256::digest(pack).as_slice() != want {
+        return Err(bad(DAMAGED));
+    }
+    members(pack)?;
+    Ok(pack)
+}
+
+/// The pack a release's program carries, wherever it is: after its trailer's check ([`carried_in`]) and its SHA-256's,
+/// or, in a program from before the pack was appended, compiled into it (the first place a whole pack starts at, each
+/// member inside it). None when it carries none.
+pub fn find_pack(file: &[u8]) -> Option<&[u8]> {
+    if has_trailer(file) {
+        return verify(file).ok();
+    }
+    let mut from = 0;
+    while let Some(i) = file[from..].windows(PACK_MAGIC.len()).position(|w| w == PACK_MAGIC) {
+        let pack = &file[from + i..];
+        if let Ok(all) = members(pack) {
+            let end = all.iter().map(|m| m.bytes.as_ptr() as usize + m.bytes.len() - pack.as_ptr() as usize).max();
+            return Some(&pack[..end.unwrap_or(0)]);
+        }
+        from += i + 1;
+    }
+    None
+}
+
+/// One member of `pack` written into `folder`, its SHA-256 and every file's checked: its files (paths in the tree, as
+/// [`unpack_into`] writes them).
+pub fn unpack_member(pack: &[u8], name: &str, folder: &Path) -> Result<u64> {
+    let all = members(pack)?;
+    let m = all.iter().find(|m| m.name == name).ok_or_else(|| bad(format!("no member {name}")))?;
+    if hex(&Sha256::digest(m.bytes)) != m.sha {
+        return Err(bad(format!("{name} is damaged")));
+    }
+    write_files(m, folder)
+}
+
+fn at_u16(b: &[u8], at: usize) -> Option<usize> {
+    Some(u16::from_le_bytes(b.get(at..at.checked_add(2)?)?.try_into().ok()?) as usize)
+}
+
+fn at_u32(b: &[u8], at: usize) -> Option<usize> {
+    usize::try_from(u32::from_le_bytes(b.get(at..at.checked_add(4)?)?.try_into().ok()?)).ok()
+}
+
+fn at_u64(b: &[u8], at: usize) -> Option<usize> {
+    usize::try_from(u64::from_le_bytes(b.get(at..at.checked_add(8)?)?.try_into().ok()?)).ok()
+}
+
+/// Where a program's image ends in its file: past every byte its headers name (a 64-bit ELF's segments, sections and
+/// section headers; a PE's headers, sections and COFF symbols). What lies after is carried data (a PE's overlay). None
+/// for a file that is neither, or whose headers can't be read.
+pub fn image_end(file: &[u8]) -> Option<usize> {
+    if file.starts_with(b"\x7fELF") {
+        // (64-bit little-endian only: what the builder is)
+        if file.get(4..6) != Some(&[2, 1]) {
+            return None;
+        }
+        let (phoff, shoff) = (at_u64(file, 0x20)?, at_u64(file, 0x28)?);
+        let (phsize, phnum) = (at_u16(file, 0x36)?, at_u16(file, 0x38)?);
+        let (shsize, shnum) = (at_u16(file, 0x3A)?, at_u16(file, 0x3C)?);
+        let mut end = 64usize.max(phoff.checked_add(phsize.checked_mul(phnum)?)?);
+        if shnum > 0 {
+            end = end.max(shoff.checked_add(shsize.checked_mul(shnum)?)?);
+        }
+        for i in 0..phnum {
+            let p = phoff + i * phsize;
+            end = end.max(at_u64(file, p + 8)?.checked_add(at_u64(file, p + 32)?)?);
+        }
+        for i in 0..shnum {
+            let s = shoff + i * shsize;
+            // (SHT_NOBITS: no bytes in the file)
+            if at_u32(file, s + 4)? != 8 {
+                end = end.max(at_u64(file, s + 0x18)?.checked_add(at_u64(file, s + 0x20)?)?);
+            }
+        }
+        return Some(end);
+    }
+    if file.starts_with(b"MZ") {
+        let pe = at_u32(file, 0x3C)?;
+        if file.get(pe..pe.checked_add(4)?)? != b"PE\0\0" {
+            return None;
+        }
+        let coff = pe + 4;
+        let (sections, opt) = (at_u16(file, coff + 2)?, at_u16(file, coff + 16)?);
+        let table = coff + 20 + opt;
+        // (the section table, and SizeOfHeaders, in the optional header)
+        let mut end = table.checked_add(sections.checked_mul(40)?)?.max(at_u32(file, coff + 20 + 60)?);
+        for i in 0..sections {
+            let s = table + i * 40;
+            let (size, at) = (at_u32(file, s + 16)?, at_u32(file, s + 20)?);
+            if size > 0 {
+                end = end.max(at.checked_add(size)?);
+            }
+        }
+        // (COFF symbols and their string table, which a linker may leave in a program)
+        let (symbols, count) = (at_u32(file, coff + 8)?, at_u32(file, coff + 12)?);
+        if symbols > 0 {
+            let strings = symbols.checked_add(count.checked_mul(18)?)?;
+            end = end.max(strings.checked_add(at_u32(file, strings)?)?);
+        }
+        return Some(end);
+    }
+    None
 }
 
 /// The folder a carried tool was unpacked into by the last [`unpack`], by its member's name (`tools/<name>`).
@@ -121,7 +354,8 @@ fn members(pack: &[u8]) -> Result<Vec<Member<'_>>> {
     }
     let count = u32::from_le_bytes(pack.get(8..12).ok_or_else(short)?.try_into().unwrap_or_default()) as usize;
     let mut at = 12;
-    let mut out = Vec::with_capacity(count);
+    // (a count no table of this size can hold is a damaged one: no room made for it)
+    let mut out = Vec::with_capacity(count.min(pack.len() / 58));
     for _ in 0..count {
         let len = u16::from_le_bytes(pack.get(at..at + 2).ok_or_else(short)?.try_into().unwrap_or_default()) as usize;
         at += 2;
@@ -275,6 +509,10 @@ pub fn unpack(pack: &[u8], cache: &Path) -> Result<Unpacked> {
         .ok()
         .is_some_and(|n| n.split_whitespace().next() == Some(hash.as_str()));
     if !complete_tree {
+        // (the carried pack hashed whole, once: a download cut short or damaged is said as such)
+        if !pack.is_empty() && std::ptr::eq(pack.as_ptr(), embedded().as_ptr()) {
+            check_carried()?;
+        }
         for m in &tool_members {
             let name = &m.name["tools/".len()..];
             let at = cache.join("tools").join(format!("{name}-{}", &m.sha[..16]));
@@ -1079,5 +1317,127 @@ mod tests {
         let fine = member_modes(&[("usr/lib/a.so", 0, b"a"), ("lib", 2, b"usr/lib")]);
         assert_eq!(unpack_into(&pack(&[("tree/x", fine)]), &d.join("f")).unwrap(), 2);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The smallest 64-bit ELF this reads: its header, one program header naming bytes up to `len`, no sections.
+    fn tiny_elf(len: usize) -> Vec<u8> {
+        let mut f = vec![0u8; len];
+        f[..4].copy_from_slice(b"\x7fELF");
+        f[4] = 2;
+        f[5] = 1;
+        f[0x20..0x28].copy_from_slice(&64u64.to_le_bytes()); // (e_phoff)
+        f[0x36..0x38].copy_from_slice(&56u16.to_le_bytes()); // (e_phentsize)
+        f[0x38..0x3A].copy_from_slice(&1u16.to_le_bytes()); // (e_phnum)
+        f[64 + 32..64 + 40].copy_from_slice(&(len as u64).to_le_bytes()); // (p_filesz from p_offset 0)
+        f
+    }
+
+    fn a_pack() -> Vec<u8> {
+        pack(&[("tree/files", member(&[("VERSION", b"v9.9.9\n")]))])
+    }
+
+    #[test]
+    fn an_attached_pack_is_read_back_whole() {
+        let program = tiny_elf(200);
+        assert_eq!(image_end(&program), Some(200));
+        let p = a_pack();
+        let file = attach(&program, &p).unwrap();
+        assert_eq!(file.len(), 200 + p.len() + TRAILER_LEN);
+        let (range, sha) = carried_in(&file).unwrap().unwrap();
+        assert_eq!(range, 200..200 + p.len(), "the pack right after the image, the trailer after it");
+        assert_eq!(&sha[..], Sha256::digest(&p).as_slice());
+        assert_eq!(verify(&file).unwrap(), &p[..]);
+        assert_eq!(carried_release(verify(&file).unwrap()).unwrap().0, "v9.9.9");
+        assert!(attach(&file, &p).is_err(), "a program that carries a pack already is refused");
+        assert!(attach(&program, b"not a pack").is_err());
+        assert!(attach(b"neither ELF nor PE", &p).is_err());
+    }
+
+    #[test]
+    fn a_program_with_no_trailer_carries_nothing() {
+        assert_eq!(carried_in(&tiny_elf(200)).unwrap(), None);
+        assert_eq!(carried_in(b"").unwrap(), None);
+        // (this test's own program, linked as the builder is: its headers name every byte of it)
+        let me = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        assert_eq!(image_end(&me), Some(me.len()));
+        assert_eq!(carried_in(&me).unwrap(), None);
+        assert!(verify(&tiny_elf(200)).is_err());
+    }
+
+    #[test]
+    fn a_wrong_trailer_is_refused() {
+        let file = attach(&tiny_elf(200), &a_pack()).unwrap();
+        let end = file.len() - TRAILER_LEN;
+        let mut magic = file.clone();
+        magic[end] ^= 1;
+        assert!(carried_in(&magic).is_err(), "bytes past the image but no trailer: damaged, not a developer's build");
+        let mut version = file.clone();
+        version[end + 8] = 9;
+        assert!(carried_in(&version).is_err());
+        let mut offset = file.clone();
+        offset[end + 16] ^= 1;
+        assert!(carried_in(&offset).is_err(), "a pack that does not end where the trailer starts");
+    }
+
+    #[test]
+    fn a_truncated_program_is_refused() {
+        let file = attach(&tiny_elf(200), &a_pack()).unwrap();
+        for cut in [1, TRAILER_LEN / 2, TRAILER_LEN, TRAILER_LEN + 10, file.len() - 199, file.len() - 150] {
+            let short = &file[..file.len() - cut];
+            assert!(carried_in(short).is_err(), "cut by {cut}");
+        }
+    }
+
+    #[test]
+    fn a_pack_whose_hash_is_wrong_is_refused() {
+        let mut file = attach(&tiny_elf(200), &a_pack()).unwrap();
+        assert!(carried_in(&file).unwrap().is_some(), "the trailer alone does not hash the pack");
+        let last = file.len() - TRAILER_LEN - 1;
+        file[last] ^= 0xff;
+        let e = verify(&file).unwrap_err().to_string();
+        assert!(e.contains("SHA-256") && e.contains("Download longshot-builder again"), "{e}");
+    }
+
+    #[test]
+    fn a_pack_is_found_appended_or_compiled_in() {
+        let p = pack(&[
+            ("tree/files", member(&[("VERSION", b"v9.9.9\n")])),
+            ("tree/third_party_objects", member(&[("third_party_objects/set.json", b"{}")])),
+        ]);
+        let appended = attach(&tiny_elf(200), &p).unwrap();
+        assert_eq!(find_pack(&appended), Some(&p[..]));
+        // (an earlier release's program: the pack among its bytes, a stray magic before it)
+        let mut old = tiny_elf(200);
+        old.extend_from_slice(PACK_MAGIC);
+        old.extend_from_slice(b"junk");
+        old.extend_from_slice(&p);
+        old.extend_from_slice(b"the program's other sections");
+        assert_eq!(find_pack(&old), Some(&p[..]));
+        assert_eq!(find_pack(&tiny_elf(200)), None);
+        let d = scratch("one-member");
+        assert_eq!(unpack_member(&p, "tree/third_party_objects", &d).unwrap(), 1);
+        assert_eq!(std::fs::read(d.join("third_party_objects/set.json")).unwrap(), b"{}");
+        assert!(!d.join("VERSION").exists(), "that member alone");
+        assert!(unpack_member(&p, "tree/nothing", &d).is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_pe_program_s_overlay_is_past_its_image() {
+        // (a PE with one section of 0x200 bytes at 0x200, no symbols)
+        let mut f = vec![0u8; 0x400];
+        f[..2].copy_from_slice(b"MZ");
+        f[0x3C..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        f[0x80..0x84].copy_from_slice(b"PE\0\0");
+        f[0x86..0x88].copy_from_slice(&1u16.to_le_bytes()); // (sections)
+        f[0x94..0x96].copy_from_slice(&0xF0u16.to_le_bytes()); // (the optional header's size)
+        f[0x98 + 60..0x98 + 64].copy_from_slice(&0x200u32.to_le_bytes()); // (SizeOfHeaders)
+        let s = 0x98 + 0xF0;
+        f[s + 16..s + 20].copy_from_slice(&0x200u32.to_le_bytes());
+        f[s + 20..s + 24].copy_from_slice(&0x200u32.to_le_bytes());
+        assert_eq!(image_end(&f), Some(0x400));
+        let file = attach(&f, &a_pack()).unwrap();
+        assert_eq!(carried_in(&file).unwrap().unwrap().0.start, 0x400);
+        assert!(carried_in(&file[..file.len() - 3]).is_err());
     }
 }

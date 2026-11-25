@@ -11,8 +11,9 @@
 //! 5. **What the builder carries**: RenHDrum's library compiled from the source (or the running builder's when this
 //!    PC has no archiver for its C), the third-party objects compiled by this builder from the source's tree, and the
 //!    pack (build_driver::sources' writer: the files the source's own `TREE` names).
-//! 6. **The builder**: `cargo build --profile dist -p longshot-builder` with the pack inside (`LONGSHOT_SOURCES`),
-//!    the release's flags, at a low priority and with as many jobs as the memory holds; checked to read its pack; then
+//! 6. **The builder**: `cargo build --profile dist -p longshot-builder` with the release's flags, at a low priority
+//!    and with as many jobs as the memory holds, the pack appended to it (build_driver::sources::attach; a source from
+//!    before the pack was appended embeds it as it compiles, `LONGSHOT_SOURCES`); checked to read its pack; then
 //!    `<out>/Longshot.x86_64` (`Longshot.exe`) and `<out>/source.json`, which says the commit and that it is unsigned.
 //!
 //! Every step says itself as build events (`stage`, `progress`, `log`), the last two `from_source` and `done`, or an
@@ -212,6 +213,7 @@ pub fn run(asked: &Asked, r: &Reporter) -> Result<()> {
         &src,
         &["--profile", "dist", "-p", "longshot-builder", "--bin", "longshot-builder"],
         &cargo::release_flags(&src, &tc.home),
+        // (a source from before the pack was appended after the link embeds it as it compiles; a newer one ignores it)
         &[("LONGSHOT_SOURCES".into(), pack.display().to_string())],
         cargo_jobs,
         &target,
@@ -222,8 +224,16 @@ pub fn run(asked: &Asked, r: &Reporter) -> Result<()> {
         &|f| r.progress(f * 0.95),
     )?;
     took("time: the builder's compile");
-    check_reads_its_pack(&built.file, &version)?;
-    let program_sha256 = install(&built.file, &program)?;
+    let file = if check_reads_its_pack(&built.file, &version).is_ok() {
+        // (an older source's, its pack embedded)
+        built.file.clone()
+    } else {
+        let with = fs.join(if cfg!(windows) { "longshot-builder-with-pack.exe" } else { "longshot-builder-with-pack" });
+        attach(&built.file, &pack, &with)?;
+        check_reads_its_pack(&with, &version)?;
+        with
+    };
+    let program_sha256 = install(&file, &program)?;
     let note = serde_json::json!({
         "v": 1,
         "commit": commit,
@@ -594,7 +604,7 @@ fn make_pack(
     sources::write(pack, &entries, &tools, &sources::compress_fast).map_err(fail)
 }
 
-/// The new builder asked its version (`--version`): it must read the pack inside it as the release `version`, so a
+/// The new builder asked its version (`--version`): it must read the pack it carries as the release `version`, so a
 /// source whose pack has another format than this builder writes is said, not installed.
 fn check_reads_its_pack(program: &Path, version: &str) -> Result<()> {
     let out = build_core::child::output(build_core::child::command(program).arg("--version"))
@@ -610,6 +620,21 @@ fn check_reads_its_pack(program: &Path, version: &str) -> Result<()> {
              source changed what a builder carries. Build it with a newer Longshot."
         ),
     ))
+}
+
+/// The compiled builder `built` with the pack at `pack` appended (build_driver::sources::attach), written to `to`
+/// (executable).
+fn attach(built: &Path, pack: &Path, to: &Path) -> Result<()> {
+    let program = std::fs::read(built).map_err(|e| Error::io(built, e))?;
+    let pack = std::fs::read(pack).map_err(|e| Error::io(pack, e))?;
+    let bytes = build_driver::sources::attach(&program, &pack).map_err(|e| Error::player("pack_failed", e))?;
+    std::fs::write(to, bytes).map_err(|e| Error::io(to, e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(to, std::fs::Permissions::from_mode(0o755)).map_err(|e| Error::io(to, e))?;
+    }
+    Ok(())
 }
 
 /// The compiled builder put at `program` (Windows: made a windowed program, as a release's version folder has it),

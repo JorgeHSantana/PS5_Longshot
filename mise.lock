@@ -2,6 +2,31 @@
 
 lockfile_version = 4
 
+[[tools."github:gitleaks/gitleaks"]]
+version = "8.22.1"
+backend = "github:gitleaks/gitleaks"
+specifiers = ["8.22.1"]
+
+[tools."github:gitleaks/gitleaks"."platforms.linux-arm64"]
+checksum = "sha256:598a495a402aa31d10322df04c1deebcd73c586bf7dda1d6df53572280250a85"
+url = "https://github.com/gitleaks/gitleaks/releases/download/v8.22.1/gitleaks_8.22.1_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/gitleaks/gitleaks/releases/assets/216772772"
+
+[tools."github:gitleaks/gitleaks"."platforms.linux-x64"]
+checksum = "sha256:2f92ab3b8e08319ac30836c32b90818e01519c3a4982771e4f45a7f5607872f7"
+url = "https://github.com/gitleaks/gitleaks/releases/download/v8.22.1/gitleaks_8.22.1_linux_x64.tar.gz"
+url_api = "https://api.github.com/repos/gitleaks/gitleaks/releases/assets/216772759"
+
+[tools."github:gitleaks/gitleaks"."platforms.macos-arm64"]
+checksum = "sha256:6673ddc9791eb4675f46f522c68d774adf56e488c60c357efa25ef7a455abeaa"
+url = "https://github.com/gitleaks/gitleaks/releases/download/v8.22.1/gitleaks_8.22.1_darwin_arm64.tar.gz"
+url_api = "https://api.github.com/repos/gitleaks/gitleaks/releases/assets/216772770"
+
+[tools."github:gitleaks/gitleaks"."platforms.windows-x64"]
+checksum = "sha256:8e3c4f7a73d79240b7184849bacec7cedef1445d0b727ee7a2c078ec50dcc50d"
+url = "https://github.com/gitleaks/gitleaks/releases/download/v8.22.1/gitleaks_8.22.1_windows_x64.zip"
+url_api = "https://api.github.com/repos/gitleaks/gitleaks/releases/assets/216772755"
+
 [[tools."github:koalaman/shellcheck"]]
 version = "0.10.0"
 backend = "github:koalaman/shellcheck"

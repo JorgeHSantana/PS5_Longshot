@@ -20,6 +20,7 @@ mod lift_cmd;
 mod profile_cmd;
 pub(crate) mod release_cmd;
 mod release_deltas;
+mod release_objects;
 mod site_hooks;
 mod sites_cmd;
 mod tools_cmd;

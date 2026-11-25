@@ -17,6 +17,8 @@ node = "22.23.5"
 "pypi:ruff" = "0.12.0"   # (ruff.toml; pre-commit runs it on changed Python)
 "github:rhysd/actionlint" = "1.7.12"
 "github:koalaman/shellcheck" = "0.10.0"
+# (.pre-commit-config.yaml's gitleaks-system hook runs it: the prebuilt release, not a Go toolchain building it)
+"github:gitleaks/gitleaks" = "8.22.1"
 # (longshot-builder's and the lifter's: docs/dev/reference/builder.md, "Building and checking the builder";
 # scripts/renhdrum.py's RUST_VERSION; the Windows target checks the builder for Windows: `cargo clippy --target
 # x86_64-pc-windows-gnullvm`, and is the game's Rust on Windows, build-compile's rust.rs, which a developer's

@@ -534,9 +534,9 @@ It goes as the release's workflows do (`.forgejo/workflows/build-linux.yml`, `bu
    The pack writer (`sources::write`) combines these artifacts with the source's `TREE` and `LEFT_OUT` file selection,
    `VERSION` and the tools. Each member is compressed quickly (zstd `-3`, else ruzstd's fastest).
 6. **The builder** (`builder`): `cargo build --profile dist -p longshot-builder --target <triple> --locked --offline`
-   with the pack inside (`LONGSHOT_SOURCES`) and the release's flags (no path of this PC in it; Linux: linked by the
-   tools' clang against their sysroot, glibc 2.35, with lld; Windows: by their llvm-mingw, the C runtime linked in).
-   Its `--version` must name the pack (`pack_failed` otherwise: a source whose pack format changed needs a newer
+   with the release's flags (no path of this PC in it; Linux: linked by the tools' clang against their sysroot, glibc 2.35, with lld; Windows: by their llvm-mingw, the C runtime linked in).
+   Then the pack is appended to it (`sources::attach`, as a release's; a source from before the pack was appended
+   embeds it as it compiles, `LONGSHOT_SOURCES`, and is taken as it is). Its `--version` must name the pack (`pack_failed` otherwise: a source whose pack format changed needs a newer
    builder). Then `<out>/Longshot.x86_64` (`Longshot.exe`) through a `.new` file, and `source.json`.
 
 Cargo and every compiler run at a low priority (nice 10; Windows' below-normal class), with as many cargo jobs as the
@@ -672,7 +672,7 @@ test's override: the launcher sets none of them.
 | `RX_MARCH=<level>` | The game's CPU level. Default: this PC's CPU (`-march=native`); `cpu_unknown` when clang cannot say what that is |
 | `RX_VK_PGO=gen\|<file>` | The renderer counts branches for a profile, or builds with this one. Default: `assets/profiles/longshot_vk.profdata.xz` ([recording one](../developing.md#record-the-renderers-play-profile)) |
 | `RX_RELEASE=1` | A release build: no console window, shaders prepared before the title. `build` and `update` always are; `compile` only with it |
-| `LONGSHOT_THIRD_PARTY_OBJECTS=<dir>\|0` | The prebuilt third-party objects. Default: the tools' `third_party_objects/`; `0`: compile them |
+| `LONGSHOT_THIRD_PARTY_OBJECTS=<dir>\|0` | The prebuilt third-party objects. Default: the tools' `third_party_objects/`; `0`: compile them. With `compile --third-party-objects` (the release's set) only a folder named here is read: the objects it holds by their keys are taken into the new set as they are (the release's: the last release's set, `dev release last-objects`) |
 | `LONGSHOT_TRACY=1`, `LONGSHOT_TRACY_FIBERS=1` | A Tracy build ([profiling](profiling.md#tracy)); the game's fibers told to Tracy |
 | `--ngx-sdk <dir>` (`LONGSHOT_NGX_SDK`, for one release) | NVIDIA's NGX SDK for `--upscaler dlss`, in place of the one the builder downloads; ignored by a build that did not ask for DLSS |
 | `LONGSHOT_VERSION=<name>` | The release's name. Default: a `VERSION` or `version.txt` file at the root, else `git describe` of the version tags |

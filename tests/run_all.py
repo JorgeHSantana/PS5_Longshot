@@ -1,6 +1,6 @@
 """Every game-free check in one run: each tests/test_*.py in its own process, the C++ unit tests under
 gpu/vk/tests and a byte-compile of every tracked Python file. All of them run even when one fails; the failures are
-printed whole at the end, with a table of every check (slowest first), also to $GITHUB_STEP_SUMMARY when it is set.
+printed whole at the end, with a table of every check (slowest first). $GITHUB_STEP_SUMMARY, when it is set, gets the\nfailures first, each with its first error line, then that table.
 Exits 1 when anything failed. On Linux a check that ends or times out takes every process it started with it.
 
     python -I -B tests/run_all.py [--jobs N] [--timeout SECONDS] [--strict] [--no-skip] [--shard K/N]
@@ -15,6 +15,9 @@ SPIR-V or Vulkan headers, spirv-val) fails instead of being skipped (CI installs
 test skips on this OS too. --list prints the checks a run would start, one a line, and runs none. --junit FILE also
 writes the results as JUnit XML. Standard library only: no package is installed for the runner itself.
 
+The shader recompiler's SPIR-V fixtures (tests/global_load_16, tests/native_suatom, tests/f2i_immediate) are three checks:
+each built with cmake (CC, CXX), its program run to emit the modules, and every module checked by spirv-val (Linux).
+
 A test says what it needs in its own file, with up to three top-level assignments of plain literals (after its
 docstring and imports). The runner reads them with ast and never imports the test; a test that declares none runs with
 no arguments and its own defaults.
@@ -24,7 +27,7 @@ no arguments and its own defaults.
     RUN_ALL_SKIP = {"windows": "needs spirv-val: checked on Linux"}       # OS ("linux", "windows") -> why it is skipped
 
 {name} in an argument is a tool or folder find_tools looks for (cc, cxx, clang, vulkan_headers, spirv_headers, spirv_val,
-glslang, dav1d, cargo, llvm_mc; clang is a C compiler that is clang on every OS, $CLANG else PATH's, for the checks
+glslang, dav1d, cargo, llvm_mc, cmake; clang is a C compiler that is clang on every OS, $CLANG else PATH's, for the checks
 that link an object clang made); a check whose tool, compiler (the word after --cc or --cxx) or module is missing here is skipped, or fails
 with --strict. A check skipped on both OSes (a GPU, the game) names both. A declaration that is not a plain literal of
 that shape, names an unknown placeholder or OS, or any other RUN_ALL_ name, stops the run with the file and line; so
@@ -48,6 +51,7 @@ import importlib.util
 import itertools
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -143,6 +147,7 @@ def find_tools():
         "clang": which(os.environ.get("CLANG", ""), "clang", "clang-23"),
         "cargo": which("cargo"),
         "llvm_mc": os.environ.get("LLVM_MC") or which("llvm-mc"),
+        "cmake": which("cmake"),
     }
 
 
@@ -410,6 +415,61 @@ def cpp_checks(tools, timeout):
     return out, ([] if cxx else ["a C++ compiler"])
 
 
+# (the shader recompiler's SPIR-V fixtures: each built with cmake against the SPIR-V headers, its modules emitted and
+# every one checked by spirv-val. --uniform-buffer-standard-layout: the back end's device has
+# uniformBufferStandardLayout, so constant buffers are u32 arrays of stride 4; native_suatom's modules have none)
+SPIRV_FIXTURES = (
+    ("tests/global_load_16", [["global_load_16_ir"], ["global_load_16_ir", "--cas-loops", {"RX_VK_FOLLOW_STORES": "1"}]], True),
+    ("tests/native_suatom", [["native_suatom"]], False),
+    ("tests/f2i_immediate", [["f2i_immediate"]], True),
+)
+
+
+def spirv_fixture_checks(tools, timeout):
+    """SPIRV_FIXTURES, a check each: (name, run) pairs, and what they need that is missing here"""
+    out = []
+
+    def fixture(rel, runs, std_layout):
+        def run():
+            with tempfile.TemporaryDirectory(prefix="spirv-fixture-") as tmp:
+                env = dict(os.environ, CC=tools["cc"] or "", CXX=tools["cxx"] or "")
+                build, logs = os.path.join(tmp, "build"), []
+                headers = os.path.dirname(tools["spirv_headers"].rstrip("/\\"))   # (the folder above include/)
+                for cmd in ([tools["cmake"], "-S", os.path.join(ROOT, rel), "-B", build, "-DREPO_ROOT=" + ROOT,
+                             "-DSPIRV_HEADERS_ROOT=" + headers],
+                            [tools["cmake"], "--build", build, "--parallel", str(os.cpu_count() or 2)]):
+                    r = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
+                    logs.append(r.stdout)
+                    if r.returncode:
+                        return Result(r.returncode, b"".join(logs))
+                modules = os.path.join(build, "modules")
+                for argv in runs:
+                    extra = dict(env, **argv[-1]) if isinstance(argv[-1], dict) else env
+                    argv = [a for a in argv if not isinstance(a, dict)]
+                    r = subprocess.run([os.path.join(build, argv[0]), *argv[1:], modules], env=extra,
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
+                    logs.append(r.stdout)
+                    if r.returncode:
+                        return Result(r.returncode, b"".join(logs))
+                spv = sorted(f for f in os.listdir(modules) if f.endswith(".spv")) if os.path.isdir(modules) else []
+                if not spv:
+                    return Result(1, b"".join(logs) + b"no .spv module emitted\n")
+                for f in spv:
+                    cmd = [tools["spirv_val"], "--target-env", "vulkan1.3"]
+                    cmd += ["--uniform-buffer-standard-layout"] if std_layout else []
+                    r = subprocess.run(cmd + [os.path.join(modules, f)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       timeout=timeout)
+                    if r.returncode:
+                        return Result(r.returncode, b"".join(logs) + ("spirv-val %s:\n" % f).encode() + r.stdout)
+                return Result(0, b"".join(logs) + ("%d modules valid\n" % len(spv)).encode())
+        return run
+    for rel, runs, std_layout in SPIRV_FIXTURES:
+        out.append((rel, fixture(rel, runs, std_layout)))
+    missing = [what for what, key in (("cmake", "cmake"), ("a C++ compiler", "cxx"), ("a C compiler", "cc"),
+                                      ("spirv-val", "spirv_val"), ("the SPIR-V headers", "spirv_headers")) if not tools[key]]
+    return out, missing
+
+
 def load_times(path=TIMES):
     """{check: seconds} for this OS from tests/run_all_times.json; {} when it is missing or unreadable (the order is
     then by name, and the parts of --shard are still whole)"""
@@ -535,6 +595,18 @@ def compile_all():
             bad.append("%s: %s" % (f, e))
     text = "%d files byte-compiled\n" % len(files) + "".join(b + "\n" for b in bad)
     return Result(1 if bad else 0, text.encode())
+
+
+ERROR_WORDS = re.compile(r"error|fail|mismatch|traceback|assert|timeout|not found|refused", re.I)
+
+
+def first_error(output):
+    """A failed check's first line that says what went wrong (an error, a failure, an assertion), else its last line"""
+    lines = [l.strip() for l in output.splitlines() if l.strip()]
+    for l in lines:
+        if ERROR_WORDS.search(l) and not l.startswith(("PASS", "ok ", "Ran ")):
+            return l
+    return lines[-1] if lines else "(no output)"
 
 
 def write_junit(path, checks, wall):
@@ -675,6 +747,20 @@ def main():
                 c.why_skip = None
                 c.run = lambda m=missing: Result(1, ("not found: %s (--strict)\n" % ", ".join(m)).encode())
         checks.append(c)
+    fixtures, missing = spirv_fixture_checks(tools, a.timeout)
+    if not everything and not any(c.startswith(("gpu/", "tests/global_load_16/", "tests/native_suatom/",
+                                                "tests/f2i_immediate/")) for c in changed):
+        fixtures = []   # (--changed: they build the shader recompiler and their own folder)
+    for name, run in fixtures:
+        c = Check(name, run)
+        if WINDOWS and not a.no_skip and not picked(name):
+            c.why_skip = "built with cmake and checked by spirv-val: checked on Linux"
+        elif missing:
+            c.why_skip = "not found here: " + ", ".join(missing)
+            if a.strict:
+                c.why_skip = None
+                c.run = lambda m=missing: Result(1, ("not found: %s (--strict)\n" % ", ".join(m)).encode())
+        checks.append(c)
     checks.append(Check(BYTE_COMPILE_ATOM, compile_all))
     if a.names:
         checks = [c for c in checks if picked(c.name)]
@@ -742,13 +828,20 @@ def main():
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         mark = {"pass": "pass", "FAIL": "**FAIL**", "TIMEOUT": "**TIMEOUT**", "skip": "skip"}
-        lines = ["### Tests (%s): %s" % (OS, head), "", "| Result | Time | Check | Note |", "|---|---:|---|---|"]
+        lines = ["### Tests (%s): %s" % (OS, head), ""]
+        if failed:
+            lines += ["Failed:", ""]
+            for c in failed:
+                lines.append("- **%s** `%s`: `%s`" % (c.status, c.name, first_error(c.output).replace("`", "'")[:200]))
+            lines.append("")
+        lines += ["<details><summary>Every check</summary>", "", "| Result | Time | Check | Note |", "|---|---:|---|---|"]
         for c in order:
             note = c.why_skip or ""
             if c.status in ("FAIL", "TIMEOUT"):
                 last = [l for l in c.output.strip().splitlines() if l.strip()][-1:] or [""]
                 note = "`%s`" % last[0].replace("|", "\\|").replace("`", "'")[:160]
             lines.append("| %s | %s | `%s` | %s |" % (mark[c.status], "" if c.why_skip else "%.1f s" % c.secs, c.name, note))
+        lines += ["", "</details>"]
         with open(summary, "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n\n")
     if a.junit:

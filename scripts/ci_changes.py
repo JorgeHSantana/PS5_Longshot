@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Whether a pull request needs ci.yml's compiling jobs (rust, e2e, host-windows, spirv-fixtures), from its files.
+"""Whether a pull request needs ci.yml's compiling jobs (rust, host-windows), from its files.
 
 Those jobs read far more than builder/: the workspace's tests and build scripts read host/, gpu/, game/, assets/,
 third_party/, scripts/, tests/, tools.lock and docs/dev/reference/build-events.md. So the rule is the other way round:
@@ -31,8 +31,8 @@ DOCS_ONLY = (
     ".forgejo/pull_request_template.md",
     ".forgejo/workflows/website.yml",
     ".forgejo/workflows/pr-description.yml",
-    ".forgejo/workflows/guide-screenshots.yml",
     ".forgejo/workflows/third-party.yml",
+    ".forgejo/workflows/ci-image.yml",
     "AGENTS.md",
     "CONTRIBUTING.md",
     "README.md",
@@ -45,7 +45,7 @@ MAX_PAGES = 60  # (3000 files: past that, run everything)
 
 
 def needs_code(files: list[str]) -> bool:
-    """True when any changed file may change what rust, e2e or host-windows check (and for no file at all: unsure)."""
+    """True when any changed file may change what rust or host-windows check (and for no file at all: unsure)."""
     if not files:
         return True
     for f in files:

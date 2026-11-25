@@ -164,7 +164,14 @@ fn a_line_over_the_limit_closes_the_channel() {
     let mut g = Game::plain(cfg);
     g.hello();
     let long = format!("{{\"id\":2,\"op\":\"profile\",\"args\":{{\"x\":\"{}\"}}}}", "a".repeat(LINE_MAX));
-    g.say(&long);
+    // (the builder stops reading at the limit and may close its end before the rest of the line is written: a broken
+    // pipe here is the builder hanging up, as it should, not a failure)
+    let to = g.to.as_mut().unwrap();
+    match to.write_all(long.as_bytes()).and_then(|()| to.write_all(b"\n")) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+        Err(e) => panic!("writing the long line: {e}"),
+    }
     let r = g.hear();
     assert_eq!(r["code"], "refused");
     // (then nothing more is served: the stream ends)

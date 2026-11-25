@@ -248,7 +248,7 @@ int hos_texts_romfs(const char *key, const char *mod, char *out, size_t cap) { (
         put(m / "03-added/romfs/New/D.bgyml.zs", raw_frame(bytes(700)))
         put(m / "-off/romfs/Model/A.bfres.zs", raw_frame(bytes(99999)))       # (off by its name: never seen)
         # (the list as the builder writes it: built.pchtxt applied as code, new.ips not in it)
-        listed = subprocess.run([a.cargo, "run", "-q", "--release", "-p", "game-files", "--example", "mods", "--",
+        listed = subprocess.run([a.cargo, "run", "-q", "-p", "game-files", "--example", "mods", "--",
                                  "exefs-list", "01-first", str(m / "01-first/exefs/built.pchtxt"), "code", ""],
                                 cwd=ROOT, capture_output=True, check=True).stdout
         (game / "exefs_patches.txt").write_bytes(listed)

@@ -63,7 +63,7 @@ pub enum Stage {
     SourceTools,
     /// `from-source`: what the new builder carries made: RenHDrum's library, the third-party objects, the pack.
     Pack,
-    /// `from-source`: the source's longshot-builder compiled with the pack inside (the release's profile), checked,
+    /// `from-source`: the source's longshot-builder compiled, its pack attached (the release's profile), checked,
     /// and the version folder written.
     Builder,
 }

@@ -166,15 +166,23 @@ pub fn open(sums: &[u8], sig: &str, keys: &[Key]) -> Result<BTreeMap<String, Str
     Ok(files)
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+/// Keys and signatures for tests, this crate's and (feature `testkit`) other crates'.
+#[cfg(any(test, feature = "testkit"))]
+pub mod tests {
     use super::*;
-    use p256::ecdsa::SigningKey;
+    pub use p256::ecdsa::SigningKey;
     use p256::ecdsa::signature::Signer;
 
     /// The tests' signing key (a fixed scalar), and its public key as a trusted [`Key`].
     pub fn test_key() -> (SigningKey, Key) {
         let sk = SigningKey::from_slice(&[7u8; 32]).unwrap();
+        let k = Key::of(*sk.verifying_key());
+        (sk, k)
+    }
+
+    /// Another signing key (a scalar of `seed`, not 0), and its public key.
+    pub fn key(seed: u8) -> (SigningKey, Key) {
+        let sk = SigningKey::from_slice(&[seed.max(1); 32]).unwrap();
         let k = Key::of(*sk.verifying_key());
         (sk, k)
     }
@@ -198,6 +206,7 @@ pub(crate) mod tests {
         b64(&der)
     }
 
+    /// `b` in base64 (with padding).
     pub fn b64(b: &[u8]) -> String {
         const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let mut s = String::new();

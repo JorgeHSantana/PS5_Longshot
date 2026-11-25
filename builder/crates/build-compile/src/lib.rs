@@ -322,8 +322,13 @@ fn prepare(o: &Options, r: &Reporter) -> Result<Prepared> {
         r.log(n.as_str());
     }
     let store = store::Store::open(&o.store_dir());
-    let set_dir = match o.mode {
-        Mode::ThirdPartySet(_) => None,
+    let set_dir = match &o.mode {
+        // (the release's set: compiled, but for the objects a set named outright (LONGSHOT_THIRD_PARTY_OBJECTS: the last
+        // release's, `dev release last-objects`) holds by their keys, taken as they are; never the set written now)
+        Mode::ThirdPartySet(out) => match &o.settings.third_party_objects {
+            Some(Some(seed)) if seed != out => Some(seed.clone()),
+            _ => None,
+        },
         _ => prebuilt::folder(&o.settings.third_party_objects, &o.root),
     };
     let set = set_dir.as_deref().and_then(prebuilt::Prebuilt::open);

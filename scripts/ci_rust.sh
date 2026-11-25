@@ -6,14 +6,16 @@
 #
 #   scripts/ci_rust.sh [components] [targets]      e.g. scripts/ci_rust.sh rustfmt,clippy
 #
-# The PATH of cargo's bin/ is handed on to the later steps through $GITHUB_PATH.
+# rustup and the toolchain go to $RUSTUP_HOME and $CARGO_HOME when they are set (scripts/linux/ci_setup.sh), else
+# ~/.rustup and ~/.cargo. The PATH of cargo's bin/ is handed on to the later steps through $GITHUB_PATH.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 RUSTUP_VERSION=1.29.0
 RUSTUP_SHA256=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10   # (x86_64-unknown-linux-gnu's rustup-init)
 rust=$(sed -n 's/^rust = { version = "\([0-9.]*\)".*/\1/p' mise.toml)
 [ -n "$rust" ] || { echo "ci_rust.sh: no rust version in mise.toml" >&2; exit 1; }
-export PATH="$HOME/.cargo/bin:$PATH"
+cargo_bin=${CARGO_HOME:-$HOME/.cargo}/bin
+export PATH="$cargo_bin:$PATH"
 if ! command -v rustup > /dev/null; then
     tmp=$(mktemp -d)
     curl -fsSL --proto '=https' --retry 3 -o "$tmp/rustup-init" \
@@ -29,8 +31,8 @@ args=(--profile minimal)
 rustup toolchain install "$rust" "${args[@]}"
 rustup default "$rust"
 if [ -n "${GITHUB_PATH:-}" ]; then
-    echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+    echo "$cargo_bin" >> "$GITHUB_PATH"
 elif [ -n "${BASH_ENV:-}" ]; then
-    echo "export PATH=\"\$HOME/.cargo/bin:\$PATH\"" >> "$BASH_ENV"
+    echo "export PATH=\"$cargo_bin:\$PATH\"" >> "$BASH_ENV"
 fi
 rustc --version

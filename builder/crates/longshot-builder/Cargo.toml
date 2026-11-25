@@ -33,5 +33,9 @@ sites.workspace = true
 steam.workspace = true
 ui.workspace = true
 
+[dev-dependencies]
+release = { workspace = true, features = ["testkit"] }
+ruzstd.workspace = true
+
 [lints]
 workspace = true

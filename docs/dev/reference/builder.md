@@ -33,7 +33,7 @@ and writes the game folder and its assets.
 | `crates/build-driver` | The driver: the stages in order with their caches, the work folder and the stores, the game folder's files ([below](#a-build)) |
 | `crates/steam` | Longshot as a non-Steam game in Steam's library (`longshot-builder steam-shortcut`, [Steam](build.md#steam)): the binary `shortcuts.vdf`, Steam's id rule, the signed-in account's library, the tile's art; the Longshot Launcher's, ported |
 | `crates/release` | Longshot's releases as a builder installs them (`fetch`, `self-update`: [fetch](build.md#fetch-a-version)): the forge's list through Cloudflare's edge, the signed `SHA256SUMS` (ECDSA P-256, `scripts/release_keys.json`), the manifest, a delta or a chain of up to 5 applied by ruzstd, the program swapped in while it runs; the Longshot Launcher's, ported |
-| `crates/longshot-builder` | The command the launcher runs; a release's carries the pack (`build.rs` embeds the file `LONGSHOT_SOURCES` names). `longshot-builder dev`, the developers' commands: the lifter's own (`lift`, `discover`, `sites`, `profile`, `site-hooks`, `words`, `decode`), `tools` (`tools.lock`) and `release` (a release's packaging) |
+| `crates/longshot-builder` | The command the launcher runs; a release's carries the pack, appended to the program after the link (`dev release attach`). `longshot-builder dev`, the developers' commands: the lifter's own (`lift`, `discover`, `sites`, `profile`, `site-hooks`, `words`, `decode`), `tools` (`tools.lock`) and `release` (a release's packaging) |
 | `crates/synthetic-game` | The builder end to end on a synthetic game: a small AArch64 program of its own (`game/main.S`) packed as a .nup, built through every stage, run with a test host, and built again after a one-instruction change ([below](#building-and-checking-the-builder)) |
 | `rt/` | The runtime the lifted code and the host share (`a64.h`, `a64_rt.c`, `a64_fp.c`), written into gen/rt/ by the lift ([below](#the-runtime)) |
 
@@ -395,9 +395,9 @@ recompiler, sirit, Dear ImGui, ReShade's FX compiler and zbic's zstd. `cargo run
 
 ## What a release carries
 
-A release's `longshot-builder` (`longshot-builder-<v>-linux-x64`, `longshot-builder-<v>-windows-x64.exe`) carries, packed
-inside it (`builder/crates/build-driver/src/sources.rs`, the pack's one writer and reader; `longshot-builder dev release
-sources` makes the pack):
+A release's `longshot-builder` (`longshot-builder-<v>-linux-x64`, `longshot-builder-<v>-windows-x64.exe`) carries one
+pack at the end of its file (`builder/crates/build-driver/src/sources.rs`, the pack's one writer and reader;
+`longshot-builder dev release sources` makes the pack):
 
 - **the tree** it builds from: `host/`, `gpu/`, the `third_party/` and `assets/` the build reads, the release's name
   (`VERSION`), the prebuilt third-party objects (`third_party_objects/`), RenHDrum's library;
@@ -411,13 +411,27 @@ file checked against its SHA-256 and the folder renamed into place once whole; e
 about 2 s. `longshot-builder sources` unpacks it now and prints the folders (a launcher can do it ahead of the first
 build).
 
+The pack is appended to the linked program, not compiled into it: `longshot-builder dev release attach <program>
+<pack> --out <file>` writes the program's bytes, then the pack's, then a 64-byte trailer (a magic, its version, the
+pack's offset and length, its SHA-256), and reads the result back to check it. So the program is compiled once per
+platform, and the same program, before its pack is attached, is the release's own tool (CI's jobs,
+[releases](releases.md)). The program finds its pack by its own file's last 64 bytes (it maps the file; nothing is
+read whole): past its image (the ELF's segments and sections; on Windows the PE's overlay, which the loader does not
+map). The pack ends at the same place relative to the file's end in every release, so deltas stay as small as they
+were.
+
+A program with no trailer and nothing past its image carries no pack (a developer's build). One with bytes past its
+image and no whole trailer (a download cut short), a trailer naming bytes the file has not, or a pack whose SHA-256 is
+not its trailer's (hashed when it is first unpacked, about 0.2 s) is damaged: it does nothing but say so
+(`tools_incomplete`, "Download longshot-builder again"), but for `dev`, `self-update` and its usage.
+
 The tree a build uses is, in order: `--root`, `LONGSHOT_ROOT`, the pack the program carries, else the checkout the
 program is in (a developer's build, under `target/`, carries no pack). A program with none of them stops with
 `tools_incomplete`.
 
 A builder for a commit with no release (a pull request's head, main's newest commit) is made the same way on the
 player's PC by `longshot-builder from-source` ([a builder from source](build.md#a-builder-from-source)): the commit's
-own builder, compiled with the pack inside.
+own builder, compiled, its pack attached (a commit from before the pack was appended embeds it as it compiles).
 
 ## The stores and the work folder
 

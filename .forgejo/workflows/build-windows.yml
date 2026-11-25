@@ -3,13 +3,15 @@
 # player's PC builds the game with: the sources, the release's third-party objects, RenHDrum's DLL and the build tools
 # (tools.lock's windows-x64 bundle), unpacked into its cache at the first use (build-driver's sources.rs). No game data is
 # involved. Called by release.yml with the version's name, it also makes the deltas from the channel's last releases, the
-# release's manifest and RecompLauncher's zip for this platform, all uploaded before any build check runs. No job here
-# restores a cache. The Windows Vulkan back end is compiled too: players build it on their PC,
+# release's manifest and RecompLauncher's zip for this platform, all uploaded before any build check runs. It restores
+# only the release's own caches (docs/dev/reference/ci.md, The release's cache). The Windows Vulkan back end is compiled too: players build it on their PC,
 # this only checks that it still builds; a tag whose commit CI released already (release.yml's `checked`) skips that
 # check, which ships nothing.
 # Every job runs on a Linux runner (label release): there is no Windows one (docs/dev/reference/ci.md). Everything is
 # cross-compiled with llvm-mingw's Linux build of tools.lock's release (scripts/longshot_builder.py llvm-mingw, pinned in builder/tools/pins.sh);
-# a Linux longshot-builder makes the third-party objects and the back end; the program is started under Wine.
+# the Linux job's longshot-builder (build-linux.yml's program before its pack, an artifact: release.yml runs this job
+# after that one) is this job's tool, so no builder is compiled for it: it makes the third-party objects, the pack and
+# the back end, and appends the pack to the Windows program, which is compiled once; that is started under Wine.
 name: longshot-builder (Windows)
 
 on:
@@ -104,17 +106,21 @@ jobs:
       - name: Version
         run: echo "TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
 
-      # (the pinned Rust (scripts/renhdrum.py's RUST: rustc, cargo and each target's standard library) and Cargo.lock's
-      # crates, each checked by its SHA-256, into $RUNNER_TEMP/rust, which RenHDrum's build below takes too)
-      # (a Linux longshot-builder that carries nothing, this runner's: the third-party objects below, the pack, the dry run,
-      # the deltas and the manifest (`dev release`))
-      - name: longshot-builder for this runner
-        run: >-
-          python -I scripts/longshot_builder.py build --target linux --profile release
-          --cache "$RUNNER_TEMP/rust" --out "$RUNNER_TEMP/host/longshot-builder" --this-pc
+      # (the Linux longshot-builder this job runs, build-linux.yml's, before its pack: the third-party objects below, the
+      # pack and its attaching, the dry run, the deltas and the manifest (`dev release`). An artifact of this run, made on
+      # this runner by this commit's code; an artifact keeps no file mode)
+      - name: The Linux longshot-builder (build-linux.yml's)
+        uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
+        with:
+          name: longshot-builder-linux-tool
+          path: ${{ runner.temp }}/host
+      - name: The Linux longshot-builder, runnable
+        run: |
+          chmod +x "$RUNNER_TEMP/host/longshot-builder"
+          "$RUNNER_TEMP/host/longshot-builder" --version
 
       # (every tool the Windows and the Linux builder carry is in tools.lock, every line's first URLs Longshot's store's,
-      # and every line's archive there with its size and SHA-256: checked here, with the runner's builder, before anything
+      # and every line's archive there with its size and SHA-256: checked here, with the Linux builder, before anything
       # is uploaded. A release uploads no tool: a line whose archive is not there yet is the Make tools workflow's to make
       # and upload. publish needs both builds, so a refusal here ships nothing)
       - name: The tools
@@ -130,7 +136,7 @@ jobs:
           fi
 
       # (tools.lock's windows-x64 bundle, at tools/<name>/ of the checkout (`longshot-builder dev tools install`, by the
-      # runner's longshot-builder above: the builder needs none of these tools to be built), where longshot-builder --root
+      # Linux longshot-builder above), where longshot-builder --root
       # <checkout> takes them (build-driver's tools), each archive checked by its size and SHA-256)
       - name: The build tools (tools.lock, windows-x64)
         run: |
@@ -139,9 +145,17 @@ jobs:
 
       # (the third-party code's objects a player's build takes instead of compiling them (build-compile's prebuilt.rs): made
       # with the bundle's llvm-mingw and CPM cache, what a player's build compiles them with)
+      # (each object whose key is the channel's newest release's taken from it, its SHA256SUMS signature checked first, as
+      # build-linux.yml's: `dev release last-objects`; the rest compiled)
       - name: The third-party objects
+        env:
+          FORGEJO_UPLOAD_API: ${{ vars.RELEASE_UPLOAD_API }}
         run: |
-          RX_TARGET=windows LONGSHOT_MINGW="$LLVM_MINGW" \
+          "$RUNNER_TEMP/host/longshot-builder" dev release last-objects --version "$TAG" --platform windows-x64 \
+            --out "$RUNNER_TEMP/last-objects"
+          last="$RUNNER_TEMP/last-objects/objects/third_party_objects"
+          [ -f "$last/set.json" ] || last=0
+          RX_TARGET=windows LONGSHOT_MINGW="$LLVM_MINGW" LONGSHOT_THIRD_PARTY_OBJECTS="$last" \
             "$RUNNER_TEMP/host/longshot-builder" compile --work "$RUNNER_TEMP/third-party-work" \
             --store "$RUNNER_TEMP/third-party-work/store" --root "$PWD" --jobs "$(nproc)" \
             --third-party-objects "$RUNNER_TEMP/third_party_objects"
@@ -161,8 +175,30 @@ jobs:
           python -I scripts/renhdrum.py build --target windows --llvm-mingw "$LLVM_MINGW" --cache "$RUNNER_TEMP/rust"
           --out "$RUNNER_TEMP/renhdrum/renhdrum.dll"
 
-      # (what the program carries, each part a zstd member of its own (`longshot-builder dev release sources`), then the program,
-      # the dist profile, with it inside; checked: x86-64, Windows' own DLLs only)
+      # (the compiled Rust of the shipped builder's compile: cargo's target folder, kept for trusted runs only (a run of
+      # main or a v* tag, on the server's release runner), by platform, profile, target and the pinned Rust
+      # (scripts/renhdrum.py), then Cargo.lock; another Cargo.lock restores the newest entry of the same toolchain.
+      # Unlike the downloads above, what it holds is not checked again: docs/dev/reference/ci.md, The release's cache)
+      - id: rust-target
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/rust-work/target
+          key: release-rust-target-windows-dist-x86_64-pc-windows-gnullvm-${{ hashFiles('scripts/renhdrum.py') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: release-rust-target-windows-dist-x86_64-pc-windows-gnullvm-${{ hashFiles('scripts/renhdrum.py') }}-
+      # (the program this release ships, the dist profile, compiled once, before it carries anything)
+      - name: longshot-builder-<version>-windows-x64.exe, before its pack
+        run: >-
+          python -I scripts/longshot_builder.py build --target windows --profile dist --llvm-mingw "$LLVM_MINGW"
+          --cache "$RUNNER_TEMP/rust" --out "$RUNNER_TEMP/longshot-builder.exe"
+      - if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.rust-target.outputs.cache-hit != 'true'
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/rust-work/target
+          key: release-rust-target-windows-dist-x86_64-pc-windows-gnullvm-${{ hashFiles('scripts/renhdrum.py') }}-${{ hashFiles('Cargo.lock') }}
+      # (what the program carries, each part a zstd member of its own (`longshot-builder dev release sources`), then the
+      # program, the dist profile, compiled once, the pack appended to it and read back (`dev release attach`); checked:
+      # x86-64, Windows' own DLLs only)
       - name: longshot-builder-<version>-windows-x64.exe
         run: |
           command -v zstd > /dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends zstd; }
@@ -172,9 +208,8 @@ jobs:
             --add "longshot-rs/prebuilt/windows-x64/sources.key=$RUNNER_TEMP/longshot-rs/windows-x64/sources.key" \
             --add "third_party/renhdrum/renhdrum.dll=$RUNNER_TEMP/renhdrum/renhdrum.dll" --tools "$BUNDLE/tools"
           mkdir -p dist
-          python -I scripts/longshot_builder.py build --target windows --profile dist --llvm-mingw "$LLVM_MINGW" \
-            --cache "$RUNNER_TEMP/rust" --sources "$RUNNER_TEMP/sources.pack" \
-            --out "dist/longshot-builder-$TAG-windows-x64.exe"
+          "$RUNNER_TEMP/host/longshot-builder" dev release attach "$RUNNER_TEMP/longshot-builder.exe" \
+            "$RUNNER_TEMP/sources.pack" --out "dist/longshot-builder-$TAG-windows-x64.exe"
           python -I scripts/longshot_builder.py check "dist/longshot-builder-$TAG-windows-x64.exe"
           ls -l dist
 
@@ -228,7 +263,7 @@ jobs:
             --runner "$(command -v wine || command -v wine64 || echo /usr/lib/wine/wine64)"
 
       # (RecompLauncher's release file: the same program as Longshot.exe, made a windowed one, and recomplauncher.json,
-      # zipped by this runner's longshot-builder into dist/, so it travels with the rest and SHA256SUMS names it: the
+      # zipped by the Linux longshot-builder into dist/, so it travels with the rest and SHA256SUMS names it: the
       # deploy runner, which signs, builds and runs no Rust)
       - name: longshot-builder-<version>-windows-x64-recomplauncher.zip
         run: |
@@ -262,7 +297,7 @@ jobs:
 
       # (a build check, which ships nothing, after the upload as build-linux.yml's: the Windows Vulkan back end alone
       # (compile --only renderer: no lift, no game), as a player's Windows build compiles it, with tools.lock's
-      # windows-x64 CPM cache (installed above) and the runner's longshot-builder already built, into an object store of
+      # windows-x64 CPM cache (installed above) and the Linux longshot-builder, into an object store of
       # this run's own. It was a job of its own, which built that builder a second time)
       - name: longshot_vk.dll (build check)
         if: env.RELEASE_CHECKED == ''

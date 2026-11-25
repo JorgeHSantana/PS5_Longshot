@@ -70,6 +70,8 @@ sha1_smol = "1.0"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Power", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 toml = "1.1"
 ruzstd = "=0.8.3"
+# (build-driver: the pack a release's program carries, read from its own file, mapped)
+memmap2 = "=0.9.12"
 lz4_flex = { version = "=0.14.0", default-features = false, features = ["std", "safe-decode", "checked-decode"] }
 sha2 = "=0.10.9"
 # (release: the release key's ECDSA P-256 signature of SHA256SUMS checked, pure Rust)

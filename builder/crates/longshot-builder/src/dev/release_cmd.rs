@@ -1,5 +1,5 @@
 //! `longshot-builder dev release`: a release's packaging (docs/dev/reference/releases.md; CI's build-linux.yml,
-//! build-windows.yml and release.yml run it with the runner's own longshot-builder).
+//! build-windows.yml and release.yml run it with build-linux.yml's own longshot-builder, before its pack is attached).
 //!
 //! ```text
 //! sources --out <pack> --version <name> [--root <checkout>] [--third-party-objects <folder>]
@@ -10,11 +10,19 @@
 //!                      apart by the zstd program, so the same files give the same bytes
 //! unpack <pack> <folder>
 //!                      a pack's files written into a folder, checked, as the program reads them
+//! attach <program> <pack> --out <file>
+//!                      the program a release ships: <program> (a linked longshot-builder that carries none) with the
+//!                      pack appended and its trailer after it (build_driver::sources' format), read back and checked
 //! dry-run <program> --work <folder> [--root <tree>] [--cache <folder>] [--clean]
 //!                      a player's build's dry run over a tree, with and without AMD FSR 4, checked: every file it
 //!                      compiles there, no unit missing, every third-party object taken from the tools' set.
 //!                      <program>: a release's longshot-builder (its own tree: --clean, nothing of this environment
 //!                      but PATH and HOME, first its `sources`, timed), or one that carries nothing with --root
+//! last-objects --version <tag> --platform <p> --out <folder> [--api <url>] [--repo <o/n>]
+//!                      the third-party objects of the channel's newest release with the platform's files, its signed
+//!                      SHA256SUMS checked first (release_objects.rs), into <folder>/objects/third_party_objects: the
+//!                      set `compile --third-party-objects` takes the objects of this build's keys from
+//!                      (LONGSHOT_THIRD_PARTY_OBJECTS). Nothing there when none could be had: said, never a failure
 //! fetch-bases --platform <p> --channel nightly|stable --out <folder> [--not <tag>] [--api <url>] [--repo <o/n>]
 //!             [--keep N]
 //!                      the last releases' full files of a channel (a nightly's: and the latest stable's), to make
@@ -44,7 +52,10 @@ const USAGE: &str = "usage: longshot-builder dev release sources --out <pack> --
                          [--third-party-objects <folder>] [--add <path>=<file> ...] [--tool <name>=<folder> ...]
                          [--tools <folder> ...]
        longshot-builder dev release unpack <pack> <folder>
+       longshot-builder dev release attach <program> <pack> --out <file>
        longshot-builder dev release dry-run <program> --work <folder> [--root <tree>] [--cache <folder>] [--clean]
+       longshot-builder dev release last-objects --version <tag> --platform <p> --out <folder> [--api <url>]
+                         [--repo <owner/name>]
        longshot-builder dev release fetch-bases --platform <p> --channel nightly|stable --out <folder> [--not <tag>]
                          [--api <url>] [--repo <owner/name>] [--keep N]
        longshot-builder dev release deltas <full file> --version <tag> --channel nightly|stable --platform <p>
@@ -54,10 +65,12 @@ const USAGE: &str = "usage: longshot-builder dev release sources --out <pack> --
        longshot-builder dev release recomplauncher <full file> [--out <folder>] [--root <checkout>]";
 
 /// Each command: its words after the command, the options it must have, the others it takes (`--clean` a flag).
-const COMMANDS: [(&str, usize, &[&str], &[&str]); 7] = [
+const COMMANDS: [(&str, usize, &[&str], &[&str]); 9] = [
     ("sources", 0, &["--out", "--version"], &["--root", "--third-party-objects", "--add", "--tool", "--tools"]),
     ("unpack", 2, &[], &[]),
+    ("attach", 2, &["--out"], &[]),
     ("dry-run", 1, &["--work"], &["--root", "--cache", "--clean"]),
+    ("last-objects", 0, &["--version", "--platform", "--out"], &["--api", "--repo"]),
     ("fetch-bases", 0, &["--platform", "--channel", "--out"], &["--not", "--api", "--repo", "--keep"]),
     ("deltas", 1, &["--version", "--channel", "--platform", "--out"], &["--bases", "--stamps"]),
     ("files", 1, &["--version", "--platform", "--work"], &["--runner", "--api", "--repo"]),
@@ -190,6 +203,41 @@ fn unpack_cmd(a: &Args) -> Result<(), String> {
     let pack = std::fs::read(&a.words[0]).map_err(|e| format!("{}: {e}", a.words[0]))?;
     let n = sources::unpack_into(&pack, Path::new(&a.words[1])).map_err(|e| e.to_string())?;
     say(format!("{n} files into {}", a.words[1]));
+    Ok(())
+}
+
+/// `attach`: the program with the pack appended, written through `<out>.new` (executable), then read back from the
+/// file as the program reads itself: its pack found by its trailer, its SHA-256 and its table checked.
+fn attach_cmd(a: &Args) -> Result<(), String> {
+    let (program, pack) = (Path::new(&a.words[0]), Path::new(&a.words[1]));
+    let out = Path::new(a.one("--out").unwrap_or(""));
+    let read = |p: &Path| std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()));
+    let bytes = sources::attach(&read(program)?, &read(pack)?).map_err(|e| format!("{}: {e}", program.display()))?;
+    if let Some(dir) = std::path::absolute(out).ok().as_deref().and_then(Path::parent) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let mut new = out.as_os_str().to_owned();
+    new.push(".new");
+    let new = PathBuf::from(new);
+    std::fs::write(&new, &bytes).map_err(|e| format!("{}: {e}", new.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("{}: {e}", new.display()))?;
+    }
+    std::fs::rename(&new, out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let back = read(out)?;
+    let carried = sources::verify(&back).map_err(|e| format!("{}: {e}", out.display()))?;
+    let release =
+        sources::carried_release(carried).map_or_else(|| "no VERSION".into(), |(r, h)| format!("{r}, source {h}"));
+    say(format!(
+        "{}: {} bytes, the pack's {} MB at {} ({release})",
+        out.display(),
+        back.len(),
+        carried.len() >> 20,
+        back.len() - carried.len() - sources::TRAILER_LEN
+    ));
     Ok(())
 }
 
@@ -429,7 +477,45 @@ fn run_parsed(a: &Args) -> Result<(), String> {
     match a.command.as_str() {
         "sources" => sources_cmd(a),
         "unpack" => unpack_cmd(a),
+        "attach" => attach_cmd(a),
         "dry-run" => dry_run_cmd(a),
+        "last-objects" => {
+            use super::release_objects as ro;
+            let bytes = |url: &str, most: u64| {
+                let dir = Path::new(a.one("--out").unwrap_or("."));
+                std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+                let to = dir.join(format!(".download-{}", std::process::id()));
+                let got = build_driver::tools::store::download(url, &to, most)
+                    .and_then(|()| std::fs::read(&to).map_err(|e| format!("{}: {e}", to.display())));
+                let _ = std::fs::remove_file(&to);
+                got
+            };
+            let curl = Net::curl();
+            let mirror = mirror();
+            let api = a.one("--api").unwrap_or(rd::API);
+            // (the full file through FORGEJO_UPLOAD_API's server first, as fetch-bases takes it, then the public address)
+            let file = |url: &str, to: &Path, sha: &str, size: u64| {
+                if let Some(m) = mirror.as_deref().and_then(|m| rd::through(url, api, m))
+                    && (curl.file)(&m, to, sha, size).is_ok()
+                {
+                    return Ok(());
+                }
+                (curl.file)(url, to, sha, size)
+            };
+            let net = ro::Net { json: curl.json, bytes: &bytes, file: &file };
+            let l = ro::Last {
+                platform: a.one("--platform").unwrap_or(""),
+                version: a.one("--version").unwrap_or(""),
+                out: Path::new(a.one("--out").unwrap_or(".")),
+                api,
+                repo: a.one("--repo").unwrap_or(rd::REPO),
+            };
+            let keys = release::trust::keys(&|k| std::env::var(k).ok());
+            if let Some((tag, dir)) = ro::last_objects(&l, &net, &keys, &mut say) {
+                say(format!("{tag}'s set: {}", dir.display()));
+            }
+            Ok(())
+        }
         "fetch-bases" => {
             let mirror = mirror();
             let keep = a.one("--keep").map_or(rd::KEEP, |k| k.parse().unwrap_or(rd::KEEP));

@@ -87,15 +87,15 @@ reviewing the fixture's effect. Do not copy fresh hashes into the manifest merel
 
 ### Automatic Longshot review signal
 
-`.forgejo/workflows/guide-screenshots.yml` defines an offline, read-only check on **every pull request** and each
+`.forgejo/workflows/ci.yml`'s `third-party` job ("Third-party parts and guide screenshots") is an offline, read-only check on **every pull request** and each
 push to `main`, plus manual dispatch. Checking every PR avoids path-filter gaps when a recorded dependency moves
 or a shared header changes. It runs source review and the checker's regression tests; it does not build the fixture
 or access game files. The ordinary game-free test runner also discovers `tests/test_guide_screenshots.py`.
 
-This PR adds the workflow definition. Whether its status runs on fork PRs and blocks merging depends on the
-repository's runner and branch-protection configuration; this PR does not change those settings. After merging,
-a maintainer should verify a test PR with a changed recorded UI source fails, then require **Guide images and
-local UI source review** in branch protection if the team wants an enforced merge gate. An unchecked status or
+Whether its status runs on fork PRs and blocks merging depends on the
+repository's runner and branch-protection configuration, which CI does not change.
+A maintainer should verify a test PR with a changed recorded UI source fails, then require **Third-party parts and
+guide screenshots** in branch protection if the team wants an enforced merge gate. An unchecked status or
 missing runner must not be described as an automatic freshness guarantee.
 
 ### Launcher counterpart: planned cross-repository integration
