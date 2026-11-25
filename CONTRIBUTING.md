@@ -83,3 +83,34 @@ Then claim something in the team room before you start on it ([claiming](docs/de
 CI is Forgejo Actions: [CI](docs/dev/reference/ci.md) says what runs when, on which runners. Its runs and logs are in the
 repository's *Actions* tab, linked from each pull request's checks. Run `mise run lint` and `mise run test` before you push,
 and put the results in the pull request.
+
+## Licensing
+
+Longshot is free software under the [GNU General Public License, version 3 or later](LICENSE). By submitting a change
+you license it under those terms, so only send code you can license that way: nothing from a project with an
+incompatible license, and no decompiled game code or anything generated from the dump.
+
+The checklist's license box is the author's own check of the diff against that paragraph: where each new file and
+copied passage comes from, and that none of it is the game's code or made from the dump. How the game or the console
+behaves (a function's name and arguments, a result code, the order of calls) is a fact and not code, and the host's
+replacements for the console's functions are written from such facts; describe them in your own words and cite a
+public source when there is one.
+
+The third-party parts (Eden, suyu, Sirit, the Vulkan Memory Allocator, SDL, Opus, Dear ImGui, zstd, the Libertinus
+fonts, zbic, AMD's FidelityFX headers and SDK, the CRT shaders, Kenney's input prompts and Tracy, among
+others; and a64-kit, whose notice for host/ and builder/rt is host/NOTICE.TOTKPort.md) keep their own notices: preserve
+them, and don't relicense their code. NVIDIA's DLSS
+SDK is not one of them: it is never in the repository ([upscaler SDKs](docs/dev/setup.md#upscaler-sdks-optional)). Nor
+is Intel's `libxess.dll` (Intel's license): only XeSS's MIT API headers are (`third_party/xess`), and the player puts the
+DLL beside the game ([optional upscalers](docs/user/advanced.md#optional-upscalers)).
+
+## Where to talk
+
+- **The team room**, `#agent-updates:magicbean.dev` on Matrix: claims, progress, pull requests and blockers, from people
+  and agents alike. Post and read it with the [team-updates skill](https://git.magicbean.dev/MagicBeanDev/Tooling/src/branch/main/skills/team-updates/SKILL.md) or Tooling's `team_chat.py`.
+- **Discord:** https://discord.gg/magicbean, for questions.
+- **Agents** read [AGENTS.md](AGENTS.md) on top of this page.
+- **Issues:** [the forms on git.magicbean.dev](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new/choose).
+
+Thanks for testing, reporting and sending fixes. Every report from a different GPU and every area played further than
+before moves the port forward.

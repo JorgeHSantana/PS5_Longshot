@@ -461,7 +461,9 @@ jobs:
           persist-credentials: false
       # (mise.toml's pre-commit; it fetches each hook at the rev .pre-commit-config.yaml pins)
       - name: pre-commit (mise.toml's)
-        run: python3 -m pip install --disable-pip-version-check --break-system-packages pre-commit==4.0.1
+        # (--ignore-installed: the image's Debian platformdirs has no RECORD file, so pip can't replace it; pre-commit's
+        # own copy goes beside it)
+        run: python3 -m pip install --disable-pip-version-check --break-system-packages --ignore-installed pre-commit==4.0.1
       - name: pre-commit on the changed files
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
@@ -593,6 +595,9 @@ jobs:
           path: ${{ runner.temp }}/ccache
           key: ${{ steps.ccache.outputs.key }}
           restore-keys: ${{ steps.ccache.outputs.prefix }}
+      # (the checks that build a site's Rust stub need cargo: mise.toml's Rust, its own step so its PATH reaches the next)
+      - name: Rust (mise.toml's)
+        run: scripts/ci_rust.sh
       # (--strict: a check whose compiler, headers or package is missing here fails instead of being skipped)
       - name: Every check of this part
         env:
