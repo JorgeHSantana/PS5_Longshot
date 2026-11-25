@@ -39,6 +39,8 @@ The game reads its files from the `.nup` you built it from, where it was then. M
    gone it offers **Pick the .nup again**, then builds the same game folder from the one you pick. Little is rebuilt:
    mostly the index of your game files is written again.
 
+[Search .nup reports](https://longshot.magicbean.dev/progress/#problem-search?q=nup)
+
 ### "Your antivirus removed part of the build tools"
 
 A false alarm on unsigned programs: Longshot isn't code-signed yet.
