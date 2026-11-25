@@ -1,5 +1,5 @@
 /* (longshot) The texture data heap's compaction asked for once in a while: the lifted f_80797240 calls
-   hos_oot_tex_compact_due where the game asks for a round (nx2/oot_patches.py patch_tex_compact); host/oot_tex_compact.h
+   hos_oot_tex_compact_due where the game asks for a round (the hook site texture.compactAsk); host/oot_tex_compact.h
    has why and the rule.
    HOS_TEX_COMPACT_MS=<ms>: at least that long between two rounds (1000 with no switch); 0: at every frame, as the game has
    it; off: never. */

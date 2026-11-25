@@ -204,7 +204,7 @@ def presses(menu):
     check(re.search(r"\.on_activate = (MENU_HOOK\()?menu_rumble_test\b", test) is not None,
           "Test vibration's Confirm does not ask menu_rumble_test")
     branch = definition(menu, "void menu_rumble_test")
-    check("host->rumble_test()" in branch and "host->version >= 32" in branch,
+    check("host->rumble_test()" in branch and "host && host->rumble_test)" in branch,
           "Test vibration's Confirm does not ask the host's rumble_test")
     check('.verb = "Test"' in test, "Test vibration's Confirm is not labelled Test")
     # (its cell and its help line: the module's text and hint, as every module's button draws them (row_value_cell,

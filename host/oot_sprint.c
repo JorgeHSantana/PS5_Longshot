@@ -1,7 +1,7 @@
 /* (longshot) Sprint (the Controls tab's Sprint row, the Controls page's Sprint line and its Toggle; host/nn_hid.c reads
    them): Link sprints while his input flags hold the dash input (bit 4 of the word at *(Link +0x50)), the flag the game sets
-   itself for the run that follows a roll. Two places load those flags (nx2/oot_patches.py patch_sprint_link and
-   patch_sprint_stance): Link's movement update, f_804caa80 at 0x804ce798, for the sprint's start and keep tests, and the
+   itself for the run that follows a roll. Two places load those flags (the hook sites sprint.link
+   and sprint.stance, host/oot_sites.c): Link's movement update, f_804caa80 at 0x804ce798, for the sprint's start and keep tests, and the
    stance and camera update, f_80c225d0 at 0x80c27f3c. Right after each load they call hos_sprint_link and
    hos_sprint_stance below, which OR the bit in while Sprint is on, so the game's own sprint runs: its speed, animation,
    camera and every rule that ends it. A is never touched: the player's own A (a roll, talking, opening, picking up) is
@@ -115,11 +115,11 @@ static int32_t rd32(uint64_t a) { return a && hos_mem_region(a, 4) ? (int32_t)G3
 /* 1 when link is the Link the player controls. Link's class has one more instance the player does not control: the game's
    actor manager names the controlled one at +0x470, whose +0x18 must be Link's own +0x18. */
 static int is_link(uint64_t link) {
-    if (!link || rd64(link) != g_module_base + LINK_CLASS) return 0;
-    const uint64_t mgr = rd64(rd64(g_module_base + ACTOR_MGR));
-    if (!mgr || rd64(mgr) != g_module_base + ACTOR_MGR_CLASS) return 0;
+    if (!link || rd64(link) != LINK_CLASS) return 0;
+    const uint64_t mgr = rd64(rd64(ACTOR_MGR));
+    if (!mgr || rd64(mgr) != ACTOR_MGR_CLASS) return 0;
     const uint64_t ctl = rd64(mgr + 0x470);
-    if (!ctl || rd64(ctl) != g_module_base + CONTROLLED_CLASS) return 0;
+    if (!ctl || rd64(ctl) != CONTROLLED_CLASS) return 0;
     const uint64_t actor = rd64(ctl + 0x18);
     return actor && actor == rd64(link + 0x18);
 }
@@ -127,7 +127,7 @@ static int is_link(uint64_t link) {
 /* An event (a conversation, a cutscene) is running: the event manager has an active event at +0x68, the field the game's
    SeqQueryIsEventRunning reads. */
 static int event_running(void) {
-    const uint64_t m = rd64(rd64(g_module_base + EVENT_MGR));
+    const uint64_t m = rd64(rd64(EVENT_MGR));
     return m && rd64(m + 0x68);
 }
 
@@ -282,7 +282,7 @@ int hos_sprint_step(int kind, int resumed, int menu) {
     return on;
 }
 
-/* (nx2/oot_patches.py) f_804caa80 at 0x804ce798, after its load of Link's input flags into x10 (Link in x19): the flags
+/* (the hook site sprint.link) f_804caa80 at 0x804ce798, after its load of Link's input flags into x10 (Link in x19): the flags
    for the sprint's start and keep tests. */
 void hos_sprint_link(Ctx *c) {
     int hos_oot_menu_sprint_active(void);
@@ -294,7 +294,7 @@ void hos_sprint_link(Ctx *c) {
     if (hos_sprint_step(kind, resumed, hos_oot_menu_sprint_active())) c->x[10] |= DASH_INPUT;
 }
 
-/* (nx2/oot_patches.py) f_80c225d0 at 0x80c27f3c, after its load of the same flags' low byte into x8 (Link in x19): the
+/* (the hook site sprint.stance) f_80c225d0 at 0x80c27f3c, after its load of the same flags' low byte into x8 (Link in x19): the
    stance and camera update. */
 void hos_sprint_stance(Ctx *c) {
     if (LOAD(enabled) && LOAD(active) && is_link(c->x[19])) c->x[8] |= DASH_INPUT;

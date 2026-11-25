@@ -2,20 +2,21 @@
    The 23.3 GB dumps (a complete one is about 23.8 GB) hold three .zs textures whose start is zeros, not a zstd frame.
    The game fails each model that uses one and asks for it again: the Great Fairy Fountain's floor is in the Hyrule
    Field preload, which then never finishes, and its 10.8 MiB model is decoded about 15 times a second while Link is
-   in Kokiri or the Market (~1.3 cores on the Steam Deck). Longshot Builder copies a stand-in over each, but only in a
-   romfs it unpacked itself (nx2/make_game.py stand_in_damaged_files); a romfs another tool unpacked, or one copied
-   by hand, keeps them. So the host reads the same stand-in in their place, whoever unpacked the romfs, and writes
-   nothing to the player's files. */
+   in Kokiri or the Market (~1.3 cores on the Steam Deck). The builder's RomFS index points each at its stand-in
+   (builder/crates/game-files/src/romfs.rs, the same choice); a romfs folder (a developer's unpacked dump) keeps them. So
+   the host reads the same stand-in in their place, from the folder too, and writes nothing to the player's files. */
 #include "hos.h"
+#include "romfs.h"
 #include <stdio.h>
 #include <string.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 HANDLE hos_fs_open_read(const char *path);   /* nn_fs.c */
+const char *hos_fs_romfs_rel(const char *path);
 int hos_fs_resolve_read(const char *guest, char *path, size_t cap);
 
-/* Each damaged texture and the stand-in nx2/nup.py stand_in_for picks for it in the game's Tex folder (the same kind
+/* Each damaged texture and the stand-in builder/crates/game-files (romfs.rs stand_ins) picks for it in the game's Tex folder (the same kind
    of texture by the end of its name, then the longest common start): the builder's choice, so a game folder looks
    the same whichever fixed it. tests/test_damaged_rom_files.py holds the two to each other */
 static const struct { const char *damaged, *stand_in; } stand_ins[] = {
@@ -25,16 +26,23 @@ static const struct { const char *damaged, *stand_in; } stand_ins[] = {
 };
 #define STAND_INS (sizeof stand_ins / sizeof *stand_ins)
 
-/* 1: the file starts as zstd data (a frame, or a skippable frame: nup.py zstd_start); 0: it does not; -1: it could not
+/* 1: the file starts as zstd data (a frame, or a skippable frame: builder/crates/game-files zstd::starts_as_zstd); 0: it does not; -1: it could not
    be read, and is left to the open that follows */
 static int starts_as_zstd(const char *path) {
-    HANDLE h = hos_fs_open_read(path);
-    if (h == INVALID_HANDLE_VALUE) return -1;
     unsigned char b[4];
     DWORD got = 0;
-    const BOOL ok = ReadFile(h, b, sizeof b, &got, NULL);
-    CloseHandle(h);
-    if (!ok) return -1;
+    const char *rel = hos_fs_romfs_rel(path);   /* (the game's file in the RomFS: romfs.h) */
+    if (rel) {
+        const int64_t n = hos_romfs_head(rel, b, sizeof b, NULL);
+        if (n < 0) return -1;
+        got = (DWORD)n;
+    } else {
+        HANDLE h = hos_fs_open_read(path);
+        if (h == INVALID_HANDLE_VALUE) return -1;
+        const BOOL ok = ReadFile(h, b, sizeof b, &got, NULL);
+        CloseHandle(h);
+        if (!ok) return -1;
+    }
     return got == 4 && ((b[0] == 0x28 && b[1] == 0xb5 && b[2] == 0x2f && b[3] == 0xfd) ||
                         ((b[0] & 0xf0) == 0x50 && b[1] == 0x2a && b[2] == 0x4d && b[3] == 0x18));
 }

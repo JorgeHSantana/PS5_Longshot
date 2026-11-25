@@ -644,7 +644,8 @@ def wiring():
     check(0 <= lift.find("if (hos_input_movie_active()) {") < lift.find("recomp_load32(c, actor + 0x31c"),
           "Link's position is read for a recording with none")
     check("if (hos_input_movie_link(pos, to) && !oot_put_link(c, components, to))" in lift and
-          "A64Fn change_position = a64_lookup(0x806d2530ULL);" in block(main_c, "static int oot_put_link("),
+          "game_call_more(c, 0x806d2530ULL, arg, 2, (const uint64_t[]){controller, arg}, NULL, &lr);" in block(main_c, "static int oot_put_link(") and
+          "a64_lookup" not in block(main_c, "static int oot_put_link("),
           "HOS_INPUT_SNAP does not put Link back through his controller")
     took, call, gave = (lift.find("TryAcquireSRWLockExclusive(&cheats_lock)"), lift.find("hos_input_movie_link(pos, to)"),
                         lift.rfind("ReleaseSRWLockExclusive(&cheats_lock)"))

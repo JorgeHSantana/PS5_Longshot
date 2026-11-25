@@ -1,4 +1,4 @@
-"""Every game-free check in one run: each tests/test_*.py and nx2/test_*.py in its own process, the C++ unit tests under
+"""Every game-free check in one run: each tests/test_*.py in its own process, the C++ unit tests under
 gpu/vk/tests and a byte-compile of every tracked Python file. All of them run even when one fails; the failures are
 printed whole at the end, with a table of every check (slowest first), also to $GITHUB_STEP_SUMMARY when it is set.
 Exits 1 when anything failed. On Linux a check that ends or times out takes every process it started with it.
@@ -23,8 +23,9 @@ no arguments and its own defaults.
     RUN_ALL_MODULES = ["zstandard"]                                       # Python packages it imports
     RUN_ALL_SKIP = {"windows": "needs spirv-val: checked on Linux"}       # OS ("linux", "windows") -> why it is skipped
 
-{name} in an argument is a tool or folder find_tools looks for (cc, cxx, vulkan_headers, spirv_headers, spirv_val, glslang,
-dotnet, dav1d); a check whose tool, compiler (the word after --cc or --cxx) or module is missing here is skipped, or fails
+{name} in an argument is a tool or folder find_tools looks for (cc, cxx, clang, vulkan_headers, spirv_headers, spirv_val,
+glslang, dav1d, cargo, llvm_mc; clang is a C compiler that is clang on every OS, $CLANG else PATH's, for the checks
+that link an object clang made); a check whose tool, compiler (the word after --cc or --cxx) or module is missing here is skipped, or fails
 with --strict. A check skipped on both OSes (a GPU, the game) names both. A declaration that is not a plain literal of
 that shape, names an unknown placeholder or OS, or any other RUN_ALL_ name, stops the run with the file and line; so
 does one set or changed anywhere but its own top-level line (inside an if or a try, .append(...), +=, a subscript).
@@ -90,10 +91,11 @@ def which(*names):
 
 
 def header_dir(env, cpm_name, probe):
-    """A headers folder: the environment variable, else the CPM cache nx2/build.py reads (RX_CPM, build-linux/deps/cpm)"""
+    """A headers folder: the environment variable, else the CPM cache the build reads (RX_CPM, else the checkout's
+    tools/cpm: mise run tools)"""
     if os.environ.get(env):
         return os.environ[env]
-    for cpm in (os.environ.get("RX_CPM"), os.path.join(ROOT, "build-linux", "deps", "cpm")):
+    for cpm in (os.environ.get("RX_CPM"), os.path.join(ROOT, "tools", "cpm")):
         d = os.path.join(cpm or "", cpm_name)
         if cpm and os.path.isdir(d) and os.listdir(d):
             inc = os.path.join(d, sorted(os.listdir(d))[-1], "include")
@@ -104,13 +106,13 @@ def header_dir(env, cpm_name, probe):
 
 def dav1d_prefix():
     """A dav1d to build against (its include/dav1d/dav1d.h, and lib/libdav1d.a or the system's -ldav1d): LONGSHOT_DAV1D, else
-    the CPM cache's (scripts/windows/dav1d.sh), the Linux dependencies' (scripts/linux/deps.sh), the system's"""
+    the CPM cache's (RX_CPM, else the checkout's tools/cpm), the checkout's tools/ffmpeg (mise run tools), the system's"""
     roots = [os.environ.get("LONGSHOT_DAV1D")]
-    for cpm in (os.environ.get("RX_CPM"), os.path.join(ROOT, "build-linux", "deps", "cpm")):
+    for cpm in (os.environ.get("RX_CPM"), os.path.join(ROOT, "tools", "cpm")):
         d = os.path.join(cpm or "", "dav1d")
         if cpm and os.path.isdir(d) and os.listdir(d):
             roots.append(os.path.join(d, sorted(os.listdir(d))[-1]))
-    roots += [os.path.join(ROOT, "build-linux", "deps", "ffmpeg"), "/usr"]
+    roots += [os.path.join(ROOT, "tools", "ffmpeg"), "/usr"]
     for r in roots:
         if r and os.path.exists(os.path.join(r, "include", "dav1d", "dav1d.h")):
             return r
@@ -118,13 +120,13 @@ def dav1d_prefix():
 
 
 def bundled_mingw():
-    """(windows) The clone's llvm-mingw folder as LONGSHOT_MINGW for every check, as nx2/make_game.py's bundled_mingw() gives
-    it to the build (CONTRIBUTING.md: the variable, or that folder). Without it a check that builds with
+    """(windows) The checkout's tools/llvm-mingw (mise run tools) as LONGSHOT_MINGW for every check, as the builder gives it
+    to the build (CONTRIBUTING.md: the variable, or that folder). Without it a check that builds with
     toolchain.native_target() asks that folder's clang, found on PATH, for the MSVC target: "'algorithm' file not found".
     LONGSHOT_MINGW set already wins; LONGSHOT_MSVC=1 (the Visual Studio route) and a folder without its clang leave it unset"""
     if not WINDOWS or os.environ.get("LONGSHOT_MINGW") or os.environ.get("LONGSHOT_MSVC") == "1":
         return
-    here = os.path.join(ROOT, "llvm-mingw")
+    here = os.path.join(ROOT, "tools", "llvm-mingw")   # (mise run tools)
     if os.path.isfile(os.path.join(here, "bin", "clang.exe")):
         os.environ["LONGSHOT_MINGW"] = here
 
@@ -136,9 +138,11 @@ def find_tools():
         "vulkan_headers": header_dir("LONGSHOT_VULKAN_HEADERS", "vulkanheaders", os.path.join("vulkan", "vulkan.h")),
         "spirv_val": which("spirv-val"),
         "glslang": which("glslangValidator", "glslang"),
-        "dotnet": which("dotnet"),
         "cc": os.environ.get("CC") or which("gcc", "clang"),
         "cxx": which(os.environ.get("CXX", ""), "clang++", "g++", "c++"),
+        "clang": which(os.environ.get("CLANG", ""), "clang", "clang-23"),
+        "cargo": which("cargo"),
+        "llvm_mc": os.environ.get("LLVM_MC") or which("llvm-mc"),
     }
 
 
@@ -613,7 +617,7 @@ def main():
     tools = find_tools()
 
     checks = []
-    tests = sorted(d + "/" + f for d in ("tests", "nx2") for f in os.listdir(os.path.join(ROOT, d))
+    tests = sorted("tests/" + f for f in os.listdir(os.path.join(ROOT, "tests"))
                    if f.startswith("test_") and f.endswith(".py"))
     stale = stale_tables()
     if stale:

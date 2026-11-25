@@ -66,11 +66,13 @@ static uint64_t answer;
 #define EVENTS 0x1000u
 static uint64_t oot_singleton(Ctx *c, int slot) { (void)c; return slot == OOT_EVENTMGR_SLOT ? EVENTS : 0; }
 static uint64_t recomp_load64(Ctx *c, uint64_t at) { (void)c; return at == EVENTS + 104 ? (uint64_t)event_playing : 0; }
-static void oot_gamedata_string(Ctx *c, uint32_t hash, char *out, size_t size) {
-    (void)c;
+static uint64_t game_flags_mgr(void) { return 1; }
+static int game_flag_text(uint64_t mgr, uint32_t hash, char *out, size_t size) {
+    (void)mgr;
     snprintf(out, size, "%s", hash == 0xee27bf71u ? reserved : current);
+    return 1;
 }
-static int oot_gamedata_bool(Ctx *c, uint32_t hash, int *out) { (void)c; *out = hash == 0xef2b60c2u ? loading_now : 0; return 1; }
+static int game_flag_bool(uint64_t mgr, uint32_t hash, int *out) { (void)mgr; *out = hash == 0xef2b60c2u ? loading_now : 0; return 1; }
 typedef struct { const char *adult_banc; } OotDestination;
 static const OotDestination oot_destinations[] = {{"Kokiri_Adult"}, {"Kakariko_Adult"}, {"Lake_Adult"}, {"Market_Adult"}};
 @STATE@
@@ -160,7 +162,7 @@ def main():
     where = "host/hos_main.c"
     state = srccut.between(src, "static struct {\n    int64_t requested_at, check_at;", "\nstatic int oot_teleport(", where=where)
     prelude = srccut.between(src, "static int oot_teleport(Ctx *c, uint64_t actor, unsigned index) {",
-                             "    const uint64_t events = oot_singleton(c, OOT_EVENTMGR_SLOT);\n    A64Fn make_arg", where=where)
+                             "    const uint64_t events = oot_singleton(c, OOT_EVENTMGR_SLOT);\n", where=where)
     sent = srccut.between(src, "    teleport.requested_at = now;\n    teleport.check_at", "    return ok;   /* (sent;", where=where)
     followup = srccut.block(src, "static void oot_teleport_followup(", where=where)
     sequence = (SEQUENCE.replace("@STATE@", state).replace("@PRELUDE@", prelude).replace("@SENT@", sent)

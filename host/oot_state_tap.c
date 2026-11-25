@@ -13,10 +13,11 @@
    A watched Enum is "#" followed by the hash of its value's name. Changed Bool/Int/Enum/UInt flags are keyed by hash;
    the first sample establishes a baseline, at most 32 changes are sent, and more counts any left out.
 
-   GameDataMgr's typed containers have their count at +8, entries at +16, and a {u32 hash,u32 entry} table at +24,
-   probed from hash % size (+36), as host/hos_main.c's debug tools use them. Both lookup and scan cap the table size. */
+   The game's flags are read through the flags service (host/game/flags.h: GameDataMgr's typed containers, every read
+   bounded, the table size capped for lookups and scans alike). */
 #include "hos.h"
 #include "control.h"
+#include "game/flags.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -26,7 +27,6 @@
 
 extern volatile LONG64 hos_present_count;   /* (host/nvn_native.c: the game's presents) */
 
-#define STATE_GAMEDATA_SLOT 0x84c9e180ULL   /* GameDataMgr's holder (host/hos_main.c OOT_GAMEDATA_SLOT) */
 #define STATE_EVENTMGR_SLOT 0x84c9e090ULL   /* EventMgr's (OOT_EVENTMGR_SLOT) */
 #define STATE_CAMERAS_SLOT 0x84ca6bc0ULL    /* the camera manager's (host/hos_main.c oot_gameplay_view) */
 #define STATE_VIEW_VTABLE 0x84c18a88ULL     /* a camera's view (hos_oot_free_view) */
@@ -42,12 +42,6 @@ extern volatile LONG64 hos_present_count;   /* (host/nvn_native.c: the game's pr
 #define STATE_PROMPT 0x9824206cu     /* the A button's action (String64; its name is not known) */
 #define STATE_MUSIC 0xcad3ffe5u      /* the music playing (String64; its name is not known) */
 
-enum { KIND_BOOL, KIND_INT, KIND_FLOAT, KIND_ENUM, KIND_TEXT, KIND_UINT, KINDS };
-/* each container's place in GameDataMgr, the size of its entries and where an entry keeps its value (a String64's: a
-   pointer to the text) */
-static const struct { uint32_t at, stride, value; } state_kind[KINDS] = {
-    {0x008, 0x18, 0x16}, {0x0c8, 0x28, 0x1c}, {0x188, 0x28, 0x1c}, {0x248, 0x38, 0x1c}, {0x608, 0x108, 0x68}, {0x788, 0x28, 0x1c}};
-
 /* n guest bytes at a into dst: 0 for a null pointer's page or anything outside the guest window */
 static int state_peek(uint64_t a, void *dst, size_t n) {
     const void *p = a >= 0x100000 ? hos_guest_range(a, n) : NULL;
@@ -62,40 +56,6 @@ static uint64_t state_u64(uint64_t a) {
 static uint32_t state_u32(uint64_t a) {
     uint32_t v = 0;
     return state_peek(a, &v, 4) ? v : 0;
-}
-
-/* MurmurHash3 x86 32 with seed 0: the hash the game names its flags by */
-static uint32_t state_murmur(const char *s, size_t n) {
-    uint32_t h = 0, k;
-    size_t i = 0;
-    for (; i + 4 <= n; i += 4) {
-        k = (uint32_t)(unsigned char)s[i] | (uint32_t)(unsigned char)s[i + 1] << 8 | (uint32_t)(unsigned char)s[i + 2] << 16 |
-            (uint32_t)(unsigned char)s[i + 3] << 24;
-        k *= 0xcc9e2d51u, k = k << 15 | k >> 17, k *= 0x1b873593u;
-        h ^= k, h = h << 13 | h >> 19, h = h * 5 + 0xe6546b64u;
-    }
-    k = 0;
-    switch (n & 3) {
-    case 3: k ^= (uint32_t)(unsigned char)s[i + 2] << 16; /* fall through */
-    case 2: k ^= (uint32_t)(unsigned char)s[i + 1] << 8; /* fall through */
-    case 1: k ^= (uint32_t)(unsigned char)s[i]; k *= 0xcc9e2d51u, k = k << 15 | k >> 17, k *= 0x1b873593u, h ^= k;
-    }
-    h ^= (uint32_t)n;
-    h ^= h >> 16, h *= 0x85ebca6bu, h ^= h >> 13, h *= 0xc2b2ae35u, h ^= h >> 16;
-    return h;
-}
-
-/* The entry of the flag hash in container kind of GameDataMgr mgr, 0 when it has none */
-static uint64_t state_entry(uint64_t mgr, int kind, uint32_t hash) {
-    const uint64_t box = mgr + state_kind[kind].at, entries = state_u64(box + 16), table = state_u64(box + 24);
-    const uint32_t count = state_u32(box + 8), size = state_u32(box + 36);
-    if (!mgr || !entries || !table || !size || size > (1u << 22) || !hash) return 0;
-    for (uint32_t probe = 0, slot = hash % size; probe < size; probe++, slot = slot + 1 == size ? 0 : slot + 1) {
-        uint32_t pair[2];
-        if (!state_peek(table + slot * 8ULL, pair, sizeof pair) || !pair[0]) return 0;
-        if (pair[0] == hash) return pair[1] < count ? entries + (uint64_t)pair[1] * state_kind[kind].stride : 0;
-    }
-    return 0;
 }
 
 /* ---- the line */
@@ -137,68 +97,10 @@ static void state_put_text(StateLine *l, const char *s) {
     state_put(l, "\"");
 }
 
-/* A String64 flag's text into buf (64 bytes), 0 when it cannot be read */
-static int state_text(uint64_t mgr, uint32_t hash, char buf[64]) {
-    const uint64_t e = state_entry(mgr, KIND_TEXT, hash), p = e ? state_u64(e + state_kind[KIND_TEXT].value) : 0;
-    buf[0] = 0;
-    if (!p || !state_peek(p, buf, 64)) return 0;
-    buf[63] = 0;
-    return 1;
-}
-
-/* A number flag (Bool, Int, Enum or UInt) into *v, 0 when it has none of these */
-static int state_number(uint64_t mgr, int kind, uint32_t hash, int64_t *v) {
-    const uint64_t e = state_entry(mgr, kind, hash), at = e + state_kind[kind].value;
-    uint8_t b;
-    uint32_t u;
-    if (!e) return 0;
-    if (kind == KIND_BOOL) return state_peek(at, &b, 1) && (*v = b, 1);
-    if (!state_peek(at, &u, 4)) return 0;
-    *v = kind == KIND_INT ? (int64_t)(int32_t)u : (int64_t)u;
-    return 1;
-}
-
-/* (host/hos_main.c's oot_map_refresh, on Link's update, as the rest of this file reads the guest: the Discord status's
-   hearts and rupees) an Int flag of the game data by its hash into *v; 0 when there is none */
-int hos_oot_gamedata_int(uint32_t hash, int64_t *v) {
-    const uint64_t mgr = state_u64(state_u64(STATE_GAMEDATA_SLOT));
-    return mgr && state_number(mgr, KIND_INT, hash, v);
-}
-
-/* (host/oot_heart_containers.c, on Link's update as above: the boss heart containers taken) a Bool64bitKey flag of the
-   game data, the kind named by an actor's 64-bit placement id: 1 set, 0 not, -1 not known. Their container is at
-   GameDataMgr + 0xc58 (the game's f_80e1f1c0 hands that to its loader, f_805ce6b0): the count (u32) at +0, the entries at +8,
-   16 bytes each, the id (u64) at +0 and the value at +12 (a save's taken heart pieces and containers read 1 there, the rest
-   0). *at keeps where id was found, so a read after the first is one entry, not a search (-1: not found yet) */
-#define STATE_BOOL64 0xc58u
-int hos_oot_gamedata_bool64(uint64_t id, int *at) {
-    const uint64_t mgr = state_u64(state_u64(STATE_GAMEDATA_SLOT));
-    const uint32_t count = mgr ? state_u32(mgr + STATE_BOOL64) : 0;
-    const uint64_t entries = mgr ? state_u64(mgr + STATE_BOOL64 + 8) : 0;
-    if (!count || count > (1u << 20) || entries < 0x100000) return -1;
-    const uint8_t *e = hos_guest_range(entries, (uint64_t)count * 16);
-    if (!e) return -1;
-    uint64_t k;
-    if (*at >= 0 && (uint32_t)*at < count && (memcpy(&k, e + (size_t)*at * 16, 8), k == id)) return e[(size_t)*at * 16 + 12] != 0;
-    for (uint32_t i = 0; i < count; i++) {
-        memcpy(&k, e + (size_t)i * 16, 8);
-        if (k == id) {
-            *at = (int)i;
-            return e[(size_t)i * 16 + 12] != 0;
-        }
-    }
-    return -1;
-}
-
-static int state_float(uint64_t mgr, uint32_t hash, float *f) {
-    const uint64_t e = state_entry(mgr, KIND_FLOAT, hash);
-    return e && state_peek(e + state_kind[KIND_FLOAT].value, f, 4) && isfinite(*f);
-}
-
 /* ,"<key>":<number flag> or null */
 static void state_put_number(StateLine *l, uint64_t mgr, const char *key, int kind, uint32_t hash) {
     int64_t v;
-    if (state_number(mgr, kind, hash, &v)) state_put(l, ",\"%s\":%lld", key, (long long)v);
+    if (game_flag_number(mgr, kind, hash, &v)) state_put(l, ",\"%s\":%lld", key, (long long)v);
     else state_put(l, ",\"%s\":null", key);
 }
 
@@ -206,7 +108,7 @@ static void state_put_number(StateLine *l, uint64_t mgr, const char *key, int ki
 static void state_put_flag_text(StateLine *l, uint64_t mgr, const char *key, uint32_t hash) {
     char t[64];
     state_put(l, ",\"%s\":", key);
-    if (state_text(mgr, hash, t)) state_put_text(l, t);
+    if (game_flag_text(mgr, hash, t, sizeof t)) state_put_text(l, t);
     else state_put(l, "null");
 }
 
@@ -215,11 +117,12 @@ static void state_put_any(StateLine *l, uint64_t mgr, uint32_t hash) {
     int64_t v;
     float f;
     char t[64];
-    if (state_number(mgr, KIND_BOOL, hash, &v) || state_number(mgr, KIND_INT, hash, &v)) state_put(l, "%lld", (long long)v);
-    else if (state_float(mgr, hash, &f)) state_put(l, "%.3f", f);
-    else if (state_number(mgr, KIND_ENUM, hash, &v)) state_put(l, "\"#%08x\"", (unsigned)v);
-    else if (state_text(mgr, hash, t)) state_put_text(l, t);
-    else if (state_number(mgr, KIND_UINT, hash, &v)) state_put(l, "%lld", (long long)v);
+    if (game_flag_number(mgr, GAME_FLAG_BOOL, hash, &v) || game_flag_number(mgr, GAME_FLAG_INT, hash, &v))
+        state_put(l, "%lld", (long long)v);
+    else if (game_flag_float(mgr, hash, &f)) state_put(l, "%.3f", f);
+    else if (game_flag_number(mgr, GAME_FLAG_ENUM, hash, &v)) state_put(l, "\"#%08x\"", (unsigned)v);
+    else if (game_flag_text(mgr, hash, t, sizeof t)) state_put_text(l, t);
+    else if (game_flag_number(mgr, GAME_FLAG_UINT, hash, &v)) state_put(l, "%lld", (long long)v);
     else state_put(l, "null");
 }
 
@@ -246,16 +149,15 @@ static int state_camera(double *yaw) {
 
 /* ---- shared, bounded changes scan (only Link's serialized update touches these baselines) ---- */
 
-static const int state_tracked[] = {KIND_BOOL, KIND_INT, KIND_ENUM, KIND_UINT};
+static const int state_tracked[] = {GAME_FLAG_BOOL, GAME_FLAG_INT, GAME_FLAG_ENUM, GAME_FLAG_UINT};
 #define STATE_TRACKED (int)(sizeof state_tracked / sizeof state_tracked[0])
 /* Smaller slices reduce work per present but delay detection. Judge changes by measured frame cost and the
    full-pass delay reported below, not the slot budget alone. */
 #define STATE_SCAN_SLOTS 4096u
 typedef struct { uint32_t key, value; int kind; } StateChange;
 typedef struct { StateChange item[32]; unsigned n, more; } StateChanges;
-typedef struct { uint64_t entries, table; uint32_t count, size; } StateTable;
 typedef struct {
-    StateTable table;
+    GameFlagTable table;
     struct StatePair { uint32_t key, value; } *slot;
     uint32_t capacity, cursor;
     int valid;
@@ -291,16 +193,7 @@ static void state_merge(StateChanges *to, const StateChanges *from) {
     to->more = UINT32_MAX - to->more < from->more ? UINT32_MAX : to->more + from->more;
 }
 
-static int state_table(uint64_t mgr, int kind, StateTable *h) {
-    const uint64_t box = mgr + state_kind[kind].at;
-    if (!mgr || !state_peek(box + 16, &h->entries, 8) || !state_peek(box + 24, &h->table, 8) ||
-        !state_peek(box + 8, &h->count, 4) || !state_peek(box + 36, &h->size, 4)) return 0;
-    return h->entries >= 0x100000 && h->table >= 0x100000 && h->size && h->size <= (1u << 22) &&
-        h->count <= h->size && hos_guest_range(h->table, (uint64_t)h->size * 8) &&
-        (!h->count || hos_guest_range(h->entries, (uint64_t)h->count * state_kind[kind].stride));
-}
-
-static int state_same_table(const StateTable *a, const StateTable *b) {
+static int state_same_table(const GameFlagTable *a, const GameFlagTable *b) {
     return a->entries == b->entries && a->table == b->table && a->size == b->size && a->count == b->count;
 }
 
@@ -312,8 +205,8 @@ static int state_scan(uint64_t mgr, StateChanges *out) {
     for (; state_scan_kind < STATE_TRACKED && budget; state_scan_kind++) {
         const int kind = state_tracked[state_scan_kind];
         StateSeen *seen = &state_seen[state_scan_kind];
-        StateTable h, after;
-        if (!state_table(mgr, kind, &h) || !state_table(mgr, kind, &after) || !state_same_table(&h, &after))
+        GameFlagTable h, after;
+        if (!game_flag_table(mgr, kind, &h) || !game_flag_table(mgr, kind, &after) || !state_same_table(&h, &after))
             goto invalid;
         if (!state_same_table(&seen->table, &h)) {
             seen->valid = 0, seen->cursor = 0, seen->changes = (StateChanges){0};
@@ -326,25 +219,15 @@ static int state_scan(uint64_t mgr, StateChanges *out) {
         }
         while (seen->cursor < h.size && budget) {
             const uint32_t slot = seen->cursor++;
-            uint32_t pair[2], again[2], v = 0;
-            uint8_t b;
+            uint32_t key, v;
             budget--;
-            if (!state_peek(h.table + slot * 8ULL, pair, sizeof pair)) goto invalid;
-            if (pair[0]) {
-                if (pair[1] >= h.count) goto invalid;
-                const uint64_t at = h.entries + (uint64_t)pair[1] * state_kind[kind].stride + state_kind[kind].value;
-                if (kind == KIND_BOOL) {
-                    if (!state_peek(at, &b, 1)) goto invalid;
-                    v = b;
-                } else if (!state_peek(at, &v, 4)) goto invalid;
-                if (!state_peek(h.table + slot * 8ULL, again, sizeof again) || memcmp(pair, again, sizeof pair))
-                    goto invalid;
-            }
-            if (seen->valid && pair[0] && seen->slot[slot].key == pair[0] && seen->slot[slot].value != v)
-                state_change(&seen->changes, (StateChange){pair[0], v, kind});
-            seen->slot[slot] = (struct StatePair){pair[0], v};
+            const int got = game_flag_slot(&h, kind, slot, &key, &v);   /* (a torn {hash, entry} pair is -1) */
+            if (got < 0) goto invalid;
+            if (seen->valid && got && seen->slot[slot].key == key && seen->slot[slot].value != v)
+                state_change(&seen->changes, (StateChange){key, v, kind});
+            seen->slot[slot] = (struct StatePair){key, v};
         }
-        if (!state_table(mgr, kind, &after) || !state_same_table(&h, &after)) goto invalid;
+        if (!game_flag_table(mgr, kind, &after) || !state_same_table(&h, &after)) goto invalid;
         state_merge(out, &seen->changes);
         seen->changes = (StateChanges){0};
         if (seen->cursor < h.size) return 1;
@@ -363,8 +246,8 @@ static void state_put_changes(StateLine *l, const StateChanges *changes) {
     state_put(l, ",\"changed\":{");
     for (unsigned i = 0; i < changes->n; i++) {
         const StateChange *c = &changes->item[i];
-        if (c->kind == KIND_INT) state_put(l, "%s\"0x%08x\":%d", i ? "," : "", c->key, (int)(int32_t)c->value);
-        else if (c->kind == KIND_ENUM) state_put(l, "%s\"0x%08x\":\"#%08x\"", i ? "," : "", c->key, c->value);
+        if (c->kind == GAME_FLAG_INT) state_put(l, "%s\"0x%08x\":%d", i ? "," : "", c->key, (int)(int32_t)c->value);
+        else if (c->kind == GAME_FLAG_ENUM) state_put(l, "%s\"0x%08x\":\"#%08x\"", i ? "," : "", c->key, c->value);
         else state_put(l, "%s\"0x%08x\":%u", i ? "," : "", c->key, c->value);
     }
     state_put(l, "}");
@@ -444,7 +327,7 @@ void hos_oot_watch(int slot, const HosControlOotWatch *watch) {
         for (int i = 0; i < watch->nflags; i++) {
             const char *name = watch->flags[i];   /* validated by the bridge */
             state_sub[slot].hashes[i] = name[0] == '0' && name[1] == 'x' ?
-                (uint32_t)strtoul(name + 2, NULL, 16) : state_murmur(name, strlen(name));
+                (uint32_t)strtoul(name + 2, NULL, 16) : game_flag_hash(name, strlen(name));
         }
     }
     state_schedule();
@@ -507,7 +390,7 @@ void hos_oot_state_tap(uint64_t actor) {
     }
     ReleaseSRWLockExclusive(&state_lock);
     StateChanges changes = {0};
-    const uint64_t mgr = state_u64(state_u64(STATE_GAMEDATA_SLOT));
+    const uint64_t mgr = game_flags_mgr();
     const int scanning = scan ? state_scan(mgr, &changes) : 0;
     if (!watching_changes) {
         state_scan_kind = 0;
@@ -524,7 +407,7 @@ void hos_oot_state_tap(uint64_t actor) {
     if (state_peek(actor + STATE_LINK_POS, p, sizeof p) && isfinite(p[0]) && isfinite(p[1]) && isfinite(p[2]))
         state_put(l, ",\"pos\":[%.2f,%.2f,%.2f]", p[0], p[1], p[2]);
     else state_put(l, ",\"pos\":null");
-    if (state_float(mgr, STATE_ROT, &rot)) state_put(l, ",\"facing\":%.1f", state_wrap(rot + 180.0));
+    if (game_flag_float(mgr, STATE_ROT, &rot)) state_put(l, ",\"facing\":%.1f", state_wrap(rot + 180.0));
     else state_put(l, ",\"facing\":null");
     double yaw;
     if (state_camera(&yaw)) state_put(l, ",\"camera\":%.1f", yaw);
@@ -534,13 +417,13 @@ void hos_oot_state_tap(uint64_t actor) {
     state_put(l, ",\"event\":%s", events && state_peek(events + 104, &event, sizeof event) ?
               (event ? "true" : "false") : "null");
     int64_t value;
-    state_put(l, ",\"loading\":%s", state_number(mgr, KIND_BOOL, STATE_LOADING, &value) ?
+    state_put(l, ",\"loading\":%s", game_flag_number(mgr, GAME_FLAG_BOOL, STATE_LOADING, &value) ?
               (value ? "true" : "false") : "null");
-    state_put(l, ",\"age\":%s", state_number(mgr, KIND_BOOL, STATE_CHILD, &value) ?
+    state_put(l, ",\"age\":%s", game_flag_number(mgr, GAME_FLAG_BOOL, STATE_CHILD, &value) ?
               (value ? "\"child\"" : "\"adult\"") : "null");
-    state_put_number(l, mgr, "life", KIND_INT, STATE_LIFE);
-    state_put_number(l, mgr, "max_life", KIND_INT, STATE_MAX_LIFE);
-    state_put_number(l, mgr, "rupees", KIND_INT, STATE_RUPEES);
+    state_put_number(l, mgr, "life", GAME_FLAG_INT, STATE_LIFE);
+    state_put_number(l, mgr, "max_life", GAME_FLAG_INT, STATE_MAX_LIFE);
+    state_put_number(l, mgr, "rupees", GAME_FLAG_INT, STATE_RUPEES);
     state_put_flag_text(l, mgr, "prompt", STATE_PROMPT);
     state_put_flag_text(l, mgr, "music", STATE_MUSIC);
     state_put(l, "}");

@@ -505,7 +505,7 @@ def main():
         if not caught:
             raise SystemExit("FAIL: a broken recorder (%s) passed" % what)
     pool.shutdown()
-    if a.bench or a.overlap:   # (with the renderer's CPU flags, nx2/build.py's CPU: RX_MARCH or x86-64-v3)
+    if a.bench or a.overlap:   # (with the renderer's CPU flags, the builder's CPU: RX_MARCH or x86-64-v3)
         fast = build(a.cxx, a.headers, out, rec, "bench", ["-march=" + os.environ.get("RX_MARCH", "x86-64-v3"), "-ffp-contract=off"])
         if a.bench:
             r = run(fast, None, "--bench", str(a.bench))

@@ -31,7 +31,11 @@ def main():
     read = cheats.index("int flying = rx_option(HOS_OPT_CHEAT_FLIGHT, 0) > 0;")
     yields = cheats.index("if (flying && oot_event_playing(c)) flying = 0;")
     forgets = cheats.index("if (!flying) flying_actor = 0;")
-    moves = cheats.index("change_position(c);")
+    # (the move is the game's own, OneShotPhysicsCctChangePosition, through game_call: the controller and the position below
+    # the stack as its arguments, that stack, LR as the update had it)
+    moves = cheats.index("game_call_more(c, 0x806d2530ULL, arg, 2, (const uint64_t[]){controller, arg}, NULL, &lr);")
+    need("const GameCallMore lr = {.set_lr = 1, .lr = c->x[30]};" in cheats and "a64_lookup" not in cheats,
+         "the flight's move is not the game's own through game_call, LR as the update had it")
     need(read < yields < forgets < moves, "the flight moves Link before it has asked whether an event plays")
     # (flying_actor cleared: the flight's own position is taken from Link again when it resumes, not the one from before)
     need("flying_actor != actor" in cheats[forgets:moves], "a flight that resumes does not start from where Link stands")

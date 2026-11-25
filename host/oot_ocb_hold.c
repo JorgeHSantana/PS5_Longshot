@@ -1,6 +1,6 @@
 /* (longshot) The neighbouring map the OptimizeChangeBank thread preloads, kept while the game's choice only flickers: the
-   lifted f_832b9880 hands its choice to hos_oot_ocb_pick before it asks for the unit and lets the others go
-   (nx2/oot_patches.py patch_ocb_hold); host/oot_ocb_hold.h has why and the rule.
+   lifted f_832b9880 hands its choice to hos_oot_ocb_pick before it asks for the unit and lets the others go (the hook
+   site preload.choice: host/game/sites.toml, host/oot_sites.c); host/oot_ocb_hold.h has why and the rule.
    HOS_OCB_HOLD_MS=<ms>: a new choice is taken once it has stayed the choice that long (OCB_HOLD_DEFAULT_MS with no switch);
    0, a negative number or off: the game's own choice at every frame. Another build than the one the manager's layout
    comes from (OCB_BUILD): the game's own too. */
@@ -13,7 +13,7 @@
 #include <string.h>
 
 #define OCB_HOLD_DEFAULT_MS 2000
-#define OCB_BUILD "e0f3ccfaf50065ae4ea01eb5aeb13b1a45da3348"   /* (main's build id: nx2/oot_patches.py LIFE_BUILD_ID) */
+#define OCB_BUILD "e0f3ccfaf50065ae4ea01eb5aeb13b1a45da3348"   /* (main's build id: the supported build's) */
 
 static OotOcbHold hold = OOT_OCB_HOLD_INIT;
 static SRWLOCK hold_lock = SRWLOCK_INIT;   /* (one manager, updated once a frame; this does not rely on it) */

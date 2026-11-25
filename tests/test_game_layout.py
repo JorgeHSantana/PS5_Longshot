@@ -46,7 +46,7 @@ CUT_SHORT = ("mkw_vk_pipelines.bin.tmp", "mkw_vk_pipelines_play_4.bin.tmp", "mkw
 OLD_LOCKS = ("longshot_programs.bin.lock", "longshot_programs.zst.bin.lock")
 MADE_AGAIN = ("prompts/Common.bntx.zs", "prompts/Common.key", "prompts/External.bfotf.zs", "prompts/rsizetable.mod.zs")
 STAY = ("image.bin", "language.txt", "longshot_options.ini", "longshot_env.txt", "longshot_shaders.bin",
-        "longshot_pipeline_states_shipped.bin", "prompts/Common.bntx", "prompts/External.bfotf", "prompts/rsizetable.zs",
+        "longshot_pipeline_states_shipped.bin", "prompts/Common.bntx.base", "prompts/External.bfotf", "prompts/rsizetable.zs",
         "prompts/xbox/textures.bin", "user/save/0100/file")
 
 

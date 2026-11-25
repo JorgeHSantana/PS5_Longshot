@@ -32,7 +32,7 @@ void hos_mod_cheat_count(const char *name, int n);
 int hos_mods_cheat_switch(const char *key, int otherwise);
 void hos_mods_cheat_set(const char *key, int on);
 extern volatile uint64_t hos_hid_buttons;   /* nn_hid.c */
-extern const char hos_main_build_id[];      /* gen/hos_image.c */
+extern const char hos_main_build_id[];      /* gen/image.c */
 extern const uint64_t hos_main_base, hos_main_size, hos_main_code_end;
 int rx_option(int id, int otherwise);
 

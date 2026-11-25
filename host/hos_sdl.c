@@ -9,6 +9,9 @@
 #include <limits.h>
 #include "audio_output_devices.h"
 #include "fullscreen_monitor.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #ifdef _WIN32
@@ -158,6 +161,16 @@ int hos_sdl_load(void) {
         if (m && get_all(m, 1)) version = 3;
         else if ((m = load_one("SDL2.dll")) && get_all(m, 0)) version = 2;
         hos_log(version ? "sdl: SDL%d" : "sdl: no SDL3 or SDL2 found: no window, sound or SDL controllers", version);
+        /* (no window: nothing reads SDL's quit event, and SDL's own SIGINT/SIGTERM handlers turned a timeout's or a service
+           manager's SIGTERM into it: the run went on until SIGKILL. SDL installs them when its first subsystem starts
+           (sound, video and the controllers each start its events) and reads this hint only then, so it is set here,
+           before any: in a headless run the sound starts first, for the Insert menu's list of outputs
+           (gpu/vk/vk_menu.cpp menu_init). Without them the signals end the run as usual. With a window, the window's
+           loop reads the quit event) */
+        if (version && env_on("HOS_HEADLESS")) {
+            if (version == 3) CALL(_Bool (*)(const char *, const char *), SetHint)("SDL_NO_SIGNAL_HANDLERS", "1");
+            else CALL(int (*)(const char *, const char *), SetHint)("SDL_NO_SIGNAL_HANDLERS", "1");
+        }
         InterlockedExchange(&state, 2);
     }
     while (state != 2) Sleep(0);
@@ -890,7 +903,7 @@ int hos_sdl_audio_channels(void) {
     return n > 0 ? n : 2;
 }
 
-/* ---- (longshot) microphones: SDL3's recording devices, or SDL2's capture devices (the Linux AppImage carries SDL2): a
+/* ---- (longshot) microphones: SDL3's recording devices, or SDL2's capture devices (a Linux build puts SDL2 beside the game): a
    stream each opened, in the format asked for, read as the game asks ---- */
 static struct {
     void *GetDevices, *DeviceName, *Available, *GetData, *Clear, *Destroy;   /* (SDL3) */

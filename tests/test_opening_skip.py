@@ -21,8 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves t
 from menu_model_fixture import menu_text  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "nx2"))
-import oot_patches  # noqa: E402
+sys.path.insert(0, str(ROOT / "tests"))
+import sitecheck  # noqa: E402
 
 
 def block(text, marker):
@@ -206,23 +206,30 @@ def main():
     need("if (!oot_event_playing(c)) hos_oot_opening(c, 3);" in lift,
          "Link updating during the opening drops the skip before the flowchart finishes")
 
-    fake = ('#include "a64.h"\n' + oot_patches.OPENING_REQUEST_HEAD + "    c->x[0] = 0;\n}\n"
-            + oot_patches.OPENING_TIMELINE_HEAD + "    c->x[0] = 0;\n}\n"
-            + oot_patches.OPENING_QUERY_HEAD + "    c->x[0] = 0;\n}\n")
-    patched = oot_patches.patch_opening(fake)
-    need(patched is not None, "the three opening functions were not patched")
-    need(oot_patches.OPENING_REQUEST in patched and "return" not in oot_patches.OPENING_REQUEST,
-         "the request hook swallows the request")
-    need("return" in oot_patches.OPENING_TIMELINE and "return" in oot_patches.OPENING_QUERY,
-         "the timeline or the skip query still runs its body")
-    need(patched.count(oot_patches.OPENING_REQUEST) == 1, "the request hook was inserted more than once")
-    need(oot_patches.patch_opening(patched) == patched, "patching a file again inserted the hooks again")
-    need(oot_patches.patch_opening('#include "a64.h"\nvoid f_1(Ctx *c) {\n}\n') is None,
-         "a file without the opening functions was patched")
-    plain = oot_patches.patch_file(fake, "code_opening.c", False)
-    need(oot_patches.OPENING_REQUEST not in plain[0], "another build's functions were hooked")
-    built = oot_patches.patch_file(fake, "code_opening.c", True)
-    need(built[1]["opening skip"] == 3, "the supported build did not count three opening hooks")
+    # (the three places are hook sites now: host/game/sites.toml, host/oot_sites.c; the lift places them)
+    sites = {x.name: x for x in sitecheck.load(sitecheck.BUILD)}
+    calls = (ROOT / "host" / "oot_sites.c").read_text(encoding="utf-8")
+    for name, function, can_return, body in (
+            ("opening.request", "f_80d9a820", False, "hos_oot_opening(c, 0);\n    return 0;"),
+            ("opening.timeline", "f_83b5bfb0", True, "return hos_oot_opening(c, 1);"),
+            ("opening.skipQuery", "f_80de6cb0", True, "return hos_oot_opening(c, 2);")):
+        x = sites.get(name)
+        need(x is not None and (x.at, x.function, bool(x.can_return)) == ("entry", function, can_return),
+             "%s is not the entry of %s%s" % (name, function, " that can return" if can_return else ""))
+        need(sitecheck.host_sites().get(sitecheck.ident(name)) == name, "host/game/sites.def has no slot for " + name)
+        need(body in calls, "%s's callback is not hos_oot_opening as the text patch called it" % name)
+    need(sites["opening.timeline"].can_return and not sites["opening.request"].can_return,
+         "the timeline's hook does not return when told to, or the request's swallows the request")
+    # (Skip title screen's own sites, the button waits' enter, are its alone: the opening's callback names none of them, and
+    # theirs reads Skip title's state, not Skip opening's)
+    for name in ("menu.buttonWait", "menu.buttonWaitNoDecideAnim"):
+        x = sites.get(name)
+        need(x is not None and x.at == "entry" and not x.can_return and x.function not in ("f_80d9a820", "f_83b5bfb0", "f_80de6cb0"),
+             "%s is not an entry of its own that only looks" % name)
+    wait = block(calls, "int hos_site_menu_button_wait(Ctx *A64_NOESC c) {")
+    need("hos_oot_autoload_watching()" in wait and "HOS_OPT_SKIP_OPENING" not in wait and "hos_oot_opening" not in wait,
+         "the button waits' callback is not Skip title screen's alone")
+    need("buttonWait" not in fn, "Skip opening reads the title's button waits")
 
     cc = args.cc or shutil.which("gcc") or shutil.which("clang") or shutil.which("cc")
     if cc:

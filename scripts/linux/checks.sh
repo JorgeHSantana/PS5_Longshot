@@ -1,5 +1,5 @@
 #!/bin/bash
-# tests/run_all.py in a container with CI's tools (scripts/linux/checks.Dockerfile: Ubuntu 24.04, as .forgejo/workflows/ci.yml),
+# tests/run_all.py in a container with CI's tools (scripts/linux/checks.Dockerfile: Ubuntu 24.04, as CircleCI's test-deps-linux),
 # on any Linux distribution. `tests/run_all.py --container` (`mise run test --container`) runs this with its other arguments:
 #
 #   scripts/linux/checks.sh --strict          every check
@@ -51,7 +51,7 @@ RUN=(run --rm --init --network none -v "$ROOT:$ROOT" -w "$ROOT")
 if git=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && [[ $git/ != "$ROOT"/* ]]; then
     RUN+=(-v "$git:$git:ro")
 fi
-# (the user: as docker.sh, beside this, says)
+# (the user: as builder/tools/docker.sh says)
 if "$DOCKER" --version 2>/dev/null | grep -qi podman; then
     RUN+=(--userns=keep-id)
 elif "$DOCKER" info --format '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; then

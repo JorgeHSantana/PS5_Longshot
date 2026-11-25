@@ -1,19 +1,16 @@
-# The Linux Longshot Builder (docs/dev/reference/releases.md): Longshot-<version>-x86_64.AppImage, the builder with its Python and Longshot's
-# sources (scripts/linux/deps.sh's pinned downloads, scripts/linux/appimage.sh), and recomplauncher.json inside. No Vulkan back
-# end is built into it: every player's build compiles it from those sources. Its build tools (the compiler, the sysroot, FFmpeg,
-# SDL2, the Vulkan headers) are not in it either: they are tools.lock's linux-x64 lines, installed here to check that the back
-# end compiles and to check the image, and on the player's PC by the launcher or the builder's first start. No game data is
-# involved. Built in Ubuntu 22.04, the oldest system it is for (glibc 2.35). The AppImage is a workflow artifact; called by
-# release.yml with the version's name, it is the release's.
-# It carries the version (its name and usr/share/longshot/VERSION, which a player's longshot_vk.so shows in its menu and bug
-# report: nx2/version.py), so a tag always builds it again; a tag whose commit CI released already (release.yml's `checked`)
-# skips only the build checks that ship nothing and passed in that run (the back end, without and with AMD FSR 4). Those
-# checks, and the tools' downloads, take the runner's caches on every run; what the AppImage carries never does.
-name: Linux AppImage
+# longshot-builder for Linux (docs/dev/reference/builder.md, "What a release carries"): longshot-builder-<version>-linux-x64, one program
+# (linked against glibc 2.35, tools.lock's sysroot, the game's own floor; the dist profile: scripts/longshot_builder.py) that carries everything a player's PC builds the game with: the
+# sources, the release's third-party objects, RenHDrum's library and the build tools (tools.lock's linux-x64 bundle),
+# unpacked into its cache at the first use (build-driver's sources.rs). Built in Ubuntu 22.04, the oldest system the game
+# it builds is for (glibc 2.35: RenHDrum's library is linked here). No game data is involved.
+# Called by release.yml with the version's name, it also makes the deltas from the channel's last releases and the
+# release's manifest for this platform (`longshot-builder dev release files`) and RecompLauncher's zip (`dev release
+# recomplauncher`), by the runner's own longshot-builder, and uploads them before the build checks; it restores no cache. It carries the version, so a tag
+# always builds it again; a tag whose commit CI released already (release.yml's `checked`) skips only the build checks
+# that ship nothing (the back end, without and with AMD FSR 4).
+name: longshot-builder (Linux)
 on:
-  # (no pull_request trigger for now: the Release workflow builds main's pushes and tags by calling this one; build a
-  # branch by hand with Run workflow)
-  workflow_dispatch:
+  # (called by the Release workflow only, with the version's name)
   workflow_call:
     inputs:
       tag:
@@ -32,17 +29,15 @@ on:
 permissions:
   contents: read
 env:
-  # (the version this run is for, from the Release workflow; empty on other runs)
+  # (the version this run is for, from the Release workflow)
   RELEASE_TAG: ${{ inputs.tag }}
   # (a published release of the same commit, when there is one: the back end's build checks, passed in its run, are not run again)
   RELEASE_CHECKED: ${{ inputs.checked }}
 concurrency:
-  group: linux-appimage-${{ inputs.tag || github.ref }}
-  # (a pull request's older run is cancelled; a release's never is)
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: longshot-builder-linux-${{ inputs.tag }}
 
 jobs:
-  appimage:
+  linux:
     runs-on: release  # (a release's build: only the runners kept for them take it, docs/dev/reference/ci.md)
     container: ubuntu:22.04
     # (about 4 minutes with the dependencies cached; building them all, as a release does, takes longer)
@@ -51,45 +46,20 @@ jobs:
       # (dpkg without an fsync per file: this container is thrown away after the job, so an install cut short loses nothing)
       - name: Package installs without fsync
         run: echo force-unsafe-io > /etc/dpkg/dpkg.cfg.d/force-unsafe-io
+      # (git for the version, curl and xz for the downloads, zstd for the pack and the deltas (1.4.8: --patch-from), Python
+      # for the scripts, gcc for the links: RenHDrum's and the runner's longshot-builder against this glibc (2.35))
       - name: System packages
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          retry_packages() {
-            for try in 1 2 3; do
-              if "$@"; then return 0; else package_status=$?; fi
-              if [ "$try" = 3 ]; then return "$package_status"; fi
-              sleep 20
-            done
-          }
-          base_packages() {
-            apt-get update &&
-              apt-get install -y --no-install-recommends software-properties-common gpg-agent
-          }
-          toolchain_packages() {
-            # Enrollment can leave a source without its key after a network failure. Repair it before refreshing
-            # indexes that depend on that key; retrying the base refresh first would stop at NO_PUBKEY (#2266).
-            # --no-update only separates enrollment from the explicit, signed index refresh immediately afterward.
-            # (libstdc++ 13, from the toolchain PPA: C++20 <format>; linked in statically)
-            # Launchpad metadata connections can hang past the entire job's hour. Give each retry a real chance;
-            # terminate enrollment after three minutes, then kill it if termination itself stalls.
-            # The PPA from ppa.launchpad.net, not ppa.launchpadcontent.net (add-apt-repository's choice): the latter
-            # answered 503 for hours on 2026-11-23 and every nightly's appimage failed, while the former served the same
-            # archive. Plain http is safe here: apt checks the archive's signature with the key enrollment added.
-            timeout --kill-after=5s 180s add-apt-repository -y --no-update ppa:ubuntu-toolchain-r/test &&
-              sed -i 's|https://ppa\.launchpadcontent\.net/|http://ppa.launchpad.net/|g' /etc/apt/sources.list.d/*.list &&
-              apt-get update &&
-              apt-get install -y --no-install-recommends g++-13 libstdc++-13-dev &&
-              apt-get install -y --no-install-recommends git ca-certificates curl xz-utils zstd file unzip python3 \
-              build-essential gcc-12 g++-12 libstdc++-12-dev nasm meson ninja-build cmake pkg-config \
-              libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev libxinerama-dev \
-              libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl-dev libgles-dev libdrm-dev libgbm-dev \
-              libpulse-dev libasound2-dev libpipewire-0.3-dev libudev-dev libdbus-1-dev zlib1g-dev
-          }
-          retry_packages base_packages
-          retry_packages toolchain_packages
+          for try in 1 2 3; do
+            apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl xz-utils zstd python3 \
+              build-essential && break
+            [ "$try" = 3 ] && exit 1
+            sleep 20
+          done
 
-      # (Node for the actions this job uses, which are JavaScript (checkout, cache, upload-artifact: `using: node24`): the
+      # (Node for the actions this job uses, which are JavaScript (checkout, upload-artifact: `using: node24`): the
       # runner starts them with the job container's own `node`, and ubuntu:22.04 has none (exec: "node": executable file
       # not found, the first nightly's run). Ubuntu 22.04's own nodejs is version 12, too old for them; this is Node.js's
       # Linux build, pinned by its SHA-256, only its node program, before the first action)
@@ -116,164 +86,118 @@ jobs:
       - name: Trust the checkout
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      # (a release builds what the AppImage carries from its checked downloads: no built deps from a cache, which other
-      # runs write. Other runs take the built deps, without the downloads they were built from: deps.sh fetches only a
-      # part it has not built (its .<part> marks), and the downloads were most of the cache, about 1.4 of 2.3 GB)
-      - if: env.RELEASE_TAG == ''
-        uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            build-linux/deps
-            !build-linux/deps/downloads
-          key: linux-deps-built-${{ hashFiles('scripts/linux/deps.sh', 'requirements.txt', 'nx2/prompt_requirements.txt') }}
-      - if: env.RELEASE_TAG != ''
-        uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: build-linux/deps/downloads
-          key: linux-deps-downloads-${{ hashFiles('scripts/linux/deps.sh') }}
+      - name: Version
+        run: echo "TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
 
-      - name: Dependencies (Python, the AppImage packer)
-        run: scripts/linux/deps.sh
+      # (no cache in this job, which makes the release's files: every download (the tools, the pinned Rust, the crates)
+      # is fetched afresh and checked by its SHA-256, and unpacked into this run's own $RUNNER_TEMP. A cache's key is
+      # anyone's to save first, and what a release ships must come from nothing a cache holds)
+      # (the pinned Rust (scripts/renhdrum.py's RUST) and Cargo.lock's crates, each checked by its SHA-256, into
+      # $RUNNER_TEMP/rust, which RenHDrum's build below takes too)
+      # (a longshot-builder that carries nothing, the release profile: it makes the third-party objects from the checkout
+      # (--root), packs what the release's program carries, runs its dry run, makes the deltas and the manifest
+      # (`dev release`), and builds the back end's checks)
+      - name: longshot-builder for this runner
+        run: >-
+          python3 -I scripts/longshot_builder.py build --target linux --profile release --cache "$RUNNER_TEMP/rust"
+          --out "$RUNNER_TEMP/host/longshot-builder" --jobs "$(nproc)"
 
-      # (tools.lock's linux-x64 tools, from Longshot's packages, each checked by its SHA-256: what the player's builder
-      # downloads. Their downloads are kept for every run, a release's too: scripts/tools.py checks a kept archive's size and
-      # SHA-256 each time it takes one, and fetches it again when they differ. The installed tools, by tools.lock's own hash,
-      # for the runs that are not a release's)
-      - uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/tools-cache
-          key: linux-tools-downloads-${{ hashFiles('tools.lock') }}
-      - if: env.RELEASE_TAG == ''
-        uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: build-linux/tools
-          key: linux-tools-${{ hashFiles('tools.lock') }}
+      # (tools.lock's linux-x64 bundle: each tool from Longshot's packages, checked by its SHA-256, unpacked at
+      # tools/<name>/ of the checkout (`longshot-builder dev tools install`, by the runner's longshot-builder above: the
+      # builder needs none of these tools to be built), where longshot-builder --root <checkout> takes them
+      # (build-driver's tools))
       - name: The build tools (tools.lock, linux-x64)
-        run: python3 -I scripts/tools.py install build-linux/tools --system linux-x64 --cache "$RUNNER_TEMP/tools-cache"
-
-      # The Vulkan back end's compiled objects (nx2/build.py's object cache, build-linux/vk-work/objcache: each object
-      # under the SHA-1 of its source, its flags and the headers it can see): a build compiles only the files a change
-      # reaches, not all 209 (about 40 s of a release's build, 80-140 s on a smaller runner). Read and written by every
-      # build that makes the back end, the nightly's and a release's too: the back end is a build check, which no release
-      # file carries (every player's build compiles its own from the AppImage's sources), and the cache is the runner's own
-      # (a release runner's is written by release builds and Run workflow alone). The key also names the compiler
-      # (tools.lock pins it) and this system's C and C++ library headers, which the objects' own keys leave out.
-      - name: Object cache key
-        id: objkey
-        env:
-          COMPILER: ${{ hashFiles('tools.lock') }}
-          SOURCES: ${{ hashFiles('gpu/**', 'third_party/imgui/**', 'third_party/zstd/**', 'host/posix/**', 'nx2/build.py') }}
         run: |
-          system=$(dpkg-query -W -f '${Package}=${Version}\n' libc6-dev libstdc++-13-dev libstdc++-12-dev | sha256sum | cut -c1-16)
-          echo "prefix=linux-vk-objects-$COMPILER-$system-" >> "$GITHUB_OUTPUT"
-          echo "key=linux-vk-objects-$COMPILER-$system-$SOURCES" >> "$GITHUB_OUTPUT"
-      - if: env.RELEASE_CHECKED == ''
-        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: build-linux/vk-work/objcache
-          key: ${{ steps.objkey.outputs.key }}
-          restore-keys: ${{ steps.objkey.outputs.prefix }}
+          "$RUNNER_TEMP/host/longshot-builder" dev tools install "$PWD" --system linux-x64 --cache "$RUNNER_TEMP/tools-cache"
+          echo "BUNDLE=$PWD" >> "$GITHUB_ENV"
 
-      # (RenHDrum (host/rumble_renhdrum.c): renhdrum.so from third_party/renhdrum, with scripts/renhdrum.py's pinned Rust,
-      # linked here, against the C library the AppImage is for. The AppImage carries it and a player's build puts it beside
-      # the game. The pinned Rust's parts are kept between runs and checked by their SHA-256 each time)
-      - uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/renhdrum-rust
-          key: renhdrum-rust-linux-${{ hashFiles('scripts/renhdrum.py') }}
+      # (the third-party code's objects a player's build takes instead of compiling them (build-compile's prebuilt.rs),
+      # made with the bundle's tools, as a player's build compiles them)
+      - name: The third-party objects
+        run: >-
+          "$RUNNER_TEMP/host/longshot-builder" compile --work "$RUNNER_TEMP/third-party-work" --root "$PWD"
+          --store "$RUNNER_TEMP/third-party-work/store" --jobs "$(nproc)" --third-party-objects "$RUNNER_TEMP/third_party_objects"
+
+      # (RenHDrum (host/rumble_renhdrum.c): renhdrum.so from third_party/renhdrum with scripts/renhdrum.py's pinned Rust,
+      # linked here against glibc 2.35; a player's build puts it beside the game)
       - name: renhdrum.so
         run: >-
-          python3 -I scripts/renhdrum.py build --target linux --linker gcc --cache "$RUNNER_TEMP/renhdrum-rust"
+          python3 -I scripts/renhdrum.py build --target linux --linker gcc --cache "$RUNNER_TEMP/rust"
           --out "$RUNNER_TEMP/renhdrum/renhdrum.so"
-      # (the AppImage, named by the release's version: a release's tag or the nightly's name)
-      - name: AppImage
+
+      # (what the program carries: the sources, the objects, RenHDrum's library, the tools, each part a zstd member of its
+      # own (`longshot-builder dev release sources`); then the program, the dist profile, with it inside, linked by the
+      # bundle's clang against its sysroot (glibc 2.35, as the game; its windows load X11 or Wayland at run time))
+      - name: longshot-builder-<version>-linux-x64
+        run: |
+          "$RUNNER_TEMP/host/longshot-builder" dev release sources --out "$RUNNER_TEMP/sources.pack" --version "$TAG" \
+            --third-party-objects "$RUNNER_TEMP/third_party_objects" \
+            --add "third_party/renhdrum/renhdrum.so=$RUNNER_TEMP/renhdrum/renhdrum.so" --tools "$BUNDLE/tools"
+          mkdir -p dist
+          python3 -I scripts/longshot_builder.py build --target linux --profile dist --cache "$RUNNER_TEMP/rust" \
+            --sources "$RUNNER_TEMP/sources.pack" --out "dist/longshot-builder-$TAG-linux-x64" --jobs "$(nproc)" \
+            --linker "$BUNDLE/tools/llvm/bin/clang" --sysroot "$BUNDLE/tools/sysroot"
+          ls -l dist
+
+      # (a player's build from the program itself, with no game and nothing beside it, up to where the lifted game is
+      # needed: what it carries unpacked into an empty cache, then its compile's dry run with and without AMD FSR 4: a file
+      # the program does not carry, or a third-party object a player's build would compile, fails here)
+      - name: A player's build from the program
+        run: >-
+          "$RUNNER_TEMP/host/longshot-builder" dev release dry-run "dist/longshot-builder-$TAG-linux-x64" --clean
+          --cache "$RUNNER_TEMP/player-cache" --work "$RUNNER_TEMP/dry"
+
+      # (the release's stamps, the deltas from its channel's last releases and its manifest for linux-x64; the bases are
+      # fetched through RELEASE_UPLOAD_API, the server without Cloudflare, when this runner reaches it, else as anyone does)
+      - name: The deltas and the manifest
         env:
-          LONGSHOT_VERSION: ${{ env.RELEASE_TAG }}
-          RENHDRUM_SO: ${{ runner.temp }}/renhdrum/renhdrum.so
-        run: scripts/linux/appimage.sh
+          FORGEJO_UPLOAD_API: ${{ vars.RELEASE_UPLOAD_API }}
+        run: >-
+          "$RUNNER_TEMP/host/longshot-builder" dev release files "dist/longshot-builder-$TAG-linux-x64" --version "$TAG"
+          --platform linux-x64 --work "$RUNNER_TEMP/release"
 
-      # (the Vulkan back end, compiled as a player's build compiles it from the AppImage's sources (nx2/build.py), with the
-      # renderer's play profile as nx2/make_game.py's vk_profile_for picks it: the checkout's work/longshot_vk.profdata, else
-      # the committed assets/profiles/ one. A build check: the AppImage carries no built back end. RX_MARCH=x86-64-v3, not this
-      # runner's own CPU, so the object cache's keys stay the same from one runner to the next)
-      - name: longshot_vk.so (build check)
-        if: env.RELEASE_CHECKED == ''
-        shell: bash
+      # (RecompLauncher's release file: the same program as Longshot.x86_64, and recomplauncher.json, zipped by this
+      # runner's longshot-builder into dist/, so it travels with the rest and SHA256SUMS names it: the deploy runner, which
+      # signs, builds and runs no Rust)
+      - name: longshot-builder-<version>-linux-x64-recomplauncher.zip
         run: |
-          VKW="$PWD/build-linux/vk-work"
-          mkdir -p "$VKW"
-          rm -f "$VKW/sa/build/longshot_vk.so"
-          VK_PGO=
-          if [ -f work/longshot_vk.profdata ]; then VK_PGO="$PWD/work/longshot_vk.profdata"
-          elif [ -f assets/profiles/longshot_vk.profdata.xz ]; then
-            xz -dc assets/profiles/longshot_vk.profdata.xz > "$VKW/longshot_vk.shipped.profdata"; VK_PGO="$VKW/longshot_vk.shipped.profdata"
-          fi
-          echo "VK_PGO=$VK_PGO" >> "$GITHUB_ENV"   # (the AMD FSR 4 check below builds with the same, so only vk_fsr4.cpp compiles again)
-          D="$PWD/build-linux/deps" T="$PWD/build-linux/tools"
-          OOT_WORK="$VKW" EMSDK="$T/usr/lib/longshot/emsdk" RX_CPM="$T/usr/share/longshot/cpm" RX_MARCH=x86-64-v3 \
-            RX_VK_ONLY=1 RX_RELEASE=1 RX_VK_PGO="$VK_PGO" "$D/python/bin/python3" -I nx2/build.py --standalone --jobs "$(nproc)"
-          test -f "$VKW/sa/build/longshot_vk.so"
-
-      # (the object cache down to the objects this build used, as nx2/make_game.py prune_object_cache does: each object in
-      # sa/build/obj names its key in <obj>.sha1. Nothing goes when no stamp is found: a commit released already, whose
-      # back end is not built again, keeps the cache as it is)
-      - name: The object cache, down to this build's objects
-        shell: bash
-        run: |
-          W=build-linux/vk-work
-          shopt -s nullglob
-          stamps=("$W"/sa/build/obj/*.sha1)
-          [ "${#stamps[@]}" -gt 0 ] || { echo "no object stamps: the cache is kept as it is"; exit 0; }
-          # (one key a line: a stamp holds its key with no line end, so cat would run them together)
-          awk '{ sub(/\r$/, ""); print }' "${stamps[@]}" | sort -u > "$RUNNER_TEMP/used.txt"
-          for f in "$W"/objcache/*.o; do
-            k=$(basename "$f" .o)
-            grep -qxF "$k" "$RUNNER_TEMP/used.txt" || rm -f "$f"
-          done
-          left=("$W"/objcache/*.o)
-          echo "objcache: ${#left[@]} objects, $(du -sh "$W/objcache" | cut -f1)"
-      - if: env.RELEASE_CHECKED == ''
-        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: build-linux/vk-work/objcache
-          key: ${{ steps.objkey.outputs.key }}
-
-      # (AMD FSR 4's Linux side, a build option (a player's build with --fsr: scripts/linux/check_player_build.sh) (gpu/vk/
-      # vk_fsr4.cpp: dlopen, the older backend description, the unit exposure; the descriptor buffers in vk_main.cpp): built once
-      # more in a copy of the build check's work folder, where only vk_fsr4.cpp compiles again. The AppImage above is not changed)
-      - name: longshot_vk.so with AMD FSR 4 (build check)
-        if: env.RELEASE_CHECKED == ''
-        shell: bash   # (this container's default is sh, which has no PIPESTATUS)
-        run: |
-          cp -r build-linux/vk-work "$RUNNER_TEMP/vk-fsr"
-          rm -f "$RUNNER_TEMP/vk-fsr/sa/build/longshot_vk.so"   # (the build check's, without FSR: the test below is this build's)
-          D="$PWD/build-linux/deps" T="$PWD/build-linux/tools"
-          OOT_WORK="$RUNNER_TEMP/vk-fsr" EMSDK="$T/usr/lib/longshot/emsdk" RX_CPM="$T/usr/share/longshot/cpm" RX_MARCH=x86-64-v3 \
-            RX_VK_ONLY=1 RX_RELEASE=1 RX_VK_PGO="$VK_PGO" LONGSHOT_FSR=1 "$D/python/bin/python3" -I nx2/build.py --standalone --jobs "$(nproc)" |
-            tee "$RUNNER_TEMP/vk-fsr.log"
-          test "${PIPESTATUS[0]}" -eq 0
-          grep -q "with AMD FSR 4" "$RUNNER_TEMP/vk-fsr.log"
-          test -f "$RUNNER_TEMP/vk-fsr/sa/build/longshot_vk.so"
+          "$RUNNER_TEMP/host/longshot-builder" dev release recomplauncher "dist/longshot-builder-$TAG-linux-x64" --out dist
+          ls -l dist
 
       # (an artifact goes to Forgejo by its public address, ROOT_URL, behind Cloudflare, whatever address the runner has: a
       # request there can fail once, and the action does not send a block again (2026-11-13, the launcher's nightly: one
-      # 8 MB block, "SSL alert bad record mac"). Sent once more when it failed: Forgejo takes the same name again)
+      # 8 MB block, "SSL alert bad record mac"). Sent once more when it failed: Forgejo takes the same name again. Sent
+      # before the build checks below, which ship nothing)
       - id: upload_1
         continue-on-error: true
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
-          name: Longshot-linux-x86_64
-          path: build-linux/*.AppImage
+          name: longshot-builder-linux
+          path: dist/
           if-no-files-found: error
       - if: steps.upload_1.outcome == 'failure'
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
-          name: Longshot-linux-x86_64
-          path: build-linux/*.AppImage
+          name: longshot-builder-linux
+          path: dist/
           if-no-files-found: error
 
-      # (a player's build started from the AppImage itself, with no game, up to where the lifted game is needed: a file the
-      # AppImage does not carry fails here, not in every player's build. 2026-11-10: third_party/fonts, #1567. After the upload,
-      # so a failing image can be looked at; a release needs this job to pass)
-      - name: A player's build from the AppImage
-        run: scripts/linux/check_player_build.sh
+      # (the back end alone (compile --only renderer: no lift, no game), as a player's build compiles it, without and with
+      # AMD FSR 4, into an object store of this run's own: no cache here either, in the job that makes the release's
+      # files (a cache's key is anyone's to save first). RX_MARCH=x86-64-v3, as a player's release build)
+      - name: longshot_vk.so (build check)
+        if: env.RELEASE_CHECKED == ''
+        run: |
+          RX_MARCH=x86-64-v3 RX_RELEASE=1 "$RUNNER_TEMP/host/longshot-builder" compile --only renderer \
+            --work build-linux/vk-work --root "$PWD" --store build-linux/vk-store --jobs "$(nproc)"
+          test -f build-linux/vk-work/build/longshot_vk.so
+      - name: longshot_vk.so with AMD FSR 4 (build check)
+        if: env.RELEASE_CHECKED == ''
+        shell: bash   # (this container's default is sh, which has no PIPESTATUS)
+        run: |
+          RX_MARCH=x86-64-v3 RX_RELEASE=1 "$RUNNER_TEMP/host/longshot-builder" compile --only renderer \
+            --work "$RUNNER_TEMP/vk-fsr" --root "$PWD" --store build-linux/vk-store --jobs "$(nproc)" --upscaler fsr4 |
+            tee "$RUNNER_TEMP/vk-fsr.log"
+          test "${PIPESTATUS[0]}" -eq 0
+          grep -q "with AMD FSR 4" "$RUNNER_TEMP/vk-fsr.log"
+          test -f "$RUNNER_TEMP/vk-fsr/build/longshot_vk.so"

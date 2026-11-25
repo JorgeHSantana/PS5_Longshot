@@ -1,4 +1,4 @@
-/* Damage taken at the player's life write (nx2/oot_patches.py patch_life).
+/* Damage taken at the player's life write (the hook sites player.lifeHit and player.lifeWrite, host/oot_sites.c).
    Life is in quarter hearts. Normal preserves the game's result; Half rounds
    damage up so even a one-quarter hit still hurts. Healing is never scaled.
    The damage site supplies the full hit before the game clamps next to zero. */

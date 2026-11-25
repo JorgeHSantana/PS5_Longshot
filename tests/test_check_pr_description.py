@@ -347,7 +347,7 @@ class ForTooling(unittest.TestCase):
         self.assertIn('spec_from_file_location("check", "scripts/check_pr_description.py")', ci)   # (the title job)
 
     def test_game_paths(self):
-        for path in ("gpu/vk/vk_draw.cpp", "host/hos.c", "nx2/lift.py"):
+        for path in ("gpu/vk/vk_draw.cpp", "host/hos.c", "builder/crates/lift/src/lib.rs"):
             self.assertTrue(path.startswith(check.GAME_PATHS), path)
         for path in ("docs/dev/reference/switches.md", "scripts/release.py", "tests/run_all.py"):
             self.assertFalse(path.startswith(check.GAME_PATHS), path)

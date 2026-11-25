@@ -152,12 +152,13 @@ def source(tour, a):
             fail("%s: no Insert menu row writes it to longshot_options.ini" % key)
     if tour.BASE_INI["frame_rate_cap"] != "6" or "Uncapped" not in re.search(r"tx_fps_cap\(int v\) \{(.*?)\}", menu, re.S).group(1).split(",")[6]:
         fail("frame_rate_cap=6 is not Uncapped")
-    # the lists the tour moves aside and reads: the notes and play's lists in the game folder's cache/, the shipped one beside the
-    # game (and a build from before's loose ones, which the game's start moves into cache/)
+    # the lists the tour moves aside and reads: the notes and play's lists in the game folder's cache/ (the tour starts the game
+    # itself: no LONGSHOT_SHADER_CACHE, which only longshot-builder's play sets), the shipped one beside the game (and a build
+    # from before's loose ones, which the game's start moves into cache/)
     draw, paths, layout = text("gpu/vk/vk_draw.cpp"), text("gpu/vk/vk_paths.h"), text("host/game_layout.c")
     if 'return strstr(name, "_shipped") ? game_folder_path() + name : cache_path(name);' not in draw or \
             'std::string pipe_notes_path() { return cache_path("longshot_pipelines.bin"); }' not in draw or \
-            'cache_path(const char* name) { return game_sub_path("cache", name); }' not in paths:
+            'return shared.empty() ? game_sub_path("cache", name) : shared + name;' not in paths:
         fail("the pipeline notes and lists are no longer in the game folder's cache/ (vk_draw.cpp, vk_paths.h)")
     if tour.LIST != "cache/longshot_pipeline_states.bin" or tour.LIST not in tour.STATE_FILES:
         fail("the tour's list is not cache/longshot_pipeline_states.bin: %s" % tour.LIST)
@@ -172,9 +173,11 @@ def source(tour, a):
         fail("the shipped list is not put aside, or two files are put aside under one name")
     # the renderer's counters (--vk-profile): RX_VK_PGO_FILE, <file>.reset and <file>.dump as host/pgo_rt.c reads them in the
     # renderer's copy, and its raw format's magic
-    pgo, build = text("host/pgo_rt.c"), text("nx2/build.py")
-    if '-DPGO_ENV="RX_VK_PGO_FILE"' not in build or vkprofile.PGO_ENV != "RX_VK_PGO_FILE" or vkprofile.PGO_MARK != b"RX_VK_PGO_FILE\x00":
-        fail("the renderer's copy of host/pgo_rt.c no longer reads RX_VK_PGO_FILE (nx2/build.py -DPGO_ENV)")
+    pgo, build = text("host/pgo_rt.c"), text("builder/crates/build-compile/src/plan.rs")
+    if '"-DPGO_ENV=\\"RX_VK_PGO_FILE\\""' not in build or vkprofile.PGO_ENV != "RX_VK_PGO_FILE" or \
+            vkprofile.PGO_MARK != b"RX_VK_PGO_FILE\x00":
+        fail("the renderer's copy of host/pgo_rt.c no longer reads RX_VK_PGO_FILE (builder/crates/build-compile/src/plan.rs "
+             "-DPGO_ENV)")
     for want in ('snprintf(dump, sizeof dump, "%s.dump", path);', 'snprintf(reset, sizeof reset, "%s.reset", path);',
                  "memset(PGO_CNT_BEGIN, 0,", "pgo_write(path);\n            DeleteFileA(dump);", "DeleteFileA(reset);",
                  "const char *e = getenv(PGO_ENV);"):
@@ -407,7 +410,7 @@ def cli(tour, a):
 
 
 def list_tools(tour, states, rec):
-    """The counts and the merge, through nx2/pipeline_states.py (whatever its format); the options file; the report; --publish"""
+    """The counts and the merge, through scripts/pipeline_states.py (whatever its format); the options file; the report; --publish"""
     head = states.MAGIC + struct.pack("<I", states.SIZE)
     with tempfile.TemporaryDirectory() as d:
         one, two, out = (os.path.join(d, n) for n in ("one.bin", "two.bin", "out.bin"))
@@ -453,7 +456,7 @@ def list_tools(tour, states, rec):
             fail("the report does not say where the renderer's counters went: %s" % report)
         if "settle: on after 60 frames with no new pipeline, 600 at most" not in report:
             fail("the report does not say the settle's frames: %s" % report)
-    # --publish: the tour's source written by nx2/pipeline_states.py tour, its note from what the runs' bridges said
+    # --publish: the tour's source written by scripts/pipeline_states.py tour, its note from what the runs' bridges said
     with tempfile.TemporaryDirectory() as d:
         part = os.path.join(d, "run-child")
         os.makedirs(part)
@@ -784,8 +787,8 @@ def folder_kept(tour):
     env = drive.run_environ({"PATH": "/bin", "RX_VK_NO_STATE_LIST": "1", "HOS_FPS_MAX": "30", "HOME": "/h"}, {"HOS_FPS_MAX": "1000"})
     if env != {"PATH": "/bin", "HOME": "/h", "HOS_FPS_MAX": "1000"}:
         fail("run_environ: %s" % env)
-    if '"HOS_ENV_FILE": no_env' not in src or '[exe, "--user", user]' not in src:
-        fail("the game reads the folder's longshot_env.txt, or its saves are not the run's own")
+    if '"HOS_ENV_FILE": no_env' not in src or '[exe, "--user", user]' not in src or '"LONGSHOT_PROFILE": profile' not in src:
+        fail("the game reads the folder's longshot_env.txt, or its saves are not the run's own (its profile)")
     # tour.md: no path of the run's, the options as the runs had them
     if tour.published_settings({"RX_VK_SHOTS": "/home/u/run/shots", "RX_VK_PGO_FILE": "/r/vk.profraw", "RX_VK_SHOT_W": "320",
                                 "HOS_OUTPUT_RES": "640x360", "RX_VK_X": "/abs"}) != {"RX_VK_SHOT_W": "320", "HOS_OUTPUT_RES": "640x360"}:

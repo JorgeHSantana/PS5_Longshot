@@ -299,7 +299,7 @@ static int movie_load(const char *path) {   /* (into S.tape) */
 
 /* Whether two paths name one file: the same name, or (a link, another spelling, a hard link) the same file on the same
    volume. A path that does not name a file yet is no other file. (Paths here are UTF-8 strings: the exe's manifest makes
-   the process's code page UTF-8, so getenv, fopen and the A functions take them as they are: nx2/win_manifest.py) */
+   the process's code page UTF-8, so getenv, fopen and the A functions take them as they are: builder/crates/build-compile/src/generated/res.rs) */
 #ifdef _WIN32
 static int movie_file_id(const char *path, BY_HANDLE_FILE_INFORMATION *id) {
     HANDLE h = CreateFileA(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,

@@ -6,13 +6,12 @@
    (<mods>/contents/<title id>/<name>/romfs): any folder holding a romfs, exefs or cheats folder is a mod. Folders whose names
    start with '-' or '_' are left out (off).
    (hookshot) The order and the switches: the Insert menu's Mods tab, kept in mods.json beside the player's settings file (in
-   the user folder, else in the game folder: state_file; mods_list.h has the file's shape: "mods", an entry a mod with its
+   the profile, else in the game folder: state_file; mods_list.h has the file's shape: "mods", an entry a mod with its
    id "local/<name>" and "enabled", in the list's order, and "cheats" for the cheats' switches). A mod the file does not name
    goes after the named ones, by name, and is on: with no file the order is the folders' names. When two mods have the same
    file, the one lower in the list wins (with no file: the one whose name sorts last, as before). A change in the menu
-   applies at the next start (what the game reads is indexed at the start). longshot_mods.txt in the game folder, the
-   file of builds before mods.json, is read once when there is no mods.json yet and then put aside (read_state); the
-   game folder's mods.json is copied into the user folder once, as the settings are (carry_state).
+   applies at the next start (what the game reads is indexed at the start). The game folder's mods.json is copied into the
+   profile once, as the settings are (carry_state).
    Every mod file is indexed once at the start (no disk lookups per open); nn_fs.c asks hos_mods_romfs for each rom:
    path and lists a folder's mod-only entries with the game's own (hos_mods_dir_extras). HOS_FS_OVERLAY (nn_fs.c) is
    looked at after this, so a test overlay wins over mods.
@@ -20,13 +19,16 @@
    raised in it, host/prompts.c) is served with every enabled mod's own table merged in (an entry larger than the game's wins)
    and the entry of every file a mod serves raised to what its size needs: two mods that each grow files load together. Written to
    modcache/rsizetable.zs in the game folder at each start that needs it (merge_sizes).
-   (hookshot) ExeFS patches are applied when the game is built (nx2/exefs_patches.py: the code is compiled ahead of time from
-   the patched instructions, their data writes are in image.bin). The build lists what it applied in exefs_patches.txt in the
-   game folder; a patch file the list does not have with the same contents waits for the next build, and the menu says so.
+   (hookshot) ExeFS patches are applied when the game is built (builder/crates/game-files/src/patches.rs: the code is compiled ahead of time from
+   the patched instructions, their data writes are in image.bin), and only a manifest mod's: the builder reads no mod in this
+   layout (docs/dev/reference/mods.md, "One mod format": `Longshot.exe mod import` makes one a manifest mod). The build lists
+   what it applied in exefs_patches.txt in the game folder; a patch file the list does not have with the same contents is not
+   in the game, and the menu says so.
    From Skybound's loader (NotRexed/SkyboundTotk a64-kit/hos/mods.c, MIT): its RomFS part. The list, its order and switches and
    the size table's merge after valentderah/totk-pc-recomp runtime/mods.c and romfs.c (MIT, Copyright (c) 2026 Valiantsin
    Dzerakh; the notice is in restbl.h). */
 #include "hos.h"
+#include "romfs.h"
 #include "hos_paths.h"
 #include "mods_list.h"
 #include "options_path.h"
@@ -40,8 +42,9 @@
 
 uint8_t *hos_zs_read(const char *path, size_t *n, size_t limit);   /* zs.c */
 uint64_t hos_zs_content_size(const char *path);
+uint8_t *hos_zs_read_romfs(const char *rel, size_t *n, size_t limit);
+uint64_t hos_zs_romfs_content_size(const char *rel);
 int hos_zs_write(const char *path, const uint8_t *data, size_t n);
-extern const char *hos_romfs_dir;   /* nn_fs.c */
 
 typedef struct { char *key; char *host; char *rel; uint64_t size; int is_dir, logged, mod; } Entry;   /* key: romfs path, lower case, '/' */
 static Entry *table;
@@ -53,7 +56,7 @@ static uint64_t hash_str(const char *s) {
     return h;
 }
 static void lower_slash(char *s) {
-    for (; *s; s++) *s = *s == '\\' ? '/' : (char)tolower((unsigned char)*s);
+    for (; *s; s++) *s = *s == '\\' ? '/' : (char)hos_romfs_fold((unsigned char)*s);
 }
 static const char *last_sep(const char *s) {   /* (a host path: '\' on Windows, '/' from host/posix) */
     const char *b = strrchr(s, '\\'), *f = strrchr(s, '/');
@@ -69,7 +72,7 @@ static Entry *find(const char *key) {
 
 /* ---- the mods: the folders under root, in the list's order (a mod: a folder holding romfs, exefs or cheats) */
 typedef struct {
-    char path[MAX_PATH], name[MAX_PATH];
+    char path[HOS_PATH_CAP], name[HOS_PATH_CAP];
     int enabled, start_enabled;
     int romfs, exefs, cheats;               /* what it has */
     int files, replaced, added, overridden; /* its RomFS files; those the game has, those it has not; those a mod below takes */
@@ -80,7 +83,7 @@ typedef struct {
 } Mod;
 static Mod *mods;
 static int nmods, cap_mods;
-static char root_dir[MAX_PATH], state_path[MAX_PATH], cache_dir[MAX_PATH];
+static char root_dir[HOS_PATH_CAP], state_path[HOS_PATH_CAP], cache_dir[HOS_PATH_CAP];
 #define MODS_KEY_NONE 0xcbf29ce484222325ull   /* (state_key with no mods: FNV-1a's offset basis) */
 /* the order and the switches at the start: state_key. With no mods folder, or none in it, hos_mods_init returns before
    it takes it, so it starts as state_key's answer for no mods: else the menu counted "the mods" as changed at every
@@ -124,52 +127,25 @@ static void put(const char *key, const char *host, const char *rel, uint64_t siz
 typedef struct { char *host, *key; int mod, other; } Shipped;
 static Shipped *shipped;
 static int nshipped;
-static char sizes_rel[MAX_PATH];   /* the game's table, its RomFS path ("System/Resource/ResourceSizeTable...zs"), "" none */
-static char sizes_key[MAX_PATH];   /* the same, lower case */
-static char sizes_served[MAX_PATH];   /* the table served in the game's place: the merged one, or a mod's as it is (merge_failed) */
+static char sizes_rel[HOS_ROMFS_PATH];   /* the game's table, its RomFS path ("System/Resource/ResourceSizeTable...zs"), "" none */
+static char sizes_key[HOS_ROMFS_PATH];   /* the same, lower case */
+static char sizes_served[HOS_PATH_CAP];   /* the table served in the game's place: the merged one, or a mod's as it is (merge_failed) */
 static int sizes_merged;              /* sizes_served is the merged table */
-static char sizes_fallback[MAX_PATH]; /* no merge: the last enabled mod's own table for this version, served as host/prompts.c makes it */
+static char sizes_fallback[HOS_PATH_CAP]; /* no merge: the last enabled mod's own table for this version, served as host/prompts.c makes it */
 static int is_sizes(const char *key) {   /* (any version's: lower case) */
     const size_t n = strlen(key);
     return !strncmp(key, "system/resource/resourcesizetable.", 34) && n > 14 && !strcmp(key + n - 14, ".rsizetable.zs");
 }
 
-/* the game file a RomFS path names: 1 with its host path */
-static int game_file(const char *rel, char *out, size_t cap) {
-    if (!hos_romfs_dir) return 0;
-    snprintf(out, cap, "%s/%s", hos_romfs_dir, rel);
-    const DWORD at = GetFileAttributesA(out);
-    return at != INVALID_FILE_ATTRIBUTES && !(at & FILE_ATTRIBUTE_DIRECTORY);
+/* the game file a RomFS path names, its letters in any case (a mod may ship ui/... where the game has UI/...): 1 with
+   its spelling in the game's files (spelled) and its size (romfs.h) */
+static int game_file(const char *rel, char *spelled, size_t cap, uint64_t *size) {
+    return hos_romfs_case(rel, spelled, cap) && hos_romfs_stat(spelled, size) == 1;
 }
 
-/* a RomFS path in the game's own case: the size table's keys are CRC32s of the game's paths, and a mod may ship ui/... where
-   the game has UI/... (Windows finds the game's file either way). Each part's name as the game's folder has it; the path as it
-   is where the game has no such file, and where the file system tells the cases apart itself */
-static void game_case(const char *rel, char *out, size_t cap) {
-    snprintf(out, cap, "%s", rel);
-#ifdef _WIN32
-    if (!hos_romfs_dir) return;
-    char dir[MAX_PATH], pat[MAX_PATH];
-    snprintf(dir, sizeof dir, "%s", hos_romfs_dir);
-    for (size_t at = 0; out[at];) {
-        size_t end = at;
-        while (out[end] && out[end] != '/' && out[end] != '\\') end++;
-        const char sep = out[end];
-        out[end] = 0;
-        snprintf(pat, sizeof pat, "%s/%s", dir, out + at);
-        out[end] = sep;
-        WIN32_FIND_DATAA fd;
-        HANDLE f = FindFirstFileA(pat, &fd);
-        if (f == INVALID_HANDLE_VALUE) return;
-        FindClose(f);
-        if (strlen(fd.cFileName) == end - at) memcpy(out + at, fd.cFileName, end - at);
-        const size_t dn = strlen(dir);
-        snprintf(dir + dn, sizeof dir - dn, "/%s", fd.cFileName);
-        if (!sep) break;
-        at = end + 1;
-    }
-#endif
-}
+/* a RomFS path in the game's own case: the size table's keys are CRC32s of the game's paths. The path as it is where the
+   game has no such file */
+static void game_case(const char *rel, char *out, size_t cap) { hos_romfs_case(rel, out, cap); }
 
 /* a mod's romfs folder, recursively: rel is the path inside the RomFS so far ("" at its root) */
 static int index_romfs(const char *host_dir, const char *rel, int depth, int mod) {
@@ -181,23 +157,30 @@ static int index_romfs(const char *host_dir, const char *rel, int depth, int mod
             return 0;
         }
     }
-    char pat[MAX_PATH];
-    snprintf(pat, sizeof pat, "%s\\*", host_dir);
+    char pat[HOS_PATH_CAP];
+    if ((size_t)snprintf(pat, sizeof pat, "%s\\*", host_dir) >= sizeof pat) {
+        hos_log("mods: %s: its path is too long: left out", host_dir);
+        return 0;
+    }
     WIN32_FIND_DATAA fd;
     HANDLE f = FindFirstFileA(pat, &fd);
     if (f == INVALID_HANDLE_VALUE) return 0;
     int files = 0;
     do {
         if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
-        char host[MAX_PATH], key[MAX_PATH], sub_rel[MAX_PATH];
-        snprintf(host, sizeof host, "%s\\%s", host_dir, fd.cFileName);
+        char host[HOS_PATH_CAP], key[MAX_PATH], sub_rel[MAX_PATH];   /* (key, sub_rel: in the RomFS) */
+        /* (a path that does not fit is left out, said: a cut one would serve another file, or none) */
+        if ((size_t)snprintf(host, sizeof host, "%s\\%s", host_dir, fd.cFileName) >= sizeof host ||
+            (size_t)snprintf(sub_rel, sizeof sub_rel, "%s%s%s", rel, *rel ? "/" : "", fd.cFileName) >= sizeof sub_rel) {
+            hos_log("mods: %s\\%s: its path is too long: left out", host_dir, fd.cFileName);
+            continue;
+        }
         /* (longshot) a link to a folder is not followed (two links back up made the walk endless); links to files are
            (mod managers place files as links) */
         if ((fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
             hos_log("mods: %s is a link to a folder: left out", host);
             continue;
         }
-        snprintf(sub_rel, sizeof sub_rel, "%s%s%s", rel, *rel ? "/" : "", fd.cFileName);
         snprintf(key, sizeof key, "%s", sub_rel);
         lower_slash(key);
         const int is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
@@ -211,8 +194,8 @@ static int index_romfs(const char *host_dir, const char *rel, int depth, int mod
         if (is_dir) {
             files += index_romfs(host, sub_rel, depth + 1, mod);
         } else {
-            char game[MAX_PATH];
-            if (game_file(sub_rel, game, sizeof game)) mods[mod].replaced++;
+            char game[HOS_PATH_CAP];
+            if (game_file(sub_rel, game, sizeof game, NULL)) mods[mod].replaced++;
             else mods[mod].added++;
             files++;
         }
@@ -227,7 +210,7 @@ static int dir_exists(const char *path) {
 }
 
 static void find_mods(const char *dir, const char *name, int depth) {
-    char probe[MAX_PATH];
+    char probe[HOS_PATH_CAP];
     snprintf(probe, sizeof probe, "%s\\romfs", dir);
     const int has_romfs = dir_exists(probe);
     snprintf(probe, sizeof probe, "%s\\exefs", dir);
@@ -238,14 +221,14 @@ static void find_mods(const char *dir, const char *name, int depth) {
         if (nmods == cap_mods) mods = (Mod *)realloc(mods, sizeof *mods * (size_t)(cap_mods = cap_mods ? cap_mods * 2 : 16));
         Mod *m = &mods[nmods++];
         memset(m, 0, sizeof *m);
-        snprintf(m->path, MAX_PATH, "%s", dir);
-        snprintf(m->name, MAX_PATH, "%s", name);
+        snprintf(m->path, sizeof m->path, "%s", dir);
+        snprintf(m->name, sizeof m->name, "%s", name);
         m->romfs = has_romfs, m->exefs = has_exefs, m->cheats = has_cheats;
         m->enabled = 1;
         return;
     }
     if (depth >= 4) return;
-    char pat[MAX_PATH];
+    char pat[HOS_PATH_CAP];
     snprintf(pat, sizeof pat, "%s\\*", dir);
     WIN32_FIND_DATAA fd;
     HANDLE f = FindFirstFileA(pat, &fd);
@@ -256,7 +239,7 @@ static void find_mods(const char *dir, const char *name, int depth) {
             hos_log("mods: %s\\%s is off (its name starts with %c)", dir, fd.cFileName, fd.cFileName[0]);
             continue;
         }
-        char sub[MAX_PATH], sub_name[MAX_PATH];
+        char sub[HOS_PATH_CAP], sub_name[HOS_PATH_CAP];
         snprintf(sub, sizeof sub, "%s\\%s", dir, fd.cFileName);
         snprintf(sub_name, sizeof sub_name, "%s%s%s", name, *name ? "/" : "", fd.cFileName);
         find_mods(sub, sub_name, depth + 1);
@@ -274,9 +257,6 @@ typedef struct { char *name; int enabled; } Synced;
 static Synced *synced;   /* the Mods tab's order and switches when the list was last read or written: what differs is this run's change */
 static int nsynced;
 static int list_bad, unsaved;           /* mods.json is not a list; the last change could not be written: the Mods tab says so (mod_text) */
-static char old_state_path[MAX_PATH];   /* longshot_mods.txt in the game folder: the list of builds before mods.json */
-static char state_game_dir[MAX_PATH];   /* the game folder state_file was given: note_state_file's, after a write too */
-static char state_note[MAX_PATH];       /* modcache/mods_json.txt: where the list is, for the build (note_state_file) */
 
 /* A file under limit bytes, a NUL after it, *len its length. NULL with *why: it cannot be opened or held (which may pass), or
    is too large (which does not) */
@@ -312,7 +292,7 @@ static int same_path(const char *a, const char *b) {
 /* text as the file at path, whole or not at all: written beside it and moved over it. Another program that has the file open
    (a launcher reading it, a scanner) stops the move on Windows for a moment: tried again for about a tenth of a second */
 static int write_file(const char *path, const char *text, size_t len) {
-    char tmp[MAX_PATH + 8];
+    char tmp[HOS_PATH_CAP + 8];
     snprintf(tmp, sizeof tmp, "%s.new", path);
     FILE *f = fopen(tmp, "wb");
     if (!f) return 0;
@@ -325,27 +305,23 @@ static int write_file(const char *path, const char *text, size_t len) {
     return 0;
 }
 
-/* Where mods.json is: beside the player's settings file (host/options_path.c chose it: HOS_OPTIONS_FILE's folder, else the
-   user folder --user names, the launcher's, the same for every build it starts), and in the game folder when the settings
-   are there (a game started by itself) or nowhere. One rule for both files: an update into a new folder keeps the list */
+/* Where mods.json is: beside the player's settings file (host/options_path.c chose it: the profile's, the same for every
+   build it plays), and in the game folder when the settings are there (no profile) or nowhere. One rule for both files: an
+   update into a new folder keeps the list */
 static void state_file(const char *game_dir) {
     const char *options = hos_options_file(), *sep = options[0] ? last_sep(options) : NULL;
     const int n = sep ? snprintf(state_path, sizeof state_path, "%.*smods.json", (int)(sep + 1 - options), options) : -1;
     if (n < 0 || n >= (int)sizeof state_path) snprintf(state_path, sizeof state_path, "%smods.json", game_dir);
-    snprintf(old_state_path, sizeof old_state_path, "%slongshot_mods.txt", game_dir);
-    snprintf(state_note, sizeof state_note, "%smodcache/mods_json.txt", game_dir);
-    snprintf(state_game_dir, sizeof state_game_dir, "%s", game_dir);
 }
 
-/* The game folder's list into the user folder, once: a player who started the game by itself and starts it through the
-   launcher now keeps their order and switches, as they keep their settings (host/options_path.c hos_options_carry, and by its
-   rules: when the user folder has no list, not with a settings file of the run's own, a copy that leaves the game folder's
-   file as it is, which is the list again when the game is started by itself). Only a file that is a list is carried */
+/* The game folder's list into the profile, once: a player who started the game by itself and plays a profile now keeps their order and switches, as they keep their settings (host/options_path.c hos_options_carry, and by its
+   rules: when the profile has no list, a copy that leaves the game folder's file as it is, which is the list again when the
+   game is started without a profile). Only a file that is a list is carried */
 static void carry_state(const char *game_dir) {
-    const char *own = getenv("HOS_OPTIONS_FILE"), *why = "";
-    char beside[MAX_PATH];
+    const char *why = "";
+    char beside[HOS_PATH_CAP];
     snprintf(beside, sizeof beside, "%smods.json", game_dir);
-    if ((own && own[0]) || same_path(beside, state_path) || path_exists(state_path) || !path_exists(beside)) return;
+    if (same_path(beside, state_path) || path_exists(state_path) || !path_exists(beside)) return;
     size_t len = 0;
     char *text = read_bytes(beside, MODS_LIST_MAX, &len, &why);
     ModsList carried;
@@ -356,7 +332,7 @@ static void carry_state(const char *game_dir) {
         if (write_file(state_path, text, len)) {
             hos_log("mods: the list in %s was copied to %s, where every build the launcher starts reads it now (the game "
                     "folder's copy is left as it is: it is the list when the game is started by itself)", beside, state_path);
-        } else {   /* (a user folder that cannot be written: this run reads and keeps the game folder's, as the settings do) */
+        } else {   /* (a profile that cannot be written: this run reads and keeps the game folder's, as the settings do) */
             hos_log("mods: %s could not be copied to %s: this run keeps the game folder's", beside, state_path);
             snprintf(state_path, sizeof state_path, "%s", beside);
         }
@@ -365,7 +341,7 @@ static void carry_state(const char *game_dir) {
 }
 
 /* A mod's id in mods.json: "local/" and its path under the mods folder, until mods have manifests. The game's file names
-   are UTF-8 (on Windows by the exe's manifest: nx2/win_manifest.py), which is what the file holds. 0 (out "") for a name
+   are UTF-8 (on Windows by the exe's manifest: builder/crates/build-compile/src/generated/res.rs), which is what the file holds. 0 (out "") for a name
    that is not (bytes of a Linux folder's name; a name outside ASCII on a Windows from before the manifest's code page):
    that mod is never named in the file, so it is on and after the named ones. An id is the folder's name exactly as the disk
    has it: compared byte for byte, here and in the build, on every system */
@@ -373,52 +349,6 @@ static int mod_id(const char *name, char *out, size_t cap) {
     if (mods_list_utf8(name) && snprintf(out, cap, "local/%s", name) < (int)cap) return 1;
     out[0] = 0;
     return 0;
-}
-
-/* The build (nx2/exefs_patches.py list_file) is given the game folder only, so a list that is not there is named there:
-   modcache/mods_json.txt holds its path, and is taken away when the list is beside the game or not there at all. With or
-   without mods, once the list exists: a build may come after mods are added. A run with a settings file of its own (HOS_OPTIONS_FILE: a test, a script) leaves the note
-   as it is, as it leaves the player's settings */
-static void note_state_file(const char *game_dir) {
-    const char *own = getenv("HOS_OPTIONS_FILE");
-    if (own && own[0]) return;
-    char beside[MAX_PATH], path[MAX_PATH + 2];
-    snprintf(beside, sizeof beside, "%smods.json", game_dir);
-    if (same_path(beside, state_path) || !mods_list_utf8(state_path)) {   /* (the note is UTF-8, as the game's paths are) */
-        remove(state_note);
-        return;
-    }
-    /* No list there yet (no mods, none switched): nothing to name. The build follows a note only to a file that is there,
-       so it reads the game folder's list either way; this keeps a start with no mods from writing into the game folder */
-    if (GetFileAttributesA(state_path) == INVALID_FILE_ATTRIBUTES) {
-        remove(state_note);
-        return;
-    }
-    snprintf(path, sizeof path, "%s\n", state_path);
-    char *now = read_text(state_note);
-    const int same = now && !strcmp(now, path);
-    free(now);
-    if (same) return;
-    CreateDirectoryA(cache_dir, NULL);
-    if (!write_file(state_note, path, strlen(path)))
-        hos_log("mods: cannot write %s: a build of the game that is not told the user folder does not find %s", state_note, state_path);
-}
-
-/* longshot_mods.txt as a list: one line a mod, "on <name>" or "off <name>", and "cheat <key> on|off" */
-static void read_old_state(char *text) {
-    for (char *line = text; line && *line;) {
-        char *end = strpbrk(line, "\r\n"), *next = end ? end + strspn(end, "\r\n") : NULL;
-        if (end) *end = 0;
-        const int on = !strncmp(line, "on ", 3), off = !strncmp(line, "off ", 4);
-        char id[MAX_PATH + 8], key[64], sw[8];
-        if ((on || off) && mod_id(line + (on ? 3 : 4), id, sizeof id)) {
-            ModsListMod *grown = (ModsListMod *)realloc(list.mods, sizeof *grown * (size_t)(list.nmods + 1));
-            if (grown) list.mods = grown, grown[list.nmods++] = (ModsListMod){_strdup(id), on, NULL, 0};
-        } else if (!strncmp(line, "cheat ", 6) && sscanf(line + 6, "%63s %7s", key, sw) == 2 && mods_list_utf8(key)) {
-            mods_list_cheat_set(&list, key, !strcmp(sw, "on"));
-        }
-        line = next;
-    }
 }
 
 /* The Mods tab's order and switches as the list has them now: from here on, what differs is a change of this run */
@@ -454,8 +384,6 @@ static void list_note(Mod *m) {
     if (n && m->note[n - 1] == ' ') m->note[n - 1] = 0;
 }
 
-static int write_state(void);
-
 /* the list in the file's order (the named first, the rest by name, on), the switches as it says */
 static void read_state(void) {
     qsort(mods, (size_t)nmods, sizeof *mods, mod_cmp);
@@ -463,8 +391,6 @@ static void read_state(void) {
     size_t len = 0;
     const char *why = "";
     char *text = there ? read_bytes(state_path, MODS_LIST_MAX, &len, &why) : NULL;
-    const char *own = getenv("HOS_OPTIONS_FILE");   /* (a run with a settings file of its own leaves the game folder's old list alone) */
-    int old = 0;
     if (text && mods_list_parse(&list, text, len, &why)) {
         hos_log("mods: the list (the order and the switches) is %s", state_path);
     } else if (there) {
@@ -472,14 +398,11 @@ static void read_state(void) {
         list_bad = 1;
         hos_log("mods: %s is not a list of mods (%s): every mod is on, in the order of the folders' names, until the Mods tab "
                 "changes something, which keeps this file as mods.json.bad and writes a new one", state_path, why);
-    } else if (!(own && own[0]) && (text = read_text(old_state_path)) != NULL) {   /* (the list of a build before mods.json, once) */
-        read_old_state(text);
-        old = 1;
     } else {
         hos_log("mods: no list yet (%s): every mod is on, in the order of the folders' names", state_path);
     }
     free(text);
-    char (*ids)[MAX_PATH + 8] = malloc(sizeof *ids * (size_t)(nmods + 1));
+    char (*ids)[HOS_PATH_CAP + 8] = malloc(sizeof *ids * (size_t)(nmods + 1));
     for (int i = 0; ids && i < nmods; i++)
         if (!mod_id(mods[i].name, ids[i], sizeof ids[i]))
             hos_log("mods: %s: mods.json cannot name this folder (its name is not UTF-8 text), so the mod is on, after the named "
@@ -489,7 +412,7 @@ static void read_state(void) {
         for (int i = placed; i < nmods; i++) {
             if (!ids[i][0] || strcmp(ids[i], list.mods[e].id)) continue;
             Mod m = mods[i];
-            char id[MAX_PATH + 8];
+            char id[HOS_PATH_CAP + 8];
             memcpy(id, ids[i], sizeof id);
             memmove(&mods[placed + 1], &mods[placed], sizeof *mods * (size_t)(i - placed));
             memmove(&ids[placed + 1], &ids[placed], sizeof *ids * (size_t)(i - placed));
@@ -500,14 +423,6 @@ static void read_state(void) {
         }
     free(ids);
     sync_tab();
-    if (old && write_state()) {   /* (read once: the old file is put aside, so nothing brings its list back) */
-        char aside[MAX_PATH + 16];
-        snprintf(aside, sizeof aside, "%s.imported", old_state_path);
-        const int moved = MoveFileExA(old_state_path, aside, MOVEFILE_REPLACE_EXISTING);
-        hos_log("mods: the order and the switches of %s are in %s now, where they are kept from here on; the old file %s", old_state_path,
-                state_path, moved ? "is kept as longshot_mods.txt.imported and never read again"
-                                  : "could not be renamed, and is read again only if mods.json goes missing");
-    }
 }
 
 /* One mod's entry as it is written: its entry in the file with what else that holds, or a new one; the switch the tab's
@@ -542,7 +457,7 @@ static int write_state(void) {
             unsaved = 1;
             return 0;
         } else {
-            char bad[MAX_PATH + 8];
+            char bad[HOS_PATH_CAP + 8];
             snprintf(bad, sizeof bad, "%s.bad", state_path);
             if (!MoveFileExA(state_path, bad, MOVEFILE_REPLACE_EXISTING)) {
                 hos_log("mods: %s is not a list of mods (%s) and cannot be kept aside as %s: left as it is, the change is "
@@ -556,7 +471,7 @@ static int write_state(void) {
         free(text);
     }
     const int old = list.nmods, moved = tab_moved();
-    char (*ids)[MAX_PATH + 8] = malloc(sizeof *ids * (size_t)(nmods + 1));
+    char (*ids)[HOS_PATH_CAP + 8] = malloc(sizeof *ids * (size_t)(nmods + 1));
     int *entry = (int *)malloc(sizeof *entry * (size_t)(nmods + 1));   /* each mod's entry in the file, -1 none */
     int *owner = (int *)malloc(sizeof *owner * (size_t)(old + 1));     /* each entry's mod, -1 one that is not there */
     ModsListMod *out = (ModsListMod *)calloc((size_t)(old + nmods) + 1, sizeof *out);
@@ -606,7 +521,6 @@ static int write_state(void) {
     if (ok) {
         sync_tab();
         list_bad = unsaved = 0;
-        note_state_file(state_game_dir);   /* (a list this write made first: the build is told now, not at the next start) */
         return 1;
     }
     hos_log("mods: cannot write %s: the change is kept and written at the next one", state_path);
@@ -624,7 +538,7 @@ static uint64_t state_key(void) {
     return h;
 }
 
-/* ---- ExeFS patches: what the build applied (exefs_patches.txt, nx2/exefs_patches.py) against the files there now */
+/* ---- ExeFS patches: what the build applied (exefs_patches.txt, builder/crates/game-files/src/patches.rs) against the files there now */
 static uint32_t fnv32_file(const char *path, int *ok) {
     FILE *f = fopen(path, "rb");
     uint32_t h = 0x811C9DC5u;
@@ -643,14 +557,14 @@ static int ends_ci(const char *s, const char *tail) {
 /* each ExeFS patch file of each mod against the build's list: applied (code, data), another game version's, unusable, or
    waiting for the next build; and the files the build applied that are no longer there as they were */
 static void exefs_status(const char *game_dir) {
-    char list_path[MAX_PATH];
+    char list_path[HOS_PATH_CAP];
     snprintf(list_path, sizeof list_path, "%sexefs_patches.txt", game_dir);
     char *built = read_text(list_path);
     int stale = 0;
     for (int i = 0; i < nmods; i++) {
         Mod *m = &mods[i];
         if (!m->exefs) continue;
-        char pat[MAX_PATH];
+        char pat[HOS_PATH_CAP];
         snprintf(pat, sizeof pat, "%s\\exefs\\*", m->path);
         WIN32_FIND_DATAA fd;
         HANDLE f = FindFirstFileA(pat, &fd);
@@ -658,7 +572,7 @@ static void exefs_status(const char *game_dir) {
         do {
             if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || !(ends_ci(fd.cFileName, ".ips") || ends_ci(fd.cFileName, ".pchtxt")))
                 continue;
-            char path[MAX_PATH], want[MAX_PATH + 64];
+            char path[HOS_PATH_CAP], want[HOS_PATH_CAP + 64];
             snprintf(path, sizeof path, "%s/exefs/%s", m->path, fd.cFileName);
             for (char *p = path; *p; p++) if (*p == '\\') *p = '/';
             int ok;
@@ -720,23 +634,21 @@ static int fit_sizes(void) {
     for (size_t i = 0; i < table_cap && !any; i++) any = table[i].key && !table[i].is_dir;
     if (!any) return 0;
     const int64_t t0 = hos_now_ns();
-    char path[MAX_PATH];
     size_t n = 0;
-    snprintf(path, sizeof path, "%s/%s", hos_romfs_dir, sizes_rel);
-    uint8_t *raw = hos_zs_read(path, &n, 64u << 20);
+    uint8_t *raw = hos_zs_read_romfs(sizes_rel, &n, 64u << 20);
     Restbl *base = raw ? restbl_parse(raw, n) : NULL;
     free(raw);
     /* (the game's own table; the button prompts' font entry raised in it as prompts.c raises it in the table it serves without
        mods (hos_prompts_font_entry, asked here, not through hos_prompts_romfs, as its first call chooses the controller's face,
        which is not known yet). Never a table the build made: another dump or game version may have made it, #1109) */
     Restbl *out = NULL;
-    if ((raw = hos_zs_read(path, &n, 64u << 20))) {
+    if ((raw = hos_zs_read_romfs(sizes_rel, &n, 64u << 20))) {
         out = restbl_parse(raw, n);
         free(raw);
     }
     uint32_t hos_prompts_font_entry(uint32_t entry);   /* prompts.c */
     uint32_t font_entry = 0, font_need = 0;
-    char font_key[MAX_PATH];
+    char font_key[HOS_PATH_CAP];
     restbl_key("Font2/Scalable/External.Nin_Ounce_NVN2.bfotf.zs", font_key, sizeof font_key);
     if (base && out && restbl_get(base, font_key, &font_entry) && (font_need = hos_prompts_font_entry(font_entry)) > font_entry)
         restbl_raise(out, font_key, font_need);
@@ -761,7 +673,7 @@ static int fit_sizes(void) {
             merged += restbl_merge(out, base, t);
         } else if (mods[shipped[s].mod].enabled) {   /* (another version's: the entries of its own mod's files) */
             for (size_t i = 0; i < table_cap; i++) {
-                char key[MAX_PATH];
+                char key[HOS_PATH_CAP];
                 uint32_t size;
                 if (table[i].key && !table[i].is_dir && table[i].mod == shipped[s].mod &&
                     restbl_get(t, restbl_key(table[i].rel, key, sizeof key), &size))
@@ -773,26 +685,22 @@ static int fit_sizes(void) {
     for (size_t i = 0; i < table_cap; i++) {   /* (each file a mod serves: the entry its size needs) */
         const Entry *e = &table[i];
         if (!e->key || e->is_dir) continue;
-        char key[MAX_PATH], game[MAX_PATH], host[MAX_PATH];
+        char key[HOS_PATH_CAP], game[HOS_PATH_CAP], host[HOS_PATH_CAP];
         restbl_key(e->rel, key, sizeof key);
         snprintf(host, sizeof host, "%s", e->host);
         for (char *p = host; *p; p++) if (*p == '\\') *p = '/';
         const int zs = ends_ci(e->rel, ".zs");
         const uint64_t now = zs ? hos_zs_content_size(host) : e->size;
         uint32_t entry, want;
-        if (game_file(e->rel, game, sizeof game)) {
+        uint64_t game_size = 0;
+        if (game_file(e->rel, game, sizeof game, &game_size)) {
             if (!restbl_get(base, key, &entry)) {   /* (the mod's path in another case than the game's, or no entry at all) */
-                char cased[MAX_PATH];
+                char cased[HOS_PATH_CAP];
                 game_case(e->rel, cased, sizeof cased);
                 if (!strcmp(cased, e->rel) || !restbl_get(base, restbl_key(cased, key, sizeof key), &entry))
                     continue;   /* (the game sizes it without the table: streamed) */
             }
-            uint64_t was = 0;
-            if (zs) was = hos_zs_content_size(game);
-            else {
-                FILE *g = fopen(game, "rb");
-                if (g) fseek(g, 0, SEEK_END), was = (uint64_t)_ftelli64(g), fclose(g);
-            }
+            const uint64_t was = zs ? hos_zs_romfs_content_size(game) : game_size;
             want = restbl_grow(key, entry, was, now);
         } else {   /* (a file the game has not: an estimate, unless a mod's own table gives it) */
             uint32_t have;
@@ -823,23 +731,18 @@ static int fit_sizes(void) {
     return served;
 }
 
+/* (a folder entry: System/Resource/ResourceSizeTable.*.rsizetable.zs, its letters in any case; the first listed) */
+static void size_table_of(void *arg, const char *name, int is_dir, uint64_t size) {
+    (void)arg, (void)size;
+    if (is_dir || sizes_rel[0] || _strnicmp(name, "ResourceSizeTable.", 18) || !ends_ci(name, ".rsizetable.zs")) return;
+    snprintf(sizes_rel, sizeof sizes_rel, "System/Resource/%s", name);
+    snprintf(sizes_key, sizeof sizes_key, "%s", sizes_rel);
+    lower_slash(sizes_key);
+}
+
 /* the game's table: the one System/Resource/ResourceSizeTable.*.rsizetable.zs of the RomFS */
 static void find_sizes(void) {
-    if (!hos_romfs_dir) return;
-    char pat[MAX_PATH];
-    snprintf(pat, sizeof pat, "%s\\System\\Resource\\ResourceSizeTable.*", hos_romfs_dir);
-    WIN32_FIND_DATAA fd;
-    HANDLE f = FindFirstFileA(pat, &fd);
-    if (f == INVALID_HANDLE_VALUE) return;
-    do {
-        if (ends_ci(fd.cFileName, ".rsizetable.zs")) {
-            snprintf(sizes_rel, sizeof sizes_rel, "System/Resource/%s", fd.cFileName);
-            snprintf(sizes_key, sizeof sizes_key, "%s", sizes_rel);
-            lower_slash(sizes_key);
-            break;
-        }
-    } while (FindNextFileA(f, &fd));
-    FindClose(f);
+    hos_romfs_list("System/Resource", size_table_of, NULL);
 }
 
 static void mod_text(Mod *m);
@@ -847,7 +750,7 @@ static void mod_text(Mod *m);
 /* hos_main.c, once the image is loaded (image_path: unused; ExeFS patches are applied when the game is built) */
 void hos_mods_init(const char *image_path) {
     (void)image_path;
-    char game_dir[MAX_PATH];
+    char game_dir[HOS_PATH_CAP];
     hos_game_path_a(game_dir, sizeof game_dir);
     char *slash = (char *)last_sep(game_dir);
     if (!slash) return;
@@ -857,7 +760,6 @@ void hos_mods_init(const char *image_path) {
     state_file(game_dir);
     snprintf(cache_dir, sizeof cache_dir, "%smodcache/", game_dir);
     carry_state(game_dir);
-    note_state_file(game_dir);   /* (with or without mods: the build reads it) */
     if (GetFileAttributesA(root_dir) == INVALID_FILE_ATTRIBUTES) return;
     find_mods(root_dir, "", 0);
     if (!nmods) {
@@ -875,7 +777,7 @@ void hos_mods_init(const char *image_path) {
             continue;
         }
         if (m->romfs) {
-            char dir[MAX_PATH];
+            char dir[HOS_PATH_CAP];
             snprintf(dir, sizeof dir, "%s\\romfs", m->path);
             m->files = index_romfs(dir, "", 0, i);
         }
@@ -900,7 +802,7 @@ void hos_mods_init(const char *image_path) {
 
 /* nn_fs.c: the mod file for a RomFS path ("UI/x.zs", no mount, no leading slash), or 0 */
 int hos_mods_romfs(const char *rel, char *out, size_t cap) {
-    char key[MAX_PATH];
+    char key[HOS_PATH_CAP];
     snprintf(key, sizeof key, "%s", rel);
     lower_slash(key);
     int hos_prompts_romfs(const char *key, const char *mod, char *out, size_t cap);   /* prompts.c: the button prompts */
@@ -933,7 +835,7 @@ int hos_mods_romfs(const char *rel, char *out, size_t cap) {
 /* prompts.c: the mod file for this exact RomFS path, before the prompts' replacements. The size table: none when the
    merged one is served (it keeps the prompts' entries), else the last mod's own (sizes_fallback) */
 int hos_mods_file(const char *rel, char *out, size_t cap) {
-    char key[MAX_PATH];
+    char key[HOS_PATH_CAP];
     snprintf(key, sizeof key, "%s", rel);
     lower_slash(key);
     if (sizes_key[0] && !strcmp(key, sizes_key)) {
@@ -949,10 +851,9 @@ int hos_mods_file(const char *rel, char *out, size_t cap) {
 
 /* nn_fs.c, listing a RomFS folder: fn(arg, name, is_dir, size) for each mod entry directly in it that the game's own
    folder (base_dir, a host path; may not exist) does not have. Returns how many. */
-int hos_mods_dir_extras(const char *rel, const char *base_dir, void (*fn)(void *, const char *, int, uint64_t),
-                        void *arg) {
+int hos_mods_dir_extras(const char *rel, int all, void (*fn)(void *, const char *, int, uint64_t), void *arg) {
     if (!table_n) return 0;
-    char prefix[MAX_PATH];
+    char prefix[HOS_PATH_CAP];
     snprintf(prefix, sizeof prefix, "%s", rel);
     lower_slash(prefix);
     size_t pn = strlen(prefix);
@@ -967,9 +868,9 @@ int hos_mods_dir_extras(const char *rel, const char *base_dir, void (*fn)(void *
         if (!*name || strchr(name, '/')) continue;   /* (deeper) */
         const char *real = last_sep(e->host);   /* (the name as the mod spells it) */
         real = real ? real + 1 : e->host;
-        char base[MAX_PATH];
-        snprintf(base, sizeof base, "%s\\%s", base_dir, real);
-        if (GetFileAttributesA(base) != INVALID_FILE_ATTRIBUTES) continue;
+        char game[HOS_ROMFS_PATH], spelled[HOS_ROMFS_PATH];
+        snprintf(game, sizeof game, "%s/%s", rel, real);
+        if (!all && hos_romfs_case(game, spelled, sizeof spelled)) continue;   /* (the game's folder lists it already) */
         fn(arg, real, e->is_dir, e->size);
         n++;
     }

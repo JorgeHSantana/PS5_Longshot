@@ -96,7 +96,7 @@
 extern char** environ;
 #endif
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
-const char* mkwvk_version();   // (vk_version.cpp: the one renderer file nx2/build.py gives the version to)
+const char* mkwvk_version();   // (vk_version.cpp: the one renderer file builder/crates/build-compile gives the version to)
 #ifndef LONGSHOT_VERSION   // (a test or a screenshot fixture that compiles this file may give its own)
 #define LONGSHOT_VERSION mkwvk_version()
 #endif
@@ -1227,7 +1227,7 @@ void prompts_at_once(const Row& r) {
 
 // ---- (longshot) Save my pipeline list (the Debug tab, under Developer): longshot_pipeline_states.bin and the "Submit your pipelines" issue's
 // template, filled in from this run, zipped into the Downloads folder (pipeline_share.h; the builders do the same with
-// nx2/pipeline_share.py). Then the report on the clipboard, the folder shown and the issue opened in the browser, where the platform
+// longshot-builder share). Then the report on the clipboard, the folder shown and the issue opened in the browser, where the platform
 // has them; never with HOS_HEADLESS (no screen to show them on). Nothing is uploaded: the player attaches the zip ----
 // (longshot) Set up for a weak laptop (the Debug tab, integrated graphics: row_shown): Minimum's rows and mip trimming, then
 // lighter still. An i3-1115G4's UHD Graphics (2 cores, 4 threads, 16 GB shared) ran Kokiri Forest and the Deku Tree at 3-6 fps
@@ -1602,7 +1602,7 @@ bool toggle_default(int button) { return button == HOS_KEY_SPRINT; }
 void toggle_set(int button, bool on) {
     if (button == HOS_KEY_SPRINT) {
         opts.sprint_toggle = on;
-        if (host && host->version >= 40 && host->bind) host->bind(HOS_BIND_SPRINT_TOGGLE, 0, 0, on);
+        if (host && host->bind) host->bind(HOS_BIND_SPRINT_TOGGLE, 0, 0, on);
     }
     else opts.hold_toggle = on ? opts.hold_toggle | (1 << button) : opts.hold_toggle & ~(1 << button);
 }
@@ -1708,7 +1708,7 @@ bool control_column_enabled(int row, int col) {
     using enum menu_hit::CtlColumn;
     if (col == kCtlReset) {
         const int button = controls[row].button;
-        return host && host->version >= 44 && host->reset_binding && host->binding_is_default &&
+        return host && host->reset_binding && host->binding_is_default &&
                ((has_toggle(button) && toggle_on(button) != toggle_default(button)) || !host->binding_is_default(button));
     }
     if (col == kCtlToggle) return has_toggle(controls[row].button);
@@ -2472,7 +2472,7 @@ void row_value_cell(ui::Ctx& c, const Row& r, ImVec2 va, ImVec2 vb, bool selecte
 // selected one; Enter picks a mod up, Up and Down move it, Enter or Esc puts it down. The order and the mods' switches apply at the
 // next start (the restart question names them); a cheat's switch at once.
 bool can_mods() {
-    return host && host->version >= 35 && host->mod_info && host->mod_edit && host->mods_changed && host->cheat_info && host->cheat_set;
+    return host && host->mod_info && host->mod_edit && host->mods_changed && host->cheat_info && host->cheat_set;
 }
 bool mods_present() {
     const char *n, *d, *o;
@@ -3370,7 +3370,7 @@ void draw_control_confirmation(ui::Ctx& c) {
 }
 
 void rebind_control(int row, int set, int slot, int code, uint64_t approved = 0) {
-    if (host->version < 43 || !host->rebind_control) return;
+    if (!host->rebind_control) return;
     uint64_t conflicts = 0;
     if (host->rebind_control(set, controls[row].button, slot, code, approved, &conflicts)) {
         if (set == HOS_BIND_PAD) opts.pad_layout = detect_pad_layout();
@@ -4100,7 +4100,7 @@ void menu_quit_game() {
 bool menu_on_tab(const char* tab) { return open_now.load() && page == 0 && !strcmp(kTabIds[cur_tab], tab); }
 const char* motion_gyro_text(int v) { return tx_gyro(v); }
 void menu_rumble_test() {
-    if (host && host->version >= 32 && host->rumble_test) host->rumble_test();
+    if (host && host->rumble_test) host->rumble_test();
 }
 // (longshot, issue 1113) the input recordings' rows (menu/input_recording.cpp): the host's input_record, input_play and
 // input_status (host/input_movie.c)
@@ -4115,7 +4115,7 @@ MenuInputStatus menu_input_status() {
     input_status_stale = false, at = now;
     MenuInputStatus s;
     static char why[128];
-    if (host && host->version >= 42 && host->input_status) {
+    if (host && host->input_status) {
         MkwVkInputStatus h{};
         host->input_status(&h);
         s.mode = h.mode, s.started = h.started, s.held = h.held, s.diverged = h.diverged;
@@ -4128,7 +4128,7 @@ MenuInputStatus menu_input_status() {
     return s;
 }
 void menu_input_record(int start) {
-    if (!host || host->version < 42 || !host->input_record) return;
+    if (!host || !host->input_record) return;
     input_refused = nullptr, input_status_stale = true;
     if (!host->input_record(start) && start) input_refused = "A recording or a playback is running: stop it first.";
 }
@@ -4141,14 +4141,14 @@ const char* menu_input_recording(int index) {
     if (!have || now - at > std::chrono::seconds(1)) {
         files.clear();
         char path[1024];
-        for (int i = 0; i < 32 && host && host->version >= 42 && host->input_recording && host->input_recording(i, path, sizeof path); i++)
+        for (int i = 0; i < 32 && host && host->input_recording && host->input_recording(i, path, sizeof path); i++)
             files.emplace_back(path);
         have = true, at = now;
     }
     return index >= 0 && index < (int)files.size() ? files[index].c_str() : nullptr;
 }
 static void input_play(int start, int index) {
-    if (!host || host->version < 42 || !host->input_play) return;
+    if (!host || !host->input_play) return;
     static const int syncs[] = {0, 1, 60, 300};   // (Drift correction: Off, every update, every second, every 5 s)
     const char* path = index >= 0 ? menu_input_recording(index) : nullptr;
     if (start && index >= 0 && !path) return;
@@ -4242,7 +4242,7 @@ void menu_init() {
             char* eq = strchr(line, '=');
             if (!eq) continue;
             *eq = 0;
-            // (a file with only the builders' Compile shaders in it, compile_shaders=, which make_game.py writes into a new
+            // (a file with only the builder's Compile shaders in it, compile_shaders=, which longshot-builder writes into a new
             // folder before the game ever started: still a first start, so Auto (this PC) chooses as it would with no file)
             has_options |= strcmp(line, "compile_shaders") != 0;
             for (Row& r : rows) {
@@ -5783,7 +5783,7 @@ void menu_tick() {
 /// a short buzz, which also shows that the controller vibrates. Whatever changed it: the keys, the mouse
 void menu_rumble_tick() {
     static int was = -1;
-    if (was >= 0 && opts.rumble != was && menu_is_open() && host && host->version >= 32 && host->rumble_test) host->rumble_test();
+    if (was >= 0 && opts.rumble != was && menu_is_open() && host && host->rumble_test) host->rumble_test();
     was = opts.rumble;
 }
 void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h, int colour_vision) {

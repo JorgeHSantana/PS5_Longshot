@@ -9,7 +9,7 @@
 
    The game's 2D layouts keep their panes in an array (the layout's +0x100, 0xb0 bytes each). f_8154cab0 makes a pane's
    final 3x4 transform (+0x28, the translation at +0x4c) from its own position, scale and rotation and its parent's
-   transform, only when the pane is marked for it (dirty bit 6, f_8154caa0). nx2/oot_wide.py calls in here:
+   transform, only when the pane is marked for it (dirty bit 6, f_8154caa0). The hook sites ui.* call in here (host/oot_wide_sites.c):
 
    - hos_wide_ui_parent: the parent f_8154cab0 multiplies by (0 for none), on the thread that is making the transform
    - hos_wide_ui_placed: the transform just stored. A layout's root pane is noted (its kind, by its layout's name), and
@@ -31,6 +31,7 @@
    a narrower screen fitted to its width, as the menus); HOS_WIDE_UI=0 or 1, when set, stands over the row;
    HOS_WIDE_UI_LOG=<n> logs the first n changes of the plan, each root layout, and the plan's time. */
 #include "hos.h"
+#include "game/game.h"   /* (game_call: the pause menu background's pieces packed and drawn) */
 #include "../gpu/vk/vk_api.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
@@ -61,7 +62,7 @@ static const float CROSS = 0.25f;           /* (a pane with less than this share
 static const float SIZE_CAP = 960.0f;       /* (wider panes count by their origin only: glows, hit boxes, backdrops) */
 static const float PAGE_STRIDE = 4280.0f;   /* (the pause menu's pages along their strips) */
 
-volatile uint32_t hos_wide_ui_force;   /* (read by nx2/oot_wide.py's site in f_8154caa0) */
+volatile uint32_t hos_wide_ui_force;   /* (read by the hook site ui.paneDirty in f_8154caa0, host/oot_wide_sites.c) */
 static volatile int ui_on, ui_custom;
 uint32_t hos_gameplay_hud_hidden;
 static int hud_minimap_placement = HOS_HUD_DEFAULT_PLACEMENT;
@@ -110,7 +111,7 @@ static unsigned ui_lock_word;
 static void ui_lock(void) { while (__atomic_exchange_n(&ui_lock_word, 1, __ATOMIC_ACQUIRE)) {} }
 static void ui_unlock(void) { __atomic_store_n(&ui_lock_word, 0, __ATOMIC_RELEASE); }
 
-/* Every 2D screen not kept whole (nx2/oot_wide.py HUD) draws with the UI projection's across and up rows times hos_ui_qx,
+/* Every 2D screen not kept whole (the hook site wide.hud) draws with the UI projection's across and up rows times hos_ui_qx,
    hos_ui_qy (0 before the first present: hos_wide_squeeze across then). The HUD's layouts, by their root layout's name
    (HUD_LAYOUTS), are placed for the screen's shape: ui_ex the canvas units a side pane moves out (less than 0: in, on a
    screen narrower than the HUD's 16:9 canvas), ui_ey the same up and down, ui_wx a spanning pane's width factor. Every
@@ -242,7 +243,7 @@ static int live_map_anchor(const Node *n) {
 static const char *const WORLD_LAYOUTS[] = {"PlayerStatus3D_00", "Pointer_00", "BalloonMessage_00"};
 static const char *const PAGE_LAYOUTS[] = {"PaCollectMenu_00", "PaItemMenu_00", "PaEquipmentMenu_00"};
 static const char *const CANVAS_LAYOUTS[] = {"PaSystemMenu_00"};
-/* (layouts of screens nx2/oot_wide.py keeps whole (KEEP_VTABLES): their canvas already spans the screen, so nothing in
+/* (layouts of screens the hook site wide.hud keeps whole (host/oot_wide_sites.c): their canvas already spans the screen, so nothing in
    them moves or widens. The item wheel's background picture widened to 5160 units mapped its capture over 3840 / 5160
    of the screen, black at the sides) */
 static const char *const WHOLE_LAYOUTS[] = {"ShortCutBG_00", "EventFade_00"};
@@ -1628,13 +1629,9 @@ static void split_piece(Ctx *c, uint64_t rec, const Whole *o, float t0, float t1
 
 /* f_8154f1c0 on the record into out, on the game's thread */
 static int split_pack(Ctx *c, uint64_t rec, uint64_t info, uint64_t out) {
-    const A64Fn fn = a64_lookup(SPLIT_PACK);
-    if (!fn) return 0;
-    const Ctx saved = *c;
-    c->x[0] = rec, c->x[1] = recomp_load64(c, info + 0x18), c->x[2] = recomp_load64(c, info + 0x20), c->x[8] = out, c->x[30] = 0;
-    fn(c);
-    *c = saved;
-    return 1;
+    const GameCallMore more = {.set_x8 = 1, .x8 = out};   /* (x8: where it writes the constants it returns) */
+    return game_call_more(c, SPLIT_PACK, 0, 3, (const uint64_t[]){rec, recomp_load64(c, info + 0x18), recomp_load64(c, info + 0x20)},
+                          NULL, &more);
 }
 
 static void split_drop(Split *s) {
@@ -1720,15 +1717,11 @@ void hos_wide_ui_bg_draw(Ctx *c) {
         split_unlock();
         return;
     }
-    const A64Fn fn = a64_lookup(SPLIT_DRAW);
-    if (!fn) { split_unlock(); return; }
+    if (!game_has(SPLIT_DRAW)) { split_unlock(); return; }
     inside = 1;
     for (int p = 0; p < 2; p++) {
         for (int k = 0; k < 3; k++) recomp_store64(c, drawer + 0x48 + 8 * (uint64_t)k, s->out[p][k]);
-        const Ctx saved = *c;
-        c->x[0] = drawer, c->x[1] = saved.x[1], c->x[30] = 0;
-        fn(c);
-        *c = saved;
+        game_call(c, SPLIT_DRAW, 0, 2, (const uint64_t[]){drawer, c->x[1]}, NULL);   /* (x1: what it draws with, as given) */
     }
     inside = 0;
     for (int k = 0; k < 3; k++) recomp_store64(c, drawer + 0x48 + 8 * (uint64_t)k, own[k]);

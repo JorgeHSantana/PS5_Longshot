@@ -139,3 +139,12 @@ provenance = "github-attestations"
 checksum = "sha256:7b8d00b751db21cea87dc551a8f8165147c5fbc5251d5537d7e5497dde00a219"
 url = "https://github.com/astral-sh/python-build-standalone/releases/download/20261021/cpython-3.12.15+20261021-aarch64-apple-darwin-install_only_stripped.tar.gz"
 provenance = "github-attestations"
+
+[[tools.rust]]
+version = "1.99.1"
+backend = "core:rust"
+specifiers = ["1.99.1"]
+
+[tools.rust.options]
+components = "clippy,rustfmt"
+targets = "x86_64-pc-windows-gnullvm"

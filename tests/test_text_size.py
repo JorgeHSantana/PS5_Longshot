@@ -1,7 +1,7 @@
 """The Insert menu's Text size scales the text of dialogue, Navi and signs, and only when the player asks for it.
 
-nx2/oot_patches.py calls hos_oot_text_pane (host/oot_text_size.c) from f_80b1e140, a LetterAnimControl's step, with the
-control in x19. The host scales the 2D scale of the control's pane wrapper (+0x28 x, +0x38 y) by the menu's choice, from the
+The hook site text.letterStep's callback (host/oot_text_step.c) calls hos_oot_text_pane (host/oot_text_size.c) from
+f_80b1e140, a LetterAnimControl's step, with the control in x19. The host scales the 2D scale of the control's pane wrapper (+0x28 x, +0x38 y) by the menu's choice, from the
 game's own value: never twice, again from the game's value whenever the game writes it, and back to it at Original.
 
 python -I -B tests/test_text_size.py [--cc gcc]
@@ -19,8 +19,8 @@ from menu_model_fixture import menu_text  # noqa: E402
 RUN_ALL_ARGS = ["--cc", "gcc"]
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "nx2"))
-import oot_patches  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # (tests/srccut.py: python -I leaves this folder off the path)
+from srccut import block   # noqa: E402
 
 # (the host file with a guest memory of its own: a flat buffer from BASE, and the menu's choice in a variable)
 FIXTURE_HEAD = r'''#include <stdint.h>
@@ -131,10 +131,11 @@ def main():
     check("rx_option(HOS_OPT_TEXT_SIZE, 0)" in host, "the host does not read the menu's row")
     check('getenv("HOS_TEXT_SIZE")' in host, "no HOS_TEXT_SIZE switch")
 
-    snippet = oot_patches.TEXT_NEW[len(oot_patches.TEXT_OLD):]
-    check(snippet.count("hos_oot_text_pane(c, c->x[19]);") == 1, "the letters' block does not call the text size hook")
-    check("extern void hos_oot_text_pane(Ctx *c, uint64_t anim);" in oot_patches.TEXT_DECL,
-          "the lifted file does not declare the hook")
+    # (the hook site text.letterStep's callback: host/oot_text_step.c; host/game/sites.toml, tests/test_text_speed.py)
+    step = (ROOT / "host" / "oot_text_step.c").read_text(encoding="utf-8")
+    check(block(step, "int hos_text_letter_step(").count("hos_oot_text_pane(c, c->x[19]);") == 1,
+          "the letters' step does not call the text size hook with x19")
+    check("void hos_oot_text_pane(Ctx *c, uint64_t anim);" in step, "the site's callback does not declare the hook")
     check("void hos_oot_text_pane(Ctx *c, uint64_t anim)" in host, "the host's hook has another signature")
 
     body = "".join(line for line in host.splitlines(keepends=True) if not line.startswith("#include"))

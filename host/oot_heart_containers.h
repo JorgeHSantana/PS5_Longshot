@@ -5,8 +5,6 @@
 
 #define HEART_CONTAINERS 8   /* (one in each of the eight dungeons with a boss: HEART_DUNGEONS in the .c) */
 
-/* Where name is in the SARC archive d (n bytes): its first byte at *start, the end at *end. 1 found, 0 not (or not a SARC) */
-int heart_sarc_find(const uint8_t *d, size_t n, const char *name, size_t *start, size_t *end);
 
 /* The 64-bit placement ids of the actors whose Gyaml is gyaml in the map file d (n bytes of BYML, either byte order: a root
    dictionary with Actors, a list of dictionaries with Gyaml and Hash), at most cap into ids. How many, -1 not a map file */

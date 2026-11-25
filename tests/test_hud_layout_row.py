@@ -27,7 +27,6 @@ from pathlib import Path
 RUN_ALL_ARGS = ["--cc", "gcc"]
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "nx2"))
 sys.path.insert(0, str(ROOT / "tests"))
 import test_hud_layout  # noqa: E402
 from test_wide_ui import FIXTURE_HEAD  # noqa: E402

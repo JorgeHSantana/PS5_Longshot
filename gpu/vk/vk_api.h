@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 45   /* (44: binding_is_default; 45: Windows Vulkan loader resolver) */
+#define MKWVK_API_VERSION 47   /* (45: Windows Vulkan loader resolver; 46: romfs_read; 47: no romfs_dir) */
 
 enum { OUTPUT_TRIAL_EXPIRED, OUTPUT_TRIAL_PREPARING, OUTPUT_TRIAL_READY, OUTPUT_TRIAL_ACTIVE, OUTPUT_TRIAL_SHOWN };
 enum { HOS_MONITOR_CURRENT = 1, HOS_MONITOR_PRIMARY = 2 };
@@ -57,7 +57,7 @@ enum { HOS_OPT_HDR_NATIVE = 40, HOS_OPT_HDR_PEAK, HOS_OPT_HDR_WHITE, HOS_OPT_DIS
 /* (HOS_OPT_DISABLE_CAMERA_CENTERING, 45: Controls' movement-follow yaw, host/mouse_native.c: 0 stock, 1 disabled) */
 enum { HOS_OPT_DISABLE_CAMERA_CENTERING = 45 };
 /* (longshot) the Insert menu's Camera speed: the right stick's camera turn in percent of the game's, 50 to 400 (host/nn_vi.c
-   hos_camera_scale, nx2/oot_patches.py). 48: after the HDR and Discord rows' 40 to 43, Skip title's 44 and camera centering's 45 */
+   hos_camera_scale, the hook sites camera.*Speed*). 48: after the HDR and Discord rows' 40 to 43, Skip title's 44 and camera centering's 45 */
 enum { HOS_OPT_CAMERA_SPEED = 48 };
 /* (HOS_OPT_PROMPTS, 46: the Button prompts row, host/prompts.c: 0 Auto, else HOS_PROMPT_* + 1; a change shows at once) */
 enum { HOS_OPT_PROMPTS = 46 };
@@ -155,7 +155,7 @@ enum { HOS_PAD_SOUTH, HOS_PAD_EAST, HOS_PAD_WEST, HOS_PAD_NORTH, HOS_PAD_BACK, H
        HOS_PAD_LSTICK, HOS_PAD_RSTICK, HOS_PAD_LSHOULDER, HOS_PAD_RSHOULDER, HOS_PAD_UP, HOS_PAD_DOWN, HOS_PAD_LEFT,
        HOS_PAD_RIGHT, HOS_PAD_LTRIGGER, HOS_PAD_RTRIGGER, HOS_PAD_RPADDLE1, HOS_PAD_LPADDLE1,
        HOS_PAD_RPADDLE2, HOS_PAD_LPADDLE2, HOS_PAD_N };
-/* (longshot) the inputs that have prompt artwork (host/prompts.c, nx2/prompt_assets.py's PADS): the prompt font's code
+/* (longshot) the inputs that have prompt artwork (host/prompts.c, builder/crates/build-assets/src/prompts's PADS): the prompt font's code
    points go by this count, so the paddles past it show their Switch button's default icon */
 enum { HOS_PAD_ART_N = HOS_PAD_RTRIGGER + 1 };
 /* (longshot) a DualShock 4's or DualSense's touchpad click, which opens the Insert menu as F1 does (host/pad_sdl.c,
@@ -167,8 +167,8 @@ enum { HOS_PAD_TOUCHPAD = 31 };
    (button and slot unused). */
 enum { HOS_BIND_PAD, HOS_BIND_KEY, HOS_BIND_SPRINT_AUTO, HOS_BIND_SPRINT_ON, HOS_BIND_SPRINT_BEGIN, HOS_BIND_SPRINT_TOGGLE };
 enum { HOS_SPRINT_AUTO_KEY = 1, HOS_SPRINT_AUTO_B = 2, HOS_SPRINT_AUTO_PAD = 4, HOS_SPRINT_AUTO_LS_SHIFT = 3 };
-/* (longshot) the controller faces of the button prompts (host/prompts.c): the Switch, then nx2/prompt_faces.py FACES' order,
-   then the keyboard's (nx2/prompt_keys.py: the keys bound, not the pad inputs); the Button prompts row's value is one more (0
+/* (longshot) the controller faces of the button prompts (host/prompts.c): the Switch, then builder/crates/build-assets/src/prompts/faces.rs FACES' order,
+   then the keyboard's (builder/crates/build-assets/src/prompts/keys.rs: the keys bound, not the pad inputs); the Button prompts row's value is one more (0
    Auto) */
 enum { HOS_PROMPT_SWITCH, HOS_PROMPT_XBOX, HOS_PROMPT_PS4, HOS_PROMPT_PS5, HOS_PROMPT_STEAMDECK, HOS_PROMPT_KEYBOARD, HOS_PROMPT_N };
 /* (longshot) what of the button prompts follows a new face or new controls at once (MkwVkHost.prompts_live, a bit each):
@@ -285,10 +285,7 @@ typedef struct MkwVkHost {
     /* (longshot) the controller face of the button prompts the game was given at its start (host/prompts.c): HOS_PROMPT_*;
        -1 none (the game's own icons), or not chosen yet */
     int (*prompt_face)(void);
-    /* (longshot) the game's romfs folder (--romfs, or romfs beside the executable): the overlays read the game's own menu font
-       from it (gpu/vk/vk_imgui.cpp), in memory only */
-    const char *(*romfs_dir)(void);
-    /* (longshot) ultrawide's menus (nx2/oot_wide.py KEEP_VTABLES): keep_mask sets which of those screens keep the whole picture
+    /* (longshot) ultrawide's menus (host/oot_wide_sites.c WIDE_KEEP_*): keep_mask sets which of those screens keep the whole picture
        (a bit each; HOS_WIDE_KEEP=<hex> over it); returns the margin of the middle 16:9 at either side, a fraction of the
        picture's width (0: the picture is 16:9) */
     float (*wide_menus)(uint32_t keep_mask);
@@ -413,6 +410,11 @@ typedef struct MkwVkHost {
     int (*binding_is_default)(int button);
     /* (version 45) Resolve vkGetInstanceProcAddr through the executable on Windows. */
     uintptr_t (*vulkan_loader_proc)(void);
+    /* (version 46, longshot) a whole file of the game's RomFS (host/romfs.h: the .nup's index, or a romfs folder), by its
+       path there: malloc'd, *n its size; NULL when there is none or it is larger than limit. Freed with romfs_free. The
+       renderer's only way to the game's files (the overlays' menu font: gpu/vk/vk_imgui.cpp) */
+    uint8_t *(*romfs_read)(const char *rel, size_t *n, size_t limit);
+    void (*romfs_free)(void *p);
 } MkwVkHost;
 /* (version 35) a cheat's kind: a heading (no opcodes), a data cheat (switched), a master cheat (always on), not supported (note) */
 enum { MKWVK_CHEAT_HEADING, MKWVK_CHEAT_DATA, MKWVK_CHEAT_MASTER, MKWVK_CHEAT_UNSUPPORTED };

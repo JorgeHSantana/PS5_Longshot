@@ -1,6 +1,6 @@
 /* (longshot) OoT's job barriers wait for their masks instead of sleeping (host/oot_barrier.h has the protocol and why):
-   nx2/oot_patches.py patch_barrier_wait makes the lifted f_800998a0, f_800738e0 and f_8007e200 call hos_oot_barrier_wait in
-   place of the 20 us SleepThread of each of their five barrier loops, and hos_oot_barrier_wake right after each atomic OR
+   the hook sites barrier.* (host/oot_sites.c) make the lifted f_800998a0, f_800738e0 and f_8007e200 call hos_oot_barrier_wait
+   in place of the 20 us SleepThread of each of their five barrier loops, and hos_oot_barrier_wake right after each atomic OR
    into a mask word those loops poll.
 
    HOS_OOT_BARRIER_WAIT: unset or on, the waits (the default); off (0, false, off, no), the game's sleeps as before. Read

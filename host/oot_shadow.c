@@ -1,4 +1,4 @@
-/* The Insert menu's Shadow resolution: the sun's cascades at the game's own larger sizes. nx2/oot_shadow.py calls this
+/* The Insert menu's Shadow resolution: the sun's cascades at the game's own larger sizes. The hook site shadow.cascadeSize calls this
    after the game has chosen this frame's cascade size and rounded it to a multiple of 8, before it stores the size.
 
    The sizes are the game's: at the quality level it runs at its table holds 1600, the size it uses, and 2200, the

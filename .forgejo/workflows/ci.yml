@@ -1,14 +1,14 @@
-# The checks of every pull request to main and every push to it (docs/dev/developing.md, "Run the checks"): the pull request's title, and every
-# game-free check: tests/run_all.py runs each
-# tests/test_*.py and nx2/test_*.py (all of them, even after a failure), the C++ unit tests under gpu/vk/tests and a
-# byte-compile of every tracked Python file, and writes a table of them to the run's summary. A check that needs a GPU,
-# the game or MSVC says so, and why, in its own file (RUN_ALL_SKIP). No game data is involved.
-# The tests run in two parts at once (run_all.py --shard, split by tests/run_all_times.json): each part is one job, and
-# every check is in exactly one of them. The Windows Builder's checks (its compile, its --cli delivery) are in part 1, on
-# Linux with EnableWindowsTargeting. There is no Windows runner (docs/dev/reference/ci.md): what only Windows can check
-# (the suite on Windows' Python, MSVC's compile of the native checks) is in docs/dev/reference/releases.md, "Windows tester".
-# On Linux the C and C++ compiles go through ccache (the compilers in its PATH), with the cache main's runs leave
-# (actions/cache: read by every run, written only by a push to main, so a pull request never writes what another reads).
+# The light checks of every pull request to main and every push to it (docs/dev/reference/ci.md): the pull request's
+# title; the Rust workspace's checks (rustfmt, clippy, cargo test: longshot-builder's crates, its lifter among them, and
+# longshot-rs, with the distribution's clang, lld and llvm-mc for the tests that compile, link and disassemble); the builder end to end on a
+# synthetic game; the host's C compiled for Windows (scripts/check_host_compile.py, with llvm-mingw); actionlint; the
+# website's checks. No game data is involved. tests/run_all.py's game-free checks and the shader recompiler fixtures run
+# on CircleCI (.circleci/), not here. There is no Windows runner: what only Windows can check is in
+# docs/dev/reference/releases.md, "Windows tester". Caches are read by every run and written only by a push to main, so a
+# pull request never writes what another reads (docs/dev/reference/ci.md, Caches). Main's tree is one: the jobs on a
+# runner outside the server seed their checkout with it (scripts/ci_git_base.sh), since git.magicbean.dev's whole tree
+# took them minutes to fetch; the registry crates' builds, without the workspace's own (scripts/ci_cargo_prune.py); the
+# downloads.
 name: CI
 
 on:
@@ -24,6 +24,13 @@ permissions:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # (CI builds each crate once: no incremental state, which would only be written, never read. No debug info in the
+  # checks' dev builds: they link faster and the dependencies' cache is smaller, and a failing test still names its file
+  # and line. The end-to-end test's --release keeps the release profile's line tables)
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
 
 jobs:
   # (a squash-merged pull request's title is its commit on main, a line of the next release's notes, and what decides the next
@@ -58,217 +65,257 @@ jobs:
           print("ok: %s" % title)
           PY
 
-  # (off for now: pushes and pull requests run only the light checks; run these by hand, Actions > CI > Run workflow.
-  # CONTRIBUTING.md asks for tests/run_all.py's results in each pull request)
-  python:
-    name: Python source checks (${{ matrix.os }}${{ matrix.shard != '1/1' && format(', part {0}', matrix.shard) || '' }})
-    if: github.event_name == 'workflow_dispatch'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            shard: 1/2
-          - os: ubuntu-24.04
-            shard: 2/2
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+  # (the Rust workspace's checks: longshot-builder's crates, its lifter among them, and longshot-rs, as `mise run rust` runs
+  # them. build-compile's compile_link test compiles and links with clang and ld.lld, a64's llvm_mc test compares the
+  # decoder with llvm-mc: both fail when their tool is missing (LONGSHOT_NO_CLANG=1 skips them, never here), so the
+  # distribution's clang, lld and llvm are installed and LLVM_MC names llvm-mc. tools.lock's llvm is trimmed to the
+  # compile's tools and has no llvm-mc)
+  rust:
+    name: Rust (rustfmt, clippy, cargo test)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
+      # (main's tree from this runner's cache, so that checkout fetches only what the commit adds; anything amiss, and it
+      # fetches all as before: scripts/ci_git_base.sh)
+      - uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/git-base
+          key: git-base
+      - name: Seed the checkout
+        env:
+          BASE: ${{ runner.temp }}/git-base
+          ORIGIN: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          tip=$(git --git-dir="$BASE" rev-parse -q --verify 'refs/heads/base^{commit}' 2> /dev/null) || exit 0
+          if git init -q . && git remote add origin "$ORIGIN" && cp "$BASE/shallow" .git/shallow &&
+            echo "$BASE/objects" > .git/objects/info/alternates && git update-ref --no-deref HEAD "$tip"; then
+            echo "main's ${tip:0:12} as the checkout's base"
+          else
+            rm -rf .git
+          fi
       - name: Check out source
         uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # (the versions scripts/linux/deps.sh builds the Vulkan back end with)
-      - name: Check out pinned SPIR-V headers
-        run: scripts/fetch_commit.sh https://github.com/KhronosGroup/SPIRV-Headers 04f10f650d514df88b76d25e83db360142c7b174 _deps/spirv-headers   # vulkan-sdk-1.4.341.0
-      - name: Check out pinned Vulkan headers
-        run: scripts/fetch_commit.sh https://github.com/KhronosGroup/Vulkan-Headers 74d8a6cb930c68ef617b202c3ff3c59d919e086b _deps/vulkan-headers   # v1.4.345
-      - name: Set up Python
-        uses: https://github.com/actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.12'
-      # (the packages tests import: nx2/test_nup_codec.py's zstandard; tests/test_prompt_guide_lines.py's Pillow and numpy,
-      # nx2/prompt_assets.py's; the build's lz4 (tests/test_discover.py, test_walk.py, test_lift_lookups.py) and unicorn
-      # (tests/test_insn_fixed_convert.py), pinned as nx2/prompt_requirements.txt and requirements.txt have them. The runner
-      # itself needs none)
-      - name: Python packages for the tests
-        run: >-
-          python -m pip install --disable-pip-version-check --no-deps zstandard==0.25.0 pillow==13.0.0 numpy==2.5.4
-          lz4==4.4.5 unicorn==2.1.4
-      # (lld: tests/test_thinlto_tls.py links with -fuse-ld=lld, as the game's build does)
-      - name: Compilers and the SPIR-V validator
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y g++ clang lld spirv-tools ccache libdav1d-dev
-      # (the cache's key: the compilers' versions and the shader recompiler's sources, the objects worth keeping: the
-      # bake and nx2 checks compile its ~164 files. A key already cached is not saved again)
-      - name: Compiler cache
-        if: runner.os == 'Linux'
-        id: ccache
-        env:
-          RECOMPILER: ${{ hashFiles('gpu/vk/eden/**', 'gpu/vk/sirit/**', 'gpu/vk/compat/**', 'gpu/compat/**', 'gpu/shaderbatch.cpp') }}
-          SHARD: ${{ matrix.shard }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/ccache-bin"
-          for c in cc c++ gcc g++ clang clang++; do ln -sf "$(command -v ccache)" "$RUNNER_TEMP/ccache-bin/$c"; done
-          echo "$RUNNER_TEMP/ccache-bin" >> "$GITHUB_PATH"
-          {
-            echo "CCACHE_DIR=$RUNNER_TEMP/ccache"
-            echo "CCACHE_MAXSIZE=400M"
-          } >> "$GITHUB_ENV"
-          compilers=$( { clang++ --version; g++ --version; } | sha256sum | cut -c1-16)
-          prefix="ccache-tests-linux-part${SHARD%/*}-$compilers-"
-          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
-          echo "key=$prefix$RECOMPILER" >> "$GITHUB_OUTPUT"
-      - if: runner.os == 'Linux'
-        id: ccache-restore
-        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/ccache
-          key: ${{ steps.ccache.outputs.key }}
-          restore-keys: ${{ steps.ccache.outputs.prefix }}
-      - name: Pinned glslang for generated shader comparisons
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          # The checked-in shader headers are generated with glslang16.6.0.
-          # Older distro compilers can lower discard differently even for unchanged GLSL.
-          tool_dir="$RUNNER_TEMP/glslang-16.6.0"
-          mkdir -p "$tool_dir"
-          curl -fL --retry 3 -o "$tool_dir/glslang.tar.gz" https://github.com/KhronosGroup/glslang/releases/download/16.6.0/glslang-16.6.0-linux-x86_64-release.tar.gz
-          echo '2c34071f56ecf39d16233294d3739cf43f981fd39080f2fd9dccb782101191ce  '"$tool_dir/glslang.tar.gz" | sha256sum --check --strict
-          tar -xzf "$tool_dir/glslang.tar.gz" -C "$tool_dir"
-          "$tool_dir/bin/glslangValidator" --version
-          echo "$tool_dir/bin" >> "$GITHUB_PATH"
-
-      # (the steps below all run when one before them failed, so one run shows every failure)
-      # (the Windows builder, command-line only, and its --cli checks are net8.0-windows: EnableWindowsTargeting brings Windows'
-      # reference packs to Linux. The --cli checks run on Linux's .NET, with Linux's Python as the child)
-      - name: Set up .NET for Windows Builder checks
-        if: ${{ !cancelled() && matrix.shard == '1/2' }}
-        uses: https://github.com/actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-        with:
-          dotnet-version: '8.0.x'
-      - name: Check Windows Builder --cli delivery
-        if: ${{ !cancelled() && matrix.shard == '1/2' }}
-        run: |
-          dotnet restore tests/builder_cli/BuilderCliTests.csproj --configfile tests/builder_cli/NuGet.Config -p:EnableWindowsTargeting=true
-          dotnet run --project tests/builder_cli/BuilderCliTests.csproj --configuration Release --no-restore \
-            -p:EnableWindowsTargeting=true -- "$(command -v python)"
-      - name: Compile Windows Builder
-        if: ${{ !cancelled() && matrix.shard == '1/2' }}
-        run: dotnet build builder/LongshotBuilder/LongshotBuilder.csproj --configuration Debug -p:NuGetAudit=false -p:EnableWindowsTargeting=true
-      # (--strict: a check whose compiler, headers or package is missing here fails instead of being skipped)
-      - name: Every test
-        if: ${{ !cancelled() }}
-        env:
-          LONGSHOT_SPIRV_HEADERS: ${{ github.workspace }}/_deps/spirv-headers/include
-          LONGSHOT_VULKAN_HEADERS: ${{ github.workspace }}/_deps/vulkan-headers/include
-          SHARD: ${{ matrix.shard }}
-        run: python -I -B tests/run_all.py --strict --shard ${{ env.SHARD }}
-      - name: Compiler cache statistics
-        if: ${{ !cancelled() && runner.os == 'Linux' }}
-        run: ccache --show-stats
-      - if: ${{ !cancelled() && runner.os == 'Linux' && github.event_name == 'push' && steps.ccache-restore.outputs.cache-hit != 'true' }}
+      - name: The checkout's own objects
+        run: scripts/ci_git_base.sh dissociate
+      - name: main's tree for later runs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: scripts/ci_git_base.sh save
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ runner.temp }}/ccache
-          key: ${{ steps.ccache.outputs.key }}
+          path: ${{ runner.temp }}/git-base
+          key: git-base
+      # (mise.toml's pinned Rust, through a checksum-pinned rustup: scripts/ci_rust.sh)
+      - name: Rust (mise.toml's; rustfmt and clippy)
+        run: scripts/ci_rust.sh rustfmt,clippy
+      - name: clang, lld and llvm-mc
+        run: |
+          if ! command -v clang > /dev/null || ! command -v ld.lld > /dev/null || ! command -v llvm-mc > /dev/null; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends clang lld llvm
+          fi
+          mc=$(command -v llvm-mc || find /usr/lib -path '/usr/lib/llvm-*/bin/llvm-mc' 2>/dev/null | sort -V | tail -1)
+          if [ -z "$mc" ] || ! "$mc" --version > /dev/null; then echo "::error::no llvm-mc"; exit 1; fi
+          clang --version && ld.lld --version
+          echo "LLVM_MC=$mc" >> "$GITHUB_ENV"
+      # (the registry crates, downloaded and built, for Cargo.lock and mise.toml's Rust: a checkout's new times make cargo
+      # build the workspace's own crates again whatever a cache holds, so only the dependencies are kept
+      # (scripts/ci_cargo_prune.py), one entry per lock. Read by every run, written only by a push to main; host-windows
+      # reads it too)
+      - id: cache-restore
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            target
+          key: rust-deps-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: clippy
+        if: ${{ !cancelled() }}
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: cargo test
+        if: ${{ !cancelled() }}
+        run: cargo test --workspace --locked
+      - name: The dependencies alone, for the cache
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache-restore.outputs.cache-hit != 'true' }}
+        run: python3 -I scripts/ci_cargo_prune.py
+      - if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache-restore.outputs.cache-hit != 'true' }}
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            target
+          key: rust-deps-${{ hashFiles('Cargo.lock', 'mise.toml') }}
 
-  # (the focused shader recompiler fixtures, in one job: they build the same recompiler sources, through ccache with the
-  # cache main's runs leave, as the Python checks' above; the direct surface atomic fixture takes the objects the global
-  # load/store one made. The F2I fixture's steps run whether or not the others passed, as when it was a job of its own)
-  # (off for now: pushes and pull requests run only the light checks; run these by hand, Actions > CI > Run workflow.
-  # CONTRIBUTING.md asks for tests/run_all.py's results in each pull request)
-  spirv-fixtures:
-    name: SPIR-V fixtures (global narrow load/store, direct surface atomics, F2I immediate)
-    if: github.event_name == 'workflow_dispatch'
+  # (the builder end to end on a synthetic game (builder/crates/synthetic-game): a made-up AArch64 program packed as a game,
+  # lifted, compiled and linked by longshot-builder's stages, and run; no game data. clang and lld from the distribution:
+  # an AArch64-capable clang assembles the synthetic program)
+  e2e:
+    name: longshot-builder end to end (synthetic game)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
+      # (main's tree from this runner's cache, so that checkout fetches only what the commit adds; anything amiss, and it
+      # fetches all as before: scripts/ci_git_base.sh)
+      - uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/git-base
+          key: git-base
+      - name: Seed the checkout
+        env:
+          BASE: ${{ runner.temp }}/git-base
+          ORIGIN: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          tip=$(git --git-dir="$BASE" rev-parse -q --verify 'refs/heads/base^{commit}' 2> /dev/null) || exit 0
+          if git init -q . && git remote add origin "$ORIGIN" && cp "$BASE/shallow" .git/shallow &&
+            echo "$BASE/objects" > .git/objects/info/alternates && git update-ref --no-deref HEAD "$tip"; then
+            echo "main's ${tip:0:12} as the checkout's base"
+          else
+            rm -rf .git
+          fi
       - name: Check out source
         uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check out pinned SPIR-V headers
-        run: scripts/fetch_commit.sh https://github.com/KhronosGroup/SPIRV-Headers 496543121ce6419f23d6fa5d7194ba66c36212d2 _deps/spirv-headers
-      - name: Install Clang C++20, SPIR-V validator and ccache
-        run: sudo apt-get update && sudo apt-get install -y clang spirv-tools ccache
-      - name: Compiler cache
-        id: ccache
-        env:
-          RECOMPILER: ${{ hashFiles('gpu/vk/eden/**', 'gpu/vk/sirit/**', 'gpu/vk/compat/**', 'gpu/compat/**') }}
-        run: |
-          {
-            echo "CCACHE_DIR=$RUNNER_TEMP/ccache"
-            echo "CCACHE_MAXSIZE=400M"
-            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
-          } >> "$GITHUB_ENV"
-          prefix="ccache-spirv-fixtures-$(clang++ --version | sha256sum | cut -c1-16)-"
-          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
-          echo "key=$prefix$RECOMPILER" >> "$GITHUB_OUTPUT"
-      - id: ccache-restore
-        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/ccache
-          key: ${{ steps.ccache.outputs.key }}
-          restore-keys: ${{ steps.ccache.outputs.prefix }}
-      - name: Configure the focused real-IR fixture
-        run: >-
-          CC=clang CXX=clang++ cmake -S tests/global_load_16 -B ${{ runner.temp }}/global-load-16
-          -DREPO_ROOT=${{ github.workspace }}
-          -DSPIRV_HEADERS_ROOT=${{ github.workspace }}/_deps/spirv-headers
-      - name: Build the focused fixture
-        run: cmake --build ${{ runner.temp }}/global-load-16 --parallel "$(nproc)"
-      - name: Emit and inspect real IR modules
-        run: ${{ runner.temp }}/global-load-16/global_load_16_ir ${{ runner.temp }}/global-load-16/modules
-      - name: Check real-IR compare-exchange loop contracts
-        env:
-          RX_VK_FOLLOW_STORES: '1'
-        run: ${{ runner.temp }}/global-load-16/global_load_16_ir --cas-loops ${{ runner.temp }}/global-load-16/modules
-      - name: Validate every emitted module
-        shell: bash
-        # (--uniform-buffer-standard-layout: the back end's device has uniformBufferStandardLayout, gpu/vk/vk_main.cpp
-        # creates it with every feature the GPU reports, so constant buffers are u32 arrays of stride 4)
-        run: |
-          for module in "${{ runner.temp }}"/global-load-16/modules/*.spv; do
-            spirv-val --target-env vulkan1.3 --uniform-buffer-standard-layout "$module"
-          done
-      - name: Configure the authored direct surface atomic fixture
-        run: >-
-          CC=clang CXX=clang++ cmake -S tests/native_suatom -B ${{ runner.temp }}/native-suatom
-          -DREPO_ROOT=${{ github.workspace }}
-          -DSPIRV_HEADERS_ROOT=${{ github.workspace }}/_deps/spirv-headers
-      - name: Build the direct surface atomic fixture
-        run: cmake --build ${{ runner.temp }}/native-suatom --parallel "$(nproc)"
-      - name: Translate authored direct surface atomic programs
-        run: ${{ runner.temp }}/native-suatom/native_suatom ${{ runner.temp }}/native-suatom/modules
-      - name: Validate every direct surface atomic module
-        shell: bash
-        run: |
-          for module in "${{ runner.temp }}"/native-suatom/modules/*.spv; do
-            spirv-val --target-env vulkan1.3 "$module"
-          done
-      - name: Build the F2I immediate fixture
-        id: f2i
-        if: ${{ !cancelled() }}
-        run: |
-          CC=clang CXX=clang++ cmake -S tests/f2i_immediate -B "${{ runner.temp }}/f2i" -DREPO_ROOT="${{ github.workspace }}" -DSPIRV_HEADERS_ROOT="${{ github.workspace }}/_deps/spirv-headers"
-          cmake --build "${{ runner.temp }}/f2i" --parallel "$(nproc)"
-      - name: Emit and validate the F2I immediate modules
-        if: ${{ !cancelled() && steps.f2i.outcome == 'success' }}
-        run: |
-          "${{ runner.temp }}/f2i/f2i_immediate" "${{ runner.temp }}/f2i/modules"
-          for module in "${{ runner.temp }}"/f2i/modules/*.spv; do
-            spirv-val --target-env vulkan1.3 --uniform-buffer-standard-layout "$module"
-          done
-      - name: Compiler cache statistics
-        if: ${{ !cancelled() }}
-        run: ccache --show-stats
-      - if: ${{ !cancelled() && github.event_name == 'push' && steps.ccache-restore.outputs.cache-hit != 'true' }}
+      - name: The checkout's own objects
+        run: scripts/ci_git_base.sh dissociate
+      - name: main's tree for later runs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: scripts/ci_git_base.sh save
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ runner.temp }}/ccache
-          key: ${{ steps.ccache.outputs.key }}
+          path: ${{ runner.temp }}/git-base
+          key: git-base
+      - name: clang and lld
+        run: |
+          if ! command -v clang > /dev/null || ! command -v ld.lld > /dev/null; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends clang lld
+          fi
+          clang --version
+      # (mise.toml's pinned Rust, through a checksum-pinned rustup: scripts/ci_rust.sh)
+      - name: Rust (mise.toml's)
+        run: scripts/ci_rust.sh
+      # (the registry crates' release builds, as the rust job's cache: scripts/ci_cargo_prune.py)
+      - id: cache-restore
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            target
+          key: rust-e2e-deps-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+      - name: The synthetic game, end to end
+        env:
+          LONGSHOT_E2E: '1'
+        run: cargo test --locked --release -p synthetic-game -- --ignored --nocapture
+      - name: The dependencies alone, for the cache
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache-restore.outputs.cache-hit != 'true' }}
+        run: python3 -I scripts/ci_cargo_prune.py
+      - if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache-restore.outputs.cache-hit != 'true' }}
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            target
+          key: rust-e2e-deps-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+
+  # (the host's C as a player's Windows build compiles it, with llvm-mingw's Linux build of tools.lock's release: every
+  # host unit build-compile plans, with its flags, compiled -fsyntax-only against a synthetic gen/rt (the lift's runtime
+  # headers): the Windows branches of host code are compiled on every change, with no game and no Windows runner)
+  host-windows:
+    name: Host C for Windows (llvm-mingw, compile only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # (main's tree from this runner's cache, so that checkout fetches only what the commit adds; anything amiss, and it
+      # fetches all as before: scripts/ci_git_base.sh)
+      - uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/git-base
+          key: git-base
+      - name: Seed the checkout
+        env:
+          BASE: ${{ runner.temp }}/git-base
+          ORIGIN: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          tip=$(git --git-dir="$BASE" rev-parse -q --verify 'refs/heads/base^{commit}' 2> /dev/null) || exit 0
+          if git init -q . && git remote add origin "$ORIGIN" && cp "$BASE/shallow" .git/shallow &&
+            echo "$BASE/objects" > .git/objects/info/alternates && git update-ref --no-deref HEAD "$tip"; then
+            echo "main's ${tip:0:12} as the checkout's base"
+          else
+            rm -rf .git
+          fi
+      - name: Check out source
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The checkout's own objects
+        run: scripts/ci_git_base.sh dissociate
+      - name: main's tree for later runs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: scripts/ci_git_base.sh save
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/git-base
+          key: git-base
+      # (mise.toml's pinned Rust, through a checksum-pinned rustup: scripts/ci_rust.sh)
+      - name: Rust (mise.toml's)
+        run: scripts/ci_rust.sh
+      - name: llvm-mingw version
+        id: llvm
+        run: echo "name=$(python3 -I scripts/longshot_builder.py llvm-mingw --name --host linux)" >> "$GITHUB_OUTPUT"
+      # (the downloads only, llvm-mingw's archive and tools.lock's, each checked by its size and SHA-256 when taken: read by
+      # every run, written only by a push to main, when missing)
+      - id: llvm-cache
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/llvm/.cache
+          key: ${{ steps.llvm.outputs.name }}-archive
+      - id: tools-cache
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/tools-cache
+          key: windows-tools-downloads-${{ hashFiles('tools.lock') }}
+      # (the rust job's cache, read only: the builder below is built with most of the same registry crates)
+      - uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            target
+          key: rust-deps-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+      - name: llvm-mingw
+        run: echo "LONGSHOT_MINGW=$(python3 -I scripts/longshot_builder.py llvm-mingw "$RUNNER_TEMP/llvm" --host linux)" >> "$GITHUB_ENV"
+      # (tools.lock's windows-x64 CPM cache, what a player's Windows build compiles with: the Vulkan, SPIR-V and VMA
+      # headers, FFmpeg's and dav1d's)
+      - name: tools.lock's cpm
+        run: >-
+          cargo run --locked -q -p longshot-builder --
+          dev tools install "$RUNNER_TEMP/win-tools" --system windows-x64 --only cpm --cache "$RUNNER_TEMP/tools-cache"
+      - name: The host's C, for Windows
+        env:
+          RX_TARGET: windows
+          RX_MARCH: x86-64-v3
+        run: >-
+          RX_CPM="$RUNNER_TEMP/win-tools/tools/cpm" python3 -I scripts/check_host_compile.py
+          --work "$RUNNER_TEMP/host-windows" --jobs "$(nproc)"
+      - if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.llvm-cache.outputs.cache-hit != 'true' }}
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/llvm/.cache
+          key: ${{ steps.llvm.outputs.name }}-archive
+      - if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.tools-cache.outputs.cache-hit != 'true' }}
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/tools-cache
+          key: windows-tools-downloads-${{ hashFiles('tools.lock') }}
 
   actionlint:
     name: Workflow lint (actionlint)
@@ -279,17 +326,15 @@ jobs:
         uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # (the release's own binary, checked against its published SHA-256; shellcheck from the runner image checks the
-      # run: scripts)
-      - name: actionlint 1.7.12
-        env:
-          VERSION: 1.7.12
-          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+      # (mise.toml's actionlint, the one pin: its release file and SHA-256 as mise.lock names them for linux-x64;
+      # shellcheck from the runner image checks the run: scripts)
+      - name: actionlint (mise.lock's)
         run: |
-          curl -fsSL --retry 5 --retry-delay 10 -o "$RUNNER_TEMP/actionlint.tar.gz" \
-            "https://github.com/rhysd/actionlint/releases/download/v$VERSION/actionlint_${VERSION}_linux_amd64.tar.gz"
-          echo "$SHA256  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
+          read -r url sha < <(python3 -I -c 'import tomllib; t = tomllib.load(open("mise.lock", "rb"))["tools"]["github:rhysd/actionlint"][-1]["platforms.linux-x64"]; print(t["url"], t["checksum"].removeprefix("sha256:"))')
+          curl -fsSL --retry 5 --retry-delay 10 --proto '=https' -o "$RUNNER_TEMP/actionlint.tar.gz" "$url"
+          echo "$sha  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -version
       - name: Lint the workflows
         run: '"$RUNNER_TEMP/actionlint" -color -config-file .forgejo/actionlint.yaml .forgejo/workflows/*.yml'
 
@@ -300,9 +345,37 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      # (main's tree from this runner's cache, so that checkout fetches only what the commit adds; anything amiss, and it
+      # fetches all as before: scripts/ci_git_base.sh)
+      - uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/git-base
+          key: git-base
+      - name: Seed the checkout
+        env:
+          BASE: ${{ runner.temp }}/git-base
+          ORIGIN: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          tip=$(git --git-dir="$BASE" rev-parse -q --verify 'refs/heads/base^{commit}' 2> /dev/null) || exit 0
+          if git init -q . && git remote add origin "$ORIGIN" && cp "$BASE/shallow" .git/shallow &&
+            echo "$BASE/objects" > .git/objects/info/alternates && git update-ref --no-deref HEAD "$tip"; then
+            echo "main's ${tip:0:12} as the checkout's base"
+          else
+            rm -rf .git
+          fi
       - name: Check out source
         uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: The checkout's own objects
+        run: scripts/ci_git_base.sh dissociate
+      - name: main's tree for later runs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: scripts/ci_git_base.sh save
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/git-base
+          key: git-base
       - name: Build and check
         run: scripts/website_check.sh

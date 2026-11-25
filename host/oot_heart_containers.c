@@ -11,10 +11,10 @@
    (romfs Banc/<dungeon>/<dungeon>_Static.bcett.byml.zs), and the game data keeps whether Link took it in a Bool64bitKey
    flag named by the actor's 64-bit placement id (host/oot_state_tap.c reads it). The ids are read from the player's own
    RomFS at the first use, not written here: the map files are zstd frames made with the dictionary bcett.byml.zsdic of
-   Pack/ZsDic.pack.zs (a SARC of dictionaries, itself a frame made without one, as nx2/text_assets.py reads it), a BYML
-   inside. Checked on a save at the Water Temple: five containers taken (Deku Tree to Fire), 9 hearts and 1 piece held,
+   Pack/ZsDic.pack.zs (host/zs.c finds it by the frame's dictionary id), a BYML inside. Checked on a save at the Water Temple: five containers taken (Deku Tree to Fire), 9 hearts and 1 piece held,
    so 5 found, the pieces its map marks plus one it does not. */
 #include "oot_heart_containers.h"
+#include "romfs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,27 +30,6 @@ static uint32_t rd(const uint8_t *d, size_t n, size_t o, int bytes, int be) {
 static uint64_t rd64(const uint8_t *d, size_t n, size_t o, int be) {
     const uint64_t a = rd(d, n, o, 4, be), b = rd(d, n, o + 4, 4, be);
     return be ? a << 32 | b : b << 32 | a;
-}
-
-int heart_sarc_find(const uint8_t *d, size_t n, const char *name, size_t *start, size_t *end) {
-    if (n < 0x14 || memcmp(d, "SARC", 4)) return 0;
-    const int be = d[6] == 0xfe && d[7] == 0xff;   /* (the byte-order mark, 0xfeff, as written) */
-    const size_t header = rd(d, n, 4, 2, be), base = rd(d, n, 12, 4, be);
-    if (header > n || n - header < 12 || memcmp(d + header, "SFAT", 4)) return 0;
-    const size_t count = rd(d, n, header + 6, 2, be), nodes = header + 12, names = nodes + 16 * count + 8;   /* (SFNT's header) */
-    if (names > n) return 0;
-    const size_t want = strlen(name);
-    for (size_t i = 0; i < count; i++) {
-        const uint32_t attr = rd(d, n, nodes + 16 * i + 4, 4, be);
-        if (!(attr & 0x01000000)) continue;
-        const size_t at = names + 4 * (size_t)(attr & 0xffffff);
-        if (at > n || n - at <= want || memcmp(d + at, name, want) || d[at + want]) continue;
-        const size_t s = base + rd(d, n, nodes + 16 * i + 8, 4, be), e = base + rd(d, n, nodes + 16 * i + 12, 4, be);
-        if (s > e || e > n) return 0;
-        *start = s, *end = e;
-        return 1;
-    }
-    return 0;
 }
 
 typedef struct {
@@ -112,11 +91,9 @@ int heart_pieces_total(int max_life, int containers, int held) {
 }
 
 #ifndef HEART_CONTAINERS_NO_GAME   /* (tests/test_discord_activity.py compiles the readers above alone) */
-#include "zstd.h"   /* (third_party/zstd: nx2/build.py's ZSTD_HOST) */
+#include "game/flags.h"   /* (game_flag_bool64: whether a container was taken) */
 
-extern const char *hos_romfs_dir;   /* (host/nn_fs.c) */
 void hos_log(const char *fmt, ...);
-int hos_oot_gamedata_bool64(uint64_t id, int *at);   /* (host/oot_state_tap.c) */
 
 /* the eight dungeons with a boss, by their folder in romfs Banc */
 static const char *const HEART_DUNGEONS[HEART_CONTAINERS] = {"InsideTheDekuTree", "DodongoCavern", "InsideJabuJabuBelly",
@@ -125,59 +102,24 @@ static const char *const HEART_DUNGEONS[HEART_CONTAINERS] = {"InsideTheDekuTree"
 static uint64_t heart_ids[HEART_CONTAINERS];
 static int heart_ready;   /* (1 once heart_ids holds all eight; published with release, read with acquire) */
 
-static uint8_t *read_all(const char *path, size_t *n) {
-    FILE *f = fopen(path, "rb");   /* (a UTF-8 path: the game's code page is UTF-8, tests/test_utf8_paths.py) */
-    if (!f) return NULL;
-    uint8_t *d = NULL;
-    long len = fseek(f, 0, SEEK_END) ? -1 : ftell(f);
-    if (len > 0 && len < (1L << 30) && !fseek(f, 0, SEEK_SET) && (d = malloc((size_t)len)) && fread(d, 1, (size_t)len, f) != (size_t)len)
-        free(d), d = NULL;
-    fclose(f);
-    *n = d ? (size_t)len : 0;
-    return d;
-}
 
-/* a whole zstd frame (its size in its header) decoded with ddict (NULL: none) */
-static uint8_t *unzstd(const uint8_t *src, size_t n, const ZSTD_DDict *ddict, size_t *out_n) {
-    const unsigned long long size = ZSTD_getFrameContentSize(src, n);
-    if (size == ZSTD_CONTENTSIZE_UNKNOWN || size == ZSTD_CONTENTSIZE_ERROR || size == 0 || size > (1ull << 30)) return NULL;
-    uint8_t *out = malloc((size_t)size);
-    ZSTD_DCtx *dctx = out ? ZSTD_createDCtx() : NULL;
-    const size_t got = dctx ? (ddict ? ZSTD_decompress_usingDDict(dctx, out, (size_t)size, src, n, ddict)
-                                     : ZSTD_decompressDCtx(dctx, out, (size_t)size, src, n)) : 0;
-    if (dctx) ZSTD_freeDCtx(dctx);
-    if (!dctx || ZSTD_isError(got) || got != size) {
-        free(out);
-        return NULL;
-    }
-    *out_n = (size_t)size;
-    return out;
-}
+uint8_t *hos_zs_read_romfs_named(const char *rel, size_t *n, size_t limit, const char *named);   /* zs.c: with the game's dictionary */
 
 void hos_oot_heart_containers_load(void) {
     static int tried;
-    if (tried || !hos_romfs_dir) return;
+    if (tried || !hos_romfs_ready()) return;
     tried = 1;
     char path[1024];
-    size_t n = 0, packed_n = 0;
-    snprintf(path, sizeof path, "%s/Pack/ZsDic.pack.zs", hos_romfs_dir);
-    uint8_t *file = read_all(path, &n), *pack = file ? unzstd(file, n, NULL, &packed_n) : NULL;
-    free(file);
-    size_t s = 0, e = 0;
-    ZSTD_DDict *ddict = pack && heart_sarc_find(pack, packed_n, "bcett.byml.zsdic", &s, &e) ? ZSTD_createDDict(pack + s, e - s) : NULL;
-    free(pack);
     uint64_t ids[HEART_CONTAINERS];
     int got = 0;
-    for (int i = 0; i < HEART_CONTAINERS && ddict; i++) {
-        snprintf(path, sizeof path, "%s/Banc/%s/%s_Static.bcett.byml.zs", hos_romfs_dir, HEART_DUNGEONS[i], HEART_DUNGEONS[i]);
+    for (int i = 0; i < HEART_CONTAINERS; i++) {   /* (each map a frame made with bcett.byml.zsdic: zs.c finds it by its id, or by that name for a frame of none) */
+        snprintf(path, sizeof path, "Banc/%s/%s_Static.bcett.byml.zs", HEART_DUNGEONS[i], HEART_DUNGEONS[i]);
         size_t map_n = 0;
-        uint8_t *packed = read_all(path, &n), *map = packed ? unzstd(packed, n, ddict, &map_n) : NULL;
-        free(packed);
+        uint8_t *map = hos_zs_read_romfs_named(path, &map_n, 1u << 30, "bcett.byml.zsdic");
         uint64_t one;
         if (map && heart_byml_actor_ids(map, map_n, "Obj_Heart_Container", &one, 1) == 1) ids[got++] = one;
         free(map);
     }
-    if (ddict) ZSTD_freeDDict(ddict);
     if (got == HEART_CONTAINERS) {
         memcpy(heart_ids, ids, sizeof ids);
         __atomic_store_n(&heart_ready, 1, __ATOMIC_RELEASE);
@@ -191,7 +133,7 @@ int hos_oot_heart_containers_taken(void) {
     if (!__atomic_load_n(&heart_ready, __ATOMIC_ACQUIRE)) return -1;
     int taken = 0;
     for (int i = 0; i < HEART_CONTAINERS; i++) {
-        const int v = hos_oot_gamedata_bool64(heart_ids[i], &at[i]);
+        const int v = game_flag_bool64(game_flags_mgr(), heart_ids[i], &at[i]);
         if (v < 0) return -1;
         taken += v;
     }

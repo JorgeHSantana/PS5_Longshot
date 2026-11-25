@@ -67,6 +67,7 @@ def main():
 #include <unistd.h>
 static DWORD last_error;
 #define HOS_FS_PATH 1024   /* (host/nn_fs.c's path buffers, #1497) */
+#define HOS_PATH_CAP MAX_PATH   /* (host/hos_paths.h, as on Linux: host/mods.c's path buffers) */
 static void hos_log(const char *f, ...) { (void)f; }
 static void lower_slash(char *s) { (void)s; }
 static int nput;
@@ -80,7 +81,7 @@ static Shipped *shipped;
 static int nshipped;
 static char sizes_key[] = "system/resource/resourcesizetable.product.111.nin_ounce_nvn2.rsizetable.zs";
 static int is_sizes(const char *key) { return strstr(key, ".rsizetable.zs") != NULL; }
-static int game_file(const char *rel, char *out, size_t cap) { (void)rel; (void)out; (void)cap; return 0; }
+static int game_file(const char *rel, char *out, size_t cap, uint64_t *size) { (void)rel; (void)out; (void)cap; (void)size; return 0; }   /* (host/mods.c: no game file here) */
 ''' + "\n".join(pieces) + r'''
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); return 1; } } while (0)
 int main(int argc, char **argv) {

@@ -372,10 +372,11 @@ def wiring_checks():
             fail("host/rx_backend.c: " + entry + " does not use the shared present dispatch")
     table = re.sub(r"/\*.*?\*/", "", block(backend, "static const MkwVkHost vk_host = {"), flags=re.S)
     names = [v.strip() for v in table.split(",") if re.fullmatch(r"\w+", v.strip())]
-    if "hos_ab_frame" not in names or names[names.index("hos_ab_frame") + 1:] != [
-            "hos_mod_info", "hos_mod_edit", "hos_mods_changed", "hos_cheat_info", "hos_cheat_set",
-            "host_ab_value", "nvn_output_preview_request", "host_input_record", "host_input_play", "host_input_status",
-            "hos_input_recording_at", "hos_reset_binding", "hos_rebind_control", "hos_binding_is_default"]:
+    after = ["hos_mod_info", "hos_mod_edit", "hos_mods_changed", "hos_cheat_info", "hos_cheat_set",
+             "host_ab_value", "nvn_output_preview_request", "host_input_record", "host_input_play", "host_input_status",
+             "hos_input_recording_at", "hos_reset_binding", "hos_rebind_control", "hos_binding_is_default"]
+    # (the entries of later versions come after these: version 46's RomFS reader)
+    if "hos_ab_frame" not in names or names[names.index("hos_ab_frame") + 1:][:len(after)] != after:
         fail("host/rx_backend.c: vk_host does not have hos_ab_frame (MkwVkHost.ab_frame, version 34) right before the "
              "Mods tab's functions, and host_ab_value (ab_value, version 36) after them")
     if "static int host_ab_value(const char *name, int normal) { return hos_ab_value(name, normal); }" not in backend:
@@ -395,8 +396,8 @@ def wiring_checks():
         fail("gpu/vk/vk_api.h: MkwVkHost does not have ab_frame at version 34 right before the Mods tab's functions, and "
              "ab_value (version 36) before the output preview callback")
     replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
-    if "host->version >= 34 && host->ab_frame ? host->ab_frame(l_at, at) : -1" not in replay:
-        fail("gpu/vk/vk_replay.cpp: the frame trace does not ask the host for ab_side (only from a version 34 host)")
+    if "host->ab_frame ? host->ab_frame(l_at, at) : -1" not in replay:
+        fail("gpu/vk/vk_replay.cpp: the frame trace does not ask the host for ab_side")
     finish = block((ROOT / "host/hos_relaunch.c").read_text(encoding="utf-8"), "void hos_close_finish(void) {")
     if not 0 <= finish.index("hos_ab_end();") < finish.index("hos_log_flush();"):
         fail("host/hos_relaunch.c: hos_close_finish does not log the A/B's sums before the log's flush")
@@ -409,8 +410,8 @@ def wiring_checks():
         text = path.read_text(encoding="utf-8")
         for m in re.finditer(r'\bab_value\("([A-Z0-9_]+)"', text):
             found.setdefault(m.group(1), []).append(path.relative_to(ROOT).as_posix())
-            if "host->version >= 36 && host->ab_value" not in text:
-                fail("%s: ab_value is asked of a host older than version 36" % path.relative_to(ROOT).as_posix())
+            if "host && host->ab_value" not in text:
+                fail("%s: ab_value is asked of no host" % path.relative_to(ROOT).as_posix())
     if {k: v for k, v in found.items()} != {k: [v] for k, v in WIRED.items()}:
         fail("the switches wired to hos_ab_value are %r, not %r (a switch whose value sets something up once may not be)"
              % (found, WIRED))

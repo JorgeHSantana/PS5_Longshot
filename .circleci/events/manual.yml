@@ -13,12 +13,16 @@ workflows:
     when: pipeline.parameters.release_dry_run
     jobs:
       - release-version
-      - release-linux:
+      - linux-longshot-builder:
+          name: release-linux-longshot-builder
+          release: true
           requires: [release-version]
-      - release-windows:
+      - windows-longshot-builder:
+          name: release-windows-longshot-builder
+          release: true
           requires: [release-version]
       - release-stage:
-          requires: [release-linux, release-windows]
+          requires: [release-linux-longshot-builder, release-windows-longshot-builder]
       - mb/release-sign:
           name: release-sign
           context: release-signing

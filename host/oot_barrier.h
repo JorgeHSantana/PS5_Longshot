@@ -1,5 +1,5 @@
 /* (longshot) OoT's job barriers: a wait that ends when the work it waits for is done, in place of the game's 20 us sleep
-   (HOS_OOT_BARRIER_WAIT; host/oot_barrier.c is the glue, nx2/oot_patches.py patch_barrier_wait puts in the calls).
+   (HOS_OOT_BARRIER_WAIT; host/oot_barrier.c is the glue, the hook sites barrier.* put in the calls).
 
    Three of the game's parallel-for jobs (f_800998a0, f_800738e0, f_8007e200) run on several threads at once over one job
    block P: each pass over the job's items takes an item and marks its progress with an atomic OR into a bitmask in P, and a

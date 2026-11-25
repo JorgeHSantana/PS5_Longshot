@@ -1,5 +1,5 @@
-/* (longshot) The texture data heap's compaction, asked for once in a while and not at every frame. nx2/oot_patches.py hooks
-   the place; host/oot_tex_compact.c holds the state and reads the switch.
+/* (longshot) The texture data heap's compaction, asked for once in a while and not at every frame. The hook site
+   texture.compactAsk (host/game/sites.toml) hooks the place; host/oot_tex_compact.c holds the state and reads the switch.
 
    The game keeps its textures' storage in one heap (2,400 MB; in Castle Town's market it stays at its line of 5 % free). Its
    manager's per-frame step (f_80797240) asks the heap's Compaction thread for a round whenever none is running (the manager's

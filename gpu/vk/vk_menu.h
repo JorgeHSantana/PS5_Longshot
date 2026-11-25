@@ -32,7 +32,7 @@ struct Options {
                           // (ir_opt/scene_tonemap_pass.h; vk_shader.cpp scene_tonemap_for)
     int fps_cap = 0;      // (longshot) Frame rate cap: 0 60 (the console's), 90, 120, 144, 165, 240, 6 Uncapped (host/nn_vi.c: frame_rate_cap= at the start, then HOS_OPT_FPS_CAP in play)
     int resolution = 0;   // the 3D's (Render resolution): 0 Auto (the game's dynamic resolution), else a share of the output,
-                          // 1..6 = 100%, 75%, 67%, 50%, 58%, 33% (upscaler_rows.h; nx2/oot_patches.py)
+                          // 1..6 = 100%, 75%, 67%, 50%, 58%, 33% (upscaler_rows.h; the hook sites dynres.*, render.fixedScale*)
     int output_res = 0;   // the game's whole frame, docked: 0 its 2048x1152, then the sizes the screen offers (vk_menu.cpp outputs,
                           // display_modes.h), then the player's own (custom_output); saved as the size (output_res=3840x2160) and read
                           // once, at the start (host/nn_applet.c)
@@ -70,7 +70,7 @@ struct Options {
     int hud_buttons_x = 0, hud_buttons_y = 0, hud_buttons_scale = 100;
     int hud_minimap_x = 0, hud_minimap_y = 0, hud_minimap_scale = 100;
     int wide_menus = 1;   // ultrawide: the pause, item and map menus 0 at full width (stretched), 1 in the middle 16:9 with the sides
-                          // blurred, 2 with black bars (nx2/oot_wide.py, vk_framegen.cpp), 3 Extended: at their
+                          // blurred, 2 with black bars (host/oot_wide_sites.c, vk_framegen.cpp), 3 Extended: at their
                           // 16:9 size with their side panes at the screen's edges (host/hos_wide_ui.c)
     int show_fps = 0;     // (longshot) the FPS counter: 0 Off, 1 FPS, 2 Frame time, 3 Graph, 4 Breakdown (fps_stats.h; saved as fps_counter=, an old On is 1)
     int fps_corner = 0;   // (longshot) its corner: 0 top right, 1 top left, 2 bottom right, 3 bottom left
@@ -99,14 +99,14 @@ struct Options {
                           // runs again (host/nn_hid.c walk_held: HOS_OPT_WALK_MODE, 49)
     int walk_speed = 45;  // (longshot) how far the movement keys tilt the left stick while Link walks, percent, 15 to 90
                           // (host/nn_hid.c: HOS_OPT_WALK_SPEED, 50)
-    int text_speed = 0;   // how fast dialogue prints: 0 the game's, 1 2x, 2 4x, 3 instant (host/nn_vi.c, nx2/oot_patches.py; HOS_TEXT_SPEED)
+    int text_speed = 0;   // how fast dialogue prints: 0 the game's, 1 2x, 2 4x, 3 instant (host/nn_vi.c, the hook site text.letterStep; HOS_TEXT_SPEED)
     int transition_autosave = 1;
     int damage_taken = 1; // 0 Half, 1 Normal, 2 Double, 3 Quadruple (host/oot_damage.c)
     int input_replay_sync = 1;   // Drift correction (menu/input_recording.cpp): 0 Off, 1 every update, 2 every second, 3 every 5 s
     int fov = 100;        // vertical gameplay field of view, 50..150% of the game's current angle (host/oot_fov.c)
     int text_size = 0;    // dialogue and signs' text size: 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% (host/oot_text_size.c,
-                          // nx2/oot_patches.py; HOS_TEXT_SIZE)
-    int camera_speed = 100;   // (longshot) the right stick's camera turn in percent of the game's, 50 to 400 (host/nn_vi.c, nx2/oot_patches.py: HOS_OPT_CAMERA_SPEED, 48)
+                          // the hook site text.letterStep; HOS_TEXT_SIZE)
+    int camera_speed = 100;   // (longshot) the right stick's camera turn in percent of the game's, 50 to 400 (host/nn_vi.c, the hook sites camera.*Speed*: HOS_OPT_CAMERA_SPEED, 48)
     int invert_cam_x = 0; // right-stick camera horizontal inversion: 0 normal, 1 inverted
     int invert_cam_y = 0; // right-stick camera vertical inversion: 0 normal, 1 inverted
     int rumble = 100;     // Vibration strength: percent of what the game asks for, 25 to 200 (host/pad_sdl.c; rumble_strength=)

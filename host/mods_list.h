@@ -1,5 +1,5 @@
 /* mods.json, the one list of which mods are on and in which order (host/mods_list.c): its text read and written, no files
-   (host/mods.c has those; nx2/exefs_patches.py reads the same file when the game is built, by the same rules).
+   (host/mods.c has those; builder/crates/game-files/src/patches.rs reads the same file when the game is built, by the same rules).
 
      { "mods":   [ { "id": "local/<the mod's folder under mods>", "enabled": true }, ... ],
        "cheats": { "<a cheat's key>": true, ... } }

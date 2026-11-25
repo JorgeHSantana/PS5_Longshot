@@ -14,21 +14,30 @@ workflows:
       - fork-test-linux:
           requires: [fork-lint]
           filters: pipeline.parameters.tests or pipeline.parameters.full
-      - builder-cli:
-          name: fork-builder-cli
+      - rust:
+          name: fork-rust
           requires: [fork-lint]
-          filters: pipeline.parameters.windows or pipeline.parameters.full
+          filters: pipeline.parameters.tests or pipeline.parameters.full
+      - e2e:
+          name: fork-e2e
+          requires: [fork-lint]
+          filters: pipeline.parameters.tests or pipeline.parameters.full
+      - host-windows:
+          name: fork-host-windows
+          requires: [fork-lint]
+          filters: >-
+            pipeline.parameters.tests or pipeline.parameters.windows or pipeline.parameters.full
       - spirv-fixtures:
           name: fork-spirv-fixtures
           requires: [fork-lint]
           filters: pipeline.parameters.gpu or pipeline.parameters.full
-      - linux-appimage:
-          name: fork-linux-appimage
+      - linux-longshot-builder:
+          name: fork-linux-longshot-builder
           requires: [fork-lint, fork-test-linux, fork-spirv-fixtures]
           filters: pipeline.parameters.linux or pipeline.parameters.full
-      - windows-builder:
-          name: fork-windows-builder
-          requires: [fork-builder-cli]
+      - windows-longshot-builder:
+          name: fork-windows-longshot-builder
+          requires: [fork-lint]
           filters: pipeline.parameters.windows or pipeline.parameters.full
       - windows-vulkan:
           name: fork-windows-vulkan
@@ -43,10 +52,12 @@ workflows:
             - fork-third-party
             - fork-guide-screenshots
             - fork-test-linux
-            - fork-builder-cli
+            - fork-rust
+            - fork-e2e
+            - fork-host-windows
             - fork-spirv-fixtures
-            - fork-linux-appimage
-            - fork-windows-builder
+            - fork-linux-longshot-builder
+            - fork-windows-longshot-builder
             - fork-windows-vulkan
       - mb/fork-report:
           repo: "<< pipeline.git.repo_owner >>/<< pipeline.git.repo_name >>"

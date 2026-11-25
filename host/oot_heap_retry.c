@@ -25,8 +25,9 @@
      lr 0x814f2438 under 0x8044f3c0 and 0x8044f088 (the second buffer), write guest 0x190 with lr 0x80443240, write guest
      0 with lr 0x80443e30.
    Each is tried again in the heap's parents up to the root, the first with room (the GPU memory then in the game's
-   default heap). Only these call sites are changed: f_80522050's other callers (some 30) are as shipped, and so is the
-   other way f_8044f420 gets that object (f_8005eca0 at 0x8044f798, taken when the pointer it tests first is null).
+   default heap). Only these call sites are changed (the hook sites heap.*: host/game/sites.toml, host/oot_sites.c):
+   f_80522050's other callers (some 30) are as shipped, and so is the other way f_8044f420 gets that object (f_8005eca0 at
+   0x8044f798, taken when the pointer it tests first is null).
 
    The rest of a build. A heap with no room for one of these has none for the next, and a build takes memory in places
    that are not in the list (f_8044e020's 0x268-byte object at 0x8044e1ec; the 0x90-byte object f_80522050 takes from its
@@ -39,9 +40,9 @@
    the full heap again (only a parent with room for a heap of the model's size; HOS_GPU_ALLOC_REST=0: that allocation
    alone), and to its +16 as well where the GPU heap is that same heap. f_804566e0 reads the holder's heap twice for its
    count of the memory the build took (the heap's free size at 0x80456928, just after the +200 buffer, and at
-   0x80457188, the difference added to the MatBlock's +680): both reads get the build's own heap
-   (hos_oot_heap_rest_own, hos_oot_heap_rest_end), and the second puts it back in the holder (the function returns in
-   one place, right after).
+   0x80457188, the difference added to the MatBlock's +680): both reads get the build's own heap (the sites
+   heap.restOwn and heap.restEnd: hos_oot_heap_rest_own, hos_oot_heap_rest_end), and the second puts it back in the
+   holder (the function returns in one place, right after).
    The build is not the OptimizeChangeBank thread's alone: sead::MainThread, SceneLowPriority,
    BaseProcCreateAndDeleteThread and BootupBackgroundWorkThread make these objects too (a run with each one refused).
 
@@ -74,6 +75,7 @@
    heap itself refuses that allocation and whatever the build asks of it afterwards: the state issue 2437's heap was
    in. */
 #include "hos.h"
+#include "game/game.h"   /* (game_call_more: the heaps' methods called again) */
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
@@ -89,7 +91,8 @@ static int retry_on(void) {
 static int rest_on(void) {
     return env_on_or("HOS_GPU_ALLOC_REST", 1);
 }
-/* Set before game threads start, after the environment file has been read. */
+/* Set before game threads start, after the environment file has been read (host/hos_main.c): the CPU sites ask
+   hos_oot_heap_refuse only while it is set */
 int hos_oot_heap_test_enabled;
 void hos_oot_heap_test_init(void) {
     const char *fail = getenv("HOS_GPU_ALLOC_TEST_FAIL"), *fill = getenv("HOS_GPU_ALLOC_TEST_FILL");
@@ -130,17 +133,12 @@ static int guest_string(Ctx *c, uint64_t at, char *out, int n) {   /* (a guest C
     out[i] = 0;
     return ok;
 }
-/* A guest function called as the game would, every register and flag as before but x0: its result */
+/* A guest function (a heap's method, from its vtable) called as the game would, with the failed call's return address as
+   LR, through game_call: every register and flag put back; its x0 the result (0 when it could not be called) */
 static uint64_t guest_call(Ctx *c, uint64_t fn, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t lr) {
-    uint64_t x[31];
-    const uint8_t n = c->n, z = c->z, cf = c->c, v = c->v;
-    memcpy(x, c->x, sizeof x);
-    c->x[0] = a0, c->x[1] = a1, c->x[2] = a2, c->x[30] = lr;
-    a64_icall(c, fn);
-    const uint64_t r = c->x[0];
-    memcpy(c->x, x, sizeof x);
-    c->n = n, c->z = z, c->c = cf, c->v = v;
-    return r;
+    uint64_t r = 0;
+    const GameCallMore more = {.set_lr = 1, .lr = lr};
+    return game_call_more(c, fn, 0, 3, (const uint64_t[]){a0, a1, a2}, &r, &more) ? r : 0;
 }
 static uint64_t heap_method(Ctx *c, uint64_t heap, unsigned slot) {   /* (0: none) */
     if (!readable(heap)) return 0;
@@ -149,7 +147,7 @@ static uint64_t heap_method(Ctx *c, uint64_t heap, unsigned slot) {   /* (0: non
 }
 static uint64_t free_size(Ctx *c, uint64_t heap) {   /* (the heap's own getFreeSize; ~0: unknown) */
     const uint64_t fn = heap_method(c, heap, VT_FREE_SIZE);
-    return fn && a64_lookup(fn) ? guest_call(c, fn, heap, 0, 0, c->x[30]) : ~0ULL;
+    return game_has(fn) ? guest_call(c, fn, heap, 0, 0, c->x[30]) : ~0ULL;
 }
 static void describe(Ctx *c, uint64_t heap, char *out, int n) {
     char name[48], kb[32];
@@ -167,7 +165,9 @@ static int tell(void) {   /* (the first 60 failures logged) */
     return __atomic_fetch_add(&told, 1, __ATOMIC_RELAXED) < 60;
 }
 /* The CPU allocations tried again: the call's return address, what the log calls it, its name in the counts, and which of
-   HOS_GPU_ALLOC_TEST_FAIL's numbers refuses it (1: the two buffers', 2: the others') */
+   HOS_GPU_ALLOC_TEST_FAIL's numbers refuses it (1: the two buffers', 2: the others'). Each is a hook site of
+   host/game/sites.toml, in this order: heap.cpuAlloc, heap.cpuAllocOther, heap.objectAlloc, heap.objectBuffer,
+   heap.objectBufferOther, heap.blockBuffer, heap.blockObject */
 static const struct { uint64_t lr; const char *what, *name; int kind; } SITES[] = {
     {0x80456910ULL, "model buffer", "model buffer (0x8045690c)", 1},     /* f_804566e0: its MatBlock's +200 */
     {0x80456da4ULL, "model buffer", "model buffer (0x80456da0)", 1},     /*             and +168 */
@@ -196,7 +196,7 @@ static void count_moved(int slot, uint64_t bytes, int say) {
 }
 
 /* ---- the GPU memory: f_80522050(x0 the memory block, x1 the request: +0 the count, +8 the heap, +0x20 what it is for; x2
-   the size of one). nx2/oot_patches.py makes f_804566e0's two calls of it call this, with the game's function ---- */
+   the size of one). The hook sites heap.gpuAlloc* make f_804566e0's two calls of it call this, with the game's function ---- */
 static int gpu_alloc_in(Ctx *c, A64Fn game, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t lr, uint64_t heap,
                         uint64_t in) {
     recomp_store64(c, a1 + 8, in);
@@ -250,11 +250,11 @@ void hos_oot_gpu_alloc(Ctx *c, A64Fn game) {
     if (!ok && say) hos_log("oot: GPU memory: no heap had room: the game goes on without it (and crashes writing to it)");
 }
 
-/* ---- the CPU allocations (SITES): the heap's tryAlloc gave x0 = 0 (or a test switch refused it: nx2/oot_patches.py then
-   made no call). Tried in each parent with room, x0 the block or 0 still, and the rest of the build handed to that
-   parent. `holder` is the heaps' holder as the place reads it: its +8 is the heap the build's allocations name, its +16
-   the GPU heap. It is on the building thread's stack, which for sead::MainThread is below the image (guest 0x10ff130 in
-   a run), so readable() is not asked of it: the game has just read the heap through it ---- */
+/* ---- the CPU allocations (SITES): the heap's tryAlloc gave x0 = 0 (or a test switch refused it: the site then made no
+   call). Tried in each parent with room, x0 the block or 0 still, and the rest of the build handed to that parent.
+   `holder` is the heaps' holder as the place reads it: its +8 is the heap the build's allocations name, its +16 the GPU
+   heap. It is on the building thread's stack, which for sead::MainThread is below the image (guest 0x10ff130 in a run),
+   so readable() is not asked of it: the game has just read the heap through it ---- */
 /* The block from the nearest parent with room (0: none had); *in the heap it came from */
 static uint64_t in_parents(Ctx *c, uint64_t heap, uint64_t size, uint64_t align, uint64_t lr, const char *what, int say,
                            uint64_t whole, int handover, uint64_t *in) {
@@ -265,7 +265,7 @@ static uint64_t in_parents(Ctx *c, uint64_t heap, uint64_t size, uint64_t align,
         if (!readable(parent) || parent == h) break;
         h = parent;
         const uint64_t f = free_size(c, h), fn = heap_method(c, h, VT_TRY_ALLOC);
-        if (!fn || !a64_lookup(fn)) continue;
+        if (!game_has(fn)) continue;
         if (handover) {
             /* Reserve the model-sized remainder as well as this allocation and the margin. */
             if (f == ~0ULL || f < size || f - size < 0x2000 || f - size - 0x2000 < whole) continue;
@@ -303,7 +303,7 @@ static void test_fill(Ctx *c, uint64_t heap, uint64_t holder, uint64_t lr) {
     if (__atomic_load_n(&left, __ATOMIC_ACQUIRE) <= 0 || lr != at || !holder || !readable(heap) || rest.holder == holder) return;
     if (recomp_load64(c, holder + 8) != heap || recomp_load64(c, heap + HEAP_SIZE) > (4ULL << 20)) return;
     const uint64_t fn = heap_method(c, heap, VT_TRY_ALLOC);
-    if (!fn || !a64_lookup(fn)) return;
+    if (!game_has(fn)) return;
     int mine = 1;
     while (__sync_lock_test_and_set(&lock, 1)) {}
     for (unsigned k = 0; k < 64 && k < filled_n; k++)
@@ -367,8 +367,9 @@ void hos_oot_heap_retry(Ctx *c, uint64_t heap, uint64_t size, uint64_t align, ui
     c->x[0] = got;
 }
 /* f_804566e0 reads its heap's free size twice (x0 the heap, x8 its getFreeSize, both just loaded through the holder): a
-   build handed to a parent has its own heap read, the first time (0x80456928; the hand-over can only be the +200
-   buffer's) with the holder left as it is, the last time (0x80457188) with its own heap back in the holder too */
+   build handed to a parent has its own heap read, the first time (0x80456928, heap.restOwn; the hand-over can only be the
+   +200 buffer's) with the holder left as it is, the last time (0x80457188, heap.restEnd) with its own heap back in the
+   holder too */
 void hos_oot_heap_rest_own(Ctx *c, uint64_t holder) {
     if (!rest.holder || rest.holder != holder) return;   /* (no build of this thread was handed over, or not this one) */
     c->x[0] = rest.own;

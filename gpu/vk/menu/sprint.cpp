@@ -23,7 +23,7 @@ namespace mkwvk {
 /// Publish Sprint and its bindings together after all the moves.
 void apply_sprint_layout(bool on) {
     if (!can_bind()) return;
-    host->bind(host->version >= 39 ? HOS_BIND_SPRINT_BEGIN : HOS_BIND_SPRINT_ON, 0, 0, 0);
+    host->bind(HOS_BIND_SPRINT_BEGIN, 0, 0, 0);
     int moved = host->binding(HOS_BIND_SPRINT_AUTO, 0, 0);
     constexpr int kShift = 0x10, kV = 'V';   // (Windows key codes)
     auto key = [](int b, int s) { return host->binding(HOS_BIND_KEY, b, s); };

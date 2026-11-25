@@ -121,9 +121,7 @@ static int pads_start(void) {
        Controller's A, on the right, at the bottom button's place: A acted as B and X as Y: SkyboundTotk issue 12. SDL3's
        are by position always) */
     hos_sdl_hint("SDL_GAMECONTROLLER_USE_BUTTON_LABELS", "0");
-    /* (with no window nothing reads SDL's quit event: SDL's own SIGINT/SIGTERM handlers turned a timeout's or a service
-       manager's SIGTERM into that event, and the run went on until SIGKILL. Without them the signals end it as usual) */
-    if (env_on("HOS_HEADLESS")) hos_sdl_hint("SDL_NO_SIGNAL_HANDLERS", "1");
+    /* (headless, SDL's SIGINT/SIGTERM handlers are off before any subsystem starts: hos_sdl_load, host/hos_sdl.c) */
     /* (longshot) Valve's own pads taken out of the ignore list Steam sets for the games it starts, so that their motion
        sensors are read (host/steam_pads.h). Only with an SDL that tells Steam's stand-in pads apart: without
        that, a real pad and its stand-in would both play. A list emptied or unset in Steam's launch options is left as

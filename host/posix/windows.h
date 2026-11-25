@@ -1,5 +1,5 @@
 /* (linux) The part of the Win32 API Longshot's runtime and Vulkan back end use, on POSIX: host/posix is on the include
-   path of Linux builds only (nx2/build.py), so `#include <windows.h>` finds this file and the Windows code paths stay
+   path of Linux builds only (builder/crates/build-compile), so `#include <windows.h>` finds this file and the Windows code paths stay
    as they are. Implemented in win32_posix.c (threads, events, fibers, files, memory, modules, exceptions, waveOut) and
    display_sdl.c (the window, keyboard, mouse).
 

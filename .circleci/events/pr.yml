@@ -9,17 +9,24 @@ workflows:
           requires: [lint]
           filters: >-
             pipeline.parameters.tests or pipeline.parameters.full
-      - builder-cli:
+      - rust:
           requires: [lint]
-          filters: pipeline.parameters.windows or pipeline.parameters.full
+          filters: pipeline.parameters.tests or pipeline.parameters.full
+      - e2e:
+          requires: [lint]
+          filters: pipeline.parameters.tests or pipeline.parameters.full
+      - host-windows:
+          requires: [lint]
+          filters: >-
+            pipeline.parameters.tests or pipeline.parameters.windows or pipeline.parameters.full
       - spirv-fixtures:
           requires: [lint]
           filters: pipeline.parameters.gpu or pipeline.parameters.full
-      - linux-appimage:
+      - linux-longshot-builder:
           requires: [lint, test-linux, spirv-fixtures]
           filters: pipeline.parameters.linux or pipeline.parameters.full
-      - windows-builder:
-          requires: [lint, builder-cli]
+      - windows-longshot-builder:
+          requires: [lint]
           filters: pipeline.parameters.windows or pipeline.parameters.full
       - windows-vulkan:
           requires: [lint, spirv-fixtures]
@@ -44,10 +51,12 @@ workflows:
             - third-party
             - guide-screenshots
             - test-linux
-            - builder-cli
+            - rust
+            - e2e
+            - host-windows
             - spirv-fixtures
-            - linux-appimage
-            - windows-builder
+            - linux-longshot-builder
+            - windows-longshot-builder
             - windows-vulkan
             - website
             - website-preview-build

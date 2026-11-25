@@ -18,7 +18,11 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 RUN_ALL_SKIP = {"windows": "a bash script for Linux containers"}
 DOCKERFILE = (ROOT / "scripts/linux/checks.Dockerfile").read_text(encoding="utf-8")
-CI = re.search(r"\n  python:\n(?:(?:    .*)?\n)+", (ROOT / ".forgejo/workflows/ci.yml").read_text(encoding="utf-8")).group(0)   # (the checks' job)
+CIRCLE = (ROOT / ".circleci/shared.yml").read_text(encoding="utf-8")
+# (the checks' tools: CircleCI's test-deps-linux command up to its test environment (which installs CircleCI's own CLI),
+# its line continuations joined; the checks' job runs on ubuntu2404)
+CI = re.sub(r"\\\n\s*", "", re.search(r"\n  test-deps-linux:\n(?:(?:    .*)?\n)+", CIRCLE).group(0).split("name: Compiler cache")[0])
+CI_IMAGE = re.search(r"\n  ubuntu2404:\n    docker:\n      - image: (ubuntu:[\d.]+)", CIRCLE).group(1)
 MISE = (ROOT / "mise.toml").read_text(encoding="utf-8").split("\n[tasks.test-deps]\n")[1].split("\n[")[0]
 ENGINE = """#!%s
 import json, os, sys
@@ -42,12 +46,10 @@ class VersionTests(unittest.TestCase):
             self.assertEqual(found[0], other, pattern)
 
     def test_the_tools_are_cis(self):
-        packages = re.search(r"apt-get install -y (g\+\+ clang [a-z0-9 +-]+)", CI).group(1).split()
+        packages = re.search(r"(g\+\+ clang [a-z0-9 +-]+)", CI).group(1).split()
         installed = re.search(r"apt-get install -y (g\+\+ clang [a-z0-9 +-]+)", DOCKERFILE).group(1).split()
         self.assertEqual(sorted(installed), sorted(packages))
-        runner = "FROM " + re.search(r"os: (ubuntu)-([\d.]+)", CI).expand(r"\1:\2")
-        self.assertIn(runner + "\n", DOCKERFILE)
-        self.assertIn("dotnet-sdk-" + re.search(r"dotnet-version: '(\d+\.\d+)\.x'", CI).group(1), DOCKERFILE)
+        self.assertIn("FROM " + CI_IMAGE + "\n", DOCKERFILE)
 
     def test_the_pins_are_cis_and_mises(self):
         self.same(r"(?:zstandard|pillow|numpy|lz4|unicorn)==[\d.]+", CI, MISE)

@@ -602,7 +602,7 @@ static _Thread_local int input_keys[HOS_KEY_N][2], input_pads[HOS_KEY_N][2];
 static int sampled_key(int i, int k) { return input_snapshot_active ? input_keys[i][k] : (int)key_bind[i][k]; }
 static int sampled_pad(int i, int k) { return input_snapshot_active ? input_pads[i][k] : pad_bind[i][k]; }
 
-/* ---- (longshot) the ocarina's five note controls, driven by the wait flag nx2/oot_patches.py's patch sets ---- */
+/* ---- (longshot) the ocarina's five note controls, driven by the wait flag the hook sites ocarina.wait* set ---- */
 volatile uint64_t hos_oc_note_bits;
 volatile int hos_oc_wait;
 volatile int hos_oc_last_kind;

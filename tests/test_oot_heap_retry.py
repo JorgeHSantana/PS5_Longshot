@@ -1,4 +1,4 @@
-"""The OptimizeChangeBank thread's allocations are tried again when their heap is full (host/oot_heap_retry.c, nx2/oot_patches.py).
+"""The OptimizeChangeBank thread's allocations are tried again when their heap is full (host/oot_heap_retry.c, the hook sites heap.*).
 
 Issue 1697 (thread OptimizeChangeBanc writes guest 0x8 a few frames after loading a save), TomShafford/Hookshot's crash at
 backflip + attack, issue 2437 (the same thread writes guest 0x20, lr 0x8044f684, crossing Gerudo Valley's bridge) and the
@@ -12,7 +12,7 @@ a stand-in for the game's f_80522050, then checks:
 - a GPU allocation that fails is tried again in each parent with room, then in the game's default heap (no waits:
   it never sleeps); the request names its own heap again afterwards; nothing with room: it fails as before;
 - a CPU allocation is tried in each parent with room, returned in x0, the other registers and the flags as they were,
-  each of the seven places counted under its own name;
+  each of the seven places counted under its own name; every heap method called through game_call_more;
 - one that came from a parent hands the rest of its build to that parent: the heaps' holder names the parent, the
   build's own heap is what f_804566e0's two reads of its heap get, and the second puts it back in the holder
   (HOS_GPU_ALLOC_REST=0 or a holder naming another heap: that allocation alone); a parent too small for the whole build
@@ -22,10 +22,17 @@ a stand-in for the game's f_80522050, then checks:
   heap without calling it (nothing leaks), and the retry makes them; <gpu>,<cpu>,<objects>: each kind its own count;
   HOS_GPU_ALLOC_TEST_FILL=<n>[,<place>]: the first n heaps at the place (the object's when none is named) are emptied
   through their own tryAlloc, once each, and never the parent a build was handed;
-- nx2/oot_patches.py makes the edits on lifted text shaped as the lift writes it, once, and a second run changes nothing;
-  the places of other files (the hot list's) are edited there too, with their declarations.
+- the eleven places are hook sites (host/game/sites.toml, host/oot_sites.c's callbacks: nine replace sites, the two reads
+  before sites): built as the lift lowers them (tests/sitehooks.py) and, side by side, as the text patch they replaced had
+  them (OLD_*, nx2/oot_patches.py on main), over stand-ins that log each call to the host and the game: the same calls
+  with the same arguments (the heaps' holder read where each function keeps it) and the same registers, with the test
+  switches off, on and refusing, for a null or not (x30 aside where the patch made no call under a refusal: the hook's
+  x30 is the return address, as a call leaves it).
 
-python -I -B tests/test_oot_heap_retry.py [--cc gcc]
+Transition check: main's text-patch C kept here as the oracle shows the sites do what it did; remove it once a
+deliberate behaviour change needs it.
+
+python -I -B tests/test_oot_heap_retry.py [--cc clang] [--cargo cargo]
 """
 import argparse
 import os
@@ -35,14 +42,125 @@ import sys
 import tempfile
 from pathlib import Path
 
-RUN_ALL_ARGS = ["--cc", "gcc"]
+RUN_ALL_ARGS = ["--cc", "{clang}", "--cargo", "{cargo}"]
 
 ROOT = Path(__file__).resolve().parents[1]
 
 # (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/longshot_env.h)
 ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "longshot_env.h")
-sys.path.insert(0, str(ROOT / "nx2"))
-import oot_patches  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves this folder off the path)
+from sitecheck import site, callback, slot  # noqa: E402
+import sitehooks  # noqa: E402
+
+# (the calls as the lift writes them, and as the text patch had them on main)
+GPU_CALL = "c->x[30] = %#xULL; f_80522050(c);"
+OLD_GPU = "c->x[30] = %#xULL; hos_oot_gpu_alloc(c, f_80522050);   /* (nx2/oot_patches.py: host/oot_heap_retry.c) */"
+CPU_CALL = "{ uint64_t _t = c->x[8]; c->x[30] = %#xULL; A64_ICALL(c, _t); }\n"
+OLD_CPU = ("{ const uint64_t _hh = c->x[0], _hn = c->x[1], _ha = c->x[2], _ho = %s;   /* (nx2/oot_patches.py: host/oot_heap_retry.c) */\n"
+           "  if (hos_oot_heap_test_enabled && hos_oot_heap_refuse(c, _hh, _ho, %#xULL)) c->x[0] = 0;\n"
+           "  else { uint64_t _t = c->x[8]; c->x[30] = %#xULL; A64_ICALL(c, _t); }\n"
+           "  if (!c->x[0]) hos_oot_heap_retry(c, _hh, _hn, _ha, %#xULL, _ho); }\n")
+OLD_REST = ("    hos_oot_heap_rest_%s(c, recomp_load64(c, c->x[31] + 56));   /* (nx2/oot_patches.py: host/oot_heap_retry.c) */\n"
+            + CPU_CALL)
+SP56, SP0 = "recomp_load64(c, c->x[31] + 56)", "recomp_load64(c, c->x[31] + 0)"
+# (name, function, its address, the site's offset, its kind, the holder as main's patch read it)
+SITES = (("heap.cpuAlloc", "f_804566e0", 0x804566e0, 0x22c, "cpu", SP56),
+         ("heap.cpuAllocOther", "f_804566e0", 0x804566e0, 0x6c0, "cpu", SP56),
+         ("heap.objectAlloc", "f_8044f420", 0x8044f420, 0x24c, "cpu", "c->x[21]"),
+         ("heap.objectBuffer", "f_8044ed60", 0x8044ed60, 0x264, "cpu", "c->x[22]"),
+         ("heap.objectBufferOther", "f_8044ed60", 0x8044ed60, 0x310, "cpu", "c->x[22]"),
+         ("heap.blockBuffer", "f_80443000", 0x80443000, 0x1fc, "cpu", SP0),
+         ("heap.blockObject", "f_80443000", 0x80443000, 0xe2c, "cpu", SP0),
+         ("heap.restOwn", "f_804566e0", 0x804566e0, 0x248, "own", None),
+         ("heap.restEnd", "f_804566e0", 0x804566e0, 0xaa8, "end", None),
+         ("heap.gpuAlloc", "f_804566e0", 0x804566e0, 0x838, "gpu", None),
+         ("heap.gpuAllocOther", "f_804566e0", 0x804566e0, 0x9b4, "gpu", None))
+SIDE = r"""
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#define A64_NOESC
+typedef struct { uint64_t x[32]; uint8_t n, z, c, v; } Ctx;
+typedef void (*A64Fn)(Ctx *);
+#define SP 0x80070000ull   /* (the stack: the heaps' holder at +0 and +56, as f_80443000 and f_804566e0 keep it) */
+static unsigned char stack_[128];
+static inline uint64_t recomp_load64(Ctx *c, uint64_t a) {
+    uint64_t v = 0;
+    (void)c;
+    if (a >= SP && a + 8 <= SP + sizeof stack_) memcpy(&v, stack_ + (a - SP), 8);
+    return v;
+}
+static uint64_t log_[96];
+static int logged, refuse, null_result;
+int hos_oot_heap_test_enabled;
+static void note(uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
+    if (logged < 92) log_[logged++] = a, log_[logged++] = b, log_[logged++] = c, log_[logged++] = d;
+}
+void f_80522050(Ctx *c) { note(1, c->x[1], c->x[30], 0); c->x[0] = !null_result; c->x[9] = 0xdead; }
+static void try_alloc(Ctx *c) { note(2, c->x[0], c->x[1], c->x[30]); c->x[0] = null_result ? 0 : 0x80080000ull; c->x[3] = 0xdead; }
+/* (the method a rest callback points x8 at: the call after it must be this one, as main's patch read x8 after the call) */
+static void own_free(Ctx *c) { note(10, c->x[0], c->x[30], 0); c->x[0] = 0x4000; }
+A64Fn a64_lookup(uint64_t a) {
+    return a == 0x80522050ull ? f_80522050 : a == 0x80002000ull ? try_alloc : a == 0x80003000ull ? own_free : NULL;
+}
+_Thread_local uint64_t hos_site_callee;   /* (host/game/sites.c's: a replaced bl's callee, which its hook stores) */
+void a64_icall(Ctx *c, uint64_t a) { a64_lookup(a)(c); }
+#define A64_ICALL(c, t) a64_icall(c, t)
+void hos_oot_gpu_alloc(Ctx *c, A64Fn game) { note(3, c->x[1], c->x[30], 0); if (!refuse) game(c); else c->x[0] = 0; }
+int hos_oot_heap_refuse(Ctx *c, uint64_t heap, uint64_t holder, uint64_t lr) {
+    note(4, heap, holder, lr), note(7, c->x[1], c->x[2], 0);   /* (x30 aside: the patch set it after this call) */
+    return refuse;
+}
+void hos_oot_heap_retry(Ctx *c, uint64_t heap, uint64_t size, uint64_t align, uint64_t lr, uint64_t holder) {
+    note(5, heap, size, align), note(6, lr, holder, 0);
+    c->x[0] = 0x80090000ull;
+}
+void hos_oot_heap_rest_own(Ctx *c, uint64_t holder) { note(8, holder, c->x[0], c->x[8]); c->x[0] = 0x80055500ull; c->x[8] = 0x80003000ull; }
+void hos_oot_heap_rest_end(Ctx *c, uint64_t holder) { note(9, holder, c->x[0], c->x[8]); c->x[0] = 0x80055600ull; c->x[8] = 0x80003000ull; }
+@CALLBACKS@
+@FUNCTIONS@
+typedef void (*Fn)(Ctx *);
+int main(void) {
+    static const Fn hooked[] = {@HOOKED@}, patched[] = {@PATCHED@};
+    static const int cpu[] = {@CPU@};
+    int fails = 0;
+    const uint64_t at0 = 0x80050000ull, at56 = 0x80050100ull;
+    memcpy(stack_, &at0, 8), memcpy(stack_ + 56, &at56, 8);
+    for (unsigned k = 0; k < sizeof hooked / sizeof hooked[0]; k++)
+        for (int mode = 0; mode < 3; mode++)   /* (test switches off; on, not refusing; refusing) */
+            for (null_result = 0; null_result < 2; null_result++) {
+                hos_oot_heap_test_enabled = mode > 0, refuse = mode == 2;
+                Ctx a, b;
+                memset(&a, 0, sizeof a);
+                for (int r = 0; r < 31; r++) a.x[r] = 0x9e3779b97f4a7c15ull * (r + 1);
+                a.x[8] = 0x80002000ull, a.x[31] = SP, a.n = 1, a.v = 1;
+                b = a;
+                uint64_t la[96];
+                int na;
+                logged = 0, memset(log_, 0, sizeof log_);
+                hooked[k](&a);
+                memcpy(la, log_, sizeof la), na = logged;
+                logged = 0, memset(log_, 0, sizeof log_);
+                patched[k](&b);
+                if (refuse && cpu[k]) b.x[30] = a.x[30];   /* (refused: the patch made no call, the hook's x30 is a call's) */
+                if (na != logged || memcmp(la, log_, sizeof la) || memcmp(&a, &b, sizeof a)) {
+                    printf("FAIL: call %u, mode %d, null %d\n", k, mode, null_result);
+                    fails++;
+                }
+            }
+    if (!fails) printf("same\n");
+    return fails != 0;
+}
+"""
+
+# (host/game/game.h for the stand-in Ctx: the fixture's game_call_more calls through a64_lookup as host/game/game.c does,
+# x0.. the arguments, LR as given (else 0), the whole context put back)
+GAME_H = r'''#pragma once
+#include <stdint.h>
+typedef struct { int set_x8; uint64_t x8; int set_lr; uint64_t lr; float *s0, *s1; } GameCallMore;
+int game_has(uint64_t fn);
+int game_call_more(Ctx *c, uint64_t fn, uint64_t sp, int nargs, const uint64_t *args, uint64_t *ret, const GameCallMore *more);
+'''
 
 HOS_H = r'''#pragma once
 #include <stdint.h>
@@ -63,6 +181,7 @@ void hos_sleep_ns(int64_t ns);
 '''
 
 FIXTURE = r'''#include "hos.h"
+#include "game/game.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -88,7 +207,26 @@ void hos_sleep_ns(int64_t ns) { (void)ns; sleeps++; }
 #define NAME(i) (0x80020000ull + 0x40ull * (i))
 static uint64_t room[8], next_block = 0x80080000ull, free_after_calls[8];
 static uint64_t heap_index(uint64_t h) { return (h - H(0)) / 0x100; }
+/* (host/game/game.c's call over this context; in_call while the callee runs, and each method reached any other way, or
+   with another LR than the failed call's, counted in outside; game_try_alloc below stands for the game's own call) */
+static int in_call, outside, direct;
+static uint64_t want_lr, free_lr;
+int game_has(uint64_t fn) { return fn && a64_lookup(fn) != NULL; }
+int game_call_more(Ctx *c, uint64_t fn, uint64_t sp, int nargs, const uint64_t *args, uint64_t *ret, const GameCallMore *more) {
+    const A64Fn f = fn ? a64_lookup(fn) : NULL;
+    if (!f || nargs < 0 || nargs > 8 || (nargs && !args)) return 0;
+    const Ctx saved = *c;
+    if (sp) c->x[31] = sp & ~0xfULL;
+    for (int i = 0; i < nargs; i++) c->x[i] = args[i];
+    if (more && more->set_x8) c->x[8] = more->x8;
+    c->x[30] = more && more->set_lr ? more->lr : 0;
+    in_call++, f(c), in_call--;
+    if (ret) *ret = c->x[0];
+    *c = saved;
+    return 1;
+}
 static void try_alloc(Ctx *c) {   /* tryAlloc(heap, size, align): the block or 0 */
+    if (!direct && (!in_call || (want_lr && c->x[30] != want_lr))) outside++;
     const uint64_t i = heap_index(c->x[0]), size = c->x[1];
     c->x[1] = c->x[2] = c->x[3] = 0xdead;   /* (a callee's scratch registers) */
     c->n = c->z = c->c = c->v = 1;
@@ -96,7 +234,12 @@ static void try_alloc(Ctx *c) {   /* tryAlloc(heap, size, align): the block or 0
     room[i] -= size;
     c->x[0] = next_block, next_block += (size + 15) & ~15ull;
 }
-static void get_free(Ctx *c) { c->x[0] = room[heap_index(c->x[0])]; c->x[5] = 0xdead; }
+static void game_try_alloc(Ctx *c) { direct = 1, try_alloc(c), direct = 0; }   /* (the game's own call of it) */
+static void get_free(Ctx *c) {   /* (its LR: the context's own, as getFreeSize is asked; in free_lr) */
+    if (!in_call) outside++;
+    free_lr = c->x[30];
+    c->x[0] = room[heap_index(c->x[0])]; c->x[5] = 0xdead;
+}
 A64Fn a64_lookup(uint64_t a) { return a == FN_TRY ? try_alloc : a == FN_FREE ? get_free : NULL; }
 void a64_icall(Ctx *c, uint64_t a) { a64_lookup(a)(c); }
 static void make_heap(int i, int parent, uint64_t free_room, const char *name) {
@@ -228,7 +371,7 @@ int main(int argc, char **argv) {
         hold(H(0));
         CHECK(hos_oot_heap_refuse(&c, H(0), HOLDER, OBJECT) && !hos_oot_heap_refuse(&c, H(0), HOLDER, OBJECT));
         const uint64_t named = room[0];
-        c.x[0] = 0;   /* (refused: the patched call made none, the heap it names untouched) */
+        c.x[0] = 0;   /* (refused: the site made no call, the heap it names untouched) */
         hos_oot_heap_retry(&c, H(0), 0x238, 8, 0x8044f670ull, HOLDER);
         CHECK(c.x[0] >= 0x80080000ull && room[0] == named && room[1] == (4 << 20) - 0x238);
         CHECK(strstr(said, "oot: model object, 0x238 bytes from heap") && !strstr(said, "model buffer"));
@@ -276,7 +419,7 @@ int main(int argc, char **argv) {
         CHECK(room[0] < 16 && room[1] == 4 << 20 && strstr(said, "HOS_GPU_ALLOC_TEST_FILL: ") && strstr(said, "is full"));
         for (int r = 0; r < 31; r++) CHECK(c.x[r] == before.x[r]);
         CHECK(c.n == 1 && c.z == 0 && c.c == 1 && c.v == 0);
-        c.x[0] = H(0), c.x[1] = 0x238, c.x[2] = 8, try_alloc(&c);
+        c.x[0] = H(0), c.x[1] = 0x238, c.x[2] = 8, game_try_alloc(&c);
         CHECK(c.x[0] == 0);
         hos_oot_heap_retry(&c, H(0), 0x238, 8, 0x8044f670ull, HOLDER);   /* (the object, and the build's rest) */
         CHECK(c.x[0] >= 0x80080000ull && held() == H(1) && room[1] == (4 << 20) - 0x238);
@@ -289,6 +432,7 @@ int main(int argc, char **argv) {
         CHECK(!hos_oot_heap_refuse(&c, H(4), HOLDER, OBJECT) && room[4] < 16 && strstr(said, "Model/Other"));
         room[3] = 0x900, said[0] = 0, hold(H(3));   /* (n = 2: no third) */
         CHECK(!hos_oot_heap_refuse(&c, H(3), HOLDER, OBJECT) && room[3] == 0x900 && !said[0]);
+        CHECK(!outside);   /* (the heaps emptied through game_call_more) */
         puts("PASS: HOS_GPU_ALLOC_TEST_FILL=2: two heaps emptied through their own tryAlloc, once each, the registers as "
              "they were; the parent a build was handed is left alone");
         return 0;
@@ -333,8 +477,10 @@ int main(int argc, char **argv) {
     for (int r = 1; r < 31; r++) c.x[r] = 0x1000 + r;
     c.n = 1, c.z = 0, c.c = 1, c.v = 0;
     Ctx before = c;
+    want_lr = BUFFER;   /* (tryAlloc asked again with the failed call's return address) */
     hos_oot_heap_retry(&c, H(0), 0x4198, 8, 0x80456910ull, 0);
     CHECK(c.x[0] >= 0x80080000ull && room[2] == (1 << 20) - 0x4198);
+    CHECK(free_lr == before.x[30]);   /* (getFreeSize with the context's own LR) */
     for (int r = 1; r < 31; r++) CHECK(c.x[r] == before.x[r]);
     CHECK(c.n == 1 && c.z == 0 && c.c == 1 && c.v == 0);
     reset(), room[1] = 0x4198 + 0x1000;   /* (a parent without the margin is passed over) */
@@ -347,11 +493,14 @@ int main(int argc, char **argv) {
     CHECK(c.x[0] && room[1] == (1 << 20) - 0x4198);
     reset(), room[1] = 1 << 20;   /* (the second site, the +168 buffer, the same way) */
     c = before;
+    want_lr = 0x80456da4ull;
     hos_oot_heap_retry(&c, H(0), 0x800, 8, 0x80456da4ull, 0);
     CHECK(c.x[0] && room[1] == (1 << 20) - 0x800);
     CHECK(!hos_oot_heap_refuse(&c, H(0), 0, BUFFER));
     CHECK(strstr(said, "model buffer (0x8045690c)") && strstr(said, "model buffer (0x80456da0) 1 blocks"));
     CHECK(!strstr(said, "model object"));
+    CHECK(!outside);   /* (every heap method called through game_call_more, with the failed call's LR where it is told) */
+    want_lr = 0;
     puts("PASS: the model buffer from a full heap: made in its nearest parent with room, x0 alone changed");
 
     /* f_8044f420's object: counted at its own site; a holder naming another heap is left alone. */
@@ -380,7 +529,7 @@ int main(int argc, char **argv) {
     CHECK(!strstr(said, "the GPU's too"));
     CHECK(strstr(said, "the rest of the build takes its memory from heap") && strstr(said, "\"Root\"") &&
           strstr(said, "(1 builds so far)"));
-    c.x[0] = held(), c.x[1] = 0x60, c.x[2] = 8, try_alloc(&c);   /* (the game's next allocation, unchanged code) */
+    c.x[0] = held(), c.x[1] = 0x60, c.x[2] = 8, game_try_alloc(&c);   /* (the game's next allocation, unchanged code) */
     CHECK(c.x[0] && room[2] == (4 << 20) - 0x238 - 0x60 && room[0] == 0);
     /* f_804566e0's last read: x0 the heap and x8 its getFreeSize, loaded through the holder, are its own heap's again */
     c = before, c.x[0] = H(2), c.x[8] = 0xbad;
@@ -443,7 +592,7 @@ int main(int argc, char **argv) {
     hos_oot_heap_rest_own(&c, HOLDER);
     CHECK(c.x[0] == H(0) && c.x[8] == FN_FREE && held() == H(1));
     for (int r = 1; r < 31; r++) CHECK(r == 8 || c.x[r] == before.x[r]);
-    c.x[0] = H(1), c.x[1] = 0x238, c.x[2] = 8, try_alloc(&c);   /* (the build's next allocation, the game's own code) */
+    c.x[0] = H(1), c.x[1] = 0x238, c.x[2] = 8, game_try_alloc(&c);   /* (the build's next allocation, the game's own code) */
     CHECK(c.x[0] && room[0] == 0);
     hos_oot_heap_rest_end(&c, HOLDER);
     CHECK(held() == H(0) && c.x[0] == H(0) && c.x[8] == FN_FREE);
@@ -474,103 +623,67 @@ int main(int argc, char **argv) {
     CHECK(recomp_load64(NULL, 0x10ff130ull + 8) == H(1));
     hos_oot_heap_rest_end(&c, 0x10ff130ull);
     CHECK(recomp_load64(NULL, 0x10ff130ull + 8) == H(0) && c.x[0] == H(0) && c.x[8] == FN_FREE);
+    CHECK(!outside);   /* (the retries' heap methods all through game_call_more) */
     puts("PASS: an object from a parent hands the rest of its build to that parent, and the build's own heap is back "
          "at f_804566e0's last read of it; a holder on a stack below the image too");
     return 0;
 }
 '''
 
-# Synthetic functions contain only patch anchors and invented surrounding statements.
-OBJECT_FUNCTION = """void synthetic_object(Ctx *c) {
-    c->x[9] = 17;
-{ uint64_t _t = c->x[8]; c->x[30] = 0x8044f670ULL; A64_ICALL(c, _t); }
-    c->x[9] = 19;
-}
-"""
-OTHER_FUNCTIONS = """void synthetic_other(Ctx *c) {
-    c->x[10] = 23;
-{ uint64_t _t = c->x[8]; c->x[30] = 0x8044efc8ULL; A64_ICALL(c, _t); }
-{ uint64_t _t = c->x[8]; c->x[30] = 0x8044f074ULL; A64_ICALL(c, _t); }
-{ uint64_t _t = c->x[8]; c->x[30] = 0x80443200ULL; A64_ICALL(c, _t); }
-{ uint64_t _t = c->x[8]; c->x[30] = 0x80443e30ULL; A64_ICALL(c, _t); }
-    c->x[10] = 29;
-}
-"""
-LIFTED = """#include "a64.h"
-void synthetic_build(Ctx *c) {
-{ uint64_t _t = c->x[8]; c->x[30] = 0x80456910ULL; A64_ICALL(c, _t); }
-    c->x[11] = 31;
-{ uint64_t _t = c->x[8]; c->x[30] = 0x8045692cULL; A64_ICALL(c, _t); }
-    c->x[11] = 37;
-{ uint64_t _t = c->x[8]; c->x[30] = 0x80456da4ULL; A64_ICALL(c, _t); }
-c->x[30] = 0x80456f1cULL; f_80522050(c);
-c->x[30] = 0x80457098ULL; f_80522050(c);
-    c->x[12] = 41;
-{ uint64_t _t = c->x[8]; c->x[30] = 0x8045718cULL; A64_ICALL(c, _t); }
-    c->x[12] = 43;
-}
-void synthetic_caller(Ctx *c) {
-c->x[30] = 0x80dfe6a4ULL; f_80522050(c);
-}
-void f_80522050(Ctx *c) { c->x[0] = 47; }
-""" + OBJECT_FUNCTION + OTHER_FUNCTIONS
-
-
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--cc", default="gcc")
+    p.add_argument("--cc", default="clang")
+    p.add_argument("--cargo")
     a = p.parse_args()
+    sitehooks.use(a.cc, a.cargo)
 
-    out, found = oot_patches.patch_heap_retry(LIFTED)
-    assert "hos_oot_heap_retry(c, _hh, _hn, _ha, 0x8044f670ULL, _ho)" in out, \
-        "f_8044f420's tryAlloc of its 0x238-byte object (0x8044f66c) is not tried again: issue 2437's crash"
-    assert found == [2, 2, 5, 2], found
-    assert out.count("hos_oot_gpu_alloc(c, f_80522050)") == 2
-    assert "c->x[30] = 0x80dfe6a4ULL; f_80522050(c);" in out, "another caller of f_80522050 was changed"
-    assert "void f_80522050(Ctx *c) { c->x[0] = 47; }" in out, "f_80522050 itself was changed"
-    # (each place hands the retry the heaps' holder as it reads it itself)
-    for lr, holder in (("0x80456910ULL", "recomp_load64(c, c->x[31] + 56)"), ("0x80456da4ULL", "recomp_load64(c, c->x[31] + 56)"),
-                       ("0x8044f670ULL", "c->x[21]"), ("0x8044efc8ULL", "c->x[22]"), ("0x8044f074ULL", "c->x[22]"),
-                       ("0x80443200ULL", "recomp_load64(c, c->x[31] + 0)"), ("0x80443e30ULL", "recomp_load64(c, c->x[31] + 0)")):
-        assert out.count("_ha = c->x[2], _ho = %s;   /* (nx2/oot_patches.py: host/oot_heap_retry.c) */\n"
-                         "  if (hos_oot_heap_test_enabled && hos_oot_heap_refuse(c, _hh, _ho, %s)) c->x[0] = 0;\n"
-                         "  else { uint64_t _t = c->x[8]; c->x[30] = %s; A64_ICALL(c, _t); }\n"
-                         "  if (!c->x[0]) hos_oot_heap_retry(c, _hh, _hn, _ha, %s, _ho); }\n" % (holder, lr, lr, lr)) == 1, lr
-    assert "    c->x[9] = 17;" in out and "    c->x[10] = 29;" in out
-    # The hooks precede the unchanged call anchors, with synthetic statements on either side.
-    for which, lr, before, after in (("own", 0x8045692c, "    c->x[11] = 31;\n", "    c->x[11] = 37;\n"),
-                                     ("end", 0x8045718c, "    c->x[12] = 41;\n", "    c->x[12] = 43;\n")):
-        assert before + oot_patches.REST_NEW % (which, lr) + after in out
-    assert out.count("hos_oot_heap_rest_own(c, ") == 1 and out.count("hos_oot_heap_rest_end(c, ") == 1
-    assert out.count(oot_patches.GPU_ALLOC_DECL) == 1 and out.count(oot_patches.HEAP_ALLOC_DECL) == 1
-    assert out.count(oot_patches.REST_DECL) == 1
-    assert oot_patches.patch_heap_retry(out) == (out, [2, 2, 5, 2]), "a second run changed the text"
-    other = LIFTED
-    for lr in ("0x80456910", "0x80456da4", "0x80456f1c", "0x80457098", "0x8044f670", "0x8045692c", "0x8045718c", "0x8044efc8",
-               "0x8044f074", "0x80443200", "0x80443e30"):
-        other = other.replace(lr + "ULL", "%#xULL" % (int(lr, 16) + 4))
-    assert oot_patches.patch_heap_retry(other) == (other, [0, 0, 0, 0]), "another version's text was edited"
-    # (the hot list's files: the places f_804566e0 is not in, each with its declarations and no others)
-    for text, n in ((OBJECT_FUNCTION, 1), (OTHER_FUNCTIONS, 4), (OBJECT_FUNCTION + OTHER_FUNCTIONS, 5)):
-        alone, found = oot_patches.patch_heap_retry('#include "a64.h"\n' + text)
-        assert found == [0, 0, n, 0] and alone.count("hos_oot_heap_retry(c, _hh, _hn, _ha, ") == n, found
-        assert alone.count(oot_patches.HEAP_ALLOC_DECL) == 1, "a place alone in a file lacks its declarations"
-        assert oot_patches.GPU_ALLOC_DECL not in alone and oot_patches.REST_DECL not in alone
-        assert oot_patches.patch_heap_retry(alone) == (alone, [0, 0, n, 0])
-    import inspect
-    assert "patch_heap_retry(out) if protect_hearts else" in inspect.getsource(oot_patches.patch_file), \
-        "the edits are made on builds other than the supported one"
-    print("PASS: nx2/oot_patches.py: the eleven places edited once (f_80522050's other callers left), a second run changes "
-          "nothing, other text is left alone, a place alone in a file has its declarations, the supported build only")
+    sites = [site(name, function, "before" if kind in ("own", "end") else "replace", offset)
+             for name, function, _, offset, kind, _ in SITES]
+    functions, hooked_names, patched_names, cpu = [], [], [], []
+    for x, (name, function, base, offset, kind, holder) in zip(sites, SITES):
+        lr = base + offset + 4
+        if kind in ("own", "end"):   # (before the blr: the hook, then the call as the lift writes it)
+            hook = sitehooks.line(x) + "\n" + CPU_CALL % lr
+            old = OLD_REST % (kind, lr)
+        else:
+            call = GPU_CALL if kind == "gpu" else CPU_CALL
+            hook = (sitehooks.line(x, base + offset, 0x80522050 if kind == "gpu" else None, call=True) + "\n"
+                    + (call % lr).rstrip("\n") + "\n" + sitehooks.REPLACE_END)
+            old = OLD_GPU % lr if kind == "gpu" else OLD_CPU % (holder, lr, lr, lr)
+        ident = x.ident
+        functions.append("static void new_%s(Ctx *c) {\n%s\n}\nstatic void old_%s(Ctx *c) {\n%s\n}\n" % (ident, hook, ident, old))
+        hooked_names.append("new_" + ident)
+        patched_names.append("old_" + ident)
+        cpu.append("1" if kind == "cpu" else "0")
+    callbacks = "\n".join(callback(m) for m in ("int hos_site_gpu_alloc(", "static void heap_alloc(", "int hos_site_heap_alloc(",
+                                                "int hos_site_heap_alloc_x21(", "int hos_site_heap_alloc_x22(",
+                                                "int hos_site_heap_alloc_sp0(", "int hos_site_heap_rest_own(",
+                                                "int hos_site_heap_rest_end("))
+    side = (SIDE.replace("@CALLBACKS@", callbacks + "\n" + "".join(slot(x) for x in sites))
+            .replace("@FUNCTIONS@", "".join(functions)).replace("@HOOKED@", ", ".join(hooked_names))
+            .replace("@PATCHED@", ", ".join(patched_names)).replace("@CPU@", ", ".join(cpu)))
+    cc = shutil.which(a.cc)
+    if cc:
+        with tempfile.TemporaryDirectory(prefix="heap-retry-sites-") as tmp:
+            c, exe = Path(tmp) / "side.c", Path(tmp) / "side.exe"
+            c.write_text(side, encoding="utf-8")
+            subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", str(c), *sitehooks.objects(tmp, side), "-o", str(exe)],
+                           check=True)
+            r = subprocess.run([str(exe)], capture_output=True, text=True)
+            if r.returncode:
+                raise SystemExit("FAIL: the sites and the text patch differ:\n" + r.stdout + r.stderr)
+        print("PASS: the eleven places through their sites, as through the text patch: the same calls, arguments, holders and registers")
 
-    cc = shutil.which(a.cc) or shutil.which("gcc") or shutil.which("clang")
+    cc = shutil.which(a.cc)
     if not cc:
         print("SKIP: no C compiler")
         return
     with tempfile.TemporaryDirectory(prefix="heap-retry-") as tmp:
         tmp = Path(tmp)
         (tmp / "hos.h").write_text(HOS_H, encoding="utf-8")
+        (tmp / "game").mkdir()
+        (tmp / "game" / "game.h").write_text(GAME_H, encoding="utf-8")
         (tmp / "fixture.c").write_text(FIXTURE, encoding="utf-8")
         (tmp / "oot_heap_retry.c").write_text((ROOT / "host" / "oot_heap_retry.c").read_text(encoding="utf-8"),
                                               encoding="utf-8")

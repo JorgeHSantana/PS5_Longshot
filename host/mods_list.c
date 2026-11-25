@@ -4,7 +4,7 @@
    objects inside each other), then the list is taken from it (read_top), where the text can no longer end early or be
    malformed and only the list's own rules are left to check. What is not known is copied as it is written (take_raw), so
    writing the list again keeps it byte for byte.
-   nx2/exefs_patches.py (parse_list) takes and refuses the same texts: tests/test_mods_list.py runs both over the same files. */
+   builder/crates/game-files/src/patches.rs (parse_list) takes and refuses the same texts: tests/test_mods_list.py runs both over the same files. */
 #include "mods_list.h"
 #include <stdio.h>
 #include <stdlib.h>

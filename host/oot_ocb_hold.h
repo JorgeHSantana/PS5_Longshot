@@ -1,5 +1,6 @@
 /* (longshot) The neighbouring map the OptimizeChangeBank thread preloads, kept while the game's choice only flickers.
-   nx2/oot_patches.py hooks the place; host/oot_ocb_hold.c holds the state and reads the switch.
+   The hook site preload.choice (host/game/sites.toml, host/oot_sites.c) hooks the place; host/oot_ocb_hold.c holds
+   the state and reads the switch.
 
    OptimizeChangeBancMgr (vtable 0x84bc1a28) preloads one neighbouring map at a time: its layouts, then every actor pack
    and model in them, set up on its own thread (f_8002f7a0). Its per-frame update (f_832b9880) picks that map among up to 16

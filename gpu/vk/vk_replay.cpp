@@ -524,7 +524,7 @@ void fo_collect(const Recording& r, const uint64_t* t);
 int rec_mc_mode[kRecordings];
 int64_t st_gpu_mc_ns[3], st_mc_frames[3];
 bool ab_running() {
-    return host->version >= 34 && host->ab_frame && host->now_ns && host->ab_frame(0, host->now_ns()) >= 0;
+    return host->ab_frame && host->now_ns && host->ab_frame(0, host->now_ns()) >= 0;
 }
 void gpu_time_collect(Recording& r) {
     if (!ts_pool || !ts_pending[r.slot]) return fo_collect(r, nullptr);
@@ -4975,7 +4975,7 @@ void status_tick() {
         // -1 none, 0 or 1, 2 or 3 in a transition; scripts/perf.py ab)
         static int64_t l_at;
         const int64_t at = host->now_ns ? host->now_ns() : 0;
-        const int ab_side = host->version >= 34 && host->ab_frame ? host->ab_frame(l_at, at) : -1;
+        const int ab_side = host->ab_frame ? host->ab_frame(l_at, at) : -1;
         static int64_t l_sp[8];   // (TEST, local: the texture steps' times, vk_texture.cpp step_ns)
         int64_t sp[8];
         texture_step_times(sp);
@@ -5851,7 +5851,7 @@ void do_present(const nvn_tex* t, const int crop[4], uint64_t native_generation 
 bool output_preview_request(uint32_t width, uint32_t height) {
     std::lock_guard settings(menu_mu);
     if (opts.hdr || opts.reflex || opts.dlss || framegen_on()) return false;
-    if (host->version < 41 || !host->output_preview_request || !output_preview_path.load(std::memory_order_acquire)) return false;
+    if (!host->output_preview_request || !output_preview_path.load(std::memory_order_acquire)) return false;
     std::lock_guard lk(output_trial_mu);
     if (output_trial.request.generation || TrialClock::now() < output_preview_queued_until) return false;
     if (!host->output_preview_request(width, height)) return false;
@@ -8249,7 +8249,7 @@ bool replay_start() {
     return true;
 }
 
-/// (longshot) The host's camera jitter (nx2/oot_jitter.py, host/rx_backend.c): the scene's size while a temporal upscaler
+/// (longshot) The host's camera jitter (the hook sites jitter.view*, host/rx_backend.c): the scene's size while a temporal upscaler
 /// draws, NVIDIA DLSS or AMD FSR 4 (vk_temporal.cpp) or AMD FSR 3.1 (vk_fsr3_inputs.cpp), whichever it is (one at a time: the
 /// Upscaler row); 0, no jitter, otherwise
 void jitter_sample(MkwVkJitter* out) {
@@ -8298,7 +8298,7 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HOS_OPT_DISABLE_CAMERA_CENTERING) return opts.disable_camera_centering;
         if (id == HOS_OPT_SPRINT) return opts.sprint;
         if (id == HOS_OPT_SPRINT_TOGGLE)
-            return host && host->version >= 40 && host->binding ? host->binding(HOS_BIND_SPRINT_TOGGLE, 0, 0) : 0;
+            return host && host->binding ? host->binding(HOS_BIND_SPRINT_TOGGLE, 0, 0) : 0;
         if (id == HOS_OPT_TEXT_SIZE) return opts.text_size;
         if (id == HOS_OPT_CAMERA_SPEED) return opts.camera_speed;
         if (id == HOS_OPT_PROMPTS) return opts.prompts;

@@ -7,12 +7,18 @@ workflows:
       - guide-screenshots
       - test-linux:
           requires: [lint]
+      - rust:
+          requires: [lint]
+      - e2e:
+          requires: [lint]
+      - host-windows:
+          requires: [lint]
       - spirv-fixtures:
           requires: [lint]
-      - linux-appimage:
+      - linux-longshot-builder:
           requires: [lint, test-linux, spirv-fixtures]
           filters: pipeline.parameters.linux or pipeline.parameters.full
-      - windows-builder:
+      - windows-longshot-builder:
           requires: [lint]
           filters: pipeline.parameters.windows or pipeline.parameters.full
       - windows-vulkan:
@@ -30,16 +36,23 @@ workflows:
             - lint
             - third-party
             - test-linux
+            - rust
+            - e2e
+            - host-windows
             - spirv-fixtures
-            - linux-appimage
-            - windows-builder
+            - linux-longshot-builder
+            - windows-longshot-builder
             - windows-vulkan
-      - release-linux:
+      - linux-longshot-builder:
+          name: release-linux-longshot-builder
+          release: true
           requires: [release-version]
-      - release-windows:
+      - windows-longshot-builder:
+          name: release-windows-longshot-builder
+          release: true
           requires: [release-version]
       - release-stage:
-          requires: [release-linux, release-windows]
+          requires: [release-linux-longshot-builder, release-windows-longshot-builder]
       - mb/release-sign:
           name: release-sign
           context: release-signing
@@ -60,9 +73,12 @@ workflows:
             - third-party
             - guide-screenshots
             - test-linux
+            - rust
+            - e2e
+            - host-windows
             - spirv-fixtures
-            - linux-appimage
-            - windows-builder
+            - linux-longshot-builder
+            - windows-longshot-builder
             - windows-vulkan
             - website
             - website-deploy

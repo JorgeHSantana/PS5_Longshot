@@ -1,7 +1,7 @@
 /* (longshot) The Insert menu's Text size: the text of dialogue, Navi and signs drawn larger.
 
-   nx2/oot_patches.py calls hos_oot_text_pane from f_80b1e140, the step of a LetterAnimControl (the text panes with
-   "LetterAnimOn"), with that control. The control's +0x28 is the game's pane wrapper: its +8 is the Layout2 text box pane,
+   The hook site text.letterStep's callback (host/oot_text_step.c) calls hos_oot_text_pane from f_80b1e140, the step of a
+   LetterAnimControl (the text panes with "LetterAnimOn"), with that control. The control's +0x28 is the game's pane wrapper: its +8 is the Layout2 text box pane,
    and its +0x28 and +0x38 are the diagonal of the text's 2D scale (0.8 each for dialogue). Each of the two keeps the
    game's own value, taken again whenever the game has written it since, and gets that value times the menu's scale. At
    Original a field never scaled is left alone, and one scaled before gets the game's value back.

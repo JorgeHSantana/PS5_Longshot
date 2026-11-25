@@ -260,7 +260,7 @@ def documented_example_checks(exe, tmp):
 
 
 def build_fixture(cc, tmp, host):
-    """mods.c, prompts.c, texts.c, zs.c and restbl.c as they are (from host), over host/posix's file calls, into one program
+    """mods.c, prompts.c, prompts_base.c, texts.c, zs.c and restbl.c as they are (from host), over host/posix's file calls, into one program
     (tmp/fixture) that opens each RomFS path it is given as the game would: `open <path>: <file served>`, or (the game's).
     tests/test_prompts_size_table.py builds it too"""
     posix = (ROOT / "host/posix/win32_posix.c").read_text(encoding="utf-8")
@@ -309,6 +309,8 @@ void hos_sdl_pad_first(char *out, size_t cap, int *type, int *sdl) { if (cap) *o
 int hos_regions(uint64_t (*out)[2], int cap) { (void)out; (void)cap; return 0; }
 int64_t hos_now_ns(void) { return 0; }
 const char *hos_romfs_dir;   /* (TEST_ROMFS: the game's table, the base mods.c merges the mods' into) */
+#include "romfs_index.h"
+HosRomfsIndex *hos_romfs_index;   /* (none: host/romfs.c reads the folder) */
 int rx_option(int id, int otherwise) { (void)id; return otherwise; }
 const char *hos_options_file(void) {   /* (host/options_path.c: beside the game, as for a game started without --user) */
     static char p[4096];
@@ -337,7 +339,7 @@ int main(int argc, char **argv) {
                     "-I", str(ROOT / "host"), "-I", str(ROOT / "host/posix"), "-I", str(ZSTD),
                     "-include", str(ROOT / "gpu/vk/compat/longshot_env.h"),   # (texts.c is a copy: its own path to it is gone)
                     str(src / "mods.c"),
-                    str(src / "mods_list.c"), str(src / "prompts.c"), str(src / "texts.c"), str(src / "zs.c"), str(ROOT / "host/restbl.c"), str(tmp / "posix.c"), str(tmp / "main.c"),
+                    str(src / "mods_list.c"), str(src / "prompts.c"), str(src / "texts.c"), str(src / "zs.c"), str(ROOT / "host/restbl.c"), str(ROOT / "host/prompts_base.c"), str(ROOT / "host/romfs.c"), str(ROOT / "host/romfs_index.c"), str(tmp / "posix.c"), str(tmp / "main.c"),
                     *(str(ZSTD / f) for f in ZSTD_SOURCES), "-o", str(exe)], check=True)
     return exe
 
@@ -443,7 +445,7 @@ def routing_checks(cc, tmp, zstandard, host):
         top = tmp / name
         game = top / "game"
         (game / "texts").mkdir(parents=True)
-        (game / "texts" / text[5:].lower()).write_bytes(b"ours")   # (nx2/text_assets.py names its files in lower case)
+        (game / "texts" / text[5:].lower()).write_bytes(b"ours")   # (the builder names its files in lower case: build-assets texts.rs)
         (top / "mods").mkdir()
         if mod:
             (top / "mods/seed/romfs" / text).parent.mkdir(parents=True)

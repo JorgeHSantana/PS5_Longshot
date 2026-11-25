@@ -141,6 +141,17 @@ class Scenes(unittest.TestCase):
         with open(os.path.join(menu, "upscaler.cpp"), encoding="utf-8") as f:
             self.assertIn('.key = "resolution"', f.read())
 
+    def test_title_skipped_by_the_game_waits(self):
+        # (the bench's skip_title_screen=1 is the row's own key, and the row goes through host/oot_autoload.c's one entry,
+        # which presses as the game waits on the title, its list and its check where the build has the sites)
+        self.assertEqual(ab.SKIP_TITLE, ("skip_title_screen", 1))
+        with open(os.path.join(ROOT, "host", "oot_autoload.c"), encoding="utf-8") as f:
+            autoload = f.read()
+        self.assertIn("hooked = hos_oot_button_wait_sites();", autoload)
+        self.assertIn('"Title_00", "SystemLoadList_00", "SystemSaveLoad_00"', autoload)
+        with open(ab.__file__, encoding="utf-8") as f:
+            self.assertIn("menu.buttonWait", f.read())
+
 
 class Trace(unittest.TestCase):
     def write(self, lines, cut=False):
@@ -454,7 +465,7 @@ class CommandPath(unittest.TestCase):
                     raise AssertionError("live log read")
                 return real_open(path, *args, **kwargs)
             with mock.patch.object(longshot_bridge, "start_session", return_value=session), mock.patch.object(drive, "Game", return_value=game), \
-                 mock.patch.object(ab.packs, "runtime_romfs", return_value=None), mock.patch.object(ab.time, "sleep"), \
+                 mock.patch.object(ab.time, "sleep"), \
                  mock.patch.object(ab, "read_trace", side_effect=[[rows[0]], [rows[0]], rows]), mock.patch.object(ab, "settled", return_value=True), \
                  mock.patch.object(ab.shutil, "copyfile") as copy, mock.patch("builtins.open", side_effect=guarded_open):
                 copy.side_effect = lambda src, dst: None if src.endswith(ab.TRACE) else real_copyfile(src, dst)

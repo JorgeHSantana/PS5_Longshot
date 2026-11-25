@@ -1,8 +1,8 @@
 /* The mouse in the game's own menus: the title and its lists, the pause menu, the panel of
    Key Items, Threads of Time and the Map, the options, the save files' dialogs. The mouse frees itself over them
    (display.c), points at their buttons (the focus as the pad moves it), clicks them (A), backs out (the right button:
-   B) and scrolls their lists. nx2/oot_patches.py has two of the game's functions call here first (the supported build
-   only):
+   B) and scrolls their lists. two of the game's functions call here first: their entries are the hook sites menu.focus and menu.update
+   (host/game/sites.toml, the supported build's):
    - f_802ed660 (in the pause menu's vtable at 0x84c0bc18), the pause menu's handler of a pane getting the focus: it
      matches the pane's name against the pages (PaItemMenu_00, PaEquipmentMenu_00, PaCollectMenu_00, PaSystemMenu_00)
      and hands the pane to the page (f_802ebd20 on the Items page: the info panel). The pause menu's page, for its tabs.
@@ -13,6 +13,7 @@
    and hands it to the focus manager (*(screen+32)+96, its vtable +48), when the manager takes the player's input.
    HOS_MENU_TRACE=1: the focus changes, the screens and what the mouse does logged. */
 #include "hos.h"
+#include "game/game.h"   /* (game_call: the game's focus setter, Key Items' refresh, the item panes' lookups) */
 
 /* Screen updates are the game's menu signal. Consume it at Link's update so the first update after the screens stop
    releases the sprint even when Link remains stationary. The panel frame runs on all three panel pages and in pause. */
@@ -23,8 +24,8 @@ int hos_oot_menu_sprint_active(void) {
 static void sprint_menu_tick(uint64_t screen) {
     if (!screen || !hos_mem_region(screen, 8)) return;
     const uint64_t vt = G64(screen);
-    if (vt == g_module_base + 0x84c0baa8ULL || vt == g_module_base + 0x84c08aa0ULL ||
-        vt == g_module_base + 0x84c07798ULL || vt == g_module_base + 0x84c04a18ULL)
+    if (vt == 0x84c0baa8ULL || vt == 0x84c08aa0ULL ||
+        vt == 0x84c07798ULL || vt == 0x84c04a18ULL)
         __atomic_store_n(&sprint_menu_seen, 1, __ATOMIC_RELAXED);
 }
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
@@ -95,30 +96,18 @@ static int each_entry(uint64_t screen, int max, void (*fn)(int i, uint64_t entry
 
 /* the game's focus setter on a button (on the game's thread, at a screen's update) */
 static int set_focus(Ctx *c, uint64_t screen, uint64_t button) {
-    A64Fn fn = a64_lookup(0x8088ffc0ULL);
-    if (!fn) return -1;
-    const Ctx saved = *c;
-    c->x[0] = screen, c->x[1] = button, c->x[2] = 0;
-    c->x[30] = 0;
-    fn(c);
-    const int r = (int)(c->x[0] & 1);
-    *c = saved;
+    uint64_t x0 = 0;
+    if (!game_call(c, 0x8088ffc0ULL, 0, 3, (const uint64_t[]){screen, button, 0}, &x0)) return -1;
+    const int r = (int)(x0 & 1);
     hos_input_movie_menu(1, screen, button, NULL);   /* (HOS_INPUT_RECORD: the mouse's focus change, given again in a replay) */
     return r;
 }
 
 /* A call of a guest function from the host, on the game's thread (x0, x1 in; x0 out, s0 and s1 too: a position) */
 static uint64_t guest_call(Ctx *c, uint64_t fn_addr, uint64_t a0, uint64_t a1, float *s0, float *s1) {
-    A64Fn fn = a64_lookup(fn_addr);
-    if (!fn) return 0;
-    const Ctx saved = *c;
-    c->x[0] = a0, c->x[1] = a1, c->x[30] = 0;
-    fn(c);
-    const uint64_t r = c->x[0];
-    if (s0) memcpy(s0, &c->vreg[0][0], 4);
-    if (s1) memcpy(s1, &c->vreg[1][0], 4);
-    *c = saved;
-    return r;
+    uint64_t r = 0;
+    const GameCallMore more = {.s0 = s0, .s1 = s1};
+    return game_call_more(c, fn_addr, 0, 2, (const uint64_t[]){a0, a1}, &r, &more) ? r : 0;
 }
 
 /* Key Items' items where the page shows them, as the page finds them to place its cursor (f_833fdaa0): the item
@@ -164,14 +153,10 @@ static int set_item_key(Ctx *c, uint64_t screen, const char *key) {
     peek(screen + 768, &room, 4);
     peek(screen + 840, &mode, 4);
     const size_t n = strlen(key);
-    A64Fn fn = a64_lookup(0x833fda00ULL);
     void *to = buf ? hos_guest_range(buf, n + 1) : NULL;   /* (longshot: buf + n + 1 wrapped for a buf near 2^64) */
-    if (!fn || !to || room <= (int32_t)n || mode != 0) return 0;
+    if (!game_has(0x833fda00ULL) || !to || room <= (int32_t)n || mode != 0) return 0;
     memcpy(to, key, n + 1);
-    const Ctx saved = *c;
-    c->x[0] = screen, c->x[1] = screen + 760, c->x[30] = 0;
-    fn(c);
-    *c = saved;
+    game_call(c, 0x833fda00ULL, 0, 2, (const uint64_t[]){screen, screen + 760}, NULL);
     hos_input_movie_menu(2, screen, 0, key);   /* (HOS_INPUT_RECORD: the mouse's item choice) */
     return 1;
 }

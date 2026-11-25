@@ -46,7 +46,7 @@ Vibration strength (`rumble_strength=`, 25 to 200 %) applies to every backend. R
 ([`host/rumble_renhdrum.c`](../../../host/rumble_renhdrum.c), source in
 [`third_party/renhdrum`](../../../third_party/renhdrum)) is loaded by full path from beside the game (`renhdrum.dll`,
 `renhdrum.so` on Linux); without it, every pad keeps its motors or its own HD rumble. `python -I scripts/renhdrum.py
-build` makes it; `nx2/build.py` copies it beside the game from `third_party/renhdrum/`.
+build` makes it; the build copies it beside the game from `third_party/renhdrum/`.
 
 ## Sticks
 

@@ -3,7 +3,8 @@
    Frame rate cap above 60, the cloth's time below 60 fps and its solves above 60: the lifted f_80435300, f_83373400,
    f_838ceb80, f_838cfc10, f_82c59eb0, f_80159dc0, f_8015d490, f_838baa40, f_81b3aa48, f_81b47080, f_832b2af0, f_832b2dc0,
    f_804f5030 and f_80b97d10 call these
-   (nx2/oot_patches.py; host/hos_main.c gives Link's body);
+   (hook sites, host/game/sites.toml through host/oot_sites.c; host/hos_main.c gives Link's
+   body);
    host/oot_high_fps.h has why and the logic.
    HOS_FPS_LOG (on, by the switches' rule: =0 is off): what they do, every 600 calls. */
 #include "hos.h"

@@ -107,6 +107,7 @@ static void *hos_guest_range(uint64_t a, uint64_t n) {
     if (allow_large_range) return heap;   /* range-validation-only boundary fixture; never copied */
     return NULL;
 }
+#define HOS_WRITTEN(p, n) ((void)0)   /* (host/hos.h's mark, for host/game/flags.c: nothing reads the marks here) */
 static void scan_probe(void);
 static unsigned scan_log_count;
 static char scan_log[256];
@@ -159,17 +160,17 @@ static uint64_t text(const char *s) {
     memcpy(hos_guest_range(a, 64), s, strlen(s) + 1);
     return a;
 }
-static uint32_t H(const char *s) { return state_murmur(s, strlen(s)); }
+static uint32_t H(const char *s) { return game_flag_hash(s, strlen(s)); }
 /* Entries and linear-probed {hash, entry} slots. Twice the table storage permits an in-place resize. */
 static void container(uint64_t mgr, int kind, uint32_t size) {
-    const uint64_t b = mgr + state_kind[kind].at;
-    w64(b + 16, alloc((uint64_t)state_kind[kind].stride * size));
+    const uint64_t b = mgr + game_flag_layout[kind].at;
+    w64(b + 16, alloc((uint64_t)game_flag_layout[kind].stride * size));
     w64(b + 24, alloc(16ull * size));
     w32(b + 36, size);
     w32(b + 8, 0);
 }
 static uint64_t flag(uint64_t mgr, int kind, uint32_t hash) {
-    const uint64_t b = mgr + state_kind[kind].at, table = r64(b + 24);
+    const uint64_t b = mgr + game_flag_layout[kind].at, table = r64(b + 24);
     const uint32_t size = r32(b + 36), count = r32(b + 8);
     CHECK(hash && count < size);
     uint32_t slot = hash % size;
@@ -177,28 +178,28 @@ static uint64_t flag(uint64_t mgr, int kind, uint32_t hash) {
     w32(table + slot * 8ull, hash);
     w32(table + slot * 8ull + 4, count);
     w32(b + 8, count + 1);
-    return r64(b + 16) + (uint64_t)count * state_kind[kind].stride + state_kind[kind].value;
+    return r64(b + 16) + (uint64_t)count * game_flag_layout[kind].stride + game_flag_layout[kind].value;
 }
 static void table_caps(void) {
     const uint64_t mgr = alloc(0x800);
-    container(mgr, KIND_UINT, 16);
-    const uint64_t value = flag(mgr, KIND_UINT, 1), box = mgr + state_kind[KIND_UINT].at;
+    container(mgr, GAME_FLAG_UINT, 16);
+    const uint64_t value = flag(mgr, GAME_FLAG_UINT, 1), box = mgr + game_flag_layout[GAME_FLAG_UINT].at;
     w32(value, 42);
     w32(box + 36, 1u << 22);
-    CHECK(state_entry(mgr, KIND_UINT, 1) == value - state_kind[KIND_UINT].value);
+    CHECK(game_flag_entry(mgr, GAME_FLAG_UINT, 1) == value - game_flag_layout[GAME_FLAG_UINT].value);
     w32(box + 36, (1u << 22) + 1);
-    CHECK(state_entry(mgr, KIND_UINT, 1) == 0);
-    StateTable h;
+    CHECK(game_flag_entry(mgr, GAME_FLAG_UINT, 1) == 0);
+    GameFlagTable h;
     allow_large_range = 1;
-    CHECK(!state_table(mgr, KIND_UINT, &h));
+    CHECK(!game_flag_table(mgr, GAME_FLAG_UINT, &h));
     w32(box + 36, 1u << 22);
-    CHECK(state_table(mgr, KIND_UINT, &h));
+    CHECK(game_flag_table(mgr, GAME_FLAG_UINT, &h));
     allow_large_range = 0;
     /* A size within the cap still needs mapped table/entry ranges before any allocation. */
     w32(box + 36, 1u << 22);
-    CHECK(!state_table(mgr, KIND_UINT, &h));
+    CHECK(!game_flag_table(mgr, GAME_FLAG_UINT, &h));
     w32(box + 36, 16);
-    CHECK(state_table(mgr, KIND_UINT, &h) && h.size == 16);
+    CHECK(game_flag_table(mgr, GAME_FLAG_UINT, &h) && h.size == 16);
 }
 
 static uint64_t mgr, holder, events, eholder, view, actor, map_value, map_text, prompt, music;
@@ -244,29 +245,29 @@ static HosControlGame game = {
 };
 static void setup(void) {
     mgr = alloc(0x800), holder = alloc(16);
-    w64(STATE_GAMEDATA_SLOT, holder), w64(holder, mgr);
-    for (int k = 0; k < KINDS; k++) container(mgr, k, k == KIND_TEXT || k == KIND_INT ? 128 : 16);
-    map_value = flag(mgr, KIND_TEXT, STATE_MAP), map_text = text("KokiriForest_Child");
+    w64(GAME_FLAGS_SLOT, holder), w64(holder, mgr);
+    for (int k = 0; k < GAME_FLAG_KINDS; k++) container(mgr, k, k == GAME_FLAG_TEXT || k == GAME_FLAG_INT ? 128 : 16);
+    map_value = flag(mgr, GAME_FLAG_TEXT, STATE_MAP), map_text = text("KokiriForest_Child");
     w64(map_value, map_text);
-    prompt = flag(mgr, KIND_TEXT, STATE_PROMPT), music = flag(mgr, KIND_TEXT, STATE_MUSIC);
+    prompt = flag(mgr, GAME_FLAG_TEXT, STATE_PROMPT), music = flag(mgr, GAME_FLAG_TEXT, STATE_MUSIC);
     w64(prompt, text("Open")), w64(music, text("BGM_\"House\"\x01"));
-    loading = flag(mgr, KIND_BOOL, STATE_LOADING), child = flag(mgr, KIND_BOOL, STATE_CHILD);
+    loading = flag(mgr, GAME_FLAG_BOOL, STATE_LOADING), child = flag(mgr, GAME_FLAG_BOOL, STATE_CHILD);
     w8(loading, 0), w8(child, 1);
-    test_flag = flag(mgr, KIND_BOOL, H("Test.Flag"));
+    test_flag = flag(mgr, GAME_FLAG_BOOL, H("Test.Flag"));
     w8(test_flag, 1);
     /* The second hash collides with the first at slot zero of the 16-slot bool table. */
-    w8(flag(mgr, KIND_BOOL, 0x00000100u), 0);
-    w8(flag(mgr, KIND_BOOL, 0x00000110u), 1);
-    resize_guard = flag(mgr, KIND_INT, 0x60000070u);   /* slot 112 before and after the 128 -> 256 resize */
-    w32(flag(mgr, KIND_INT, STATE_LIFE), 12), w32(flag(mgr, KIND_INT, STATE_MAX_LIFE), 12);
-    rupees = flag(mgr, KIND_INT, STATE_RUPEES);
+    w8(flag(mgr, GAME_FLAG_BOOL, 0x00000100u), 0);
+    w8(flag(mgr, GAME_FLAG_BOOL, 0x00000110u), 1);
+    resize_guard = flag(mgr, GAME_FLAG_INT, 0x60000070u);   /* slot 112 before and after the 128 -> 256 resize */
+    w32(flag(mgr, GAME_FLAG_INT, STATE_LIFE), 12), w32(flag(mgr, GAME_FLAG_INT, STATE_MAX_LIFE), 12);
+    rupees = flag(mgr, GAME_FLAG_INT, STATE_RUPEES);
     w32(rupees, 5);
-    w32(flag(mgr, KIND_INT, H("Test.Negative")), (uint32_t)-3);
-    rotation = flag(mgr, KIND_FLOAT, STATE_ROT);
+    w32(flag(mgr, GAME_FLAG_INT, H("Test.Negative")), (uint32_t)-3);
+    rotation = flag(mgr, GAME_FLAG_FLOAT, STATE_ROT);
     wf(rotation, -71.43f);
-    w32(flag(mgr, KIND_ENUM, H("Step.Test")), 0xdeadbeefu);
-    w32(flag(mgr, KIND_UINT, H("Test.Unsigned")), 3000000000u);
-    for (int i = 0; i < 40; i++) bursts[i] = flag(mgr, KIND_INT, 0x60000000u + (unsigned)i);
+    w32(flag(mgr, GAME_FLAG_ENUM, H("Step.Test")), 0xdeadbeefu);
+    w32(flag(mgr, GAME_FLAG_UINT, H("Test.Unsigned")), 3000000000u);
+    for (int i = 0; i < 40; i++) bursts[i] = flag(mgr, GAME_FLAG_INT, 0x60000000u + (unsigned)i);
     char escaped[64];
     memset(escaped, 0x80, 63), escaped[0] = 1, escaped[63] = 0;
     escaped_text = text(escaped);
@@ -274,7 +275,7 @@ static void setup(void) {
         char name[48];
         snprintf(name, sizeof name, "Test.Escaped.%034u", (unsigned)i);
         CHECK(strlen(name) == 47);
-        w64(flag(mgr, KIND_TEXT, H(name)), escaped_text);
+        w64(flag(mgr, GAME_FLAG_TEXT, H(name)), escaped_text);
     }
     events = alloc(128), eholder = alloc(16);
     w64(STATE_EVENTMGR_SLOT, eholder), w64(eholder, events), w64(events + 104, 1);
@@ -288,7 +289,7 @@ static void setup(void) {
     wf(actor + STATE_LINK_POS, -20.1f), wf(actor + STATE_LINK_POS + 4, 0.0f), wf(actor + STATE_LINK_POS + 8, 6.8f);
 }
 static void resize_int_table(void) {
-    const uint64_t box = mgr + state_kind[KIND_INT].at, table = r64(box + 24);
+    const uint64_t box = mgr + game_flag_layout[GAME_FLAG_INT].at, table = r64(box + 24);
     uint32_t pairs[128][2];
     CHECK(r32(box + 36) == 128);
     /* Other flags may rehash to different slots, which by itself suppresses their changes even if the resize
@@ -368,7 +369,7 @@ static void shared_scan_cases(void) {
         state_scan(large, &discard);
         CHECK(scan_log_count == 1);
     }
-    const uint64_t size_at = large + state_kind[KIND_BOOL].at + 36;
+    const uint64_t size_at = large + game_flag_layout[GAME_FLAG_BOOL].at + 36;
     w32(size_at, size - 1);
     for (int i = 0; i < 6; i++) {
         StateChanges discard = {0};
@@ -384,7 +385,7 @@ static void shared_scan_cases(void) {
     CHECK(scan_log_count == 3);
     /* A mid-slice size change discards the diff; the next pass resets its baseline. */
     w8(values[0], 1);
-    tear_at = 1000, tear_target = large + state_kind[KIND_BOOL].at + 36, tear_value = size - 1;
+    tear_at = 1000, tear_target = large + game_flag_layout[GAME_FLAG_BOOL].at + 36, tear_value = size - 1;
     scan_visits = 0;
     StateChanges changes = {0};
     state_scan(large, &changes);
@@ -397,7 +398,7 @@ static void shared_scan_cases(void) {
     /* A torn {hash,index} pair is rejected too, not read from an unrelated entry. */
     state_scan_kind = 0;
     scan_visits = 0;
-    const uint64_t table = r64(large + state_kind[KIND_BOOL].at + 24);
+    const uint64_t table = r64(large + game_flag_layout[GAME_FLAG_BOOL].at + 24);
     tear_at = 0x101, tear_target = table + 0x100 * 8 + 4, tear_value = UINT32_MAX;
     changes = (StateChanges){0};
     state_scan(large, &changes);
@@ -446,7 +447,7 @@ int main(int argc, char **argv) {
             measuring_tap = 0;
             if (tap_formats != formats) tap_captures++;
             char map[64];
-            if (state_text(state_u64(state_u64(STATE_GAMEDATA_SLOT)), STATE_MAP, map)) {
+            if (game_flag_text(game_flags_mgr(), STATE_MAP, map, sizeof map)) {
                 AcquireSRWLockExclusive(&map_lock);
                 memcpy(last_map, map, sizeof map);
                 ReleaseSRWLockExclusive(&map_lock);
@@ -465,9 +466,9 @@ int main(int argc, char **argv) {
         } else if (!strcmp(command, "unreadable\n")) {
             w64(view, 0), w64(map_value, 0x7000000000ull), w64(events + 104, 0);
         } else if (!strcmp(command, "no_mgr\n")) {
-            w64(STATE_GAMEDATA_SLOT, 0);
+            w64(GAME_FLAGS_SLOT, 0);
         } else if (!strcmp(command, "restore\n")) {
-            w64(STATE_GAMEDATA_SLOT, holder), w64(STATE_EVENTMGR_SLOT, eholder), w64(eholder, events);
+            w64(GAME_FLAGS_SLOT, holder), w64(STATE_EVENTMGR_SLOT, eholder), w64(eholder, events);
             w64(view, STATE_VIEW_VTABLE), w64(map_value, map_text), w64(events + 104, 1);
             wf(actor + STATE_LINK_POS, -20.1f), wf(rotation, -71.43f);
         } else if (!strcmp(command, "adult\n")) {
@@ -475,7 +476,7 @@ int main(int argc, char **argv) {
         } else if (!strcmp(command, "nulls\n")) {
             wf(actor + STATE_LINK_POS, NAN), wf(rotation, INFINITY), w64(eholder, 0x7000000000ull);
         } else if (!strcmp(command, "move\n")) {
-            const uint64_t box = mgr + state_kind[KIND_INT].at, old = r64(box + 24);
+            const uint64_t box = mgr + game_flag_layout[GAME_FLAG_INT].at, old = r64(box + 24);
             const uint32_t size = r32(box + 36);
             const uint64_t replacement = alloc(16ull * size);
             memcpy(hos_guest_range(replacement, 8ull * size), hos_guest_range(old, 8ull * size), 8ull * size);
@@ -542,7 +543,8 @@ def block(text, head):
 
 def wiring(root, tap, mutation):
     main_c = (root / "host" / "hos_main.c").read_text(encoding="utf-8")
-    patches = (root / "nx2" / "oot_patches.py").read_text(encoding="utf-8")
+    sites = (root / "host" / "oot_sites.c").read_text(encoding="utf-8")
+    table = (root / "host" / "game" / "sites.toml").read_text(encoding="utf-8")   # (the sites' definitions)
     control = (root / "host" / "control.c").read_text(encoding="utf-8")
     docs = (root / "docs" / "dev" / "developing.md").read_text(encoding="utf-8")
     protocol = (root / "docs" / "dev" / "reference" / "control-bridge.md").read_text(encoding="utf-8")
@@ -552,7 +554,8 @@ def wiring(root, tap, mutation):
     took, call, gave = (lift.find("TryAcquireSRWLockExclusive(&cheats_lock)"), lift.find("hos_oot_state_tap(actor);"),
                         lift.find("ReleaseSRWLockExclusive(&cheats_lock)"))
     check(0 <= took < call < gave, "hos_oot_lift_player does not call hos_oot_state_tap under its lock")
-    check("hos_oot_lift_player(c, c->x[19]);" in patches, "Link's update does not call hos_oot_lift_player")
+    check("hos_oot_lift_player(c, c->x[19]);" in sites and 'name = "player.update"' in table,
+          "Link's update (the hook site player.update) does not call hos_oot_lift_player")
     check("void hos_oot_state_tap(uint64_t actor) {" in tap, "the tap's hook has another signature")
     check("HOS_CONTROL_MEM" in protocol and "GameDataMgr" in protocol, "flag access boundary is not documented")
     for name in ("oot_sample_ask", "oot_sample_cancel", "oot_sample", "oot_watch", "oot_poll"):
@@ -562,8 +565,9 @@ def wiring(root, tap, mutation):
         check("`%s`" % name in protocol or '"%s"' % name in protocol, "control protocol does not describe " + name)
 
     defs = dict(re.findall(r"#define (STATE_\w+) (0x[0-9a-fA-F]+)", tap))
-    check(re.search(r"#define OOT_GAMEDATA_SLOT %sULL\b" % defs["STATE_GAMEDATA_SLOT"], main_c) is not None,
-          "GameDataMgr's slot differs from hos_main.c's")
+    flags_h = (root / "host" / "game" / "flags.h").read_text(encoding="utf-8")
+    check(re.search(r"#define GAME_FLAGS_SLOT 0x84c9e180ULL\b", flags_h) is not None, "GameDataMgr's slot is not the flags service's")
+    check("0x84c9e180" not in tap and "0x84c9e180" not in main_c, "a copy of GameDataMgr's slot outside host/game/")
     check(re.search(r"#define OOT_EVENTMGR_SLOT %sULL\b" % defs["STATE_EVENTMGR_SLOT"], main_c) is not None,
           "EventMgr's slot differs from hos_main.c's")
     check("recomp_load64(c, %sULL)" % defs["STATE_CAMERAS_SLOT"] in block(main_c, "static uint64_t oot_gameplay_view("),
@@ -592,7 +596,7 @@ MUTATIONS = tuple("drop-" + field for field in CORE_FIELDS) + (
     "status-types", "utf8", "scan-log", "scan-log-repeat", "scan-log-size", "scan-log-round")
 
 
-def mutate_sources(tap, control, mode):
+def mutate_sources(tap, flags, control, mode):
     """Explicit source mutations, required to match; an unmatched target is not a behavioral negative result."""
     def once(source, old, new):
         check(source.count(old) == 1, "MUTATION TARGET MISMATCH (%s): %r" % (mode, old))
@@ -616,19 +620,19 @@ def mutate_sources(tap, control, mode):
     elif mode == "independent":
         tap = once(tap, "state_put_changes(s, &work[slot].changes)", "state_put_changes(s, &work[0].changes)")
     elif mode == "null-range":
-        tap = within(tap, "static int state_peek(", "if (!p) return 0;", "if (!p) { memset(dst, 0, n); return 1; }")
+        flags = within(flags, "static int flag_peek(", "if (!p) return 0;", "if (!p) { memset(dst, 0, n); return 1; }")
     elif mode == "nonfinite":
         tap = once(tap, "isfinite(p[0]) && isfinite(p[1]) && isfinite(p[2])", "1")
     elif mode == "lookup-cap":
-        tap = within(tap, "static uint64_t state_entry(", "size > (1u << 22)", "0")
+        flags = within(flags, "uint64_t game_flag_entry(", "size > FLAG_TABLE_MAX", "0")
     elif mode == "changes-cap":
-        tap = within(tap, "static int state_table(", "h->size <= (1u << 22)", "1")
+        flags = within(flags, "int game_flag_table(", "h->size <= FLAG_TABLE_MAX", "1")
     elif mode == "hash":
-        tap = within(tap, "static uint32_t state_murmur(", "return h;", "return h ^ 1u;")
+        flags = within(flags, "uint32_t game_flag_hash(", "return h;", "return h ^ 1u;")
     elif mode == "watch-hash":
-        tap = once(tap, "(uint32_t)strtoul(name + 2, NULL, 16)", "state_murmur(name, strlen(name))")
+        tap = once(tap, "(uint32_t)strtoul(name + 2, NULL, 16)", "game_flag_hash(name, strlen(name))")
     elif mode == "collision":
-        tap = within(tap, "static uint64_t state_entry(", "probe < size", "probe < 1")
+        flags = within(flags, "uint64_t game_flag_entry(", "probe < size", "probe < 1")
     elif mode == "changes":
         tap = within(tap, "static int state_scan(", "seen->slot[slot].value != v", "0 && seen->slot[slot].value != v")
     elif mode == "changes-limit":
@@ -636,8 +640,8 @@ def mutate_sources(tap, control, mode):
     elif mode == "changes-more":
         tap = within(tap, "static void state_change(", "to->more++;", "to->more += 0;")
     elif mode == "overflow-baseline":
-        tap = within(tap, "static int state_scan(", "seen->slot[slot] = (struct StatePair){pair[0], v};",
-                     "if (!seen->changes.more) seen->slot[slot] = (struct StatePair){pair[0], v};")
+        tap = within(tap, "static int state_scan(", "seen->slot[slot] = (struct StatePair){key, v};",
+                     "if (!seen->changes.more) seen->slot[slot] = (struct StatePair){key, v};")
     elif mode == "moved-table":
         tap = within(tap, "static int state_same_table(", "a->table == b->table && ", "")
     elif mode == "resized-table":
@@ -698,7 +702,7 @@ def mutate_sources(tap, control, mode):
                    "AcquireSRWLockExclusive(&state_lock);\n    const int scanning = scan ? state_scan(mgr, &changes) : 0;\n"
                    "    ReleaseSRWLockExclusive(&state_lock);")
     elif mode == "scan-recheck":
-        tap = once(tap, "if (!state_table(mgr, kind, &after) || !state_same_table(&h, &after)) goto invalid;",
+        tap = once(tap, "if (!game_flag_table(mgr, kind, &after) || !state_same_table(&h, &after)) goto invalid;",
                    "/* mutation: no post-slice header check */")
     elif mode == "scan-allocation":
         tap = once(tap, "if (!state_same_table(&seen->table, &h)) {",
@@ -713,7 +717,7 @@ def mutate_sources(tap, control, mode):
     elif mode == "utf8":
         tap = once(tap, 'else { state_put(l, "%.*s", n + 1, s - 1); s += n; }',
                    'else { state_put(l, "\\\\u%04x", ch); }')
-    return tap, control
+    return tap, flags, control
 
 
 class Fixture:
@@ -1197,16 +1201,20 @@ def main():
     args = parser.parse_args()
     root = args.source_root.resolve()
     tap = (root / "host" / "oot_state_tap.c").read_text(encoding="utf-8")
+    flags = (root / "host" / "game" / "flags.c").read_text(encoding="utf-8")
     if args.mutate == "hook":
         print("MUTATION: hook (expected source-wiring failure, not a compiled negative)", flush=True)
     wiring(root, tap, args.mutate)
     control = (root / "host" / "control.c").read_text(encoding="utf-8")
     if args.mutate:
-        tap, control = mutate_sources(tap, control, args.mutate)
+        tap, flags, control = mutate_sources(tap, flags, control, args.mutate)
         print("MUTATION: %s (temporary production source; expected behavioral failure)" % args.mutate, flush=True)
     # Substitute platform declarations and count scan entry/slots; production decisions stay unchanged.
     body = "".join(line for line in tap.splitlines(keepends=True)
                    if not line.startswith('#include "hos.h"') and not line.startswith("#include <windows.h>"))
+    # (the flags service the sampler reads the game's flags through, ahead of it: its guest reads are the fixture's too)
+    flags_body = "".join(line.replace('#include "flags.h"', '#include "game/flags.h"') for line in flags.splitlines(keepends=True)
+                         if not line.startswith('#include "../hos.h"'))
     check(body.count("budget--;") == 1, "scan slot counter has no unique instrumentation point")
     body = body.replace("budget--;", "budget--; scan_visits++; scan_probe();")
     body = body.replace("static int state_scan(uint64_t mgr, StateChanges *out) {",
@@ -1221,7 +1229,7 @@ def main():
         src, exe = tmp / "fixture.c", tmp / ("fixture.exe" if windows else "fixture")
         bridge_src = tmp / "control.c"
         bridge_src.write_text(control, encoding="utf-8")
-        src.write_text(FIXTURE_HEAD + body + FIXTURE_MAIN, encoding="utf-8")
+        src.write_text(FIXTURE_HEAD + flags_body + body + FIXTURE_MAIN, encoding="utf-8")
         warnings = ["-Wno-format-truncation"] if "clang" not in Path(args.cc).name else []
         libraries = ["-ladvapi32", "-lm"] if windows else ["-lpthread", "-lm"]
         subprocess.run([args.cc, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers",

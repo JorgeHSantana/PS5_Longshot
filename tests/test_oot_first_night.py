@@ -48,22 +48,23 @@ static void hos_log(const char *fmt, ...) { (void)fmt; }
 static void rx_option_set(int id, int value) { (void)id; (void)value; }
 static int oot_item_count(Ctx *c, const char *name) { (void)c; (void)name; return 0; }
 static int oot_pouch_count(Ctx *c, const char *name) { (void)c; (void)name; return -1; }
-static int oot_gamedata_bool(Ctx *c, uint32_t hash, int *value) {
-    (void)c;
+/* (the flags service, host/game/flags.h) */
+#define MGR 0x1000u
+static uint64_t game_flags_mgr(void) { return MGR; }
+static int game_flag_bool(uint64_t mgr, uint32_t hash, int *value) {
+    if (mgr != MGR) return 0;
     if (hash == 0xcea220d3u) { *value = child; return 1; }
     if (hash == 0x8592aa82u) { *value = flag; return 1; }
     return 0;
 }
-__attribute__((unused)) static int oot_gamedata_set_bool(Ctx *c, uint32_t hash, int value) {
-    (void)c;
-    if (hash != 0x8592aa82u) return 0;
+__attribute__((unused)) static int game_flag_set_bool(uint64_t mgr, uint32_t hash, int value) {
+    if (mgr != MGR || hash != 0x8592aa82u) return 0;
     if (flag != value) cleared++;
     flag = value;
     return 1;
 }
-static int oot_gamedata_string(Ctx *c, uint32_t hash, char *buf, size_t size) {
-    (void)c;
-    if (hash != 0x1d6189dau) return 0;
+static int game_flag_text(uint64_t mgr, uint32_t hash, char *buf, size_t size) {
+    if (mgr != MGR || hash != 0x1d6189dau) return 0;
     snprintf(buf, size, "%s", map_name);
     return 1;
 }

@@ -1,5 +1,5 @@
 /* The Insert menu's Field of view, as a percentage of the game's current vertical
-   angle. nx2/oot_fov.py calls this after the angle load, before the game builds its
+   angle. The hook site camera.lens calls this after the angle load, before the game builds its
    projection (including the cached half-angle tangent used by CPU culling).
 
    Only camera zero's gameplay view is adjusted. Event cameras keep their authored

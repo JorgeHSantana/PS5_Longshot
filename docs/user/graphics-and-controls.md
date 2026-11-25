@@ -288,7 +288,10 @@ helper asks you to.
   and can show the footer at every level.
 - **Game speed:** Per frame slows the game whenever it is below 60 fps; Real time keeps normal speed down to 15 fps.
 - **Field of view** changes the gameplay camera's angle: 100% is the game's. Cutscenes, the HUD and movies keep theirs.
-- **Skip title screen** loads your most recent save at the start, once you have saved once.
+- **Skip title screen** loads your most recent save at the start, once you have saved once. It presses A for you on the
+  title screen, its file list and its Yes, each as soon as the game waits there; the game itself loads the save. Where
+  the game does not tell its screens (another version of it, or none told by 45 s), it presses A every couple of
+  seconds instead. With no save yet the title screen stays, so a new game can start. It waits while this menu is open.
 - **Game language** writes `language.txt` in the game folder, read at the next start. **Menu language** is this
   menu's: its translations are machine-made, and corrections are welcome.
 - **Bug report** saves what a report needs in a new folder ([what is in it](reporting-and-contributing.md#report-a-bug)).
@@ -395,7 +398,7 @@ udev rules, the `steam-devices` package on most distributions). A third-party pa
 weak rumble or none gets the plain motor rumble with `HOS_HD_RUMBLE=0` in `longshot_env.txt`.
 
 **DualSense haptics:** a DualSense on a USB cable plays the game's own fine vibration on its voice coils, through
-RenHDrum, which the Longshot Builder puts beside the game. Without it, the pad gets its motors. With **DualSense HD
+RenHDrum, which the build puts beside the game. Without it, the pad gets its motors. With **DualSense HD
 Haptics** on (the default) its speaker taps and its triggers kick back too; turn it off for the voice coils alone.
 
 **The supported console's Pro Controller over USB (Windows):** the game reads it itself, with its motion sensor and

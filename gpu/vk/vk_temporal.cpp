@@ -14,7 +14,7 @@
 //    vectors from the depth reprojected through the two cameras. The game has no motion vectors of its own (no velocity
 //    target: the scene pass draws into one B10G11R11 target, and its upscale network samples the colour alone),
 //    so that is the camera's motion, and what moves by itself would ghost. The scene camera's sub-pixel jitter
-//    (nx2/oot_jitter.py, while an engine draws) is read back from its projection, given to the engine and taken off the motion.
+//    (the hook sites jitter.view*, while an engine draws) is read back from its projection, given to the engine and taken off the motion.
 //  - actor motion (actor_motion, shaders/dlss_actor.vert): the skinned draws into the scene (vk_draw.cpp's skin_check:
 //    Link, the other characters, the animals, what the game animates with bones) are drawn again over that motion, each
 //    vertex skinned with this frame's bones and the frame before's, so their pixels get their own motion. Their poses are
@@ -184,7 +184,7 @@ void stage_barrier(VkCommandBuffer cmd, VkPipelineStageFlags2 src_stage, VkAcces
 struct Camera {
     float current[16]{};      // (its view-projection)
     float projection[16]{};   // (its projection, jittered: FSR 3.1's depth constants, and DLSS Frame Generation's camera, vk_dlss.cpp dlss_fg_inputs)
-    float jitter[2]{};        // (the projection's offset of the picture's centre, in clip space: nx2/oot_jitter.py)
+    float jitter[2]{};        // (the projection's offset of the picture's centre, in clip space: the hook sites jitter.view*)
     float near_z = 0, far_z = 0, fov_y = 0;   // (its projection's, 0 when it is not a plain perspective one)
     uint32_t width = 0, height = 0;
     Texture* depth = nullptr;

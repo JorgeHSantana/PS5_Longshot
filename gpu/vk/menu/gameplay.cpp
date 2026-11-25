@@ -63,8 +63,8 @@ MENU_MODULE(gameplay) {
               .hint = hn_text_size}, menu::before("bug_report").order(330))
         .row({.key = "skip_title_screen",
               .label = "Skip title screen",
-              .help = "Starts a launch with the most recent saved game: presses through the title screen and its file list. Does nothing "
-                      "until the game has a save. Applies after a restart.",
+              .help = "Starts a launch with the most recent saved game: presses A on the title screen, its file list and its Yes as "
+                      "soon as the game waits on each. Does nothing until the game has a save. Applies after a restart.",
               .kind = menu::Kind::Toggle,
               .value = &opts.skip_title,
               .lo = 0, .hi = 1,

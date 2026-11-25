@@ -628,7 +628,7 @@ static DWORD WINAPI display_main(void *p) {
     wc.lpfnWndProc = wndproc;
     wc.hInstance = GetModuleHandleA(NULL);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hIcon = LoadIconA(wc.hInstance, MAKEINTRESOURCEA(1));   /* (nx2/make_icon.py; none in a build without the picture) */
+    wc.hIcon = LoadIconA(wc.hInstance, MAKEINTRESOURCEA(1));   /* (builder/crates/build-compile/src/generated/res.rs; none in a build without the picture) */
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.lpszClassName = "Longshot";
     RegisterClassA(&wc);

@@ -50,4 +50,4 @@ repos:
         entry: bash -c 'shellcheck -x -S error "$@"' --
         language: system
         types: [shell]
-        files: ^scripts/(linux|windows)/.*\.sh$
+        files: ^(scripts/linux|builder/tools)/.*\.sh$

@@ -51,7 +51,7 @@ static const char *const made_again[] = {
 };
 
 static int done, moved, kept;
-static char kept_first[MAX_PATH];
+static char kept_first[HOS_PATH_CAP];
 
 static int exists(const char *p) { return GetFileAttributesA(p) != INVALID_FILE_ATTRIBUTES; }
 static int is_dir(const char *p) {
@@ -61,7 +61,7 @@ static int is_dir(const char *p) {
 
 /* game's file name into dir (both with their separator) as as: never over one there, never a folder */
 static void move_as(const char *game, const char *name, const char *dir, const char *as) {
-    char from[MAX_PATH], to[MAX_PATH];
+    char from[HOS_PATH_CAP], to[HOS_PATH_CAP];
     if (snprintf(from, sizeof from, "%s%s", game, name) >= (int)sizeof from || !exists(from) || is_dir(from)) return;
     if (snprintf(to, sizeof to, "%s%s", dir, as) >= (int)sizeof to) return;
     if (!exists(to) && MoveFileExA(from, to, 0)) {
@@ -73,7 +73,7 @@ static void move_as(const char *game, const char *name, const char *dir, const c
 
 /* the game folder's files whose names start with old_pcache and end with suffix: each renamed into cache (rename: 1) or deleted */
 static void each_old_pcache(const char *game, const char *cache, const char *suffix, int rename) {
-    char pattern[MAX_PATH];
+    char pattern[HOS_PATH_CAP];
     snprintf(pattern, sizeof pattern, "%s%s*%s", game, old_pcache, suffix);
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA(pattern, &fd);
@@ -81,11 +81,11 @@ static void each_old_pcache(const char *game, const char *cache, const char *suf
     do {
         if (strncmp(fd.cFileName, old_pcache, sizeof old_pcache - 1)) continue;
         if (rename) {
-            char as[MAX_PATH];
+            char as[HOS_PATH_CAP];
             snprintf(as, sizeof as, "%s%s", new_pcache, fd.cFileName + sizeof old_pcache - 1);
             move_as(game, fd.cFileName, cache, as);
         } else {
-            char path[MAX_PATH];
+            char path[HOS_PATH_CAP];
             snprintf(path, sizeof path, "%s%s", game, fd.cFileName);
             DeleteFileA(path);
         }
@@ -96,9 +96,9 @@ static void each_old_pcache(const char *game, const char *cache, const char *suf
 void hos_game_layout(void) {
     if (done) return;
     done = 1;
-    char game[MAX_PATH], cache[MAX_PATH], logs[MAX_PATH], prompts[MAX_PATH];
-    DWORD n = hos_game_path_a(game, MAX_PATH);
-    if (!n || n >= MAX_PATH) return;
+    char game[HOS_PATH_CAP], cache[HOS_PATH_CAP], logs[HOS_PATH_CAP], prompts[HOS_PATH_CAP];
+    DWORD n = hos_game_path_a(game, HOS_PATH_CAP);
+    if (!n || n >= HOS_PATH_CAP) return;
     while (n && game[n - 1] != '\\' && game[n - 1] != '/') n--;
     if (!n) return;
     game[n] = 0;   /* (the game folder, with its separator) */
@@ -116,12 +116,12 @@ void hos_game_layout(void) {
     each_old_pcache(game, cache, ".tmp", 0);     /* (a write cut short: never read) */
     each_old_pcache(game, cache, ".tmp-*", 0);   /* (one with its writer's own name, gpu/vk/pipeline_cache_file.h) */
     for (size_t i = 0; i < sizeof old_locks / sizeof *old_locks; i++) {
-        char path[MAX_PATH];
+        char path[HOS_PATH_CAP];
         snprintf(path, sizeof path, "%s%s", game, old_locks[i]);
         DeleteFileA(path);
     }
     for (size_t i = 0; i < sizeof made_again / sizeof *made_again; i++) {
-        char path[MAX_PATH];
+        char path[HOS_PATH_CAP];
         snprintf(path, sizeof path, "%s%s", game, made_again[i]);
         DeleteFileA(path);
     }

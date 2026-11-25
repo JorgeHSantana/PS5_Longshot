@@ -9,16 +9,31 @@
    Environment: HOS_TRACE=1 (log HLE calls), HOS_MEMORY_MB (memory the game is told it has),
                 HOS_NVN_CONTINUE=1 (go on past nvnBootstrapLoader). */
 #include "hos.h"
+#include "romfs.h"
+#include "romfs_index.h"
 #ifdef TRACY_ENABLE
 #include "hos_tracy.h"
+#endif
+#ifdef TRACY_ENABLE
+/* (LONGSHOT_TRACY: the profiler's client, started by the game's main: host/hos_tracy.h) */
+int hos_tracy_started;
+void hos_tracy_start(void) {
+    ___tracy_startup_profiler();
+    hos_tracy_started = 1;
+}
 #endif
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
 #include "hos_paths.h"
 #include "oot_heart_containers.h"   /* (the Discord status's pieces of heart) */
+#include "game/game.h"    /* (game_call: the Debug tab's calls into the game) */
+#include "game/flags.h"   /* (the game's flags: Link's age, the map, the songs, the Discord status's numbers) */
 #include "game_layout.h"
 #include "options_path.h"
+#include "save_dir.h"       /* (the profile's saves/: the run's save folder, refused at the start when unusable) */
+#include "longshot_exit.h"
+#include "builder_channel.h"   /* (the hand-over to a version folder's builder) */
 #include "prepare_args.h"   /* (the supervised --prepare-shaders run's arguments) */
 #include "hos_wide_size.h"   /* (the widescreen picture's size, shared with the Insert menu) */
 #include "ws_floor.h"        /* (the game's memory kept in RAM: HOS_WS_FLOOR_MB) */
@@ -29,7 +44,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-const char *hos_version(void);   /* (host/version.c: the one file nx2/build.py gives the version to) */
+const char *hos_version(void);   /* (host/version.c: the one file builder/crates/build-compile gives the version to) */
 #ifndef LONGSHOT_VERSION   /* (a test that cuts a piece of this file out may give its own) */
 #define LONGSHOT_VERSION hos_version()
 #endif
@@ -49,6 +64,7 @@ const char *hos_version(void);   /* (host/version.c: the one file nx2/build.py g
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/syscall.h>
+#include <sys/stat.h>   /* (hand_over: the builder a regular file) */
 #endif
 #include "hos_atomic_file.h"   /* (the files the saves' move copies, saves-moved.txt and the stand-ins' clean-up: whole or not at all) */
 /* (linux) the separator of the paths the executable's folder is joined with */
@@ -141,7 +157,7 @@ static void ws_floor(void) {
 
 int hos_game_is_mkw(void) { return !strcmp(hos_main_build_id, "d00e4f399e411d0613aa8d26b1c02fef"); }
 
-/* gen/hos_image.c (build.py lift) */
+/* gen/image.c (the lift) */
 extern const uint64_t hos_main_stack_size;
 extern const int hos_main_priority, hos_main_core, hos_module_count;
 extern const uint64_t hos_module_init[];
@@ -315,34 +331,51 @@ static void call_guest(Ctx *c, uint64_t addr, uint64_t sp, const char *what) {
     call_guest_args(c, addr, sp, what);
 }
 
-#ifndef _WIN32
-/* (linux) Saves live in $XDG_DATA_HOME/longshot (~/.local/share/longshot), so a rebuilt game folder still finds them.
-   A user/ folder beside the executable from before is moved there the first time, entry by entry. Anything that
-   cannot be moved keeps the old place. --user still wins.
-   A symbolic link in it, to saves the player keeps elsewhere (a synced folder, another drive), is made again in the
+/* (longshot) Saves live outside the game folder, so a rebuilt or updated game folder still finds them: on Linux in
+   $XDG_DATA_HOME/longshot (~/.local/share/longshot); on Windows in %APPDATA%\Longshot, the folder the Longshot Launcher gives
+   every build as --user (LongshotLauncher Core/Saves.cs LongshotRoot), so a game started by itself (RecompLauncher, a shortcut)
+   keeps the same saves. The settings stay where options_path.c puts them (the game folder's longshot_options.ini, which
+   RecompLauncher writes, when there is no --user).
+   A user/ folder beside the executable from before is moved there the first time, entry by entry: each copied whole into the
+   new place, then all renamed to their names, then the move committed, and only then the old entries deleted, so a start cut
+   at any point (the PC lost power, the game killed) leaves every save in the place the next start uses (see SAVES_MOVING).
+   Anything that cannot be moved keeps the old place, and so does any entry of the same name the new place has already (a
+   launcher's saves there: the two are never mixed). --user still wins.
+   (linux) A symbolic link in it, to saves the player keeps elsewhere (a synced folder, another drive), is made again in the
    new place, to the same folder, and never entered. It was moved as it stood, and one written from where it stood
    ("../../saves") then named nothing; from another drive it was copied as the folder it names and delete_tree emptied
    that folder, which is not Longshot's: the next start found the link still here, kept the old place, and showed no
-   saves. A user/ that is a link itself is the player's choice of place, and is used as it is. */
+   saves. A user/ that is a link itself is the player's choice of place, and is used as it is. (Windows) A user\ that is a
+   link or a junction is used as it is too; one in it is not made again, so the old place keeps every entry. */
 static int is_dir(const char *p) {
     const DWORD a = GetFileAttributesA(p);
     return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
 }
 static int is_link(const char *p) {
+#ifdef _WIN32
+    /* (a symbolic link or a junction: on Windows the move does not make one again, and an entry that has one stays, with the
+       rest: see saves_dir) */
+    const DWORD a = GetFileAttributesA(p);
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_REPARSE_POINT);
+#else
     struct stat st;
     return lstat(p, &st) == 0 && S_ISLNK(st.st_mode);
+#endif
 }
+#ifdef _WIN32
+static int copy_link(const char *from, const char *to) { (void)from, (void)to; return 0; }   /* (never reached: has_link keeps it) */
+#else
 static const char *move_old, *move_from, *move_new;   /* (the user folder on the move, as realpath names it and as given, and the new place) */
 static int moved_to(char *target, const char *dir) {   /* (a target under dir: named where it will be) */
-    char there[MAX_PATH];
+    char there[HOS_PATH_CAP];
     const size_t n = dir && dir[0] == SEP ? strlen(dir) : 0;
     if (!n || strncmp(target, dir, n) || target[n] != SEP) return 0;
     snprintf(there, sizeof there, "%s%s", move_new, target + n);
-    snprintf(target, MAX_PATH, "%s", there);
+    snprintf(target, HOS_PATH_CAP, "%s", there);
     return 1;
 }
 static int copy_link(const char *from, const char *to) {   /* (to what it names, in full; one that names nothing: as written) */
-    char target[MAX_PATH];
+    char target[HOS_PATH_CAP];
     if (!realpath(from, target)) {
         const ssize_t n = readlink(from, target, sizeof target - 1);
         if (n < 0) return 0;
@@ -353,10 +386,12 @@ static int copy_link(const char *from, const char *to) {   /* (to what it names,
     if (!moved_to(target, move_old)) moved_to(target, move_from);
     return symlink(target, to) == 0;
 }
+#endif
+#ifdef _WIN32   /* (an entry with a link in it: not moved on Windows, see saves_dir) */
 static int has_link(const char *p) {
     if (is_link(p)) return 1;
     if (!is_dir(p)) return 0;
-    char pattern[MAX_PATH];
+    char pattern[HOS_PATH_CAP];
     snprintf(pattern, sizeof pattern, "%s" SEP_S "*", p);
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA(pattern, &fd);
@@ -364,7 +399,7 @@ static int has_link(const char *p) {
     if (h != INVALID_HANDLE_VALUE) {
         do {
             if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
-            char a[MAX_PATH];
+            char a[HOS_PATH_CAP];
             snprintf(a, sizeof a, "%s" SEP_S "%s", p, fd.cFileName);
             found = has_link(a);
         } while (!found && FindNextFileA(h, &fd));
@@ -372,13 +407,14 @@ static int has_link(const char *p) {
     }
     return found;
 }
+#endif
 static int copy_tree(const char *from, const char *to) {
     if (is_link(from)) return copy_link(from, to);
     if (!is_dir(from)) {
         return hos_atomic_copy_file(from, to);   /* (each file whole under its name, or not there) */
     }
     if (!CreateDirectoryA(to, NULL) && !is_dir(to)) return 0;
-    char pattern[MAX_PATH];
+    char pattern[HOS_PATH_CAP];
     snprintf(pattern, sizeof pattern, "%s" SEP_S "*", from);
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA(pattern, &fd);
@@ -386,7 +422,7 @@ static int copy_tree(const char *from, const char *to) {
     if (h != INVALID_HANDLE_VALUE) {
         do {
             if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
-            char a[MAX_PATH], b[MAX_PATH];
+            char a[HOS_PATH_CAP], b[HOS_PATH_CAP];
             snprintf(a, sizeof a, "%s" SEP_S "%s", from, fd.cFileName);
             snprintf(b, sizeof b, "%s" SEP_S "%s", to, fd.cFileName);
             ok = copy_tree(a, b);
@@ -400,14 +436,14 @@ static void delete_tree(const char *p) {
         DeleteFileA(p);
         return;
     }
-    char pattern[MAX_PATH];
+    char pattern[HOS_PATH_CAP];
     snprintf(pattern, sizeof pattern, "%s" SEP_S "*", p);
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA(pattern, &fd);
     if (h != INVALID_HANDLE_VALUE) {
         do {
             if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
-            char a[MAX_PATH];
+            char a[HOS_PATH_CAP];
             snprintf(a, sizeof a, "%s" SEP_S "%s", p, fd.cFileName);
             delete_tree(a);
         } while (FindNextFileA(h, &fd));
@@ -416,7 +452,7 @@ static void delete_tree(const char *p) {
     RemoveDirectoryA(p);
 }
 static int save_work_pending(const char *beside) {
-    char pattern[MAX_PATH];
+    char pattern[HOS_PATH_CAP];
     if (snprintf(pattern, sizeof pattern, "%s" SEP_S "save-work" SEP_S "*.journal", beside) >= (int)sizeof pattern) return 1;
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA(pattern, &fd);
@@ -424,12 +460,85 @@ static int save_work_pending(const char *beside) {
     const DWORD e = GetLastError();
     return e != ERROR_FILE_NOT_FOUND && e != ERROR_PATH_NOT_FOUND;
 }
+/* (longshot) The move's own names in the new place: an entry copied under ".moving-<name>" until it is whole, then renamed to
+   its name; the names of one move (".moving-names") while it renames them in, renamed ".moved-names" once all are in: the
+   move's commit, after which the old place's entries of those names are deleted. A start that finds ".moved-names" finishes
+   that deletion and uses the new place; one that finds ".moving-names" takes the copies it names out of the new place (the
+   old place still has every entry), and every ".moving-*" left by a cut copy goes. A cut start never leaves the saves in
+   neither place, nor in both with the old place used. */
+#define SAVES_MOVING ".moving-"
+#define SAVES_MOVING_LIST ".moving-names"
+#define SAVES_MOVED_LIST ".moved-names"
+static int saves_list_path(char *out, size_t cap, const char *dir, const char *name) {
+    return snprintf(out, cap, "%s" SEP_S "%s", dir, name) < (int)cap;
+}
+/* (the names of a list, each on its line: fn(arg, name) for each; 0 when it cannot be read) */
+static int saves_each_listed(const char *list, void (*fn)(void *, const char *), void *arg) {
+    FILE *f = fopen(list, "rb");
+    if (!f) return 0;
+    char line[HOS_PATH_CAP];
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (line[0] && strcmp(line, ".") && strcmp(line, "..") && !strchr(line, '/') && !strchr(line, '\\')) fn(arg, line);
+    }
+    fclose(f);
+    return 1;
+}
+struct saves_pair { const char *old_place, *new_place; int left; };
+static void saves_delete_old(void *arg, const char *name) {   /* (committed: the old place's entry goes) */
+    struct saves_pair *p = (struct saves_pair *)arg;
+    char a[HOS_PATH_CAP];
+    if (snprintf(a, sizeof a, "%s" SEP_S "%s", p->old_place, name) >= (int)sizeof a) return;
+    delete_tree(a);
+    HOS_AF_STEP("saves: an old entry deleted");
+    p->left += GetFileAttributesA(a) != INVALID_FILE_ATTRIBUTES || is_link(a);
+}
+static void saves_undo_copy(void *arg, const char *name) {   /* (not committed: the copy goes, where the old place still has it) */
+    struct saves_pair *p = (struct saves_pair *)arg;
+    char a[HOS_PATH_CAP], b[HOS_PATH_CAP];
+    if (snprintf(a, sizeof a, "%s" SEP_S "%s", p->old_place, name) >= (int)sizeof a ||
+        snprintf(b, sizeof b, "%s" SEP_S "%s", p->new_place, name) >= (int)sizeof b)
+        return;
+    if (GetFileAttributesA(a) != INVALID_FILE_ATTRIBUTES || is_link(a)) delete_tree(b);
+}
+static void saves_clear_moving(const char *dir) {   /* (every .moving-* a cut copy left) */
+    char pattern[HOS_PATH_CAP];
+    if (snprintf(pattern, sizeof pattern, "%s" SEP_S SAVES_MOVING "*", dir) >= (int)sizeof pattern) return;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        char a[HOS_PATH_CAP];
+        if (strncmp(fd.cFileName, SAVES_MOVING, strlen(SAVES_MOVING))) continue;   /* (the posix layer's pattern is loose) */
+        if (snprintf(a, sizeof a, "%s" SEP_S "%s", dir, fd.cFileName) < (int)sizeof a) delete_tree(a);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+}
+/* (an entry, a folder most often, renamed to its name in the new place, on the disk once done: hos_af_move's
+   MOVEFILE_REPLACE_EXISTING is a file's alone on Windows, and none is there to replace) */
+static int saves_rename(const char *from, const char *to) {
+    HOS_AF_STEP("saves: an entry renamed: before");
+    if (!MoveFileExA(from, to, MOVEFILE_WRITE_THROUGH)) return 0;
+#ifndef _WIN32
+    hos_af_sync_folder(to);
+#endif
+    HOS_AF_STEP("saves: an entry renamed: after");
+    return 1;
+}
 static const char *saves_dir(const char *beside) {
-    static char dir[MAX_PATH];
-    const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME");
+    static char dir[HOS_PATH_CAP];
     if (is_link(beside)) return beside;
     /* (a pending journal belongs with C; let the next save mount finish recovery before moving C) */
     if (save_work_pending(beside)) return beside;
+#ifdef _WIN32
+    /* (Windows: %APPDATA%\Longshot itself, as the launcher has it; an APPDATA that is no full path: the old place) */
+    const char *appdata = getenv("APPDATA");
+    if (!appdata || !appdata[0] || !(appdata[1] == ':' || (appdata[0] == '\\' && appdata[1] == '\\')) ||
+        snprintf(dir, sizeof dir, "%s\\Longshot", appdata) >= (int)sizeof dir)
+        return beside;
+    CreateDirectoryA(dir, NULL);
+#else
+    const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME");
     if (xdg && xdg[0] == '/') snprintf(dir, sizeof dir, "%s", xdg);
     else if (home && home[0] == '/') {
         snprintf(dir, sizeof dir, "%s/.local", home);
@@ -439,81 +548,123 @@ static const char *saves_dir(const char *beside) {
     CreateDirectoryA(dir, NULL);
     snprintf(dir + strlen(dir), sizeof dir - strlen(dir), "/longshot");
     CreateDirectoryA(dir, NULL);
+#endif
     if (GetFileAttributesA(dir) == INVALID_FILE_ATTRIBUTES) return beside;
-    char pattern[MAX_PATH];
+    char moving[HOS_PATH_CAP], moved_list[HOS_PATH_CAP];
+    if (!saves_list_path(moving, sizeof moving, dir, SAVES_MOVING_LIST) || !saves_list_path(moved_list, sizeof moved_list, dir, SAVES_MOVED_LIST))
+        return beside;
+    struct saves_pair pair = {beside, dir, 0};
+    /* (a move that committed, cut before the old place's entries were all deleted: the new place is the saves' place) */
+    if (GetFileAttributesA(moved_list) != INVALID_FILE_ATTRIBUTES) {
+        saves_each_listed(moved_list, saves_delete_old, &pair);
+        if (!pair.left) DeleteFileA(moved_list), RemoveDirectoryA(beside);
+        else hos_log("saves: %d of %s's moved entries could not be deleted yet: tried again at the next start", pair.left, beside);
+        saves_clear_moving(dir);
+        return dir;
+    }
+    /* (a move cut before its commit: its copies out of the new place, the old place has every entry) */
+    if (saves_each_listed(moving, saves_undo_copy, &pair)) DeleteFileA(moving);
+    saves_clear_moving(dir);
+    char pattern[HOS_PATH_CAP];
     snprintf(pattern, sizeof pattern, "%s" SEP_S "*", beside);
-    int moved = 0, kept = 0;
-    char real[MAX_PATH];
+#ifndef _WIN32   /* (copy_link's: Linux only) */
+    char real[HOS_PATH_CAP];
     move_old = realpath(beside, real), move_from = beside, move_new = dir;
-    /* (looked at first, then moved: with an entry the new place has already, the old place is kept, and it keeps them all.
-       The others used to go all the same, and the game then ran here without them. So does one that cannot go, a copy that
-       fails (a full disk): the entries that went before it come back, and a copied one's old place goes only once all are
-       there. They used to stay in the new place, and the next start found them there and kept the old place without them) */
-    struct { char *name; int copied; } *went = NULL;
-    size_t n_went = 0;
-    for (int move = 0; move < 2 && !kept; move++) {
+#endif
+    /* (looked at first, then copied: with an entry the new place has already, the old place is kept, and it keeps them all.
+       Each entry is copied whole under ".moving-<name>"; none is renamed out of the old place, which keeps every entry until
+       the commit. One that cannot go (a copy that fails: a full disk) keeps the old place, and the copies go) */
+    char **names = NULL;
+    size_t n_names = 0, renamed = 0, text_len = 0;
+    int kept = 0;
+    for (int copy = 0; copy < 2 && !kept; copy++) {
         WIN32_FIND_DATAA fd;
         HANDLE h = FindFirstFileA(pattern, &fd);
         if (h == INVALID_HANDLE_VALUE) return dir;
         do {
-            if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..") || !strcmp(fd.cFileName, "save-work") || (move && kept)) continue;
-            char from[MAX_PATH], to[MAX_PATH];
-            snprintf(from, sizeof from, "%s" SEP_S "%s", beside, fd.cFileName);
-            snprintf(to, sizeof to, "%s" SEP_S "%s", dir, fd.cFileName);
-            if (!move) {
-                kept += GetFileAttributesA(to) != INVALID_FILE_ATTRIBUTES;
+            if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..") || !strcmp(fd.cFileName, "save-work") || kept) continue;
+            char from[HOS_PATH_CAP], to[HOS_PATH_CAP];
+            if (snprintf(from, sizeof from, "%s" SEP_S "%s", beside, fd.cFileName) >= (int)sizeof from ||
+                snprintf(to, sizeof to, "%s" SEP_S SAVES_MOVING "%s", dir, fd.cFileName) >= (int)sizeof to ||
+                strchr(fd.cFileName, '\n') || strchr(fd.cFileName, '\r')) {
+                kept++;
                 continue;
             }
-            void *more = realloc(went, (n_went + 1) * sizeof *went);
-            char *name = more ? strdup(fd.cFileName) : NULL;
-            if (more) went = more;
+            if (!copy) {
+                char there[HOS_PATH_CAP];
+                snprintf(there, sizeof there, "%s" SEP_S "%s", dir, fd.cFileName);
+                kept += GetFileAttributesA(there) != INVALID_FILE_ATTRIBUTES || is_link(there);
+                continue;
+            }
+            void *more = realloc(names, (n_names + 1) * sizeof *names);
+            char *name = more ? _strdup(fd.cFileName) : NULL;
+            if (more) names = (char **)more;
             if (!name) kept++;
-            else if (!has_link(from) && MoveFileExA(from, to, 0)) went[n_went].name = name, went[n_went++].copied = 0;
-            else if (copy_tree(from, to)) went[n_went].name = name, went[n_went++].copied = 1;
+#ifdef _WIN32
+            else if (has_link(from)) free(name), kept++;   /* (a link is not made again on Windows: the old place keeps all) */
+#endif
+            else if (copy_tree(from, to)) names[n_names++] = name, text_len += strlen(name) + 1;
             else delete_tree(to), free(name), kept++;
+            HOS_AF_STEP("saves: an entry copied");
         } while (FindNextFileA(h, &fd));
         FindClose(h);
     }
-    for (size_t i = 0; i < n_went; i++) {
-        char from[MAX_PATH], to[MAX_PATH];
-        snprintf(from, sizeof from, "%s" SEP_S "%s", beside, went[i].name);
-        snprintf(to, sizeof to, "%s" SEP_S "%s", dir, went[i].name);
-        if (!kept) {
-            moved++;
-            if (went[i].copied) delete_tree(from);
-        } else if (went[i].copied) delete_tree(to);
-        else if (!MoveFileExA(to, from, 0)) hos_log("saves: %s could not come back to %s", to, from);
-        free(went[i].name);
+    /* (the names of this move, then each copy renamed to its name, then the commit) */
+    if (!kept) {
+        char *text = (char *)malloc(text_len + 1);
+        size_t at = 0;
+        for (size_t i = 0; text && i < n_names; i++) at += (size_t)sprintf(text + at, "%s\n", names[i]);
+        if (!text || !hos_atomic_write(moving, text ? text : "", at)) kept++;
+        free(text);
     }
-    free(went);
+    for (size_t i = 0; i < n_names && !kept; i++) {
+        char from[HOS_PATH_CAP], to[HOS_PATH_CAP];
+        snprintf(from, sizeof from, "%s" SEP_S SAVES_MOVING "%s", dir, names[i]);
+        snprintf(to, sizeof to, "%s" SEP_S "%s", dir, names[i]);
+        if (saves_rename(from, to)) renamed++;
+        else kept++;
+    }
+    if (!kept && !hos_af_move(moving, moved_list)) kept++;
+    if (kept) {
+        for (size_t i = 0; i < n_names; i++) {
+            char a[HOS_PATH_CAP];
+            snprintf(a, sizeof a, "%s" SEP_S "%s%s", dir, i < renamed ? "" : SAVES_MOVING, names[i]);
+            delete_tree(a);
+        }
+        DeleteFileA(moving);
+    }
+    for (size_t i = 0; i < n_names; i++) free(names[i]);
+    free(names);
     if (kept) {
         hos_log("saves: %d of %s's entries could not go to %s: the saves stay in %s", kept, beside, dir, beside);
         return beside;
     }
+    /* (committed: the old place's entries go; one that cannot is deleted at the next start) */
+    saves_each_listed(moved_list, saves_delete_old, &pair);
+    if (!pair.left) DeleteFileA(moved_list);
     RemoveDirectoryA(beside);
-    if (moved) {
-        char note[MAX_PATH];
+    if (n_names) {
+        char note[HOS_PATH_CAP];
         const char *sep = strrchr(beside, SEP);
         snprintf(note, sizeof note, "%.*s" SEP_S "saves-moved.txt", sep ? (int)(sep - beside) : 0, beside);
-        char text[MAX_PATH + 160];
+        char text[HOS_PATH_CAP + 160];
         const int n = snprintf(text, sizeof text, "Longshot's saves are now in\n%s\n\nThey moved there from the user folder that was here.\n", dir);
         if (n > 0 && (size_t)n < sizeof text) hos_atomic_write(note, text, (size_t)n);
         hos_log("saves: moved from %s to %s", beside, dir);
     }
     return dir;
 }
-#endif
 
 /* (longshot) What a write of a setting that a kill cut left (host/hos_atomic_file.h), at the start, before the game reads any
    setting: a "<name>.hosnew" beside the setting. language.txt is the game folder's; mouse_sens.txt is the user folder's; the
-   settings file is where options_path.c chose it (the user folder's with --user, HOS_OPTIONS_FILE's, else the game folder's):
-   the options' one-time copy into the user folder leaves its stand-in there. */
+   settings file is where options_path.c chose it (the profile's settings.ini, else the game folder's): the options'
+   one-time copy into the profile leaves its stand-in there. */
 static void recover_writes(void) {
-    char path[MAX_PATH];
-    const DWORD len = hos_game_path_a(path, MAX_PATH);
+    char path[HOS_PATH_CAP];
+    const DWORD len = hos_game_path_a(path, HOS_PATH_CAP);
     char *slash = len ? strrchr(path, SEP) : NULL;
     if (slash) {
-        snprintf(slash + 1, (size_t)(path + MAX_PATH - slash - 1), "language.txt");
+        snprintf(slash + 1, (size_t)(path + HOS_PATH_CAP - slash - 1), "language.txt");
         hos_atomic_remove_stale(path);
     }
     if (hos_options_file()[0]) hos_atomic_remove_stale(hos_options_file());
@@ -553,7 +704,9 @@ static int env_line_allowed(const char *name, const char *value) {
        the file select) */
     static const char *const by_name[] = {
         "HOS_AUDIO_DUMP", "HOS_AUDIO_WB_DUMP", "HOS_SHADER_DUMP", "HOS_FS_OVERLAY", "HOS_MODS", "HOS_INPUT_LIVE",
-        "HOS_INPUT_SCRIPT", "HOS_SAMPLE_ALL", "HOS_SLOW_FRAMES", "HOS_CHAIN", "HOS_WATCH", "HOS_CRASH_TEST", "LONGSHOT_BUILDER_HOME", "RX_VK_SHOTS", "RX_VK_SHOT_GO",
+        "HOS_INPUT_SCRIPT", "HOS_SAMPLE_ALL", "HOS_SLOW_FRAMES", "HOS_CHAIN", "HOS_WATCH", "HOS_CRASH_TEST", "LONGSHOT_BUILDER_HOME",
+        "LONGSHOT_BUILDER_CHANNEL", "LONGSHOT_DEV_MODS", "LONGSHOT_PROFILE", "LONGSHOT_SHADER_CACHE",
+        "RX_VK_SHOTS", "RX_VK_SHOT_GO",
         "RX_VK_FRAMELOG", "RX_VK_HANG_DUMP", "RX_VK_DUMP", "RX_VK_DUMP_SPV", "RX_VK_DUMP_MESH_SPV", "RX_VK_DUMP_STAGES",
         "RX_VK_DUMP_FAILED", "RX_VK_IR", "RX_VK_MENU_SCRIPT"};
     for (size_t i = 0; i < sizeof by_name / sizeof *by_name; i++) names_file |= !strcmp(name, by_name[i]);
@@ -565,12 +718,12 @@ static int env_line_allowed(const char *name, const char *value) {
     return !strpbrk(value, "/\\") && !drive && value[0] != '~' && strcmp(value, ".") && strcmp(value, "..");
 }
 static void load_longshot_env(void) {
-    char path[MAX_PATH + 32];
+    char path[HOS_PATH_CAP + 32];
     const char *other = getenv("HOS_ENV_FILE");
     if (other && *other) {
         snprintf(path, sizeof path, "%s", other);
     } else {
-        DWORD n = hos_game_path_a(path, MAX_PATH);
+        DWORD n = hos_game_path_a(path, HOS_PATH_CAP);
         while (n && path[n - 1] != 92 && path[n - 1] != 47) n--;
         memcpy(path + n, "longshot_env.txt", 17);
     }
@@ -684,7 +837,7 @@ int hos_oot_is_player(Ctx *c, uint64_t actor) {
 static uint64_t oot_speed_controller;
 static int oot_speed_percent = 100;
 
-/* A character controller's forward speed being set (nx2/oot_patches.py patch_cct_speed: s0, in metres a second, or a frame when
+/* A character controller's forward speed being set (the hook sites player.speed*, host/oot_sites.c: s0, in metres a second, or a frame when
    per_second is 0): Link's scaled by the row while it is above 1x and the player steers him (a scene's walk, as the one into a
    map, keeps its pace), the physics step moving him by it with its collisions. Only speeds up to 15 m/s (his run is 4.5): a ledge
    climb sets some 55 for a frame, and scaled it threw him past the ledge. Every other controller as it is. */
@@ -708,13 +861,11 @@ static int oot_pouch_change(Ctx *c, const char *name, int delta) {
     const uint64_t state_singleton = recomp_load64(c, 0x84c9e2a8ULL);
     const uint64_t actor_db = recomp_load64(c, 0x84eb6888ULL);
     const uint64_t actor_info = recomp_load64(c, 0x84e8c060ULL);
-    A64Fn edit = a64_lookup(0x828d4a70ULL);
-    if (!edit || !pouch_singleton || !recomp_load64(c, pouch_singleton) ||
+    if (!game_has(0x828d4a70ULL) || !pouch_singleton || !recomp_load64(c, pouch_singleton) ||
         !state_singleton || !recomp_load64(c, state_singleton) || !actor_db || !actor_info || !delta ||
         strlen(name) >= 0x60) return -1;
 
     // OneShotAddOrRemovePouchContent reads the event parameters through pointers.
-    const Ctx saved = *c;
     const uint64_t event = (c->x[31] - 0xe0) & ~0xfULL;
     memset(A64_PTR(event), 0, 0xe0);
     memcpy(A64_PTR(event + 0x80), name, strlen(name) + 1);
@@ -726,29 +877,20 @@ static int oot_pouch_change(Ctx *c, const char *name, int delta) {
     recomp_store64_sp(c, event + 0x60, event + 0x80);
     recomp_store64_sp(c, event + 0x68, 0x83f0a6d8ULL); // Script
     recomp_store32_sp(c, event + 0x70, (uint32_t)delta);
-    c->x[31] = event;
-    c->x[0] = event;
-    edit(c);
-    const int result = (int)(recomp_load32(c, event + 0x18) >> 30);
-    *c = saved;
-    return result;
+    if (!game_call(c, 0x828d4a70ULL, event, 1, (const uint64_t[]){event}, NULL)) return -1;
+    return (int)(recomp_load32(c, event + 0x18) >> 30);
 }
 
 /* QueryGetPouchContentNumByActorName (f_82a3c260): f_805b63e0(pouch manager, &name, 0, 0) counts one content. */
 static int oot_pouch_count(Ctx *c, const char *name) {
     const uint64_t manager = recomp_load64(c, 0x84e98e28ULL);
-    A64Fn count = a64_lookup(0x805b63e0ULL);
-    if (!manager || !count || strlen(name) >= 0x60) return -1;
-    const Ctx saved = *c;
+    if (!manager || !game_has(0x805b63e0ULL) || strlen(name) >= 0x60) return -1;
     const uint64_t frame = (c->x[31] - 0x80) & ~0xfULL;
     memcpy(A64_PTR(frame + 0x10), name, strlen(name) + 1);
     recomp_store64_sp(c, frame, frame + 0x10);
-    c->x[31] = frame;
-    c->x[0] = manager, c->x[1] = frame, c->x[2] = 0, c->x[3] = 0;
-    count(c);
-    const int n = (int)(int32_t)c->x[0];
-    *c = saved;
-    return n;
+    uint64_t n;
+    if (!game_call(c, 0x805b63e0ULL, frame, 4, (const uint64_t[]){manager, frame, 0, 0}, &n)) return -1;
+    return (int)(int32_t)n;
 }
 
 static void oot_edit_pouch(Ctx *c, int action) {
@@ -771,10 +913,7 @@ static const unsigned char oot_item_kinds[] = {OOT_CHEAT_ITEMS(OOT_NO_SECTION, O
 #define OOT_ITEM_COUNT (sizeof oot_item_names / sizeof oot_item_names[0])
 
 static int oot_item_count(Ctx *c, const char *name);
-static int oot_gamedata_bool(Ctx *c, uint32_t hash, int *value);
-static int oot_gamedata_set_bool(Ctx *c, uint32_t hash, int value);
 static const char *oot_gamedata_queue_bool(Ctx *c, uint32_t hash, int value);
-static int oot_gamedata_string(Ctx *c, uint32_t hash, char *buf, size_t size);
 static int oot_event_playing(Ctx *c);
 
 /* The first adult night's time lock (Longshot #1064): f_8347c020 holds the clock at 20:00 while the saved Bool
@@ -786,9 +925,10 @@ static int oot_first_night_fix(Ctx *c, const char *map) {
     static int on = -1;
     if (on < 0) on = env_on_or("HOS_OOT_FIRST_NIGHT_FIX", 1);
     if (!on || !map[0] || !strncmp(map, "HyruleField", 11) || oot_event_playing(c)) return 0;
+    const uint64_t mgr = game_flags_mgr();
     int set = 0;
-    if (!oot_gamedata_bool(c, 0x8592aa82u, &set) || !set) return 0;
-    if (!oot_gamedata_set_bool(c, 0x8592aa82u, 0)) return 0;
+    if (!game_flag_bool(mgr, 0x8592aa82u, &set) || !set) return 0;
+    if (!game_flag_set_bool(mgr, 0x8592aa82u, 0)) return 0;
     hos_log("oot: cleared the first adult night's time lock (the save was in %s, outside Hyrule Field)", map);
     return 1;
 }
@@ -807,7 +947,7 @@ static void oot_inventory_refresh(Ctx *c, int64_t now) {
     }
     {   /* Link's age for the Debug tab's Switch age row: 0 child, 1 adult, -1 no save loaded (Sequence_IsChildhood) */
         int child = 1;
-        rx_option_set(OOT_CHEAT_AGE_ID, loaded && oot_gamedata_bool(c, 0xcea220d3u, &child) ? (child ? 0 : 1) : -1);
+        rx_option_set(OOT_CHEAT_AGE_ID, loaded && game_flag_bool(game_flags_mgr(), 0xcea220d3u, &child) ? (child ? 0 : 1) : -1);
     }
     static char logged[100];
     if (!loaded && logged[0]) {   /* back to the title or the file select: the summary's time there is not the last map's */
@@ -821,9 +961,9 @@ static void oot_inventory_refresh(Ctx *c, int64_t now) {
                        the game" of the Insert menu's Bug report (gpu/vk/vk_bug_report.cpp reads the last of these lines) */
         char map[80], line[100];
         int child = 1;
-        if (oot_gamedata_string(c, 0x1d6189dau, map, sizeof map) && map[0]) {   /* Sequence_CurrentBanc */
+        if (game_flag_text(game_flags_mgr(), 0x1d6189dau, map, sizeof map) && map[0]) {   /* Sequence_CurrentBanc */
             snprintf(line, sizeof line, "%s (%s)", map,
-                     oot_gamedata_bool(c, 0xcea220d3u, &child) ? (child ? "child" : "adult") : "age not known");
+                     game_flag_bool(game_flags_mgr(), 0xcea220d3u, &child) ? (child ? "child" : "adult") : "age not known");
             if (strcmp(line, logged)) {
                 hos_log("map: %s", line), snprintf(logged, sizeof logged, "%s", line);
                 AcquireSRWLockExclusive(&map_lock);   /* (the performance summary's map: hos_perf_info) */
@@ -882,7 +1022,7 @@ static int oot_item_count(Ctx *c, const char *name) {
     const uint32_t song = oot_song_flag(name);
     if (song) {
         int learned = 0;
-        return oot_gamedata_bool(c, song, &learned) ? learned : -1;
+        return game_flag_bool(game_flags_mgr(), song, &learned) ? learned : -1;
     }
     char alias[64];
     const int n = oot_pouch_count(c, name);
@@ -942,16 +1082,11 @@ static void oot_set_time(Ctx *c, unsigned hour) {
     // ExecuteWmSetTime passes seconds since midnight to the world manager.
     const uint64_t singleton = recomp_load64(c, 0x84c9e898ULL);
     const uint64_t world = singleton ? recomp_load64(c, singleton) : 0;
-    A64Fn set_time = a64_lookup(0x834722d0ULL);
-    if (!set_time || !world || !recomp_load64(c, world + 0x510)) {
+    if (!game_has(0x834722d0ULL) || !world || !recomp_load64(c, world + 0x510)) {
         hos_log("cheats: world clock unavailable");
         return;
     }
-    const Ctx saved = *c;
-    c->x[0] = world;
-    c->x[1] = hour * 3600;
-    set_time(c);
-    *c = saved;
+    game_call(c, 0x834722d0ULL, 0, 2, (const uint64_t[]){world, hour * 3600ULL}, NULL);
     hos_log("cheats: requested %02u:00", hour);
 }
 
@@ -1030,7 +1165,6 @@ static const OotDestination oot_destinations[] = {   /* (generated: work/oot-tel
 };
 #define OOT_AGE_ACTION 999   /* (the Cheats page's Age row) */
 #define OOT_TELEPORT_ACTION 1000   /* (pouch edits use 200 to 348) */
-#define OOT_GAMEDATA_SLOT 0x84c9e180ULL   /* GameDataMgr, as ReserveBancChange's readers load it */
 #define OOT_EVENTMGR_SLOT 0x84c9e090ULL   /* EventMgr, as SeqOneShotRequestEvent loads it */
 #define OOT_EVENT_ARG_SIZE 0x1b20ULL      /* EventRequestArg: SeqOneShotRequestEvent reserves this much stack */
 
@@ -1041,55 +1175,11 @@ static uint64_t oot_singleton(Ctx *c, uint64_t slot) {
 
 /* The game's Bool setter queues the live value and the copy written by the next save. */
 static const char *oot_gamedata_queue_bool(Ctx *c, uint32_t hash, int value) {
-    A64Fn set = a64_lookup(0x806a2b20ULL);
-    if (!set) return "the game's Bool setter";
-    const uint64_t mgr = oot_singleton(c, OOT_GAMEDATA_SLOT);
+    if (!game_has(0x806a2b20ULL)) return "the game's Bool setter";
+    const uint64_t mgr = game_flags_mgr();
     if (!mgr) return "the game data manager";
-    const Ctx saved = *c;
-    c->x[0] = mgr, c->x[1] = value != 0, c->x[2] = hash;
-    set(c);
-    *c = saved;
+    if (!game_call(c, 0x806a2b20ULL, 0, 3, (const uint64_t[]){mgr, value != 0, hash}, NULL)) return "a guest thread to call it on";
     return NULL;
-}
-
-/* GameDataMgr getters by MurMur3 name hash: f_8022d9c0 (bool) and f_80cd0ea0 (String64). 1 when found. */
-static int oot_gamedata_bool(Ctx *c, uint32_t hash, int *value) {
-    const uint64_t mgr = oot_singleton(c, OOT_GAMEDATA_SLOT);
-    A64Fn get = a64_lookup(0x8022d9c0ULL);
-    if (!mgr || !get) return 0;
-    const Ctx saved = *c;
-    const uint64_t out = (c->x[31] - 0x40) & ~0xfULL;
-    recomp_store64_sp(c, out, 0);
-    c->x[31] = out;
-    c->x[0] = mgr, c->x[1] = out, c->x[2] = hash;
-    get(c);
-    const int found = (int)(c->x[0] & 1);
-    *value = recomp_load8(c, out) & 1;
-    *c = saved;
-    return found;
-}
-
-static int oot_gamedata_string(Ctx *c, uint32_t hash, char *buf, size_t size) {
-    const uint64_t mgr = oot_singleton(c, OOT_GAMEDATA_SLOT);
-    A64Fn get = a64_lookup(0x80cd0ea0ULL);
-    buf[0] = 0;
-    if (!mgr || !get) return 0;
-    const Ctx saved = *c;
-    const uint64_t out = (c->x[31] - 0x40) & ~0xfULL;
-    recomp_store64_sp(c, out, 0);
-    c->x[31] = out;
-    c->x[0] = mgr, c->x[1] = out, c->x[2] = hash;
-    get(c);
-    const int found = (int)(c->x[0] & 1);
-    const uint64_t text = recomp_load64(c, out);
-    *c = saved;
-    if (!found || !text) return 0;
-    for (size_t i = 0; i + 1 < size; i++) {
-        buf[i] = (char)recomp_load8(c, text + i);
-        buf[i + 1] = 0;
-        if (!buf[i]) break;
-    }
-    return 1;
 }
 
 /* One argument of an EventRequestArg: the array of 200-byte entries at arg+8, capacity arg+0, count arg+16.
@@ -1138,9 +1228,9 @@ static int oot_teleport(Ctx *c, uint64_t actor, unsigned index) {
         return 0;
     }
     const uint64_t events = oot_singleton(c, OOT_EVENTMGR_SLOT);
-    A64Fn make_arg = a64_lookup(0x80d99f10ULL), request = a64_lookup(0x80d9a820ULL);
-    A64Fn set_link = a64_lookup(0x802dc440ULL), release_link = a64_lookup(0x8022b6f0ULL);
-    if (!events || !make_arg || !request || !set_link || !release_link) {
+    /* (the game's functions it calls: the request's arg made, its starter actor linked, the request, the links released) */
+    enum { MAKE_ARG = 0x80d99f10, REQUEST = 0x80d9a820, SET_LINK = 0x802dc440, RELEASE_LINK = 0x8022b6f0 };
+    if (!events || !game_has(MAKE_ARG) || !game_has(REQUEST) || !game_has(SET_LINK) || !game_has(RELEASE_LINK)) {
         hos_log("cheats: teleport unavailable (event manager %#llx)", (unsigned long long)events);
         teleport.why = "the game's event manager is not there yet";
         return 0;
@@ -1151,12 +1241,13 @@ static int oot_teleport(Ctx *c, uint64_t actor, unsigned index) {
         return 0;
     }
     int loading = 0, child = 1;
-    if (oot_gamedata_bool(c, 0xef2b60c2u, &loading) && loading) {   /* Sequence_IsLoadingBanc */
+    const uint64_t mgr = game_flags_mgr();
+    if (game_flag_bool(mgr, 0xef2b60c2u, &loading) && loading) {   /* Sequence_IsLoadingBanc */
         hos_log("cheats: teleport ignored while a map loads");
         teleport.why = "a map is loading";
         return 0;
     }
-    if (!oot_gamedata_bool(c, 0xcea220d3u, &child)) hos_log("cheats: Sequence_IsChildhood not found, using child maps");
+    if (!game_flag_bool(mgr, 0xcea220d3u, &child)) hos_log("cheats: Sequence_IsChildhood not found, using child maps");
     const OotDestination *d = &oot_destinations[index];
     const char *banc = child ? d->child_banc : d->adult_banc;
     const char *start = child ? d->child_start : d->adult_start;
@@ -1181,50 +1272,35 @@ static int oot_teleport(Ctx *c, uint64_t actor, unsigned index) {
     const char *starter_env = getenv("HOS_OOT_TELEPORT_STARTER");
     const int with_starter = !(starter_env && !strcmp(starter_env, "0"));
 
-    const Ctx saved = *c;
     const uint64_t arg = (c->x[31] - OOT_EVENT_ARG_SIZE - 0x100) & ~0xfULL;
-    c->x[31] = arg;
-    c->x[0] = arg;
-    make_arg(c);
-    int ok = 1;
+    int ok = game_call(c, MAKE_ARG, arg, 1, (const uint64_t[]){arg}, NULL);
     {   /* the event's name: arg+6800 points at its buffer, arg+6808 the capacity */
         const uint64_t buf = recomp_load64(c, arg + 6800);
         const uint32_t cap = recomp_load32(c, arg + 6808);
         void *to = buf && strlen(event) + 1 <= cap ? hos_guest_range(buf, strlen(event) + 1) : NULL;   /* (longshot) */
         if (!to) ok = 0;
-        else memcpy(to, event, strlen(event) + 1);
+        else if (ok) memcpy(to, event, strlen(event) + 1);
     }
     ok = ok && oot_event_arg(c, arg, "NextBanc", 1, strings);
     ok = ok && oot_event_arg(c, arg, "NextStartPos", 1, strings + 128);
     ok = ok && oot_event_arg(c, arg, "BootEventName", 1, strings + 256);
     ok = ok && oot_event_arg(c, arg, "IsCheckAir", 4, 0);
-    if (ok && with_starter) {   /* the starter actor (arg+0x1950), as OneShotEventMemberRequestEventByEventName sets it */
-        c->x[31] = arg;
-        c->x[0] = arg + 0x1950, c->x[1] = actor, c->x[2] = 0;
-        set_link(c);
-    }
+    if (ok && with_starter)   /* the starter actor (arg+0x1950), as OneShotEventMemberRequestEventByEventName sets it */
+        game_call(c, SET_LINK, arg, 3, (const uint64_t[]){arg + 0x1950, actor, 0}, NULL);
     uint64_t result = 0;
-    if (ok) {
-        c->x[31] = arg;
-        c->x[0] = events, c->x[1] = arg;
-        request(c);
-        result = c->x[0];
-    }
+    if (ok) game_call(c, REQUEST, arg, 2, (const uint64_t[]){events, arg}, &result);
     /* SeqOneShotRequestEvent's cleanup of the arg's two actor links */
     for (unsigned i = 0; i < 2; i++) {
         const uint64_t link = arg + (i ? 0x1950 : 0x1968);
         recomp_store64(c, link, 0x84994b20ULL);
-        c->x[31] = arg;
-        c->x[0] = link;
-        release_link(c);
+        game_call(c, RELEASE_LINK, arg, 1, (const uint64_t[]){link}, NULL);
     }
-    *c = saved;
     /* A map-hiding area can leave this saved flag set when a debug teleport skips its exit.
        Only clear it once the event manager takes the request; the destination may hide its own minimap.
        Use the game's Bool setter (mgr, value, hash): it queues the change for the live value AND the save's copy.
        Writing only the live byte restores the HUD until the next load, but saves keep the old hidden value. */
     int hidden = 0;
-    if (ok && result && oot_gamedata_bool(c, 0x9a4dd779u, &hidden) && hidden) {
+    if (ok && result && game_flag_bool(mgr, 0x9a4dd779u, &hidden) && hidden) {
         const char *missing = oot_gamedata_queue_bool(c, 0x9a4dd779u, 0);   /* MapIconDeactivateByAreaActor */
         if (!missing) {
             hos_log("cheats: teleport: the area left had hidden the minimap (MapIconDeactivateByAreaActor): restore queued");
@@ -1247,38 +1323,18 @@ static int oot_teleport(Ctx *c, uint64_t actor, unsigned index) {
     return ok;   /* (sent; the request's own result is only logged) */
 }
 
-/* Writes a GameData bool directly: GameDataMgr+32 is the (hash, index) table (+44 its size), the bools are 24-byte
-   entries at GameDataMgr+24 (+16 their count) with the value at +22, as f_8022d9c0 reads them. 1 when found. */
-static int oot_gamedata_set_bool(Ctx *c, uint32_t hash, int value) {
-    const uint64_t mgr = oot_singleton(c, OOT_GAMEDATA_SLOT);
-    if (!mgr) return 0;
-    const uint64_t table = recomp_load64(c, mgr + 32);
-    const uint32_t size = recomp_load32(c, mgr + 44);
-    if (!table || !size) return 0;
-    for (uint32_t probe = 0, slot = hash % size; probe < size; probe++, slot = (slot + 1) % size) {
-        const uint32_t key = recomp_load32(c, table + slot * 8ULL);
-        if (!key) return 0;
-        if (key != hash) continue;
-        const uint32_t index = recomp_load32(c, table + slot * 8ULL + 4), count = recomp_load32(c, mgr + 16);
-        if (index >= count) return 0;
-        recomp_store8(c, recomp_load64(c, mgr + 24) + index * 24ULL + 22, value ? 1 : 0);
-        return 1;
-    }
-    return 0;
-}
-
 /* Age toggle: flips Sequence_IsChildhood (what the Temple of Time event sets) and reloads the current map, or the
    Market when this map is not in oot_destinations, through the teleport so the other age's map and Link load. 1: the map
    change was sent (teleport.banc its map); 0: not, teleport.why says why (the control bridge's reply) */
 static int oot_toggle_age(Ctx *c, uint64_t actor) {
     int child = 1;
-    if (!oot_gamedata_bool(c, 0xcea220d3u, &child)) {
+    if (!game_flag_bool(game_flags_mgr(), 0xcea220d3u, &child)) {
         hos_log("cheats: age toggle: Sequence_IsChildhood not found");
         teleport.why = "Link's age is not in the game's data (Sequence_IsChildhood not found)", teleport.banc = NULL;
         return 0;
     }
     char current[80];
-    oot_gamedata_string(c, 0x1d6189dau, current, sizeof current);   /* Sequence_CurrentBanc */
+    game_flag_text(game_flags_mgr(), 0x1d6189dau, current, sizeof current);   /* Sequence_CurrentBanc */
     unsigned target = 3;   /* Market (the Temple of Time is in it) */
     for (unsigned i = 0; i < sizeof oot_destinations / sizeof oot_destinations[0]; i++) {
         const OotDestination *d = &oot_destinations[i];
@@ -1288,7 +1344,7 @@ static int oot_toggle_age(Ctx *c, uint64_t actor) {
             break;
         }
     }
-    if (!oot_gamedata_set_bool(c, 0xcea220d3u, !child)) {
+    if (!game_flag_set_bool(game_flags_mgr(), 0xcea220d3u, !child)) {
         hos_log("cheats: age toggle: could not write Sequence_IsChildhood");
         teleport.why = "Link's age could not be written (Sequence_IsChildhood)", teleport.banc = NULL;
         return 0;
@@ -1296,7 +1352,7 @@ static int oot_toggle_age(Ctx *c, uint64_t actor) {
     hos_log("cheats: age toggle: %s -> %s, reloading via destination %u (current map \"%s\")",
             child ? "child" : "adult", child ? "adult" : "child", target, current);
     if (!oot_teleport(c, actor, target)) {
-        oot_gamedata_set_bool(c, 0xcea220d3u, child);
+        game_flag_set_bool(game_flags_mgr(), 0xcea220d3u, child);
         hos_log("cheats: age toggle undone, the map change was not requested");
         return 0;
     }
@@ -1307,12 +1363,12 @@ static void oot_teleport_followup(Ctx *c, uint64_t actor) {
     if (!teleport.check_at || hos_now_ns() < teleport.check_at) return;
     teleport.check_at = 0;
     char next[80] = "", current[80] = "";
-    oot_gamedata_string(c, 0xee27bf71u, next, sizeof next);     /* Sequence_ReservedNextBanc */
-    oot_gamedata_string(c, 0x1d6189dau, current, sizeof current);   /* Sequence_CurrentBanc */
+    game_flag_text(game_flags_mgr(), 0xee27bf71u, next, sizeof next);     /* Sequence_ReservedNextBanc */
+    game_flag_text(game_flags_mgr(), 0x1d6189dau, current, sizeof current);   /* Sequence_CurrentBanc */
     const uint64_t events = oot_singleton(c, OOT_EVENTMGR_SLOT);
     const int playing = events && recomp_load64(c, events + 104) ? 1 : 0;
     int loading = 0;
-    oot_gamedata_bool(c, 0xef2b60c2u, &loading);   /* Sequence_IsLoadingBanc */
+    game_flag_bool(game_flags_mgr(), 0xef2b60c2u, &loading);   /* Sequence_IsLoadingBanc */
     hos_log("cheats: teleport check: reserved \"%s\", current \"%s\", event playing %d", next, current, playing);
     /* (dropped by the game, as a request a few frames after a save has loaded is: sent once more, the 8 s guard aside, so
        the control bridge's wait for the map sees it arrive. oot_teleport_check.h) */
@@ -1336,23 +1392,24 @@ static int oot_flags = -1;   /* (1 an event playing, 2 a map loading, 4 the chil
 /* (with the map, for the Discord status: Link's life and its most in quarter hearts, his rupees, his Gold Skulltula
    tokens, his pieces of heart; -1 not known) */
 static int oot_stats[5] = {-1, -1, -1, -1, -1};
-int hos_oot_gamedata_int(uint32_t hash, int64_t *v);   /* (host/oot_state_tap.c) */
 static void oot_map_refresh(Ctx *c, int64_t now) {
     static int64_t next;
     if (now < next) return;
     next = now + 250000000LL;
     char map[80];
-    if (!oot_gamedata_string(c, 0x1d6189dau, map, sizeof map) || !map[0]) return;   /* Sequence_CurrentBanc */
-    int loading = 0, child = 1;
-    oot_gamedata_bool(c, 0xef2b60c2u, &loading);   /* Sequence_IsLoadingBanc */
-    oot_gamedata_bool(c, 0xcea220d3u, &child);     /* Sequence_IsChildhood */
+    const uint64_t mgr = game_flags_mgr();
+    if (!game_flag_text(mgr, 0x1d6189dau, map, sizeof map) || !map[0]) return;   /* Sequence_CurrentBanc */
+    /* (a flag not found reads 0, as the game's getter this called before wrote it: not loading, the adult) */
+    int loading, child;
+    if (!game_flag_bool(mgr, 0xef2b60c2u, &loading)) loading = 0;   /* Sequence_IsLoadingBanc */
+    if (!game_flag_bool(mgr, 0xcea220d3u, &child)) child = 0;       /* Sequence_IsChildhood */
     const uint64_t events = oot_singleton(c, OOT_EVENTMGR_SLOT);
     const int flags = (events && recomp_load64(c, events + 104) ? 1 : 0) | (loading ? 2 : 0) | (child ? 4 : 0);
     int stats[5] = {-1, -1, -1, -1, -1};
     static const uint32_t hashes[3] = {0x31ab5580u, 0xfbe01da1u, 0xa77921d7u};   /* PlayerStatus.Life, .MaxLife, .CurrentRupee */
     for (int i = 0; i < 3; i++) {
         int64_t v;
-        if (hos_oot_gamedata_int(hashes[i], &v) && v >= 0 && v < 100000) stats[i] = (int)v;
+        if (game_flag_number(mgr, GAME_FLAG_INT, hashes[i], &v) && v >= 0 && v < 100000) stats[i] = (int)v;
     }
     /* (the Gold Skulltula tokens, as the Cheats page counts them, -1 none: a call into the game, so every 2 s, not 250 ms; the
        Discord status changes at most every 15 s) */
@@ -1642,7 +1699,7 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
         oot_inventory_edit(c, action);
     } else if (action == OOT_AGE_ACTION) {
         int child = 1;   /* (the bridge's: Link's age now, not its sample's; already the age wanted, nothing to flip) */
-        if (bridge_adult >= 0 && oot_gamedata_bool(c, 0xcea220d3u, &child) && !child == bridge_adult) {
+        if (bridge_adult >= 0 && game_flag_bool(game_flags_mgr(), 0xcea220d3u, &child) && !child == bridge_adult) {
             hos_log("cheats: age toggle: Link is the %s already", child ? "child" : "adult");
             oot_bridge_teleport_done(bridge_ticket, 2);
             taken = 0;
@@ -1665,8 +1722,7 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
     // Follow OneShotPhysicsCctChangePosition to Link's controller.
     const uint64_t controller = oot_player_controller(c, components);
     if (!controller || recomp_load64(c, 0x84c54f10ULL + 0xe8) != 0x806d2530ULL) return;
-    A64Fn change_position = a64_lookup(0x806d2530ULL);
-    if (!change_position) return;
+    if (!game_has(0x806d2530ULL)) return;
 
     if (action == 2) {
         for (unsigned i = 0; i < 3; i++) {
@@ -1732,23 +1788,19 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
         }
     }
 
-    const Ctx saved = *c;
-    const uint64_t arg = c->x[31] - 16;
+    const uint64_t arg = c->x[31] - 16;   /* (the position below the stack, x1 pointing at it, the call's stack) */
     for (unsigned i = 0; i < 3; i++) {
         uint32_t bits;
         memcpy(&bits, &target[i], sizeof bits);
         recomp_store32_sp(c, arg + i * 4, bits);
     }
     recomp_store32_sp(c, arg + 12, 0);
-    c->x[31] = arg;
-    c->x[0] = controller;
-    c->x[1] = arg;
     flight_transform_yaw = yaw;
     flight_pose_actor = flying && !returning ? actor : 0;
     flight_transform_controller = flying && !returning ? controller : 0;
-    change_position(c);
+    const GameCallMore lr = {.set_lr = 1, .lr = c->x[30]};   /* (LR as the update had it, as before) */
+    game_call_more(c, 0x806d2530ULL, arg, 2, (const uint64_t[]){controller, arg}, NULL, &lr);
     flight_transform_controller = 0;
-    *c = saved;
     if (returning) hos_log("cheats: returned to %.2f %.2f %.2f", mark[0], mark[1], mark[2]);
 }
 #endif
@@ -1761,6 +1813,13 @@ int64_t hos_oot_player_seen_ns(void) {
 #else
     return 0;
 #endif
+}
+
+/* (host/oot_autoload.c) whether the game is loading a map: GameDataMgr's Sequence_IsLoadingBanc; 0 before GameDataMgr is made
+   or without the flag. Any thread: one byte of the game's, read */
+int hos_oot_loading(void) {
+    int loading = 0;
+    return game_flag_bool(game_flags_mgr(), 0xef2b60c2u, &loading) && loading;   /* Sequence_IsLoadingBanc */
 }
 
 int hos_oot_player_seen(void) {
@@ -1896,9 +1955,7 @@ int hos_oot_opening(Ctx *c, int mode) {
 static int oot_put_link(Ctx *c, uint64_t components, const float pos[3]) {
     const uint64_t controller = oot_player_controller(c, components);
     if (!controller || recomp_load64(c, 0x84c54f10ULL + 0xe8) != 0x806d2530ULL) return 0;
-    A64Fn change_position = a64_lookup(0x806d2530ULL);
-    if (!change_position) return 0;
-    const Ctx saved = *c;
+    if (!game_has(0x806d2530ULL)) return 0;
     const uint64_t arg = c->x[31] - 16;
     for (unsigned i = 0; i < 3; i++) {
         uint32_t bits;
@@ -1906,13 +1963,10 @@ static int oot_put_link(Ctx *c, uint64_t components, const float pos[3]) {
         recomp_store32_sp(c, arg + i * 4, bits);
     }
     recomp_store32_sp(c, arg + 12, 0);
-    c->x[31] = arg;
-    c->x[0] = controller;
-    c->x[1] = arg;
     flight_pose_actor = 0;
     flight_transform_controller = 0;
-    change_position(c);
-    *c = saved;
+    const GameCallMore lr = {.set_lr = 1, .lr = c->x[30]};   /* (LR as the update had it, as before) */
+    game_call_more(c, 0x806d2530ULL, arg, 2, (const uint64_t[]){controller, arg}, NULL, &lr);
     return 1;
 }
 #endif
@@ -1931,6 +1985,8 @@ void hos_oot_lift_player(Ctx *c, uint64_t actor) {
     hos_oot_note_link(components);
 
     // Link can be updated by different guest workers on successive frames.
+    // (Kept with the frame phases: the Debug tab's tools and the state tap still run here, on whichever job worker updates
+    // Link, and the lock keeps two workers out of them at once. The acquire phase, host/game/phases.h, is the main thread's.)
     static SRWLOCK cheats_lock = SRWLOCK_INIT;
     if (!TryAcquireSRWLockExclusive(&cheats_lock)) return;
     oot_update_player_cheats(c, actor, components);
@@ -2038,7 +2094,7 @@ void hos_oot_free_view(Ctx *c, uint64_t view) {
 }
 
 float hos_aspect_ratio = 0;   /* (the window's default shape: host/display.c) */
-/* (nx2/oot_wide.py) read by the widescreen patches in the game's code; 0: the game's own 16:9 */
+/* (host/oot_wide_sites.c) read by the widescreen hook sites in the game's code; 0: the game's own 16:9 */
 volatile uint64_t hos_wide_out, hos_wide_scene;
 volatile float hos_wide_ratio, hos_wide_squeeze, hos_wide_margin;
 int hos_camera_trace_enabled(void) {
@@ -2047,7 +2103,7 @@ int hos_camera_trace_enabled(void) {
     fclose(marker);
     return 1;
 }
-volatile uint32_t hos_wide_keep_mask = 0x1f;   /* (nx2/oot_wide.py KEEP_VTABLES and KEEP_ALSO: the screens that keep the whole picture, a bit each; MkwVkHost.wide_menus) */
+volatile uint32_t hos_wide_keep_mask = 0x1f;   /* (host/oot_wide_sites.c WIDE_KEEP_*: the screens that keep the whole picture, a bit each; MkwVkHost.wide_menus) */
 /* Swap can keep a small Linux PC from running out of backing storage without keeping it responsive.
    Warn below the existing 10 GiB floor in physical RAM there too; this is not a promise that 10 GiB is enough.
    The game starts anyway, and headless runs only log the warning. Windows keeps its commit-limit check. */
@@ -2112,29 +2168,83 @@ static char driver_env_said[1024];
 static void driver_env_log(void) {
     if (driver_env_said[0]) hos_log("%s", driver_env_said);
 }
+/* (longshot) The profile's start slot (host/longshot_profile.h): with LONGSHOT_PROFILE, its profile.json's start_slot
+   handed on to the game's side as HOS_START_SLOT (0-99), the slot the run starts on. The profile is its one source: a
+   HOS_START_SLOT the environment or longshot_env.txt brought is taken away first, so the run starts on the profile's slot
+   or on none. Set before anything reads it (after longshot_env.txt); the log says what it did once it is open
+   (profile_note_log). The pressing is the Skip title mod's (the Mod API's) */
+static char profile_note[512];
+static void profile_start_slot(void) {
+    const char *profile = getenv(LONGSHOT_PROFILE);
+    char path[HOS_PATH_CAP];
+#ifdef _WIN32
+    SetEnvironmentVariableA("HOS_START_SLOT", NULL);
+    _putenv("HOS_START_SLOT=");
+#else
+    unsetenv("HOS_START_SLOT");
+#endif
+    if (!longshot_profile_file(profile, SEP, path, sizeof path)) return;
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        snprintf(profile_note, sizeof profile_note, "profile: %s (no %s: no start slot)", profile, LONGSHOT_PROFILE_FILE);
+        return;
+    }
+    static char text[LONGSHOT_PROFILE_FILE_MAX];
+    const size_t n = fread(text, 1, sizeof text, f);
+    fclose(f);
+    int slot = -1;
+    const char *why = NULL;
+    const int got = n < sizeof text ? longshot_profile_start_slot(text, n, &slot, &why) : (why = "it is too large", -2);
+    if (got == 1) {
+        char set[32];
+        snprintf(set, sizeof set, "%d", slot);
+#ifdef _WIN32
+        SetEnvironmentVariableA("HOS_START_SLOT", set);
+        char put[64];
+        snprintf(put, sizeof put, "HOS_START_SLOT=%s", set);
+        _putenv(put);
+#else
+        setenv("HOS_START_SLOT", set, 1);
+#endif
+        snprintf(profile_note, sizeof profile_note, "profile: %s; its start slot slot_%02d (HOS_START_SLOT=%d)", profile,
+                 slot, slot);
+    } else if (got == 0)
+        snprintf(profile_note, sizeof profile_note, "profile: %s (no start slot)", profile);
+    else
+        snprintf(profile_note, sizeof profile_note, "profile: %s: %s %s: no start slot taken (the run starts as it would "
+                 "without)", profile, got == -1 ? "its start_slot:" : LONGSHOT_PROFILE_FILE ":", why);
+}
+static void profile_note_log(void) {
+    if (profile_note[0]) hos_log("%s", profile_note);
+}
 #ifdef _WIN32
 /* (longshot) On laptops with two GPUs, the drivers run a program on the dedicated one when it exports these (NVIDIA Optimus, AMD
    PowerXpress): without them a laptop could put the game on its integrated GPU, 5 fps */
 __declspec(dllexport) unsigned long NvOptimusEnablement = 1;
 __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 
-/* (longshot) The game's paths are UTF-8 char strings through Windows' A functions and fopen: its manifest (nx2/win_manifest.py)
+/* (longshot) The game's paths are UTF-8 char strings through Windows' A functions and fopen: its manifest (builder/crates/build-compile/src/generated/res.rs)
    makes the process's code page UTF-8, from Windows 10 1903 on. Before that, or with the manifest missing, those take the system's
    ANSI code page, and a folder name it cannot spell (Japanese on a Western Windows, an emoji) comes back as "?": nothing opens and
-   the game closed with no window and no log. The exe's own path through GetModuleFileNameA must name the exe (a name past MAX_PATH
+   the game closed with no window and no log. The exe's own path through GetModuleFileNameA must name the exe (a name past HOS_PATH_CAP
    bytes fails the same way); when it does not, a message says why (none for the builder's --prepare-shaders run: its log has it). */
 static int narrow_paths_ok(int argc, char **argv) {
-    char a[MAX_PATH];
-    const DWORD n = GetModuleFileNameA(NULL, a, MAX_PATH);
-    if (n && n < MAX_PATH && GetFileAttributesA(a) != INVALID_FILE_ATTRIBUTES) return 1;
-    wchar_t w[MAX_PATH * 2] = L"";
-    GetModuleFileNameW(NULL, w, MAX_PATH * 2);
+    char a[HOS_PATH_CAP];
+    const DWORD n = GetModuleFileNameA(NULL, a, HOS_PATH_CAP);
+    wchar_t w[HOS_PATH_CAP] = L"";
+    GetModuleFileNameW(NULL, w, HOS_PATH_CAP);
+    /* (the code page not UTF-8 (the manifest's activeCodePage not applied: before Windows 10 1903, 1809 LTSC): the A
+       functions take the ANSI code page's bytes, which the game's UTF-8 paths (hos_game_path_a) are only for plain ASCII.
+       A path the ANSI code page spells (Zélda on a Western Windows) opened here but named nothing once made UTF-8) */
+    int plain = 1;
+    for (const wchar_t *c = w; *c; c++) plain &= *c < 0x80;
+    if (n && n < HOS_PATH_CAP && GetFileAttributesA(a) != INVALID_FILE_ATTRIBUTES && (plain || GetACP() == CP_UTF8)) return 1;
     fprintf(stderr, "longshot: this folder's path cannot be opened (code page %u, %s): move the game to a folder with a plain name\n",
-            GetACP(), n >= MAX_PATH ? "too long" : "has characters the code page lacks");
+            GetACP(), n >= HOS_PATH_CAP ? "too long" : "has characters the code page lacks");
     int quiet = env_on("HOS_HEADLESS");
     for (int i = 1; i < argc; i++) quiet |= !strcmp(argv[i], "--prepare-shaders");
     if (!quiet) {
-        wchar_t text[MAX_PATH * 2 + 640];
+        wchar_t text[HOS_PATH_CAP + 640];
         _snwprintf(text, sizeof text / sizeof text[0],
                    L"Longshot can't open its files in this folder:\n\n%ls\n\n"
                    L"%ls\n\nMove the game folder somewhere with a shorter name of plain letters and digits (for example C:\\Games\\Longshot), "
@@ -2147,31 +2257,78 @@ static int narrow_paths_ok(int argc, char **argv) {
     return 0;
 }
 
+#endif
+
+/* (longshot) The game started by itself in a version folder's game folder (<version>/builds/<build>/, the builder two
+   folders up) hands over to the builder, which checks the folder, updates it when it must and starts the game with the
+   default profile (host/longshot_exit.h, docs/dev/reference/build.md "The game started by itself"): Linux, the
+   process becomes the builder; Windows, the builder is started and this process ends. Returns when there is nothing to
+   hand over to (a developer's folder, a game the builder started) or the builder could not be started */
+static int hand_over_is_file(const char *path) {
+#ifdef _WIN32
+    const DWORD a = GetFileAttributesA(path);
+    return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+#else
+    struct stat st;
+    return !stat(path, &st) && S_ISREG(st.st_mode);
+#endif
+}
+static void hand_over(int argc, char **argv) {
+    static char game[HOS_PATH_CAP], builder[HOS_PATH_CAP];
+    const DWORD n = hos_game_path_a(game, HOS_PATH_CAP);
+    if (!n || n >= HOS_PATH_CAP ||
+        !longshot_handover(game, getenv(LONGSHOT_BUILDER_CHANNEL), argc, argv, hand_over_is_file, LONGSHOT_BUILDER_NAME,
+                           builder, sizeof builder))
+        return;
+#ifdef _WIN32
+    static wchar_t wbuilder[HOS_PATH_CAP];
+    if (!MultiByteToWideChar(CP_UTF8, 0, builder, -1, wbuilder, HOS_PATH_CAP)) return;
+    const wchar_t *tail = longshot_cmdline_tail(GetCommandLineW());
+    const size_t len = wcslen(wbuilder) + wcslen(tail) + 16;
+    wchar_t *cmd = (wchar_t *)malloc(len * sizeof *cmd);   /* (CreateProcessW may write into it) */
+    if (!cmd) return;
+    swprintf(cmd, len, L"\"%ls\" play -- %ls", wbuilder, tail);
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof si), si.cb = sizeof si;
+    if (CreateProcessW(wbuilder, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        CloseHandle(pi.hThread), CloseHandle(pi.hProcess);
+        void hos_crash_clean_end(void);
+        hos_crash_clean_end();   /* (a normal exit: the builder plays it. Before the record starts, so nothing to clear) */
+        ExitProcess(0);
+    }
+    free(cmd);
+#else
+    char **v = longshot_handover_argv(builder, argc, argv);
+    if (v) execv(builder, v);
+    free(v);
+#endif
+    fprintf(stderr, "longshot: %s could not be started: the game starts by itself\n", builder);
+}
+
+#ifdef _WIN32
 int main(int argc, char **argv) {
 #else
 static int game_main(int argc, char **argv) {
 #endif
-#ifdef _WIN32
-    {   /* (longshot) the crash window's helper of this run (host/hos_crash_dialog.c): first, so it starts nothing of the game */
-        int hos_crash_helper_main(int argc, char **argv);
-        const int helper = hos_crash_helper_main(argc, argv);
-        if (helper >= 0) return helper;
-    }
+#ifdef _WIN32   /* (the Windows start; Linux's main below does its own) */
 #ifdef TRACY_ENABLE
     hos_tracy_start();   /* (LONGSHOT_TRACY: the profiler's client, in the game alone: host/hos_tracy.h) */
 #endif
     if (!narrow_paths_ok(argc, argv)) return 1;
+    hand_over(argc, argv);   /* (started by itself in a version folder: the builder's to start, host/longshot_exit.h) */
+    bc_claim();   /* (the builder's channel ends kept from what the game starts, after the hand-over read them) */
     hos_game_layout();   /* (the game folder's cache/ and logs/, before anything writes there: host/game_layout.c) */
     {
         void hos_relaunch_keep_env(void);   /* (host/hos_relaunch.c: the environment before the file's lines, for a restart) */
         hos_relaunch_keep_env();
     }
     load_longshot_env();
+    profile_start_slot();   /* (the profile's start_slot as HOS_START_SLOT, after the file, which may set it) */
     hos_profiling_env();   /* (HOS_PROFILE=1, host/profiling.c: after the file, which may set it) */
 #endif
-    /* (the settings file, in the user folder: chosen before the crash window's helper, the Discord status and the renderer read
-       it, and after longshot_env.txt, which may set HOS_OPTIONS_FILE; Linux's main chose it already: host/options_path.c) */
-    hos_options_choose(argc, argv);
+    /* (the settings file, the profile's: chosen before the Discord status and the renderer read it; Linux's main chose it already: host/options_path.c) */
+    hos_options_choose();
     {
         void hos_oot_heap_test_init(void);
         hos_oot_heap_test_init();
@@ -2206,7 +2363,7 @@ static int game_main(int argc, char **argv) {
         HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
         const DWORD err_kind = (!err || err == INVALID_HANDLE_VALUE) ? FILE_TYPE_UNKNOWN : GetFileType(err);
         /* Steam markers say the process came from Steam, not that its stderr is Steam's log pipe: the launcher's build
-           steps (nx2/make_game.py's run: stdout=PIPE, stderr merged into it, its lines read for @@progress and its
+           steps (longshot-builder's run: stdout=PIPE, stderr merged into it, its lines read for @@progress and its
            silence accounted) keep Steam's markers through game_env's filter, and their stderr is a pipe the builder
            reads. A --prepare-shaders run is that builder subprocess, never a played game: its pipe stays the
            builder's, the log gate does not fire for it. (An icon start under UNKNOWN still writes its log as always;
@@ -2231,10 +2388,10 @@ static int game_main(int argc, char **argv) {
                 (getenv("SteamGameId") || getenv("SteamAppId")) && !isatty(STDIN_FILENO))
 #endif
             ) {
-            char path[MAX_PATH + 32];
-            DWORD n = hos_game_path_a(path, MAX_PATH);
+            char path[HOS_PATH_CAP + 32];
+            DWORD n = hos_game_path_a(path, HOS_PATH_CAP);
             while (n && path[n - 1] != 92 && path[n - 1] != 47) n--;
-            if (n && n + 5 < MAX_PATH) {   /* (its logs/, which hos_game_layout made; else beside the game, as before) */
+            if (n && n + 5 < HOS_PATH_CAP) {   /* (its logs/, which hos_game_layout made; else beside the game, as before) */
                 memcpy(path + n, "logs", 5);
                 if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) path[n + 4] = path[n - 1], n += 5;
             }
@@ -2242,7 +2399,7 @@ static int game_main(int argc, char **argv) {
             hos_crash_record_prepare(path);   /* recovery before rotation; keep this run's actual destination */
             /* (the four runs before stay as longshot_log.1.txt (the last) to .4.txt: a player who started the game again after a
                crash sent in the new run's log, and the crash was gone) */
-            char from[MAX_PATH + 32], to[MAX_PATH + 32];
+            char from[HOS_PATH_CAP + 32], to[HOS_PATH_CAP + 32];
             for (int k = 4; k >= 1; k--) {
                 if (k == 1) memcpy(from + n, "longshot_log.txt", 17), memcpy(from, path, n);
                 else memcpy(from, path, n), snprintf(from + n, 32, "longshot_log.%d.txt", k - 1);
@@ -2250,7 +2407,7 @@ static int game_main(int argc, char **argv) {
                 MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING);
             }
             /* (longshot) the run before's log without the player's user name: its own lines were written so, and what wrote to
-               stderr itself (the Vulkan loader, SDL) is redacted here when its crash watch did not (host/log_redact.h) */
+               stderr itself (the Vulkan loader, SDL) is redacted here (host/log_redact.h) */
             hos_log_redact_file(to, NULL);
 #if !defined(_WIN32) && !defined(A64_MEM_ZERO)
             startup_stderr = fcntl(STDERR_FILENO, F_DUPFD_CLOEXEC, 0);
@@ -2281,10 +2438,6 @@ static int game_main(int argc, char **argv) {
     removed_switch_notes();
     void hos_control_start(const char *version);
     hos_control_start(LONGSHOT_VERSION);   /* (HOS_CONTROL=<socket>: the control bridge, host/control.c) */
-    /* (longshot) the window after a crash: a helper that waits for this run to end (host/hos_crash_dialog.c), started before
-       the guest, the renderer, the sound and the input; none for --prepare-shaders, HOS_HEADLESS or HOS_CRASH_WATCH=0 */
-    void hos_crash_watch_start(int argc, char **argv);
-    hos_crash_watch_start(argc, argv);
     const char *image = NULL;
     /* (longshot) --compile-shaders all or most: what a preparation of this run builds (gpu/vk/vk_draw.cpp compile_all), over
        compile_shaders= in longshot_options.ini; as RX_VK_COMPILE_SHADERS, set before --prepare-shaders runs, wherever it stands */
@@ -2328,25 +2481,21 @@ static int game_main(int argc, char **argv) {
         hos_discord_start();
     }
 #endif
-    static char beside_image[MAX_PATH], beside_romfs[MAX_PATH], beside_user[MAX_PATH];
+    static char beside_image[HOS_PATH_CAP], beside_romfs[HOS_PATH_CAP], beside_user[HOS_PATH_CAP];
     if (!image) {   /* (longshot) started with nothing, as a game is: everything beside the executable (the builder's folder) */
-        char dir[MAX_PATH];
-        const DWORD len = hos_game_path_a(dir, MAX_PATH);
+        char dir[HOS_PATH_CAP];
+        const DWORD len = hos_game_path_a(dir, HOS_PATH_CAP);
         char *slash = len ? strrchr(dir, SEP) : NULL;
         if (slash) {
             *slash = 0;
             SetCurrentDirectoryA(dir);
-            snprintf(beside_image, MAX_PATH, "%s" SEP_S "image.bin", dir);
-            snprintf(beside_romfs, MAX_PATH, "%s" SEP_S "romfs", dir);
-            snprintf(beside_user, MAX_PATH, "%s" SEP_S "user", dir);
+            snprintf(beside_image, HOS_PATH_CAP, "%s" SEP_S "image.bin", dir);
+            snprintf(beside_romfs, HOS_PATH_CAP, "%s" SEP_S "romfs", dir);
+            snprintf(beside_user, HOS_PATH_CAP, "%s" SEP_S "user", dir);
             if (GetFileAttributesA(beside_image) != INVALID_FILE_ATTRIBUTES) {
                 image = beside_image;
                 if (!hos_romfs_dir) hos_romfs_dir = beside_romfs;
-#ifndef _WIN32
                 if (!hos_user_dir) hos_user_dir = saves_dir(beside_user);
-#else
-                if (!hos_user_dir) hos_user_dir = beside_user;
-#endif
             }
         }
     }
@@ -2355,21 +2504,49 @@ static int game_main(int argc, char **argv) {
                 argv[0]);
         return 2;
     }
+    {   /* (longshot) The RomFS read in place from the player's .nup (romfs_index.h): the game folder has the index the
+           builder wrote beside image.bin, and no romfs folder. A .nup moved or replaced is said here, before the game starts */
+        static char index_path[2048], romfs_beside[2048];
+        if (!hos_romfs_index_beside(image, index_path, sizeof index_path))
+            hos_fatal(NULL, "romfs_index_bad: the game folder's path is too long (%s)", image);
+        /* (started as `game image.bin` with no --romfs: the romfs folder beside the image, as a start with nothing has it
+           beside the executable, so the index beside the image is opened when that folder is not there) */
+        if (!hos_romfs_dir && hos_romfs_dir_beside(image, romfs_beside, sizeof romfs_beside)) hos_romfs_dir = romfs_beside;
+        if (hos_romfs_dir && GetFileAttributesA(hos_romfs_dir) == INVALID_FILE_ATTRIBUTES &&
+            GetFileAttributesA(index_path) != INVALID_FILE_ATTRIBUTES) {
+            extern HosRomfsIndex *hos_romfs_index;   /* nn_fs.c */
+            char why[1536];
+            hos_romfs_index = hos_romfs_index_open(index_path, why, sizeof why);
+            if (!hos_romfs_index) hos_fatal(NULL, "%s", why);
+            hos_log("romfs: %u files read in place from %s", hos_romfs_index_count(hos_romfs_index), hos_romfs_index_nup(hos_romfs_index));
+        }
+    }
     if (env_on("HOS_TRACE")) hos_trace = 1;
     if (env_on("HOS_HLE_STATS")) {
         void hos_hle_stats_start(void);
         hos_hle_stats_start();
     }
     if (!hos_user_dir) hos_user_dir = "user";
+    /* (longshot) The run's save folder (host/save_dir.h): the profile's saves/ (LONGSHOT_PROFILE). An unusable folder is a
+       plain fatal error (the builder makes and tries the profile's folders before it starts the game, and says so itself),
+       and never falls back to the user folder's saves, which may be another profile's */
+    if (!hos_save_dir_choose()) {
+        hos_log("fatal: the save folder can't be used: %s", hos_save_dir_refused());
+        fprintf(stderr, "longshot: the save folder can't be used: %s\n", hos_save_dir_refused());
+        hos_log_flush();
+        return 1;
+    }
+    if (hos_save_dir_chosen()) hos_log("fs: the saves are kept in %s (%s)", hos_save_dir_chosen(), hos_save_dir_source());
+    profile_note_log();
     recover_writes();   /* (what a write of a setting that a kill cut left: before anything reads the settings) */
     CreateDirectoryA(hos_user_dir, NULL);
-    hos_options_carry();   /* (a game folder's settings from before into the user folder, once: host/options_path.c) */
+    hos_options_carry();   /* (a game folder's settings from before into the profile, once: host/options_path.c) */
     if (!reserve_guest()) {
         fprintf(stderr, "cannot reserve the guest window\n");
         return 1;
     }
     void hos_crash_test_arm(void);
-    hos_crash_test_arm();   /* (HOS_CRASH_TEST: a crash on purpose, once the crash handlers are set up: host/hos_crash_dialog.c) */
+    hos_crash_test_arm();   /* (HOS_CRASH_TEST: a crash on purpose, once the crash handlers are set up: host/hos_crash_test.c) */
 #ifdef A64_MEM_ZERO
     web_fs_init(NULL, hos_romfs_dir);
     /* (the whole file, no range: the server sends it brotli-compressed, 85 -> 26 MB) */
@@ -2401,7 +2578,7 @@ static int game_main(int argc, char **argv) {
         return 1;
     }
     hos_mem_init(hos_image_end);
-    {   /* (longshot) Widescreen and ultrawide (nx2/oot_wide.py): HOS_ASPECT=<ratio> (2.3889 for 3440x1440), else the Insert menu's
+    {   /* (longshot) Widescreen and ultrawide (host/oot_wide_sites.c): HOS_ASPECT=<ratio> (2.3889 for 3440x1440), else the Insert menu's
            Aspect ratio (on unless it says 0) takes the main monitor's shape. The game's picture takes that shape at its own height (the
            world wider at the sides on an ultrawide screen, narrower on a 16:10 or 4:3 one), its 16:9 cameras the picture's ratio.
            An output that is not 16:9 takes precedence over both HOS_ASPECT and the Aspect ratio, matching the menu's picture. Wider
@@ -2604,11 +2781,8 @@ static void driver_env_choose(void) {
     fprintf(stderr, "%s\n", driver_env_said);
 }
 int main(int argc, char **argv) {
-    {   /* (longshot) the crash window's helper of this run (host/hos_crash_dialog.c): first, so it starts nothing of the game */
-        int hos_crash_helper_main(int argc, char **argv);
-        const int helper = hos_crash_helper_main(argc, argv);
-        if (helper >= 0) return helper;
-    }
+    hand_over(argc, argv);   /* (started by itself in a version folder: the builder's to start, host/longshot_exit.h) */
+    bc_claim();   /* (the builder's channel ends kept from what the game starts, after the hand-over read them) */
 #ifdef TRACY_ENABLE
     hos_tracy_start();   /* (LONGSHOT_TRACY: the profiler's client, in the game alone: host/hos_tracy.h) */
 #endif
@@ -2620,8 +2794,9 @@ int main(int argc, char **argv) {
         hos_relaunch_keep_env();
     }
     load_longshot_env();
+    profile_start_slot();   /* (the profile's start_slot as HOS_START_SLOT, after the file, which may set it) */
     hos_profiling_env();   /* (HOS_PROFILE=1, host/profiling.c: after the file, which may set it) */
-    hos_options_choose(argc, argv);   /* (before the Discord status reads it, below: host/options_path.c) */
+    hos_options_choose();   /* (before the Discord status reads it, below: host/options_path.c) */
     driver_cache_room();
     driver_cache_folder();
     driver_env_choose();

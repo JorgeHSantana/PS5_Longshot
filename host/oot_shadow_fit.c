@@ -1,5 +1,5 @@
 /* Steady sun shadows near Link: the nearest of the sun's cascades fitted so that it no longer moves with the camera.
-   nx2/oot_shadow_fit.py calls these two after the game's light basis for a cascade (main+0x713620) and in its box fit
+   The hook sites shadow.fitBasis and shadow.fitBox call these two after the game's light basis for a cascade (main+0x713620) and in its box fit
    (main+0x713be0).
 
    Every frame the game refits each cascade to the view: a light basis whose sideways axis follows the camera's

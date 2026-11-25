@@ -1,28 +1,42 @@
 # Longshot's releases (docs/dev/reference/releases.md; how to make one: "Making a release" there). The same workflow as MagicBeanDev/LongshotLauncher's,
-# but for what is built: here the two builders.
+# but for what is built: here longshot-builder, one self-contained program per platform.
 #
 #   a push to main       the nightly: nightly-<commits since the fork>-<commit>, a pre-release, 5 minutes after the last of a few
 #                        merges in a row (and at least once an hour while they keep coming)
 #                        and none when the commits since the nightly before put nothing on its page (ci:, chore:)
 #   a tag vX.Y.Z         a stable (the stable channel), on a tested nightly's commit. Longshot's first is v3.0.0
 #
-# 1. version: tools.lock is checked first (scripts/tools.py check --require: every tool the Windows and the Linux builder
-#    need is in Longshot's packages), then the version's name; a tag is checked too (Tooling's scripts/release.py check-tag: its form, on main, above
-#    every release, and as high as the commits since the last stable call for). Either refused builds nothing.
+# 1. version: the version's name first; a tag is checked too (Tooling's scripts/release.py check-tag: its form, on main,
+#    above every release, and as high as the commits since the last stable call for). Then, only when there is a version
+#    to build (a nightly with nothing new is none), tools.lock (`longshot-builder dev tools check --require`: every tool
+#    the Windows and the Linux builder carry has its line, and every line's archive is in Longshot's store with its size
+#    and SHA-256). Either refused builds nothing. A release only downloads the pinned tools: the Make tools workflow
+#    (tools.yml, started by hand) makes and uploads them, never a release.
 #    A tag whose commit CI has released already (for a stable, the nightly of its commit) names that release in
 #    `checked` (Tooling's scripts/release.py released-as: published, its SHA256SUMS signed by a key the launcher trusts and naming its
 #    every file; one that is not stops the run). Its run passed every check of the commit, so the build checks that ship
-#    no file are not run again. Its files are not reused: each carries its version (the AppImage's VERSION, the zip's
-#    VERSION and builder), and a release never ships a file that names another version.
-# 2. linux, windows: Longshot-<v>-x86_64.AppImage and LongshotBuilder-<v>-windows-x64.zip (build-linux.yml, build-windows.yml).
-# 3. publish: SHA256SUMS over the files and tools.lock, SHA256SUMS.sig (the release key), the notes (git-cliff, cliff.toml),
-#    then a draft release with every file, published last: until then no launcher sees it. A nightly also prunes the
-#    nightlies past the newest 20 that are 5 days old or more. Nothing is committed back to the repository.
+#    no file are not run again. Its files are not reused: each carries its version (the VERSION in what longshot-builder
+#    carries), and a release never ships a file that names another version.
+#    The builds take every tool from the store (`longshot-builder dev tools install`) into what longshot-builder carries.
+#    version builds a longshot-builder of its own (mise.toml's Rust, scripts/ci_rust.sh), which reads the lock and needs
+#    none of the tools to be built.
+# 2. linux, windows (build-linux.yml, build-windows.yml), per platform p (linux-x64, windows-x64):
+#    longshot-builder-<v>-<p> (.exe on Windows), the deltas to it from the channel's last 5 releases,
+#    longshot-builder-<from>-to-<v>-<p>.zst-patch, its manifest, longshot-builder-<v>-<p>.json, and RecompLauncher's
+#    longshot-builder-<v>-<p>-recomplauncher.zip (the program as Longshot.exe or Longshot.x86_64, and recomplauncher.json)
+#    (`longshot-builder dev release files` and `recomplauncher`, run by each job's own Linux longshot-builder), uploaded
+#    before any build check runs; no cache is restored in them.
+# 3. publish: SHA256SUMS over the builds' files and tools.lock, SHA256SUMS.sig (the release key), the notes (git-cliff,
+#    cliff.toml), then a draft release with every file, published last: until then no launcher sees it. A nightly also
+#    prunes the nightlies past the newest 20 that are 5 days old or more. Nothing is committed back to the repository.
 #
 # Secret (docs/dev/reference/releases.md, One-time setup): RELEASE_SIGNING_KEY_SEALED (the release key's private PEM, sealed:
 # scripts/ci_secret.sh). version and publish run on the runner kept for them (runs-on: deploy); publish gets the seal.key
-# that opens it from the seal broker, which hands it to a run of main or a v* tag only; the builds run on the release runners (docs/dev/reference/ci.md, Runners). Releases are made with the job's
-# own token (forgejo.token, passed to Tooling's scripts/release.py as RELEASE_TOKEN; no secret, no bot account): on a push to this repository Forgejo gives it write access to this repository's every
+# that opens it from the seal broker, which hands it to a run of main or a v* tag only; the builds run on the release
+# runners (docs/dev/reference/ci.md, Runners). publish compiles no Rust and runs no program the checkout builds: what
+# they sign or upload was made and checked elsewhere, and each secret (the sealed ones, the job's token) is given only to
+# the steps that use it, never to the job.
+# Releases are made with the job's own token (forgejo.token, passed to Tooling's scripts/release.py as RELEASE_TOKEN; no secret, no bot account): on a push to this repository Forgejo gives it write access to this repository's every
 # unit (routers/api/v1/permissions/repo_access.go), so it may make, upload to, publish and delete releases and delete tags
 # here, and nowhere else. No `permissions:` key: Forgejo 17 ignores it (with a warning). Variable: RELEASE_UPLOAD_API (passed to release.py as FORGEJO_UPLOAD_API; Forgejo reserves the FORGEJO_ prefix for variables), the
 # API's address without Cloudflare in front, when a file is larger than its 100 MB upload limit.
@@ -46,7 +60,7 @@ jobs:
   version:
     name: The version
     runs-on: deploy  # (only the runner kept for deploys and releases: the version and commit it names are what is built and signed)
-    timeout-minutes: 10
+    timeout-minutes: 20   # (with the builder that reads tools.lock: a debug build, a few minutes)
     outputs:
       tag: ${{ steps.name.outputs.tag }}
       ref: ${{ steps.name.outputs.ref }}
@@ -62,14 +76,6 @@ jobs:
           git clone -q https://git.magicbean.dev/MagicBeanDev/Tooling.git "$RUNNER_TEMP/tooling"
           git -C "$RUNNER_TEMP/tooling" checkout -q --detach "$(cat .tooling-rev)"
           echo "RELEASE_PY=$RUNNER_TEMP/tooling/scripts/release.py" >> "$GITHUB_ENV"
-      - name: The tools
-        run: |
-          # (every tool the Windows and the Linux builder need is in tools.lock and its packages: before any build, not
-          # after both. Neither builder carries its tools: they download them by tools.lock)
-          if ! python3 -I scripts/tools.py check --require; then
-            echo "::error::tools.lock or its packages lack a tool a builder needs; docs/dev/reference/releases.md, Bumping a tool"
-            exit 1
-          fi
       - id: name
         env:
           RELEASE_TOKEN: ${{ forgejo.token }}
@@ -126,9 +132,31 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "$tag, from $ref"
+      # (only for a version: a nightly with nothing new builds nothing. The builder that reads tools.lock, mise.toml's
+      # Rust: scripts/ci_rust.sh)
+      - name: longshot-builder for the tools
+        if: steps.name.outputs.tag != ''
+        run: |
+          scripts/ci_rust.sh
+          cargo build --locked -q -p longshot-builder
+          echo "TOOLS=$PWD/target/debug/longshot-builder dev tools" >> "$GITHUB_ENV"
+      - name: The tools
+        if: steps.name.outputs.tag != ''
+        run: |
+          # (every tool the Windows and the Linux builder carry is in tools.lock, every line's first URLs Longshot's store's,
+          # and every line's archive there with its size and SHA-256: before any build. A release uploads no tool: a line
+          # whose archive is not there yet is the Make tools workflow's to make and upload)
+          if ! $TOOLS check; then
+            echo "::error::tools.lock lacks a tool a builder needs; docs/dev/reference/releases.md, Bumping a tool"
+            exit 1
+          fi
+          if ! $TOOLS check --require; then
+            echo "::error::a tools.lock line's archive is not in Longshot's store (above): a release uploads no tool. Run the Make tools workflow (Actions > Make tools, on main) for it, or fix the line; docs/dev/reference/releases.md, Bumping a tool"
+            exit 1
+          fi
 
   linux:
-    name: Linux builder
+    name: longshot-builder (Linux)
     needs: version
     if: needs.version.outputs.tag != ''
     uses: ./.forgejo/workflows/build-linux.yml
@@ -138,7 +166,7 @@ jobs:
       checked: ${{ needs.version.outputs.checked }}
 
   windows:
-    name: Windows builder
+    name: longshot-builder (Windows)
     needs: version
     if: needs.version.outputs.tag != ''
     uses: ./.forgejo/workflows/build-windows.yml
@@ -160,7 +188,6 @@ jobs:
       SEAL_BROKER_PIN: ${{ vars.SEAL_BROKER_PIN }}
       TAG: ${{ needs.version.outputs.tag }}
       REF: ${{ needs.version.outputs.ref }}
-      RELEASE_TOKEN: ${{ forgejo.token }}
       FORGEJO_UPLOAD_API: ${{ vars.RELEASE_UPLOAD_API }}
     steps:
       - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -174,26 +201,28 @@ jobs:
           git clone -q https://git.magicbean.dev/MagicBeanDev/Tooling.git "$RUNNER_TEMP/tooling"
           git -C "$RUNNER_TEMP/tooling" checkout -q --detach "$(cat .tooling-rev)"
           echo "RELEASE_PY=$RUNNER_TEMP/tooling/scripts/release.py" >> "$GITHUB_ENV"
-      # (the builders from Forgejo's own address, RELEASE_UPLOAD_API on this runner's network, where the artifacts are on its
+      # (the programs, deltas and manifests from Forgejo's own address, RELEASE_UPLOAD_API on this runner's network, where the artifacts are on its
       # disk: through its public address behind Cloudflare, as download-artifact fetches them, they came at about 1 MB/s,
       # two of this job's three minutes (nightly-325). When that fails (no variable, an API that answers otherwise), the
       # download-artifact steps below fetch them as before)
       - id: artifacts
-        name: The builders, from Forgejo's own address
+        name: The files, from Forgejo's own address
         continue-on-error: true
-        run: python3 -I "$RELEASE_PY" artifacts files --run "$GITHUB_RUN_ID" Longshot-linux-x86_64 LongshotBuilder-windows
+        env:
+          RELEASE_TOKEN: ${{ forgejo.token }}
+        run: python3 -I "$RELEASE_PY" artifacts files --run "$GITHUB_RUN_ID" longshot-builder-linux longshot-builder-windows
       # (from Forgejo's public address behind Cloudflare, as the build jobs' upload: fetched once more when it failed)
       - id: download_1
         if: steps.artifacts.outcome == 'failure'
         continue-on-error: true
         uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
-          name: Longshot-linux-x86_64
+          name: longshot-builder-linux
           path: files
       - if: steps.artifacts.outcome == 'failure' && steps.download_1.outcome == 'failure'
         uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
-          name: Longshot-linux-x86_64
+          name: longshot-builder-linux
           path: files
       # (from Forgejo's public address behind Cloudflare, as the build jobs' upload: fetched once more when it failed)
       - id: download_2
@@ -201,26 +230,35 @@ jobs:
         continue-on-error: true
         uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
-          name: LongshotBuilder-windows
+          name: longshot-builder-windows
           path: files
       - if: steps.artifacts.outcome == 'failure' && steps.download_2.outcome == 'failure'
         uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
-          name: LongshotBuilder-windows
+          name: longshot-builder-windows
           path: files
+      # (each platform's program, manifest and RecompLauncher zip, made by its build job: this runner builds and runs no
+      # program of the checkout's, it only signs and publishes files)
       - name: The files
         run: |
           git fetch -q --tags origin
           cp tools.lock files/
           ls -l files
-          test -f "files/Longshot-$TAG-x86_64.AppImage" && test -f "files/LongshotBuilder-$TAG-windows-x64.zip"
+          for p in linux-x64 windows-x64; do
+            exe=; [ "$p" = windows-x64 ] && exe=.exe
+            for f in "longshot-builder-$TAG-$p$exe" "longshot-builder-$TAG-$p.json" "longshot-builder-$TAG-$p-recomplauncher.zip"; do
+              test -s "files/$f" || { echo "::error::the builds made no $f (or an empty one)"; exit 1; }
+            done
+          done
       - name: SHA256SUMS, signed
         env:
           SEALED: ${{ secrets.RELEASE_SIGNING_KEY_SEALED }}
         run: |
           python3 -I "$RELEASE_PY" sums files/* --out files/SHA256SUMS
           umask 077
-          # (the key is sealed: only the seal broker's seal.key opens it, for main and v* tags, scripts/ci_secret.sh)
+          # (the key is sealed: only the seal broker's seal.key opens it, for main and v* tags, scripts/ci_secret.sh. Removed
+          # however the step ends: a failed signing leaves no key on the runner)
+          trap 'rm -f "$RUNNER_TEMP/key.pem"' EXIT
           printf '%s' "$SEALED" | scripts/ci_secret.sh unseal > "$RUNNER_TEMP/key.pem"
           python3 -I "$RELEASE_PY" sign files/SHA256SUMS --key "$RUNNER_TEMP/key.pem" --out files/SHA256SUMS.sig
           rm -f "$RUNNER_TEMP/key.pem"
@@ -234,7 +272,11 @@ jobs:
           python3 -I "$RELEASE_PY" notes "$TAG" --out notes.md
           cat notes.md
       - name: Publish
+        env:
+          RELEASE_TOKEN: ${{ forgejo.token }}
         run: python3 -I "$RELEASE_PY" publish "$TAG" --target "$REF" --notes notes.md files/*
       - name: Prune the nightlies
         if: startsWith(needs.version.outputs.tag, 'nightly-')
+        env:
+          RELEASE_TOKEN: ${{ forgejo.token }}
         run: python3 -I "$RELEASE_PY" prune --keep 20 --keep-days 5

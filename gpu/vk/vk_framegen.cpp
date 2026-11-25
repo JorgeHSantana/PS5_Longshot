@@ -1082,7 +1082,7 @@ void framegen_idle(bool recorded) {
     drop_size();
 }
 
-// Ultrawide's menus (the Insert menu's Ultrawide menus): which of nx2/oot_wide.py's keep-list screens keep the whole picture, told
+// Ultrawide's menus (the Insert menu's Ultrawide menus): which of host/oot_wide_sites.c's kept screens keep the whole picture, told
 // to the game's side each present, and, while a menu shows, the sides of the middle 16:9 to show out of focus (1)
 // or black (2), as fractions of the width. A menu's layout is set up once, when it is first opened: what tells one is
 // that the frame draws no world (vk_draw.cpp world_drawn_at), as a pause, the map, a loading screen or a movie

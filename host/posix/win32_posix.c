@@ -20,7 +20,7 @@
 #include <sys/time.h>
 #include <ucontext.h>
 
-/* the guest window (third_party/a64-kit/rt/a64.h A64_HOST_BASE, host/hos.h HOS_GUEST_SPACE): one mapping, all of it
+/* the guest window (builder/rt/a64.h A64_HOST_BASE, host/hos.h HOS_GUEST_SPACE): one mapping, all of it
    readable and writable, which VirtualQuery reports as committed without asking the kernel */
 #define GUEST_LO 0x100000000000ULL
 #define GUEST_HI (GUEST_LO + (1ULL << 39))

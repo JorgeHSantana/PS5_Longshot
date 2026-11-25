@@ -19,20 +19,17 @@ showing the last line written ("vertex format NVN 0xe -> vk 17"). In one log the
   compile at work to the watchdog in the preparation's own process only; a game start goes on to play after 30 s as before.
   The pipeline cache's save is stopped only when workers were left in the driver or it faulted, and after twice that limit (a
   fault AMD's retry recovered from counts, so a slow save there is not stopped as early); otherwise it is reported, and its lines
-  end so that make_game.py's silence limit still applies.
-- make_game.py says "the GPU driver stopped responding" for exit status 4.
+  end so that a builder's silence limit still applies.
+(That the builder says "the GPU driver stopped responding" for exit status 4 is build-driver's own test,
+src/shaders_outcome_tests.rs.)
 
 python -I -B tests/test_prepare_stall.py --cxx clang++
 """
 import argparse
-import contextlib
-import importlib.util
-import io
 import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 
@@ -322,7 +319,7 @@ def compile_run(cxx, name, code, tmp):
     exe = Path(tmp) / (name + (".exe" if os.name == "nt" else ""))
     src.write_text(code, encoding="utf-8")
     # (-D_CRT_SECURE_NO_WARNINGS: a clang that targets MSVC's C library, CI's, calls getenv and fopen deprecated, as the game's
-    # own build says too: toolchain.native_target)
+    # own build says too)
     cmd = [cxx, "-std=c++20", "-O1", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-D_CRT_SECURE_NO_WARNINGS", str(src),
            "-o", str(exe)]
     if os.name != "nt":
@@ -445,25 +442,11 @@ def check_sources():
         raise SystemExit("the hour for a compile at work is not kept to Mesa's Intel driver")
 
 
-def check_make_game():
-    spec = importlib.util.spec_from_file_location("make_game_stall", ROOT / "nx2" / "make_game.py")
-    make_game = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(make_game)
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        code = make_game.prepare_shaders([sys.executable, "-I", "-c", "import sys; sys.exit(4)"])
-    lines = [l for l in out.getvalue().splitlines() if l.startswith(make_game.NOT_PREPARED)]
-    if code != 4 or len(lines) != 1 or "(the GPU driver stopped responding)" not in lines[0]:
-        raise SystemExit("make_game.py does not say why for exit status 4: %r" % out.getvalue())
-    print("PASS make_game: exit status 4", flush=True)
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cxx", default="clang++")
     args = parser.parse_args()
     check_sources()
-    check_make_game()
     if not shutil.which(args.cxx):
         raise SystemExit("C++ compiler not found: " + args.cxx)
     with tempfile.TemporaryDirectory(prefix="prepare-stall-") as tmp:
