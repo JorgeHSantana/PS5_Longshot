@@ -298,7 +298,13 @@ mod tests {
         assert!(!remove_work(&works, &w), "a build holds it");
         assert!(w.join("gen/lift.key").is_file());
         drop(held);
-        assert!(remove_work(&works, &w));
+        // (flock belongs to the open file, and another test of this process may be forking a child right now: the
+        // child holds the lock's file until its exec closes it, so the lock can outlive `held` for a moment)
+        let t0 = std::time::Instant::now();
+        while !remove_work(&works, &w) {
+            assert!(t0.elapsed() < std::time::Duration::from_secs(5), "let go, it goes");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         assert!(!w.exists());
         // (what a removal stopped part way left aside goes as it is)
         let aside = works.join(format!("{GONE}game-2-1"));
