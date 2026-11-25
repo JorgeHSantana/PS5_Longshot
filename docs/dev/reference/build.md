@@ -587,7 +587,7 @@ developer's (it carries no tools, so all five Linux tools are downloaded; a nigh
 |---|---|---|---|
 | main before the Rust builder | 1 s | 23 MB | the archive, then `no_builder_in_source` |
 | first, empty cache | 218 s | 325 MB (archive 25, Rust 120, tools 106, crates 55, RenHDrum's crates) | source 1 s, Rust 14 s, tools 4 s, crates 5 s, RenHDrum 11 s, third-party objects 27 s, pack 3 s, the builder's compile 154 s |
-| a new commit, Rust, crates and tools kept | 109 s | 0 (the archive given) | the builder's compile 106 s (the workspace's crates and the fat LTO link; the dependencies kept), the rest 3 s |
+| a new commit, Rust, crates and tools kept | 109 s | 0 (the archive given) | the builder's compile 106 s (the workspace's crates and the LTO link, fat when this was measured (thin since: about 2.5 times faster); the dependencies kept), the rest 3 s |
 
 The cache then holds about 4 GB: Rust 0.6 GB, the cargo home 0.5 GB, the tools 0.5 GB (none with a nightly that
 carries them), cargo's target folder 2 GB, the tree 0.6 GB. The program is about 190 MB (its pack: 560 MB of files,

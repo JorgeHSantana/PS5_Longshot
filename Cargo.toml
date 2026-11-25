@@ -111,8 +111,10 @@ overflow-checks = true
 # --profile dist -p longshot-builder`.
 [profile.dist]
 inherits = "release"
-lto = "fat"
-codegen-units = 1
+# (thin, not fat: the same game build time (a cold build 2:14 against 2:15), the program 2.5 times faster to build
+# (63 s against 155 s on a 7900X; the release's server runner has 2 cores); 34.7 MB against 25.9 MB)
+lto = "thin"
+codegen-units = 16
 # (the line tables are most of the program's size: gone; the symbols stay, so a panic's backtrace names functions)
 strip = "debuginfo"
 
