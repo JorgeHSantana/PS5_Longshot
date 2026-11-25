@@ -50,6 +50,7 @@ import glob
 import os
 import re
 import sys
+import oot_wide
 import whole_write   # (rewrites written beside and moved over)
 
 DECL = "extern volatile int hos_fixed_resolution;\nextern volatile int hos_dynres_runs;\nextern volatile uint32_t hos_fixed_scale_bits;\n"
@@ -1658,7 +1659,14 @@ def patch_file(s, name, protect_hearts=False):
     lines to print). The counts add up over the files; report() decides from the sums"""
     counts = collections.Counter()
     lines = []
-    out = s
+    # f_815505b0, f_81550720, f_8156abc0: preparation/draw and arena reset stay in context
+    # even when the hot list puts them in separate files (guest_locals).
+    out, prepare, draw, reset = oot_wide.title_card_file(s)
+    counts["title card prepare"] = prepare
+    counts["title card draw"] = draw
+    counts["title card reset"] = reset
+    if out != s:
+        lines.append("oot_wide: title card independent strips in " + name)
     d = patch_dynres(out)
     if d is not None:
         out = d
@@ -1931,6 +1939,17 @@ def report(paths, counts, protect_hearts=False):
     total = collections.Counter()
     for c in counts:
         total.update(c)
+    title_pair = [total["title card prepare"], total["title card draw"], total["title card reset"]]
+    if title_pair != [1, 1, 1]:
+        print("oot_wide: WARNING: title card preparation/draw/reset anchors found %s times; game's drawing retained" % title_pair)
+        for path in paths if any(title_pair) else ():
+            with open(path, encoding="utf-8", newline="") as f:
+                source = f.read()
+            original = oot_wide.title_card_original(source)
+            if original != source:
+                whole_write.write_whole(path, original, newline="")
+    else:
+        print("oot_wide: title card preparation, draw and arena reset paired (three independent strips)")
     for what in done:
         done[what] = total[what]
     speed_hooks = total["speed hooks"]   # (SPEED_PLACES', in one file or several)

@@ -227,7 +227,7 @@ static Node *node_take(uint64_t key) {
 enum { LK_PLAIN, LK_WORLD, LK_WHOLE, LK_HELD, LK_PAGE, LK_CANVAS };   /* (a layout placed by code from the world; on a screen kept
                                                                         whole; held; a pause page: by hand; its own canvas) */
 enum { RULE_NONE, RULE_KEEP, RULE_KEEP_LOOK, RULE_WIDEN, RULE_LEFT, RULE_RIGHT, RULE_SLIDE, RULE_KEEP_ORIGIN, RULE_HELD_RIGHT,
-       RULE_KEEP_WIDE, RULE_GROW, RULE_KEEP_TAB, RULE_STRIP, RULE_PAGES, RULE_SPLIT };
+       RULE_KEEP_WIDE, RULE_GROW, RULE_KEEP_TAB, RULE_STRIP, RULE_PAGES, RULE_SPLIT, RULE_TITLE_FRAME };
        /* (RULE_SLIDE: a pane the game slides in from beside its parent, planned where it comes to rest. RULE_HELD_RIGHT: a
           held layout's group at its canvas's right edge, moved in to the screen's right side where the HUD's canvas is
           wider than the screen (ui_ex < 0: 16:10 and narrower), so it keeps 16:9's distance from it; on a wider screen held
@@ -308,10 +308,10 @@ static const PaneRule RULES[] = {
        The icons' part itself is never looked into: its icons move as one with their group) */
     {"MapMenu_00", "N_MapIcon_00", RULE_KEEP_ORIGIN}, {"MapMenu_00", "Pa_MapIcon_00", RULE_KEEP},
     {"MapMenu_00", "Pa_WorldMap_00", RULE_KEEP},
-    {"Location_00", "P_DecoFrameLT_00", RULE_WIDEN}, {"Location_00", "P_DecoFrameLTSh_00", RULE_WIDEN},
-    {"Location_00", "P_DecoFrameRT_00", RULE_WIDEN}, {"Location_00", "P_DecoFrameRTSh_00", RULE_WIDEN},
-    {"Location_00", "P_DecoFrameLB_00", RULE_WIDEN}, {"Location_00", "P_DecoFrameLBSh_00", RULE_WIDEN},
-    {"Location_00", "P_DecoFrameRB_00", RULE_WIDEN}, {"Location_00", "P_DecoFrameRBSh_00", RULE_WIDEN},
+    {"Location_00", "P_DecoFrameLT_00", RULE_TITLE_FRAME}, {"Location_00", "P_DecoFrameLTSh_00", RULE_TITLE_FRAME},
+    {"Location_00", "P_DecoFrameRT_00", RULE_TITLE_FRAME}, {"Location_00", "P_DecoFrameRTSh_00", RULE_TITLE_FRAME},
+    {"Location_00", "P_DecoFrameLB_00", RULE_TITLE_FRAME}, {"Location_00", "P_DecoFrameLBSh_00", RULE_TITLE_FRAME},
+    {"Location_00", "P_DecoFrameRB_00", RULE_TITLE_FRAME}, {"Location_00", "P_DecoFrameRBSh_00", RULE_TITLE_FRAME},
     /* (the text box's choices: their column, at the canvas's right edge) */
     {"MessageDialog_00", "N_BtnNum_00", RULE_HELD_RIGHT},
 };
@@ -501,7 +501,10 @@ static void visit(int p, int depth) {
             visit(c, depth + 1);
             continue;
         }
-        if (n->rule == RULE_WIDEN) {
+        /* Horizontal resizing belongs to the prepared strips. The old narrow
+           planner still handles the frame's vertical placement. */
+        if (n->rule == RULE_TITLE_FRAME && ui_ex > 0.0f) continue;
+        if (n->rule == RULE_WIDEN || n->rule == RULE_TITLE_FRAME) {
             widen(c, depth);
             continue;
         }
@@ -779,6 +782,403 @@ float hos_hud_reach(float r, float max) {
 float hos_hud_scale(float r, float full) { return r > 0.0f && full > 0.0f && r < full ? r / full : 1.0f; }
 
 /* Each present (host/rx_backend.c host_wide_menus): the scales and moves for the picture's shape, and the plan */
+/* The area title card's baked frame is drawn in three strips, not stretched.
+   Each quarter (and shadow) keeps its outside and middle ornaments at their own
+   size; only the plain line between them changes to reach the picture's sides. Artwork,
+   noise and distortion use the same cuts, including their generated coordinates.
+
+   The planner publishes the choice once per present. Preparation snapshots it,
+   allocates independent constants, and records the original and three descriptors.
+   Drawing uses that preparation, never the setting. A live option change can
+   therefore leave the already prepared frame at its earlier choice, but cannot
+   change half a pane. Descriptors are restored before returning to the game.
+   A picture may reuse its preparation. The constants remain valid until the same
+   arena resets; the reset hook retires its records before memory can be recycled.
+   HOS_WIDE_UI_LOG traces these pairs at trace level and prints event totals after
+   a card. Ordinary play reports each unexpected event only once per pane kind. */
+typedef struct {
+    float width, centre, source0, source1;
+} TitleStrip;
+static int title_strips(float extension, int right, TitleStrip out[3]) {
+    if (extension == 0.0f || !isfinite(extension) || extension <= -1368.0f)
+        return 0;
+    const float source[4] = {0, 384, 1752, 1920};
+    const float dest[4] = {0, 384, 1752 + extension, 1920 + extension};
+    for (int i = 0; i < 3; i++) {
+        TitleStrip s = (TitleStrip){dest[i + 1] - dest[i],
+                                    -960 - extension + (dest[i] + dest[i + 1]) * .5f,
+                                    source[i] / 1920,
+                                    source[i + 1] / 1920};
+        if (right)
+            out[2 - i] = (TitleStrip){s.width, -s.centre, 1 - s.source1, 1 - s.source0};
+        else
+            out[i] = s;
+    }
+    return 1;
+}
+static float title_float(const unsigned char *p) {
+    float f;
+    memcpy(&f, p, 4);
+    return f;
+}
+static void title_put(unsigned char *p, float f) {
+    memcpy(p, &f, 4);
+}
+/* The prepared affine transform is three rows of four floats at +0x40. Keep all
+   size/clipping fields unchanged, scaling its across column and moving its origin.
+   Slice every material coordinate set at the same original positions. Stretching
+   an effect over the new width separately moves it across the unchanged artwork.
+   Adjacent strips still meet at the same coordinates, without restarting a reveal. */
+static void title_strip_params(unsigned char out[0x640], const unsigned char in[0x640], TitleStrip s) {
+    memcpy(out, in, 0x640);
+    for (int row = 0; row < 3; row++) {
+        unsigned o = 0x40 + 16 * row;
+        float x = title_float(in + o);
+        title_put(out + o, x * (s.width / 1920));
+        title_put(out + o + 12, title_float(in + o + 12) + x * s.centre);
+    }
+    const unsigned offsets[3] = {0xc0, 0x110, 0x150};
+    for (int k = 0; k < 3; k++) {
+        float a = s.source0, b = s.source1;
+        for (int row = 0; row < 2; row++)
+            for (int component = 0; component < 2; component++) {
+                unsigned o = offsets[k] + row * 16 + component * 4;
+                float l = title_float(in + o), r = title_float(in + o + 8);
+                title_put(out + o, l + (r - l) * a);
+                title_put(out + o + 8, l + (r - l) * b);
+            }
+    }
+    /* The two generated coordinate sets start from the quad's position, not
+       the UV corners above: .5 + (position - .5) * pane_size / texture_size.
+       Compose the slice into their transforms so each strip samples only its
+       part of that field, rather than starting the whole effect again. */
+    const unsigned matrices[2] = {0x130, 0x170}, sizes[2] = {0x108, 0x190};
+    float span = s.source1 - s.source0;
+    for (int k = 0; k < 2; k++) {
+        float ratio = title_float(in + 0xb0) / title_float(in + sizes[k]);
+        float shift = s.source0 * ratio + .5f * (1 - span) * (1 - ratio);
+        for (int row = 0; row < 2; row++) {
+            unsigned column = matrices[k] + row * 8, translation = matrices[k] + 16 + row * 4;
+            float x = title_float(in + column);
+            title_put(out + column, x * span);
+            title_put(out + translation, title_float(in + translation) + x * shift);
+        }
+    }
+}
+/* Low bit: resizing is planned. The other bits count live strip records.
+   A narrow/Middle preparation and an idle draw each need one atomic read. */
+static unsigned title_work;
+static void title_diagnostics(uint32_t epoch);
+static uint64_t title_plan;
+static uint64_t title_plan_read(void) {
+    return __atomic_load_n(&title_plan, __ATOMIC_ACQUIRE);
+}
+static uint32_t title_plan_epoch(void) {
+    return (uint32_t)(title_plan_read() >> 32);
+}
+static void title_plan_tick(float extension) {
+    static uint32_t epoch;
+    uint32_t bits;
+    memcpy(&bits, &extension, sizeof bits);
+    __atomic_store_n(&title_plan, ((uint64_t)++epoch << 32) | bits, __ATOMIC_RELEASE);
+    if (extension != 0 && isfinite(extension))
+        __atomic_fetch_or(&title_work, 1u, __ATOMIC_RELEASE);
+    else
+        __atomic_fetch_and(&title_work, ~1u, __ATOMIC_RELEASE);
+    title_diagnostics(epoch);
+}
+typedef struct {
+    uint64_t pane, picture, layout, material, sequence, allocator;
+    uint32_t epoch;
+    unsigned char original[24], strips[3][24];
+    float extension;
+    int valid, used, count, kind;
+} TitlePrepared;
+static TitlePrepared title_saved[128];
+static unsigned char title_lock;
+static uint64_t title_sequence;
+static void title_enter(void) {
+    while (__atomic_test_and_set(&title_lock, __ATOMIC_ACQUIRE)) {
+    }
+}
+static void title_leave(void) {
+    __atomic_clear(&title_lock, __ATOMIC_RELEASE);
+}
+static void title_read(Ctx *c, uint64_t p, unsigned char *out, unsigned n) {
+    for (unsigned i = 0; i < n; i += 4) {
+        uint32_t v = (uint32_t)recomp_load32(c, p + i);
+        memcpy(out + i, &v, 4);
+    }
+}
+static void title_write(Ctx *c, uint64_t p, const unsigned char *in, unsigned n) {
+    for (unsigned i = 0; i < n; i += 4) {
+        uint32_t v;
+        memcpy(&v, in + i, 4);
+        recomp_store32(c, p + i, v);
+    }
+}
+static int title_is(Ctx *c, uint64_t p, const char *s) {
+    if (!p)
+        return 0;
+    for (unsigned i = 0; i < 64; i++) {
+        char a = (char)recomp_load8(c, p + i);
+        if (a != s[i])
+            return 0;
+        if (!a)
+            return 1;
+    }
+    return 0;
+}
+static int title_prefix(Ctx *c, uint64_t p, const char *s) {
+    if (!p)
+        return 0;
+    for (unsigned i = 0; s[i]; i++)
+        if (recomp_load8(c, p + i) != (unsigned char)s[i])
+            return 0;
+    return 1;
+}
+static int title_kind(Ctx *c, uint64_t pane, uint64_t *layout) {
+    static unsigned warned;
+    static const char *names8[] = {"P_DecoFrameLT_00", "P_DecoFrameLTSh_00", "P_DecoFrameRT_00", "P_DecoFrameRTSh_00",
+                                   "P_DecoFrameLB_00", "P_DecoFrameLBSh_00", "P_DecoFrameRB_00", "P_DecoFrameRBSh_00"};
+    if (!pane)
+        return -1;
+    uint32_t flags = (uint32_t)recomp_load32(c, pane + 0xa8);
+    if (((flags >> 22) & 15) != 1)
+        return -1;
+    *layout = recomp_load64(c, pane + 0x18);
+    if (!*layout)
+        return -1;
+    uint64_t res = recomp_load64(c, *layout + 0xf8);
+    if (!res)
+        return -1;
+    if (!title_is(c, recomp_load64(c, res + 0x18), "Location_00"))
+        return -1;
+    uint64_t base = recomp_load64(c, *layout + 0x100), names = recomp_load64(c, res + 0x20);
+    unsigned count = (unsigned)recomp_load32(c, *layout + 0x13c);
+    if (!base || !names || pane < base || (pane - base) % 0xb0 || (pane - base) / 0xb0 >= count)
+        return -1;
+    uint64_t name = recomp_load64(c, names + (pane - base) / 0xb0 * 8);
+    for (int i = 0; i < 8; i++)
+        if (title_is(c, name, names8[i]))
+            return i;
+    if (title_prefix(c, name, "P_DecoFrame") && !__atomic_exchange_n(&warned, 1, __ATOMIC_RELAXED))
+        hos_log("wide UI: title unknown frame pane name; game's drawing retained");
+    return -1;
+}
+enum { TITLE_GUARD, TITLE_UNUSED, TITLE_NO_SLOT, TITLE_FALLBACK, TITLE_EVENTS };
+static uint64_t title_events[TITLE_EVENTS][8], title_prepares[8], title_draws[8], title_reuses[8], title_retired[8];
+static uint32_t title_seen;
+static void title_note(int event, int kind) {
+    static const char *names[] = {"guard failed", "unused preparation", "no state slot", "draw fallback"};
+    uint64_t n = __atomic_add_fetch(&title_events[event][kind], 1, __ATOMIC_RELAXED);
+    if (n == 1)
+        hos_log("wide UI: title %s kind %d (count %llu; first occurrence)", names[event], kind, (unsigned long long)n);
+}
+static void title_diagnostics(uint32_t epoch) {
+    static uint32_t reported;
+    if (log_each <= 0)
+        return;
+    uint32_t seen = __atomic_load_n(&title_seen, __ATOMIC_RELAXED);
+    if (!seen || seen == reported || (uint32_t)(epoch - seen) <= 2)
+        return;
+    reported = seen;
+    for (int k = 0; k < 8; k++)
+        hos_log("wide UI: title totals kind %d: %llu prepares, %llu draws, %llu reuses, %llu guard, %llu unused, "
+                "%llu no slot, %llu fallback, %llu retired", k,
+                (unsigned long long)__atomic_load_n(&title_prepares[k], __ATOMIC_RELAXED),
+                (unsigned long long)__atomic_load_n(&title_draws[k], __ATOMIC_RELAXED),
+                (unsigned long long)__atomic_load_n(&title_reuses[k], __ATOMIC_RELAXED),
+                (unsigned long long)__atomic_load_n(&title_events[TITLE_GUARD][k], __ATOMIC_RELAXED),
+                (unsigned long long)__atomic_load_n(&title_events[TITLE_UNUSED][k], __ATOMIC_RELAXED),
+                (unsigned long long)__atomic_load_n(&title_events[TITLE_NO_SLOT][k], __ATOMIC_RELAXED),
+                (unsigned long long)__atomic_load_n(&title_events[TITLE_FALLBACK][k], __ATOMIC_RELAXED),
+                (unsigned long long)__atomic_load_n(&title_retired[k], __ATOMIC_RELAXED));
+}
+/* Under title_lock. A record remains reusable until its constants' arena resets,
+   or its picture is prepared again. The descriptor alone has no generation tag. */
+static void title_forget(int slot) {
+    TitlePrepared *p = &title_saved[slot];
+    if (p->valid) {
+        __atomic_fetch_sub(&title_work, 2u, __ATOMIC_RELEASE);
+        if (!p->used)
+            title_note(TITLE_UNUSED, p->kind);
+    }
+    memset(p, 0, sizeof *p);
+}
+void hos_wide_title_reset(uint64_t allocator) {
+    if (!(__atomic_load_n(&title_work, __ATOMIC_ACQUIRE) >> 1))
+        return;
+    title_enter();
+    for (int i = 0; i < 128; i++)
+        if (title_saved[i].valid && title_saved[i].allocator == allocator) {
+            __atomic_add_fetch(&title_retired[title_saved[i].kind], 1, __ATOMIC_RELAXED);
+            title_forget(i);
+        }
+    title_leave();
+}
+static int title_slot(uint64_t picture) {
+    for (int i = 0; i < 128; i++)
+        if (title_saved[i].picture == picture)
+            return i;
+    for (int i = 0; i < 128; i++)
+        if (!title_saved[i].valid)
+            return i;
+    return -1;
+}
+static int title_mapping(Ctx *c, uint64_t material, const unsigned char *params) {
+    if (!material || ((recomp_load32(c, material + 0x58) >> 15) & 7) != 3)
+        return 0;
+    uint64_t samplers = recomp_load64(c, material + 0x30);
+    if (!samplers || recomp_load8(c, samplers + 0x20) != 0 ||
+        recomp_load8(c, samplers + 0x70) != 6 || recomp_load8(c, samplers + 0xc0) != 6 ||
+        recomp_load8(c, samplers + 0x71) || recomp_load8(c, samplers + 0xc1))
+        return 0;
+    const unsigned sizes[2] = {0x108, 0x190};
+    for (int k = 0; k < 2; k++) {
+        float width = title_float(params + sizes[k]);
+        if (!(width > 0) || !isfinite(width))
+            return 0;
+    }
+    return 1;
+}
+void hos_wide_title_prepare(Ctx *c, uint64_t picture, uint64_t pane, uint64_t params, uint64_t alloc, uint64_t align,
+                            uint64_t out, void (*allocate)(Ctx *)) {
+    allocate(c);
+    if (!__atomic_load_n(&title_work, __ATOMIC_ACQUIRE))
+        return;
+    uint64_t layout = 0;
+    int kind = title_kind(c, pane, &layout);
+    if (kind < 0)
+        return;
+    const uint64_t choice = title_plan_read();
+    uint32_t bits = (uint32_t)choice;
+    float ext;
+    memcpy(&ext, &bits, 4);
+    TitlePrepared state = {0};
+    state.pane = pane;
+    state.picture = picture;
+    state.layout = layout;
+    state.material = recomp_load64(c, picture + 0x30);
+    state.allocator = alloc;
+    state.kind = kind;
+    state.epoch = (uint32_t)(choice >> 32);
+    title_read(c, out, state.original, 24);
+    unsigned char original[0x640], changed[0x640];
+    title_read(c, params, original, sizeof original);
+    float alpha = title_float(original + 0x20);
+    uint32_t flags;
+    memcpy(&flags, original + 0x630, 4);
+    if (ext != 0 && alpha > 0) {
+        if ((flags & 7) != 3 || !isfinite(title_float(original + 0xb0)) || !isfinite(title_float(original + 0xb4)) ||
+            fabsf(title_float(original + 0xb0) - 1920) > .01f ||
+            fabsf(title_float(original + 0xb4) - 1080) > .01f || !title_mapping(c, state.material, original)) {
+            title_note(TITLE_GUARD, kind);
+        } else {
+            TitleStrip strips[3];
+            if (title_strips(ext, (kind / 2) & 1, strips)) {
+                Ctx saved = *c;
+                for (int i = 0; i < 3; i++) {
+                    title_strip_params(changed, original, strips[i]);
+                    title_write(c, params, changed, sizeof changed);
+                    *c = saved;
+                    c->x[0] = params;
+                    c->x[1] = alloc;
+                    c->x[2] = align;
+                    c->x[8] = out;
+                    allocate(c);
+                    title_read(c, out, state.strips[i], 24);
+                }
+                title_write(c, params, original, sizeof original);
+                title_write(c, out, state.original, 24);
+                *c = saved;
+                state.valid = 1;
+                state.count = 3;
+                state.extension = ext;
+            }
+        }
+    }
+    if (alpha > 0)
+        __atomic_store_n(&title_seen, state.epoch, __ATOMIC_RELAXED);
+    title_enter();
+    int slot = title_slot(picture);
+    if (slot >= 0) {
+        title_forget(slot);
+        if (state.valid) {
+            state.sequence = ++title_sequence;
+            title_saved[slot] = state;
+            __atomic_fetch_add(&title_work, 2u, __ATOMIC_RELEASE);
+        }
+    }
+    title_leave();
+    if (slot < 0) {
+        title_note(TITLE_NO_SLOT, kind);
+        return;
+    }
+    if (!state.valid)
+        return;
+    __atomic_add_fetch(&title_prepares[kind], 1, __ATOMIC_RELAXED);
+    if (log_each > 0)
+        hos_log_at(HOS_LOG_TRACE, "wide UI: title prepare kind %d pane %llx seq %llu epoch %u strips %d E %.3f alpha %.6f", kind,
+                   (unsigned long long)pane, (unsigned long long)state.sequence, state.epoch, state.count, state.extension, alpha);
+}
+int hos_wide_title_draw(Ctx *c, void (*draw)(Ctx *)) {
+    if (!(__atomic_load_n(&title_work, __ATOMIC_ACQUIRE) >> 1))
+        return 0;
+    uint64_t picture = c->x[0];
+    TitlePrepared state = {0};
+    int slot = -1;
+    title_enter();
+    for (int i = 0; i < 128; i++)
+        if (title_saved[i].valid && title_saved[i].picture == picture) {
+            slot = i;
+            state = title_saved[i];
+            break;
+        }
+    title_leave();
+    if (slot < 0)
+        return 0; /* Other pictures need no guest loads or name walks. */
+    uint64_t pane = recomp_load64(c, c->x[1] + 8), layout = 0;
+    int kind = title_kind(c, pane, &layout);
+    unsigned char original[24];
+    title_read(c, picture + 0x48, original, 24);
+    if (kind != state.kind || pane != state.pane || state.layout != layout ||
+        state.material != recomp_load64(c, picture + 0x30) || memcmp(original, state.original, 24)) {
+        title_enter();
+        if (title_saved[slot].sequence == state.sequence)
+            title_forget(slot);
+        title_leave();
+        title_note(TITLE_FALLBACK, state.kind);
+        return 0;
+    }
+    /* Preparation and draw use the game's arena ownership, not host present age.
+       The arena-reset hook invalidates every dependent record before it can recycle. */
+    title_enter();
+    if (!title_saved[slot].valid || title_saved[slot].sequence != state.sequence) {
+        title_leave();
+        title_note(TITLE_FALLBACK, state.kind);
+        return 0;
+    }
+    title_saved[slot].used = 1;
+    title_leave();
+    uint32_t now = title_plan_epoch();
+    __atomic_store_n(&title_seen, now, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&title_draws[kind], 1, __ATOMIC_RELAXED);
+    if (state.used)
+        __atomic_add_fetch(&title_reuses[kind], 1, __ATOMIC_RELAXED);
+    Ctx saved = *c;
+    for (int i = 0; i < 3; i++) {
+        title_write(c, picture + 0x48, state.strips[i], 24);
+        *c = saved;
+        draw(c);
+    }
+    title_write(c, picture + 0x48, original, 24);
+    if (log_each > 0)
+        hos_log_at(HOS_LOG_TRACE, "wide UI: title draw kind %d pane %llx seq %llu epoch %u now %u strips %d descriptor restored", kind,
+                   (unsigned long long)pane, (unsigned long long)state.sequence, state.epoch, now, state.count);
+    return 1;
+}
+
 void hos_wide_ui_tick(void) {
     static const char *env;
     static int looked, keep_forced;
@@ -808,6 +1208,10 @@ void hos_wide_ui_tick(void) {
         qx = k * GAME / r, qy = k, fit = r / GAME / k;
         if (hud) ex = CANVAS_HALF * (r / (k * GAME) - 1.0f), ey = CANVAS_HALF_Y * (1.0f / k - 1.0f);
     }
+    /* The large area frame reaches the picture's sides, even where the gameplay
+       HUD stays nearer the middle. Middle 16:9 retains the original frame. */
+    const float title_ex = r > GAME * 1.001f ? CANVAS_HALF * (r / GAME - 1.0f) : ex;
+    title_plan_tick(hud ? title_ex : 0.0f);
     /* (the Ultrawide menus row at Extended, on a wider screen: the menus placed as the HUD is, by the whole extra width;
        HOS_WIDE_UI is about the HUD's moves only) */
     const int menus = r > GAME * 1.001f && rx_option(HOS_OPT_WIDE_MENUS, 0) == HOS_WIDE_MENUS_EXTENDED;

@@ -220,3 +220,45 @@ def install(lifter, img):
         n += 1
     print("widescreen: %d of %d sites" % (n, len(SITES)))
     return n
+
+
+# The picture preparation f_815505b0 and draw f_81550720. Applied to the lifted C
+# by oot_patches; that pipeline keeps these functions' registers in their context,
+# including when the shipped hot list separates them into different files.
+TITLE_ALLOC = "c->x[30] = 0x815506f4ULL; f_8154f1c0(c);"
+TITLE_PREP = ("c->x[30] = 0x815506f4ULL; "
+              "hos_wide_title_prepare(c, c->x[19], c->x[20], c->x[31] + 0x54, c->x[1], c->x[2], c->x[31] + 8, f_8154f1c0);")
+TITLE_HEAD = "void f_81550720(Ctx *__restrict A64_NOESC c) {"
+TITLE_ORIGINAL = "void hos_wide_title_original_draw(Ctx *__restrict A64_NOESC c) {"
+TITLE_RESET_HEAD = "void f_8156abc0(Ctx *__restrict A64_NOESC c) {"
+TITLE_RESET = TITLE_RESET_HEAD + "\n    hos_wide_title_reset(c->x[0]); /* retire constants before their arena resets */"
+TITLE_DECL = ("extern void hos_wide_title_prepare(Ctx *, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, void (*)(Ctx *));\n"
+              "extern int hos_wide_title_draw(Ctx *, void (*)(Ctx *));\n"
+              "extern void hos_wide_title_reset(uint64_t);\n")
+TITLE_WRAPPER = ("\nvoid f_81550720(Ctx *__restrict A64_NOESC c) {\n"
+                 "    if (!hos_wide_title_draw(c, hos_wide_title_original_draw)) hos_wide_title_original_draw(c);\n}\n")
+
+
+def title_card_file(source):
+    """One file's sites. report() checks preparation, draw and reset before compiling."""
+    if source.count('#include "a64.h"\n') != 1:
+        return source, 0, 0, 0
+    prepared = source.count(TITLE_PREP)
+    drawn = source.count(TITLE_ORIGINAL)
+    prepare = source.count(TITLE_ALLOC) + prepared
+    draw = source.replace(TITLE_WRAPPER, "").count(TITLE_HEAD) + drawn
+    reset = source.count(TITLE_RESET_HEAD)
+    if reset == 1 and TITLE_RESET not in source:
+        source = source.replace(TITLE_RESET_HEAD, TITLE_RESET, 1)
+    if prepare == 1 and not prepared:
+        source = source.replace(TITLE_ALLOC, TITLE_PREP, 1)
+    if draw == 1 and not drawn:
+        source = source.replace(TITLE_HEAD, TITLE_ORIGINAL, 1) + TITLE_WRAPPER
+    if (prepare == 1 or draw == 1 or reset == 1) and TITLE_DECL not in source:
+        source = source.replace('#include "a64.h"\n', '#include "a64.h"\n' + TITLE_DECL, 1)
+    return source, prepare, draw, reset
+
+
+def title_card_original(source):
+    """A missing/changed anchor restores all three sites: the game's own draw."""
+    return source.replace(TITLE_RESET, TITLE_RESET_HEAD).replace(TITLE_WRAPPER, "").replace(TITLE_ORIGINAL, TITLE_HEAD).replace(TITLE_PREP, TITLE_ALLOC).replace(TITLE_DECL, "")

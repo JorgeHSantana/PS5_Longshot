@@ -71,6 +71,11 @@ previous resolution. Other mode changes apply after a restart.
 Each row of the menu, in the menu's order, with its choices and its default. Labels on a setting say when it applies:
 after a restart, only on some GPUs or builds, only while HDR is on, or set for you by a quality preset.
 
+The area title card's frame reaches the picture's sides with **HUD layout** at Screen's edges or Custom,
+including at 16:10, 21:9, 32:9 and 48:9. Only the joining lines lengthen or shorten; the ornaments keep their
+usual size. Middle 16:9 keeps the game's original frame, and a 16:9 picture is unchanged. The other HUD
+elements retain their usual placement, including the width limit on very wide screens.
+
 | Tab | Option | Choices | Default |
 |---|---|---|---|
 | Graphics | Quality preset | Custom, Minimum (4GB), Low (6GB), Balanced (8GB), High (12GB), Ultra (16GB+), Auto (this PC) | Auto (this PC) on a first start; Custom in an options file from before it |
