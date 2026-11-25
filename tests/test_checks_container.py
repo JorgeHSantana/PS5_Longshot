@@ -1,5 +1,5 @@
-"""The checks in a container (tests/run_all.py --container, scripts/linux/checks.sh and checks.Dockerfile): the tools are CI's and
-mise.toml's, what runs has no network and writes only the checkout, and run_all.py's other arguments reach it as they are.
+"""The checks in a container (tests/run_all.py --container, scripts/linux/checks.sh and checks.Dockerfile): the tools are CI's
+(.forgejo/workflows/ci.yml's tests job) and mise.toml's, what runs has no network and writes only the checkout, and run_all.py's other arguments reach it as they are.
 
 A stand-in for podman and docker writes down what it is called with: nothing is built, fetched or started.
 
@@ -18,11 +18,11 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 RUN_ALL_SKIP = {"windows": "a bash script for Linux containers"}
 DOCKERFILE = (ROOT / "scripts/linux/checks.Dockerfile").read_text(encoding="utf-8")
-CIRCLE = (ROOT / ".circleci/shared.yml").read_text(encoding="utf-8")
-# (the checks' tools: CircleCI's test-deps-linux command up to its test environment (which installs CircleCI's own CLI),
-# its line continuations joined; the checks' job runs on ubuntu2404)
-CI = re.sub(r"\\\n\s*", "", re.search(r"\n  test-deps-linux:\n(?:(?:    .*)?\n)+", CIRCLE).group(0).split("name: Compiler cache")[0])
-CI_IMAGE = re.search(r"\n  ubuntu2404:\n    docker:\n      - image: (ubuntu:[\d.]+)", CIRCLE).group(1)
+WORKFLOW = (ROOT / ".forgejo/workflows/ci.yml").read_text(encoding="utf-8")
+# (the checks' tools: ci.yml's tests job up to its compiler cache, its line continuations joined; the job runs on
+# ubuntu-24.04, the Dockerfile's ubuntu:24.04)
+CI = re.sub(r"\\\n\s*", "", re.search(r"\n  tests:\n(?:(?:    .*)?\n)+", WORKFLOW).group(0).split("name: Compiler cache")[0])
+CI_IMAGE = "ubuntu:" + re.search(r"\n    runs-on: ubuntu-([\d.]+)\n", CI).group(1)
 MISE = (ROOT / "mise.toml").read_text(encoding="utf-8").split("\n[tasks.test-deps]\n")[1].split("\n[")[0]
 ENGINE = """#!%s
 import json, os, sys

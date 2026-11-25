@@ -1,13 +1,13 @@
 # The game-free checks' environment (tests/run_all.py --strict), for running them on any distribution: the system CI runs
-# them in (CircleCI's test-deps-linux, .circleci/shared.yml, Ubuntu 24.04) with the same packages, Python packages,
-# glslang and headers. tests/test_checks_container.py checks that the versions here are CircleCI's and mise.toml's.
+# them in (.forgejo/workflows/ci.yml's tests job, Ubuntu 24.04) with the same packages, Python packages, glslang and
+# headers. tests/test_checks_container.py checks that the versions here are CI's and mise.toml's.
 #
 # The image holds the tools only. The checkout is mounted at its own path when it runs, with no network.
 # scripts/linux/checks.sh builds the image and runs it (tests/run_all.py --container).
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-# (g++ clang lld spirv-tools ccache libdav1d-dev are CircleCI's, with what they recommend: clang's sanitizer libraries
+# (g++ clang lld spirv-tools ccache libdav1d-dev are CI's, with what they recommend: clang's sanitizer libraries
 # among it. The rest is what its image has: Python 3.12, git, curl)
 RUN apt-get update \
  && apt-get install -y g++ clang lld spirv-tools ccache libdav1d-dev \

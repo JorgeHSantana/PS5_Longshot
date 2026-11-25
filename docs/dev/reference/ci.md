@@ -1,75 +1,18 @@
 # CI
 
-CI is moving from Forgejo Actions (`.forgejo/workflows/`) to CircleCI (`.circleci/`). Until the cutover both run:
-CircleCI runs the checks, and Forgejo Actions still publishes the releases and deploys the website. Neither needs the
-game: every check is game-free.
+CI is Forgejo Actions (`.forgejo/workflows/`): it runs the checks, publishes the releases and deploys the website. No
+check needs the game: every one is game-free.
 
 **Run CI's checks yourself:** `mise run ci` runs what CI checks on every change: the pinned test tools (`test-deps`),
 every game-free check (`tests/run_all.py --strict`, the same line CI runs in parts) and the website's build and checks
-(`scripts/website_check.sh`). `mise run test` runs the checks alone, and takes `run_all.py`'s arguments.
-
-## CircleCI
-
-CircleCI uses the team's orb, `magicbeandev/ci` (alias `mb`). `.circleci/config.yml` has one `mb/setup` job per event;
-it compares the changed files with `.circleci/mapping.conf` and continues with that event's workflow:
-
-| Event | Workflow | What runs |
-|---|---|---|
-| Pull request (same repository) | `events/pr.yml` | The checks the changed paths call for, a website preview, then `gate` |
-| Push to `main` | `events/main.yml` | Every check, then the nightly release (dry run until the cutover) and the website deploy (dry run) |
-| Tag `v*` | `events/release.yml` | Every check, the Windows ones included, before anything is built, signed or published (dry run) |
-| Schedule `nightly` | `events/nightly.yml` | `third-party-upstream`: the `third_party/` parts against their upstream archives |
-| Schedule `website_refresh` | `events/scheduled.yml` | The website deploy (dry run) |
-| API run | `events/manual.yml` | A release dry run, or the Windows Vulkan back end linked with DLSS |
-| Fork pull request | `events/fork.yml` | The pull request checks, with no secrets (below) |
-
-Every workflow ends at `mb/gate`, which posts the `ci/circleci: gate` status on the commit.
-
-The checks, in `.circleci/shared.yml`:
-
-| Job | What it checks |
-|---|---|
-| `lint` | pre-commit on the changed files, and actionlint (`mise run lint`) |
-| `third-party` | `scripts/check_third_party.py` |
-| `guide-screenshots` | the player guide's screenshots and their source review |
-| `test-linux` | `tests/run_all.py`, in 4 parts on x86-64 |
-| `rust` | the Rust workspace's checks (`builder/`'s crates and `longshot-rs/`): rustfmt, clippy with warnings as errors, `cargo test`, with the distribution's clang, lld and llvm-mc (`LLVM_MC`), which its compile, link and disassembler tests need |
-| `e2e` | the builder end to end on a synthetic game (`builder/crates/synthetic-game`): a made-up AArch64 program packed as a game, lifted, compiled, linked and run; no game data |
-| `host-windows` | every host unit a Windows game compiles, `-fsyntax-only` with llvm-mingw (`scripts/check_host_compile.py`) |
-| `spirv-fixtures` | the shaders' SPIR-V fixtures |
-| `linux-longshot-builder` | `longshot-builder-<v>-linux-x64`, the static program with its pack, built in Ubuntu 22.04 |
-| `windows-longshot-builder` | `longshot-builder-<v>-windows-x64.exe` with its pack, cross-compiled on Linux and started under Wine |
-| `windows-vulkan` | the Windows Vulkan back end, cross-compiled with llvm-mingw |
-| `vulkan-dlss` | `longshot_vk.dll` compiled and linked with DLSS and FSR 4 (by hand for now) |
-| `website` | the website's build and checks |
-
-What CircleCI does not do: make and publish tools.lock's archives (Forgejo's Make tools workflow, `tools.yml`, which
-needs `PACKAGES_TOKEN_SEALED` and the deploy runner). Its release only checks that every line's archive is published
-(`release-version`), as Forgejo's does. Nor does its `release-stage` make RecompLauncher's zips yet, which Forgejo's build jobs make
-(`longshot-builder dev release recomplauncher`, after `dev release files`): a TODO there says so for the cutover.
-
-`mapping.conf` turns on areas by path (`tests`, `gpu`, `linux`, `windows`, `website`, or `full` for everything: the
-workspace's `Cargo.toml` and `Cargo.lock` among them; `longshot-rs/` and `game/` turn on `tests`, `third_party/renhdrum/` both
-builder builds);
-`lint`, `third-party`, `guide-screenshots` and `website` (the site's checks) always run, and a docs-only change runs
-nothing else; `website` turns on the site's preview (pull requests) and deploy (`main`). `main`, tags and API
-runs run everything.
-
-**Fork pull requests.** CircleCI's Forgejo integration skips them, so a second CircleCI project (`Longshot-forks`)
-runs `.circleci/forks.yml` from a Forgejo webhook. A maintainer adds the label `ci: approved` after reading the change;
-the doorbell job checks the pull request (open, from a fork, labelled, its head commit) and runs `events/fork.yml` on
-that commit with no secrets. Every push runs again while the label is on; remove it to stop, add it again to rerun.
-After 14 days with no push the label is removed.
-
-**Contexts** (secrets): `release-signing`, `forgejo-bot`, `cloudflare-prod`, `forgejo-comment`.
-
-**Checking a change to the config:** `MB_ORB_DIR=<a checkout of MagicBeanDev/orb> pre-commit run --hook-stage manual circleci-config-validate`.
+(`scripts/website_check.sh`). `mise run test` runs the checks alone, and takes `run_all.py`'s arguments; `mise run lint`
+runs pre-commit and actionlint as the `lint` and `actionlint` jobs do.
 
 ## Forgejo Actions
 
 | Workflow | When | What it does |
 |---|---|---|
-| `ci.yml` | Pull request, push to `main` | The pull request's title; `rust`: rustfmt, clippy and `cargo test` (with clang, lld and llvm-mc); `e2e`: the synthetic game end to end; `host-windows`: the host's C for Windows with llvm-mingw; actionlint; the website's checks (`scripts/website_check.sh`). `tests/run_all.py` and the SPIR-V fixtures run on CircleCI only. On a pull request, `changes` skips `rust`, `e2e` and `host-windows` when [only docs change](#what-a-pull-request-runs) |
+| `ci.yml` | Pull request, push to `main` | The pull request's title; `lint`: pre-commit on the changed files and ShellCheck on `scripts/`; `tests`: `tests/run_all.py --strict` in 4 parts; `spirv-fixtures`: the shader recompiler's SPIR-V fixtures, checked by `spirv-val`; `rust`: rustfmt, clippy and `cargo test` (with clang, lld and llvm-mc); `e2e`: the synthetic game end to end; `host-windows`: the host's C for Windows with llvm-mingw; actionlint; the website's checks (`scripts/website_check.sh`). On a pull request, `changes` skips `rust`, `e2e`, `host-windows` and `spirv-fixtures` when [only docs change](#what-a-pull-request-runs) |
 | `pr-description.yml` | Pull request | The description against the template (`scripts/check_pr_description.py`) |
 | `third-party.yml` | Pull request, push, nightly | `scripts/check_third_party.py`, and the upstream comparison at night |
 | `guide-screenshots.yml` | Pull request, push | The guide screenshots' source review |
@@ -88,7 +31,7 @@ started under Wine. The labels the workflows ask for, all on the image `docker:/
 | Label | For |
 |---|---|
 | `ubuntu-latest`, `ubuntu-24.04` | the checks. No secrets: a runner anyone in the team lends can carry these |
-| `quick` | jobs of a few minutes (title, `changes`, description, third-party, actionlint, guide screenshots), on a runner kept for them so they never wait behind a build |
+| `quick` | jobs of a few minutes (title, `changes`, description, lint, third-party, actionlint, guide screenshots), on a runner kept for them so they never wait behind a build |
 | `release` | the release's `longshot-builder` builds, and the Make tools workflow's build of `main`'s tools (another branch's runs on `ubuntu-24.04`). **Only the server's release runner, `unraid-linux-1`**, which carries no other label, so CI never takes it; never anyone else's runner. Each such job starts with [scripts/ci_release_runner.sh](../../../scripts/ci_release_runner.sh), which fails unless the job reaches the seal broker with its pinned key, so a runner given the label anywhere else builds nothing. A pull request's own code never runs on it. It needs about 50 GB of disk |
 | `deploy` | the jobs that sign, publish or deploy: a release's version and publish, the Make tools workflow's upload, the website's deploy and preview upload. Only the server's quick runner, on the seal broker's network ([below](#secrets-only-our-runners-can-open)). A pull request's own code never runs on it |
 
@@ -109,11 +52,12 @@ website's deploy, read no cache at all; the jobs that build a release read only 
 
 | Cache (key) | What it holds | Who reads it |
 |---|---|---|
-| `git-base` | main's tree, a bare repository at depth 1 ([scripts/ci_git_base.sh](../../../scripts/ci_git_base.sh)) | `rust`, `e2e`, `host-windows`, `website`: before `actions/checkout`, the workspace borrows its objects, so the fetch takes only what the commit adds (a lent runner fetched the whole tree, 26 MB, through Cloudflare in 2 to 4.5 minutes: now seconds). After the checkout every object is copied in and checked against its name (`git fsck`) |
+| `git-base` | main's tree, a bare repository at depth 1 ([scripts/ci_git_base.sh](../../../scripts/ci_git_base.sh)) | `rust`, `e2e`, `host-windows`, `tests`, `website`: before `actions/checkout`, the workspace borrows its objects, so the fetch takes only what the commit adds (a lent runner fetched the whole tree, 26 MB, through Cloudflare in 2 to 4.5 minutes: now seconds). After the checkout every object is copied in and checked against its name (`git fsck`) |
 | `rust-deps-<Rust>-<Cargo.lock>`, `rust-e2e-deps-...` | the registry crates, downloaded and built (dev, release), without the workspace's own: a checkout's new file times make cargo build those again whatever a cache holds ([scripts/ci_cargo_prune.py](../../../scripts/ci_cargo_prune.py)). One entry per lock, written when missing. When the lock has changed, the newest entry for the same Rust is restored instead, and cargo builds only the crates that changed | `rust`, `e2e`; `host-windows` reads `rust-deps` |
 | `rustup-<Rust>-<job>` | `~/.rustup` and `~/.cargo/bin`: mise.toml's toolchain with the job's components, as [scripts/ci_rust.sh](../../../scripts/ci_rust.sh) installs it (its rustup checked by SHA-256, the toolchain by rustup against the release's manifest). With it, `ci_rust.sh` finds the toolchain installed and downloads nothing | `rust`, `e2e`, `host-windows` |
-| `apt-<job>-<month>` | apt's package lists and the packages it downloaded ([scripts/ci_apt.sh](../../../scripts/ci_apt.sh)): the job installs clang, lld and llvm from them without `apt-get update`, and updates only when that fails. apt checks each package against the lists' hashes as it installs it; a new month starts from the last month's entry | `rust`, `e2e` |
+| `apt-<job>-<month>` | apt's package lists and the packages it downloaded ([scripts/ci_apt.sh](../../../scripts/ci_apt.sh)): the job installs its packages from them without `apt-get update`, and updates only when that fails. apt checks each package against the lists' hashes as it installs it; a new month starts from the last month's entry | `rust`, `e2e`, `tests`, `spirv-fixtures` |
 | `<llvm-mingw>-archive`, `windows-tools-downloads-<tools.lock>` | the downloads, each checked by its size and SHA-256 when taken, written when missing | `host-windows` |
+| `ccache-tests-part<K>-...`, `ccache-spirv-fixtures-...` | ccache's objects, keyed by the compilers' versions and the shader recompiler's sources; the nearest older key is restored | `tests` (one per part), `spirv-fixtures` |
 
 `ci.yml`'s jobs run with `CARGO_INCREMENTAL=0` and `CARGO_PROFILE_DEV_DEBUG=0`: incremental state is only ever
 written in CI, and the dev builds link faster without debug info (a failing test still names its file and line).
@@ -143,8 +87,8 @@ Why it keeps the guarantee that what a release ships comes from nothing a cache 
 ### What a pull request runs
 
 `ci.yml`'s `changes` job reads the pull request's changed files from the API ([scripts/ci_changes.py](../../../scripts/ci_changes.py))
-and skips `rust`, `e2e` and `host-windows` when every one of them is in a place those jobs never read: `website/`,
-`docs/` (but `docs/dev/reference/build-events.md`, which the builder's tests compare with its codes), `.circleci/`, the
+and skips `rust`, `e2e`, `host-windows` and `spirv-fixtures` when every one of them is in a place those jobs never read: `website/`,
+`docs/` (but `docs/dev/reference/build-events.md`, which the builder's tests compare with its codes), the
 other workflows' files and the top-level documents. The Rust workspace's tests and build scripts read `host/`, `gpu/`,
 `game/`, `assets/`, `third_party/`, `scripts/`, `tests/` and `tools.lock`, so any other change runs them all. Anything
 unsure runs them too: a push to `main`, a run by hand, an API that doesn't answer. The title, actionlint and the
@@ -179,9 +123,6 @@ rests on main and the `v*` tags being protected: whoever may push to main or pus
 - A runner that takes such a job and can't reach the broker (anyone else's) gets text it can't open: the job fails, and
   signs or deploys nothing.
 - A job of a branch, or of a pull request, gets no key, on any runner.
-- **CircleCI's contexts** that hold secrets must be restricted to `main` and the release tags in CircleCI's own settings
-  (Organization Settings > Contexts > the context's security: an expression on the branch and tag); the config cannot
-  restrict them itself.
 
 | Secret (organization) | Sealed | Used by |
 |---|---|---|
@@ -219,5 +160,5 @@ Lend runners only to people you'd trust that far.
 
 ## Before you push
 
-Run `mise run lint` and `mise run test` and say so in the pull request. CircleCI's runs, logs and reruns are visible to
-members of the MagicBeanDev organization on CircleCI ([CONTRIBUTING.md](../../../CONTRIBUTING.md#ci)).
+Run `mise run lint` and `mise run test` and say so in the pull request. CI's runs and logs are in the repository's
+*Actions* tab ([CONTRIBUTING.md](../../../CONTRIBUTING.md#ci)).

@@ -38,13 +38,6 @@ repos:
       - id: ruff   # (the hook's entry passes --force-exclude itself; given again, ruff refuses to run)
   - repo: local
     hooks:
-      # manual until magicbeandev/ci@0.1.0 is published (hook needs the registry orb).
-      - id: circleci-config-validate
-        name: circleci config validate
-        stages: [manual]
-        entry: bash -c 'MB_ORB_DIR="${MB_ORB_DIR:?}"; bash "$MB_ORB_DIR/tools/validate.sh" "$(git rev-parse --show-toplevel)"'
-        language: system
-        pass_filenames: false
       - id: shellcheck-scripts
         name: ShellCheck (packaging scripts)
         entry: bash -c 'shellcheck -x -S error "$@"' --

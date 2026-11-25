@@ -16,8 +16,6 @@ node = "22.23.5"
 "pypi:pre-commit" = "4.0.1"
 "pypi:ruff" = "0.12.0"   # (ruff.toml; pre-commit runs it on changed Python)
 "github:rhysd/actionlint" = "1.7.12"
-"github:open-policy-agent/conftest" = "0.71.1"
-"github:CircleCI-Public/circleci-cli" = "1.14.0"
 "github:koalaman/shellcheck" = "0.10.0"
 # (longshot-builder's and the lifter's: docs/dev/reference/builder.md, "Building and checking the builder";
 # scripts/renhdrum.py's RUST_VERSION; the Windows target checks the builder for Windows: `cargo clippy --target
@@ -135,11 +133,6 @@ else
 fi
 actionlint -color -config-file .forgejo/actionlint.yaml .forgejo/workflows/*.yml
 """
-
-[tasks."ci:smoke"]
-description = "CI's quick check of run_all's JUnit report (Chunk runs it after lint)"
-shell = "bash -c"
-run = "python3 -I -B tests/test_run_all_junit.py"
 
 [tasks.test-changed]
 description = "Only the checks that read a file this branch changed against main (run_all.py --changed [BASE]): a quick look before you push"

@@ -1,12 +1,12 @@
 #!/bin/bash
 # CI's Rust: mise.toml's pinned version (the one pin), through rustup, which checks every part it downloads against the
 # release's manifest. rustup itself, when the machine has none, is rustup-init at a pinned version, checked by its
-# SHA-256 before it runs (not sh.rustup.rs's script, which fetches whatever is newest). Both CIs run it (.forgejo/workflows
-# ci.yml, .circleci/shared.yml):
+# SHA-256 before it runs (not sh.rustup.rs's script, which fetches whatever is newest). CI's jobs run it
+# (.forgejo/workflows/ci.yml):
 #
 #   scripts/ci_rust.sh [components] [targets]      e.g. scripts/ci_rust.sh rustfmt,clippy
 #
-# The PATH of cargo's bin/ is handed on: to $GITHUB_PATH (Forgejo), else to $BASH_ENV (CircleCI).
+# The PATH of cargo's bin/ is handed on to the later steps through $GITHUB_PATH.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 RUSTUP_VERSION=1.29.0

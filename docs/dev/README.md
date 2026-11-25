@@ -26,7 +26,7 @@ How each part is implemented.
 | [Control bridge](reference/control-bridge.md) | driving a running game from tools and tests: the protocol and `longshot_ctl.py` |
 | [Pipeline state lists](reference/pipeline-states.md) | the shipped pipeline lists and the pipeline tour |
 | [Releases](reference/releases.md) | versions, channels, the release workflow, making a release, signing, `tools.lock` |
-| [CI](reference/ci.md) | what CircleCI and Forgejo Actions run, when, and on which runners |
+| [CI](reference/ci.md) | what Forgejo Actions runs, when, and on which runners |
 
 Features: [crash window](reference/crash-window.md) · [fullscreen monitor](reference/fullscreen.md) ·
 [input](reference/input.md) · [mods](reference/mods.md) · [NFC tags](reference/nfc.md) · [profiles](reference/profiles.md) ·

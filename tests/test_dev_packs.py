@@ -55,7 +55,7 @@ def test_route():
     check("the forge's workflows build nothing", r([".forgejo/workflows/ci.yml", ".forgejo/pull_request_template.md"]) is None)
     check("developer tools and CI's settings build nothing",
           r(["scripts/perf.py", "scripts/profiling/cpu.py", "scripts/dev.py", "scripts/devtools/packs.py", "mise.toml",
-             ".circleci/config.yml", "tools.lock", "scripts/longshot_builder.py",
+             "tools.lock", "scripts/longshot_builder.py",
              "assets/routes/a.route", "assets/saves/x/save.bin"]) is None)
     check("a renderer file and a host file build the game", r(["gpu/vk/vk_draw.cpp", "host/nvn_native.c"]) == "game")
 

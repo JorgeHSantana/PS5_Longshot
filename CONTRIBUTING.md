@@ -80,46 +80,6 @@ Then claim something in the team room before you start on it ([claiming](docs/de
 
 ## CI
 
-CI is moving from Forgejo Actions to CircleCI, and both run until the cutover: [CI](docs/dev/reference/ci.md) says what
-runs when, on which runners. Run `mise run lint` and `mise run test` before you push, and put the results in the pull
-request.
-
-- **CircleCI:** sign up at https://circleci.com/signup and ask in Discord to be added to the MagicBeanDev org, so you can see runs, read logs and rerun jobs.
-- **CircleCI CLI:** `mise install` installs the pinned version, or see the [official install docs](https://circleci.com/docs/guides/toolkit/circleci-cli/). Run `circleci auth login` once.
-- **CircleCI MCP server**, so an AI agent can read failures and logs and rerun jobs. Claude Code: `claude mcp add --transport http circleci-mcp-server https://mcp.circleci.com/v1/mcp`, then `/mcp` and Authenticate. Cursor: search "circleci" in the MCP marketplace.
-- **CircleCI docs MCP**, so an agent can look things up in CircleCI's docs (no account needed): `claude mcp add --transport http circleci-docs https://circleci.mcp.kapa.ai`.
-- **Chunk CLI** (optional) runs this repo's checks on a remote CircleCI sidecar, handy for an agent or a machine without the toolchain. Install with `brew install CircleCI-Public/circleci/chunk` (Windows: see its [README](https://github.com/CircleCI-Public/chunk-cli)), run `chunk auth login`, then `chunk sidecar create`, `chunk sidecar sync` and `chunk validate`. The commands it runs are in `.chunk/config.json`.
-
-The software-Vulkan fixtures run only by hand: on Forgejo, *Actions* > *Authored Vulkan fixtures* > *Run workflow*, or
-locally ([run the checks](docs/dev/developing.md#run-the-checks)).
-
-## Licensing
-
-Longshot is free software under the [GNU General Public License, version 3 or later](LICENSE). By submitting a change
-you license it under those terms, so only send code you can license that way: nothing from a project with an
-incompatible license, and no decompiled game code or anything generated from the dump.
-
-The checklist's license box is the author's own check of the diff against that paragraph: where each new file and
-copied passage comes from, and that none of it is the game's code or made from the dump. How the game or the console
-behaves (a function's name and arguments, a result code, the order of calls) is a fact and not code, and the host's
-replacements for the console's functions are written from such facts; describe them in your own words and cite a
-public source when there is one.
-
-The third-party parts (Eden, suyu, Sirit, the Vulkan Memory Allocator, SDL, Opus, Dear ImGui, zstd, the Libertinus
-fonts, zbic, AMD's FidelityFX headers and SDK, the CRT shaders, Kenney's input prompts and Tracy, among
-others; and a64-kit, whose notice for host/ and builder/rt is host/NOTICE.TOTKPort.md) keep their own notices: preserve
-them, and don't relicense their code. NVIDIA's DLSS
-SDK is not one of them: it is never in the repository ([upscaler SDKs](docs/dev/setup.md#upscaler-sdks-optional)). Nor
-is Intel's `libxess.dll` (Intel's license): only XeSS's MIT API headers are (`third_party/xess`), and the player puts the
-DLL beside the game ([optional upscalers](docs/user/advanced.md#optional-upscalers)).
-
-## Where to talk
-
-- **The team room**, `#agent-updates:magicbean.dev` on Matrix: claims, progress, pull requests and blockers, from people
-  and agents alike. Post and read it with the [team-updates skill](https://git.magicbean.dev/MagicBeanDev/Tooling/src/branch/main/skills/team-updates/SKILL.md) or Tooling's `team_chat.py`.
-- **Discord:** https://discord.gg/magicbean, for questions.
-- **Agents** read [AGENTS.md](AGENTS.md) on top of this page.
-- **Issues:** [the forms on git.magicbean.dev](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new/choose).
-
-Thanks for testing, reporting and sending fixes. Every report from a different GPU and every area played further than
-before moves the port forward.
+CI is Forgejo Actions: [CI](docs/dev/reference/ci.md) says what runs when, on which runners. Its runs and logs are in the
+repository's *Actions* tab, linked from each pull request's checks. Run `mise run lint` and `mise run test` before you push,
+and put the results in the pull request.

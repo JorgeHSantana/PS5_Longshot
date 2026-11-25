@@ -1,5 +1,5 @@
 #!/bin/bash
-# tests/run_all.py in a container with CI's tools (scripts/linux/checks.Dockerfile: Ubuntu 24.04, as CircleCI's test-deps-linux),
+# tests/run_all.py in a container with CI's tools (scripts/linux/checks.Dockerfile: Ubuntu 24.04, as CI's tests job),
 # on any Linux distribution. `tests/run_all.py --container` (`mise run test --container`) runs this with its other arguments:
 #
 #   scripts/linux/checks.sh --strict          every check

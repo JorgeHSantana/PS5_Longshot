@@ -58,7 +58,6 @@ build-windows/
 
 # ---- NVIDIA's DLSS SDK (scripts/fetch.py dlss): NVIDIA's files, never committed ----
 ngx-sdk/
-test-results/
 _deps/
 
 # ---- a link to <build>/compile_commands.json (build-compile's link.rs), for clangd and clang-tidy ----

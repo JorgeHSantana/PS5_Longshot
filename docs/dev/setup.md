@@ -42,8 +42,8 @@ build`, `work/` in your development folder (`~/.local/share/longshot-dev`, `%LOC
    (`pr create` does it too if you haven't).
 
 `mise tasks` lists the tasks: `setup`, `build` (`longshot-builder` with your arguments), `build-dev` (its `compile`
-alone), `rust` (`builder/`'s checks: rustfmt, clippy, `cargo test`), `dev`, `test`, `lint`, `tracy-tools` (and `ci:smoke`,
-CI's). Run any Python script from the checkout root with `python -I` (or `mise exec -- python -I ...` for the pinned
+alone), `tools` (tools.lock's build tools into the checkout), `rust` (`builder/`'s checks: rustfmt, clippy, `cargo test`),
+`dev`, `test`, `test-changed`, `lint`, `ci` (what CI checks on every change) and `tracy-tools`. Run any Python script from the checkout root with `python -I` (or `mise exec -- python -I ...` for the pinned
 interpreter). Python is for the development tools and the checks only: the builder is Rust, and no player needs Python.
 
 ## 2. Get the team's tooling

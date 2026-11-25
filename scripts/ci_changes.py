@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Whether a pull request needs ci.yml's compiling jobs (rust, e2e, host-windows), from the files it changes.
+"""Whether a pull request needs ci.yml's compiling jobs (rust, e2e, host-windows, spirv-fixtures), from its files.
 
 Those jobs read far more than builder/: the workspace's tests and build scripts read host/, gpu/, game/, assets/,
 third_party/, scripts/, tests/, tools.lock and docs/dev/reference/build-events.md. So the rule is the other way round:
@@ -23,11 +23,10 @@ import sys
 import urllib.request
 
 # (what the compiling jobs never read: the site, the docs but the one the builder's tests compare with its codes, the
-# other CIs' configuration, the top-level documents. A file outside these, or one of KEEP, runs them)
+# other workflows' files, the top-level documents. A file outside these, or one of KEEP, runs them)
 DOCS_ONLY = (
     "website/*",
     "docs/*",
-    ".circleci/*",
     ".forgejo/ISSUE_TEMPLATE/*",
     ".forgejo/pull_request_template.md",
     ".forgejo/workflows/website.yml",

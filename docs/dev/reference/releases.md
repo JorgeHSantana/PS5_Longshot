@@ -215,8 +215,7 @@ manifest's SHA-256 of the full file. `longshot-builder` checks every file of its
 
 Who can sign: anyone who can push a branch to this repository can run a workflow on the deploy runner and unseal the
 release key and the packages token ([CI](ci.md#secrets-only-our-runners-can-open)): push access is release-signing
-access, until the deploy runner takes only `main`'s and the tags' jobs. CircleCI's contexts must be restricted to `main`
-and the release tags in its settings.
+access, until the deploy runner takes only `main`'s and the tags' jobs.
 
 Uploads go through `RELEASE_UPLOAD_API` (an organization variable, passed to `release.py` as `FORGEJO_UPLOAD_API`): the
 API without Cloudflare in front, which cuts uploads at 100 MB. Releases are made with the job's own token; no other

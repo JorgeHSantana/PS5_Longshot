@@ -76,7 +76,7 @@ class LinuxDockerPackages(unittest.TestCase):
         """(main's #2373) where the toolchain PPA is added, its source is rewritten to ppa.launchpad.net:
         ppa.launchpadcontent.net, add-apt-repository's choice, answered 503 for hours and every build that added it failed"""
         rewrite = "sed -i 's|https://ppa\\.launchpadcontent\\.net/|http://ppa.launchpad.net/|g' /etc/apt/sources.list.d/*.list"
-        files = [DOCKERFILE, WORKFLOW] + sorted((ROOT / ".forgejo/workflows").glob("*.yml")) + [ROOT / ".circleci/shared.yml"]
+        files = [DOCKERFILE, WORKFLOW] + sorted((ROOT / ".forgejo/workflows").glob("*.yml"))
         adders = 0
         for f in dict.fromkeys(files):
             text = re.sub(r"\\\n", " ", f.read_text(encoding="utf-8")) if f.exists() else ""

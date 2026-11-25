@@ -1,6 +1,6 @@
 # NVIDIA DLSS is a local build's option: NVIDIA's SDK is never part of Longshot or its downloads. This only checks that
 # longshot_vk.dll still compiles and links with it, through llvm-mingw as players build it. It runs by hand only (Actions >
-# Run workflow), when the DLSS or FSR 4 code changes; CircleCI's vulkan-dlss is the same check. scripts/fetch.py
+# Run workflow), when the DLSS or FSR 4 code changes. scripts/fetch.py
 # dlss fetches the SDK at its pinned release, SHA-256 checked, without DLSS's runtime: NVIDIA's license is accepted for that run
 # alone (--accept-nvidia-license), and nothing of it is uploaded or cached.
 # AMD FSR 4 (--upscaler fsr4: AMD's MIT headers, nothing downloaded) is built in the same run: both engines share
