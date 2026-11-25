@@ -1119,7 +1119,51 @@ fn link_renderer(
         let mb = std::fs::metadata(&vdll).map_or(0, |m| m.len() >> 20);
         r.log(format!("linked {}: {mb} MB ({:.0}s)", vdll.display(), compile::since(t)));
     }
+    if let Err(f) = link_forwarder(r, tc, l, p, cc_id)? {
+        return Ok(Err(f));
+    }
     Ok(Ok(Some(vdll)))
+}
+
+/// (longshot) DLSS 5's forwarder, a library of its own beside the renderer: the renderer calls the community FP16 model
+/// through it (gpu/vk/vk_dlss.cpp `NrDirect`; the model refuses a caller whose module name lacks "nvngx.dll").
+pub const NR_FORWARDER: &str = "longshot_nvngx.dll_nr.dll";
+
+/// [`NR_FORWARDER`] linked in the build's folder (or found as the last link left it): its one C file,
+/// gpu/vk/dlss_nr_forwarder.c, compiled and linked in one command, run again only when that command or the file
+/// changed ([`link::run`]'s record names the source). Only a Windows build with NVIDIA's NGX SDK makes it: the direct
+/// path that loads it is under `LONGSHOT_NGX`. `/Brepro`: no time stamp in it, so the same source makes the same bytes
+/// (a pack brings it only when it changed). `None` elsewhere
+fn link_forwarder(
+    r: &Reporter,
+    tc: &toolchain::Toolchain,
+    l: &Layout,
+    p: &plan::Plan,
+    cc_id: &str,
+) -> Result<std::result::Result<Option<PathBuf>, Failure>> {
+    if !tc.windows || p.ngx.is_none() {
+        return Ok(Ok(None));
+    }
+    let src = l.root.join("gpu/vk/dlss_nr_forwarder.c");
+    let dst = l.out.join(NR_FORWARDER);
+    let mut cmd = vec![tc.cc.display().to_string()];
+    cmd.extend(tc.native_target.iter().cloned());
+    cmd.extend(tc.native_link.iter().cloned());
+    cmd.extend(["-shared", "-O2", "-g0", "-o"].map(String::from));
+    cmd.extend([dst.display().to_string(), src.display().to_string(), tc.link_opt("/Brepro")]);
+    let t = Instant::now();
+    let res = link::run(&cmd, &dst, cc_id, &|t: &str| r.log(t))?;
+    if !res.ok {
+        let text = compile::short(&res.said, 3000);
+        r.log(format!("{NR_FORWARDER} link FAILED"));
+        r.log(text.as_str());
+        return Ok(Err(Failure { stopped: Stopped::RendererLink, units: Vec::new(), text, objects: Vec::new() }));
+    }
+    if !res.skipped {
+        let kb = std::fs::metadata(&dst).map_or(0, |m| m.len() >> 10);
+        r.log(format!("linked {}: {kb} KB ({:.1}s)", dst.display(), compile::since(t)));
+    }
+    Ok(Ok(Some(dst)))
 }
 
 /// Whether a unit is in the shader preparation's driver: the game's own units but the lifted game (its units, and the

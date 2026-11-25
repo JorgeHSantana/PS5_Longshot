@@ -3,8 +3,11 @@
 // opens the DLSS 5 settings page, which holds the tuning rows (vk_menu.cpp TAB_DLSS5). Shown only where it can run: NVIDIA's
 // nvngx_dlssnr.dll found in one of the folders NGX searches (the game's ngx folder, LOCALAPPDATA's Longshot/ngx or
 // RX_VK_DLSS_DIR; the player puts it there, Longshot neither ships nor downloads it), an NVIDIA GPU, a build with DLSS, and
-// a temporal Upscaler (DLSS, DLAA or FSR). With none of that there is no row and no line (no heading of their own either: the
-// menu draws a section's title over rows all hidden). The rows are the Bloodborne PC port's DLSS 5 rows; the Default preset
+// a temporal Upscaler (DLSS, DLAA or FSR). On Windows the community FP16 conversion of that file counts too, in such
+// a folder's fp16 folder (dlss_nr_model.h: it runs DLSS 5 on RTX 20, 30 and 40); on an RTX 50 with both files the
+// DLSS 5 model row chooses which one runs, after a restart. With none of that there is no row and no line (no heading
+// of their own either: the menu draws a section's title over rows all hidden). The rows are the Bloodborne PC port's
+// DLSS 5 rows; the Default preset
 // holds them as tuned in the game (menu/dlss5.h), and a row moved by hand makes the preset row say Custom. The rows past the first show while DLSS 5
 // is On (the preset, the page's row and the page's rows). The parts that ask the renderer are fenced from a layout-only
 // build (MENU_LAYOUT_ONLY, MENU_HOOK).
@@ -21,6 +24,7 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -45,9 +49,23 @@ void dlss5_publish() {
     c.detail = opts.dlss5_detail, c.color = opts.dlss5_colour, c.highlight = opts.dlss5_highlight;
     c.debug = debug;
     c.scale = opts.dlss5_resolution;
+    // (the DLSS 5 model row as the run started: the first publish is menu_init's, and the row applies after a restart)
+    static const int model_at_start = opts.dlss5_model;
+    c.model_file = model_at_start;
     dlss_nr_publish(c);
 }
 #endif
+
+int dlss5_model_env() {
+    const char* e = getenv("RX_VK_DLSS_NR_MODEL");
+    if (!e || !*e) return -1;
+    const std::string v = [&] {
+        std::string s(e);
+        for (char& ch : s) ch = (char)std::tolower((unsigned char)ch);
+        return s;
+    }();
+    return v == "auto" || v == "0" ? 0 : v == "nvidia" || v == "1" ? 1 : v == "fp16" || v == "2" ? 2 : -1;
+}
 
 namespace {
 // (the renderer told at once: each row's change)
@@ -60,6 +78,9 @@ void publish() {
 /// temporal Upscaler; the rows past the first, while DLSS 5 is On
 bool offered() { return dlss5_offered() && upscaler_rows::supports_nr(upscaler()); }
 bool tuning() { return offered() && opts.dlss5 != 0; }
+/// The DLSS 5 model row shows while DLSS 5 is On on an RTX 50 with both files, NVIDIA's and the FP16 one (menu_module.h
+/// dlss5_model_offered): the only case with a choice
+bool model_shown() { return tuning() && dlss5_model_offered(); }
 
 int preset_ui = 0;   // (the DLSS 5 preset row: unsaved, synced from the rows it sets)
 bool is_default() {
@@ -137,7 +158,8 @@ MENU_MODULE(dlss5) {
               .label = "DLSS 5",
               .help = "[EXPERIMENTAL] NVIDIA's DLSS 5 model adds detail to faces, skin and surfaces after the "
                       "upscaler, before the HUD. Costs a lot of GPU time. Needs NVIDIA's nvngx_dlssnr.dll in the "
-                      "game's ngx folder: Longshot does not include or download it. Applies at once.",
+                      "game's ngx folder (RTX 50), or the community FP16 one in its fp16 folder (RTX 20, 30, 40 and "
+                      "50): Longshot does not include or download them. Applies at once.",
               .kind = menu::Kind::Toggle,
               .value = &opts.dlss5,
               .lo = 0, .hi = 1,
@@ -151,6 +173,17 @@ MENU_MODULE(dlss5) {
                   (void)v;
                   publish();
               }}, menu::after("sharpness"))
+        .row({.key = "dlss5_model",
+              .label = "DLSS 5 model",
+              .help = "[EXPERIMENTAL] Which DLSS 5 file runs: NVIDIA's own (FP8, made for RTX 50 cards) or the "
+                      "community FP16 conversion of it. Auto is NVIDIA's. Shown on an RTX 50 card with both files. "
+                      "Applies after a restart.",
+              .value = &opts.dlss5_model,
+              .lo = 0, .hi = 2,
+              .choices = {"Auto", "NVIDIA", "FP16"},
+              .restart = true,
+              .preset_exempt = true,
+              .shown = model_shown}, menu::after("dlss5"))
         .row({.key = "dlss5_preset",
               .label = "DLSS 5 preset",
               .help = "[EXPERIMENTAL] Default: our settings for every row of the DLSS 5 settings page, tuned in the "
@@ -166,7 +199,7 @@ MENU_MODULE(dlss5) {
                   publish();
               },
               .unsaved = true,
-              .sync = [] { return is_default() ? 0 : 1; }}, menu::after("dlss5"))
+              .sync = [] { return is_default() ? 0 : 1; }}, menu::after("dlss5_model"))
         .row({.key = "@DLSS 5 settings",
               .label = "DLSS 5 settings",
               .help = "[EXPERIMENTAL] Opens the DLSS 5 page: model resolution, detail and colour strength, style, the "

@@ -1,15 +1,17 @@
 """The Insert menu's DLSS 5 rows (gpu/vk/menu/dlss5.cpp), built with every module as the game builds them (no game, no GPU):
 
 - where they are: on the Graphics tab right after the Upscaler rows (Sharpness), before Frame generation's section, with
-  no heading of their own (the menu draws a heading over rows all hidden): DLSS 5, its preset and the row that opens the
-  DLSS 5 settings page; the page holds the tuning rows in the Bloodborne port's order;
+  no heading of their own (the menu draws a heading over rows all hidden): DLSS 5, its model, its preset and the row that
+  opens the DLSS 5 settings page; the page holds the tuning rows in the Bloodborne port's order;
 - no DLL, no rows: every row is hidden while the renderer says DLSS 5 cannot run here (no nvngx_dlssnr.dll found, not
   NVIDIA, no DLSS in the build) or the Upscaler is not DLSS, DLAA or FSR; with it, the On row shows, and the rest while On;
+  the DLSS 5 model row only where the renderer says there is a choice (an RTX 50 with both files), and it takes a restart;
 - the Default preset: the options' defaults are its values, the preset row says Default with them and Custom once any
   row is moved, and choosing Longshot puts every row back;
 - the rows' steps, ends, texts and locks (the four strengths wait for Model strengths at Applied), the Quality preset
   leaving them alone, and the sliders that make the model again committing on release;
-- what reaches the renderer (dlss5_publish): each row's value, the strengths sent only at Applied, the model's preset 2.
+- what reaches the renderer (dlss5_publish): each row's value, the strengths sent only at Applied, the model's preset 2,
+  and the DLSS 5 model row as the run started.
 
     python -I -B tests/test_dlss5_menu.py [--cxx g++]
 """
@@ -29,7 +31,7 @@ from menu_model_fixture import core_module, module_header, renderer_stand_ins  #
 from srccut import block  # noqa: E402
 
 VK = ROOT / "gpu" / "vk"
-GRAPHICS = ["dlss5", "dlss5_preset", "@DLSS 5 settings"]
+GRAPHICS = ["dlss5", "dlss5_model", "dlss5_preset", "@DLSS 5 settings"]
 PAGE = ["dlss5_resolution", "dlss5_detail", "dlss5_colour", "dlss5_style", "dlss5_strengths", "dlss5_intensity",
         "dlss5_local_structure", "dlss5_local_tone", "dlss5_skin", "dlss5_auto_mask", "dlss5_highlight"]
 ROWS = GRAPHICS + PAGE
@@ -45,7 +47,7 @@ MENU_MAIN = r'''#include "menu_module.h"
 namespace mkwvk { Options opts; }
 using namespace mkwvk;
 namespace ur = upscaler_rows;
-bool offered_now = false;
+bool offered_now = false, model_now = false;
 int upscaler_now = 0;
 // CORE
 const menu::Setting& row(const char* key) {
@@ -75,9 +77,10 @@ int main() {
     for (const char* k : keys) CHECK(row(k).shown);
     for (int on : {0, 1})
         for (int up = 0; up < ur::kUpscalers; up++) {
-            opts.dlss5 = on, offered_now = false, upscaler_now = up;
+            opts.dlss5 = on, offered_now = false, model_now = true, upscaler_now = up;
             CHECK(!any_shown(false));
         }
+    model_now = false;
     // its DLL found: the On row with a temporal upscaler DLSS 5 runs over (DLSS, DLAA, FSR), the rest while On
     offered_now = true;
     for (int up = 0; up < ur::kUpscalers; up++) {
@@ -86,8 +89,18 @@ int main() {
         CHECK(!any_shown(true));
         opts.dlss5 = 1;
         CHECK(row("dlss5").shown() == ur::supports_nr(up));
-        for (const char* k : keys) CHECK(row(k).shown() == ur::supports_nr(up));
+        for (const char* k : keys) CHECK(row(k).shown() == (ur::supports_nr(up) && std::strcmp(k, "dlss5_model") != 0));
+        // (the DLSS 5 model row: only with a choice of file, an RTX 50 with both, and while DLSS 5 is On)
+        model_now = true;
+        CHECK(row("dlss5_model").shown() == ur::supports_nr(up));
+        opts.dlss5 = 0;
+        CHECK(!row("dlss5_model").shown());
+        model_now = false;
     }
+    const menu::Setting& model = row("dlss5_model");
+    CHECK(model.restart && model.preset_exempt && model.value == &opts.dlss5_model && model.lo == 0 && model.hi == 2);
+    CHECK(model.choices.size() == 3 && !std::strcmp(model.choices[0], "Auto") && !std::strcmp(model.choices[1], "NVIDIA") &&
+          !std::strcmp(model.choices[2], "FP16") && Options{}.dlss5_model == 0);
     // the Default preset: the options' defaults, the preset row's Default
     const Dlss5Preset& p = kDlss5Default;
     const Options fresh{};
@@ -106,7 +119,7 @@ int main() {
     // a row moved by hand, any of them, one step: Custom; choosing the preset (either way) puts every row back
     for (const char* k : keys) {
         const menu::Setting& s = row(k);
-        if (!std::strcmp(k, "dlss5") || s.unsaved || !s.value) continue;
+        if (!std::strcmp(k, "dlss5") || !std::strcmp(k, "dlss5_model") || s.unsaved || !s.value) continue;   // (not the preset's)
         opts = Options{};
         int& v = *s.value;
         const int was = v;
@@ -174,7 +187,7 @@ using namespace mkwvk;
 int main() {
     opts.dlss5 = 1, opts.dlss5_resolution = 55, opts.dlss5_detail = 120, opts.dlss5_colour = 80, opts.dlss5_style = 1;
     opts.dlss5_intensity = 90, opts.dlss5_local_structure = 110, opts.dlss5_local_tone = 70, opts.dlss5_skin = -100;
-    opts.dlss5_auto_mask = 0, opts.dlss5_highlight = 35;
+    opts.dlss5_auto_mask = 0, opts.dlss5_highlight = 35, opts.dlss5_model = 2;
     for (int mode : {0, 1, 2}) {
         opts.dlss5_strengths = mode;
         dlss5_publish();
@@ -183,6 +196,10 @@ int main() {
         assert(got.model.skin == -100 && got.model.mask == 0 && got.model.preset == 2 && got.model.ui == 1);
         assert(got.model.strengths == (mode == 2));   // (As in OptiScaler and Model defaults: the model's own)
         assert(got.debug == 3);   // (RX_VK_DLSS_NR_DEBUG, read once)
+        assert(got.model_file == 2);   // (the DLSS 5 model row)
+        opts.dlss5_model = 1;
+        dlss5_publish();
+        assert(got.model_file == 2);   // (... as the run started: it applies after a restart)
     }
     opts.dlss5 = 0; dlss5_publish(); assert(!got.requested);
     std::puts("publish: PASS");
@@ -205,7 +222,7 @@ def main():
         # (the menu as tests/menu_model_fixture.py compile_menu builds it, the renderer's answers in the test's hands)
         core, _ = core_module((VK / "vk_menu.cpp").read_text(encoding="utf-8"))
         stand_ins = renderer_stand_ins()
-        for name, value in (("dlss5_offered", "offered_now"), ("upscaler", "upscaler_now")):
+        for name, value in (("dlss5_offered", "offered_now"), ("dlss5_model_offered", "model_now"), ("upscaler", "upscaler_now")):
             pattern = r"(\b%s\(\) \{ return )\{\}(; \})" % name
             if not re.search(pattern, stand_ins):
                 raise SystemExit("FAIL: tests/menu_model_fixture.py renderer_stand_ins has no %s() to stand in for" % name)

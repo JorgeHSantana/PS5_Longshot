@@ -52,7 +52,18 @@ int main() {
     assert(blocking(Issue::runtime_path) && !blocking(Issue::configuration_rejected));
     for (int i = 1; i < kIssues; ++i)   // (the DLSS 5 row's line enumerates them: menu/dlss5.cpp hn_dlss5)
         assert(std::strlen(message(static_cast<Issue>(i))) > 30);
-    assert(kIssues == static_cast<int>(Issue::runtime_path) + 1);
+    assert(kIssues == static_cast<int>(Issue::checking_files) + 1);
+    // (the FP16 file's direct path, Windows: what to do in each case; its check at the start holds DLSS 5 a moment)
+    assert(blocking(Issue::fp16_forwarder) && blocking(Issue::fp16_failed) && blocking(Issue::checking_files));
+    assert(std::strstr(message(Issue::checking_files), "FP16 file"));
+    assert(std::strstr(message(Issue::fp16_forwarder), "longshot_nvngx.dll_nr.dll") &&
+           std::strstr(message(Issue::fp16_forwarder), "Build the game again"));
+    assert(std::strstr(message(Issue::fp16_failed), "fp16 folder") && std::strstr(message(Issue::fp16_failed), "Restart"));
+#ifdef _WIN32
+    assert(std::strstr(message(Issue::unavailable), "RTX 50 only") && std::strstr(message(Issue::unavailable), "fp16"));
+    // (NVIDIA's file on an older RTX: NGX may answer either way, and both name the FP16 file)
+    assert(std::strstr(message(Issue::unsupported_gpu), "RTX 50 only") && std::strstr(message(Issue::unsupported_gpu), "fp16"));
+#endif
     // (where the player puts NVIDIA's file: both folders said)
     assert(std::strstr(message(Issue::missing_runtime), "ngx folder") && std::strstr(message(Issue::missing_runtime), "Longshot/ngx"));
     assert(std::strlen(message(Issue::none)) == 0);

@@ -150,6 +150,7 @@ when its fast check says the folder is out of date ([play](build.md#play-the-ver
 |---|---|
 | `longshot` / `longshot.exe` | The game (a folder built by the old Windows Builder had it in `bin/`, which `host/hos_paths.h` still reads) |
 | `longshot_vk.so` / `longshot_vk.dll` | The renderer, beside the game |
+| `longshot_nvngx.dll_nr.dll` | Windows, a build with NVIDIA's NGX SDK: DLSS 5's forwarder beside the renderer, through which it calls the community FP16 model ([DLSS 5](../../user/dlss5.md)); `gpu/vk/dlss_nr_forwarder.c`, linked by `build-compile`'s `link_forwarder` |
 | `libSDL2-2.0.so.0`, `renhdrum.so` / `SDL2.dll`, `SDL3.dll`, `renhdrum.dll` | The controllers' libraries, beside the game; on Windows a shared FFmpeg's DLLs too |
 | `image.bin` | The game's image: its modules laid out, patched and relocated. Made from the dump: it never leaves the PC |
 | `longshot_romfs.idx` | The romfs's index: where each file of the romfs is in the player's .nup ([below](#the-romfs-read-in-place)) |

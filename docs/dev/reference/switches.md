@@ -348,3 +348,4 @@ The memory budget and its `vk: budget:` lines are in [architecture](architecture
 | `RX_VK_DLSS_NR=0/1` | DLSS 5 (NVIDIA's neural rendering after the upscaler) off or on for one run, over its row; NVIDIA's `nvngx_dlssnr.dll` and a temporal upscaler are still needed ([DLSS 5](../../user/dlss5.md)) |
 | `RX_VK_DLSS_NR_DEBUG=0..5` | A view of DLSS 5 for one run, never saved: 1 its input, 2 the model's raw output, 3 the difference x20, 4 depth, 5 motion vectors |
 | `RX_VK_DLSS_NR_LINUX=1` | Linux: the DLSS 5 rows shown and the native NGX asked for neural rendering (an experiment; a Windows DLL cannot be used there) |
+| `RX_VK_DLSS_NR_MODEL=auto/nvidia/fp16` | Windows, an RTX 50 with both DLSS 5 files: which one runs for one run, over the DLSS 5 model row (Auto is NVIDIA's). With one file, that file runs; RTX 20, 30 and 40 run the community FP16 file ([DLSS 5](../../user/dlss5.md)) |

@@ -28,10 +28,13 @@ bool dlss_nr_pending();   // (a check asked for (dlss_nr_retry) waits for the re
 /// f.output; false, nothing done (off, not available, or failed: the upscaler's picture is shown)
 bool dlss_nr_chain(VkCommandBuffer cmd, TemporalFrame& f, bool native_hdr, TemporalImage& result);
 /// The menu's DLSS 5 rows show (gpu/vk/menu/dlss5.cpp): NVIDIA's model, nvngx_dlssnr.dll, is in one of the folders NGX
-/// searches for DLSS's runtime (runtime_dirs: RX_VK_DLSS_DIR, the game's ngx folder, LOCALAPPDATA's Longshot/ngx), on an
-/// NVIDIA GPU, in a build with DLSS. Linux: only with RX_VK_DLSS_NR_LINUX=1 (native NGX finds its own runtime). Looked for
-/// once a run: a DLL put in while the game runs shows the rows at the next start
+/// searches for DLSS's runtime (runtime_dirs: RX_VK_DLSS_DIR, the game's ngx folder, LOCALAPPDATA's Longshot/ngx), or
+/// (Windows) the known community FP16 one in such a folder's fp16 folder (dlss_nr_model.h), on an NVIDIA GPU, in a build
+/// with DLSS. Linux: only with RX_VK_DLSS_NR_LINUX=1 (native NGX finds its own runtime). Looked for once a run: a DLL put in
+/// while the game runs shows the rows at the next start
 bool dlss_nr_offered();
+/// The DLSS 5 model row shows (gpu/vk/menu/dlss5.cpp): an RTX 50 with both files, NVIDIA's and the known FP16 one (Windows)
+bool dlss_nr_model_offered();
 enum DlssNrStatus { NR_WAITING, NR_ACTIVE, NR_PENDING, NR_FAILED };
 DlssNrStatus dlss_nr_status();   // (the last evaluation's, for the menu: never inferred from the On row)
 dlss_nr::Issue dlss_nr_check(bool refresh = false);   // (the last check's; refresh asks the recording thread to check again)
@@ -45,6 +48,7 @@ struct DlssNrControls {
     int highlight = 20;              // (the most the model may brighten or darken a pixel, tenths of a ratio)
     int debug = 0;                   // (RX_VK_DLSS_NR_DEBUG's view for this run, never saved)
     int scale = 100;                 // (the model's working size, a percent of the picture)
+    int model_file = 0;              // (the DLSS 5 model row as the run started, dlss_nr::ModelChoice: which file runs)
 };
 void dlss_nr_publish(const DlssNrControls& controls);
 /// Lock-free telemetry for the FPS counter's Dev level; owned_bytes leaves out what NVIDIA's runtime allocates itself

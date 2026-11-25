@@ -252,9 +252,13 @@ fn finished_files(
     if let Some(vk) = &built.renderer {
         files.push((vk.clone(), game_dir.join(vk.file_name().unwrap_or_default())));
     }
-    // (SDL2.dll is sdl2-compat: it loads SDL3.dll from beside the exe, else no controller works)
-    let beside: &[&str] =
-        if windows { &["SDL2.dll", "SDL3.dll", "renhdrum.dll"] } else { &["libSDL2-2.0.so.0", "renhdrum.so"] };
+    // (SDL2.dll is sdl2-compat: it loads SDL3.dll from beside the exe, else no controller works. DLSS 5's forwarder
+    // beside the renderer, which loads it from its own folder: a Windows build with NVIDIA's NGX SDK makes it)
+    let beside: &[&str] = if windows {
+        &["SDL2.dll", "SDL3.dll", "renhdrum.dll", build_compile::NR_FORWARDER]
+    } else {
+        &["libSDL2-2.0.so.0", "renhdrum.so"]
+    };
     let mut names: Vec<String> = beside.iter().map(|s| s.to_string()).collect();
     if windows {
         // (a shared FFmpeg's DLLs, which the compile put beside the game)

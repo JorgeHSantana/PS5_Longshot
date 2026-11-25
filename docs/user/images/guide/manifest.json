@@ -967,7 +967,7 @@
       },
       "reviewed_source": {
         "repository": "https://git.magicbean.dev/MagicBeanDev/Longshot",
-        "revision": "main fb724339 + #2503 6b76485a",
+        "revision": "main fb724339 + #2503 6b76485a + #2513 9f2cce42",
         "files": {
           "assets/longshot.png": "9186c5ea9c3c5d4b22725d3dbffd4eb81a8965f66cebbcfa1c492423b9defb2b",
           "game/game.h": "f8c17f88f983c01c47e0ae3e411c6b85b72fca563f958414187c2b46dd13829b",
@@ -983,7 +983,7 @@
           "gpu/vk/device_policy.h": "833e9ea9c6cac35219516e53b69182db9b6437d77cddcc4795a921897f704348",
           "gpu/vk/display_modes.h": "beea7b04494ed72b564eb462be979029c4aa81cc661154ec88c28b7050149c3f",
           "gpu/vk/dlss_nr_settings.h": "2bbe19e4c500d487cda60e009f8a056d6383a5389cbdd58503ff8d82e6443717",
-          "gpu/vk/dlss_nr_support.h": "c2fcdb1f593c1c46e40e6984984c834e559186016e169bd1da44b8e2d1891cea",
+          "gpu/vk/dlss_nr_support.h": "8f0aaf099a295107c9ebb6c0e37fa147e128d6e11205d175f32b110fb006942b",
           "gpu/vk/fallback_size_policy.h": "c64e49b0786cd9b4964e803f628e2296c70b7249887dfd0aeb8ffa00dee78ed4",
           "gpu/vk/fps_stats.h": "306cfb01489d4e793dbc1174b59d65fa79b699caeab16c29e092f9b037787da9",
           "gpu/vk/framegen_rows.h": "3c8837e53220c3b69fd13c4436832289a1047cad2b344b21f6ba0c752937bebc",
@@ -1008,8 +1008,8 @@
           "gpu/vk/menu/detail.cpp": "6d8b20637875725c2b6c72f6443d441b1f9179b07b0a9d9a4b774412b9f5edf5",
           "gpu/vk/menu/display.cpp": "1479ad524b475abf47992d51a8a508ae8690b63cdc4fb9720aa9178af94f68bd",
           "gpu/vk/menu/display.h": "ef1c8c1583e1e98ee5edf3374b5538093b71dad017a259b36957ad2d7b2bc707",
-          "gpu/vk/menu/dlss5.cpp": "6df4714f5913562a041dccc8315149072349642774ef61ae6bf36bb408ab90f6",
-          "gpu/vk/menu/dlss5.h": "1dbb4b852d09c8233d8d47956dc5ef676bbb9d882d7928dfd6c2fa2bee9ea4b2",
+          "gpu/vk/menu/dlss5.cpp": "b976cd5967ec294e89e430f804d5ec130275e634b8d8dd2c0b8cb19f659ce7c2",
+          "gpu/vk/menu/dlss5.h": "51884e02eafff7b9ed55f94545eb4a1d4e7a6d87d50228173aa3607907862591",
           "gpu/vk/menu/fps_counter.cpp": "7dbf640936e3d8c8c4937684eaf592cf3a01d47c6e2233d0783b4ce15a686b8a",
           "gpu/vk/menu/framegen.cpp": "6a66e753eeaacce80fc8d17a8bb46a21acb092542c2c40f62e2f725c1cce00d5",
           "gpu/vk/menu/framegen.h": "72fccd44fd2de138d93741b7513d409e8c41f4ce585873e4d2053329a8ec4604",
@@ -1049,7 +1049,7 @@
           "gpu/vk/menu_i18n.h": "0e281f19baa10bc6fe767aa259508ce2dbd9927891d3903e69c58708312bbf69",
           "gpu/vk/menu_model.cpp": "dc1dbdb4b18b9d793cf251a326f04a4796c378b2ed1cb715aeda73628dc4c913",
           "gpu/vk/menu_model.h": "85fcf93d13b3ab5cfdb7be1103193f96302957023861a0dd8b74be9455fbfc9a",
-          "gpu/vk/menu_module.h": "7b3c14299e91e0428566d02db50e064974762607f010cb81964c02ef47cccc75",
+          "gpu/vk/menu_module.h": "3b728cfb4f7a4857a1891fb0ac06fafdd8df0ed12747af4e91993ba5400e64f0",
           "gpu/vk/menu_restart.h": "89dc8e1be7471344dd5aef1ebcde3378dec986b648c69dc86b9da4a72f23e55c",
           "gpu/vk/mesh_mode.h": "ab4db02eb50dfc36789d293945e997b39e4e05302cf2e51b381866b4c6038142",
           "gpu/vk/mirror_budget.h": "1097f6e17f149c018a93f8b2e751aba2065c6db78811e83be773165645688b43",
@@ -1068,7 +1068,7 @@
           "gpu/vk/vk_antilag.h": "e43538dde4493328eef266c1580a983e2187645c613d00a108fa92ed1376b5be",
           "gpu/vk/vk_api.h": "2ccd72bd992348130f9b1efe3014adce0c2d3eddf1bb11a5f19470e6cb0e9279",
           "gpu/vk/vk_bug_report.h": "026d6e09fe64aebb03fb8cc8c2872e60ad170ae7c20b121deb340dcbc4e1f523",
-          "gpu/vk/vk_dlss.h": "2fffca0f2515e2155013b2e300d0f386fbf8c5d65a79a73c98660c543c9fddc8",
+          "gpu/vk/vk_dlss.h": "915513a9471c72edbcff082e271e4a77dc22859fc61ef189639140c0e07b68a1",
           "gpu/vk/vk_draw.h": "eee2886a9783bf86e968f35447c9dd131e3606b0fee123abb8c5c7f42cd6ee61",
           "gpu/vk/vk_fps.h": "baae20a869887249e31948e9359d43953d9f7dd7699c6cbcbb78feddea5d3b2e",
           "gpu/vk/vk_framegen.h": "84029145fe561c21cd2d7c009e829e4a8663cf6f3501ac6398419fcb9c81c270",
@@ -1078,8 +1078,8 @@
           "gpu/vk/vk_imgui.h": "89246a2eb2ceab0320634a8cab24b4a7608389666192bcad740477d9b0b6c106",
           "gpu/vk/vk_internal.h": "b30337dc959347e1027fbf11bf8151b62d3a582c882ab09586ae13512ee5585b",
           "gpu/vk/vk_loader.h": "0715166821b073ca858c3aab75f15ca882f768c5bf0912e798ead757b67f874d",
-          "gpu/vk/vk_menu.cpp": "514a6966c85f3011a998a253c59925a5e4610f285bcb0ff08455c6e5b9e9e6a0",
-          "gpu/vk/vk_menu.h": "1304d061714499c5e97639b112255276cda2e857e10fa87cfcb66c86fbeece15",
+          "gpu/vk/vk_menu.cpp": "e41ce33f0a83e25128a00b14551a752ac06be111e08105e7c78a7c41063f1ea4",
+          "gpu/vk/vk_menu.h": "f713c388096cf9dbf79203012ab1632d0c09afa78465d4c20401db127e99e57f",
           "gpu/vk/vk_menu_hit.h": "fb83d444c770e0edef75c9c091b633c1960292be4da0b44b76dd2693bc505c91",
           "gpu/vk/vk_menu_i18n.cpp": "affe63074f0763d089cdc9218d7f780d267fa33a4c820ce3bb2d981226a4b46a",
           "gpu/vk/vk_menu_i18n.h": "e60789499433bb5ada9f7fa25acea022baa430717772ff74e0b09afca4f8cf9b",
@@ -1119,7 +1119,7 @@
       },
       "fixture_files": {
         "scripts/screenshots/capture_menu.py": "8b031d1c1980fb8570900bd233ed17d6f82f6d6da6b7e2a919ca21f80201d02b",
-        "scripts/screenshots/menu.cpp": "2ff8fa8eb4a8f71143f34296133c5648af7f79bb2ee0781ee7f52fb846c18906"
+        "scripts/screenshots/menu.cpp": "7843961e9bfd8dda4c8d0f8846174cdc81a2a13f118bb70fa9629a02f32f5281"
       },
       "capture": {
         "platform": "Linux x86_64, game-free SDL2 software renderer",
@@ -1139,7 +1139,7 @@
         "contains_save_data": false,
         "contains_private_paths": false,
         "font_source": "Bundled Libertinus Sans Regular/Bold and Serif Semibold; third_party/fonts/libertinus/OFL.txt.",
-        "notes": "Recaptured with the maintained UI-only helper from main 8aa5ab87 plus the website fix e78aa33d (nightly-798), after 31 recorded UI-source inputs changed. Visually compared with the 124e4a4d image: #2383 replaced the Render resolution row's Auto (dynamic) with a Dynamic resolution Off/On row in the pictured Resolution and upscaling group, so the old image no longer matched. Every other pictured label, value, the Quality preset help and the navigation are unchanged. The PNG is copied unchanged from the helper output; capture and reviewed sources are the helper's compiler-discovered inputs (137 files). No game run, live GPU check or official-binary capture is claimed. Retained at 6b76485a (#2503, DLSS 5) after reviewing its six changed UI-source inputs, the five it adds and its six fixture stand-ins: its three Graphics rows (DLSS 5, DLSS 5 preset, DLSS 5 settings), after Sharpness, show only where NVIDIA's nvngx_dlssnr.dll is found, which the fixture, like a PC without the file, has not; its settings page is not a tab of the strip. The pictured rows, values, help, tab strip and footer are unchanged; the PNG and capture provenance are kept. See source-review-6b76485a.md. Merged with main fb724339 (main's own review c99fac0a: #2411's game rows): the inputs both sides changed are recorded at the merge, see source-review-2503-fb724339.md. No fresh rendering, pixel comparison or capture is claimed."
+        "notes": "Recaptured with the maintained UI-only helper from main 8aa5ab87 plus the website fix e78aa33d (nightly-798), after 31 recorded UI-source inputs changed. Visually compared with the 124e4a4d image: #2383 replaced the Render resolution row's Auto (dynamic) with a Dynamic resolution Off/On row in the pictured Resolution and upscaling group, so the old image no longer matched. Every other pictured label, value, the Quality preset help and the navigation are unchanged. The PNG is copied unchanged from the helper output; capture and reviewed sources are the helper's compiler-discovered inputs (137 files). No game run, live GPU check or official-binary capture is claimed. Retained at 6b76485a (#2503, DLSS 5) after reviewing its six changed UI-source inputs, the five it adds and its six fixture stand-ins: its three Graphics rows (DLSS 5, DLSS 5 preset, DLSS 5 settings), after Sharpness, show only where NVIDIA's nvngx_dlssnr.dll is found, which the fixture, like a PC without the file, has not; its settings page is not a tab of the strip. The pictured rows, values, help, tab strip and footer are unchanged; the PNG and capture provenance are kept. See source-review-6b76485a.md. Merged with main fb724339 (main's own review c99fac0a: #2411's game rows): the inputs both sides changed are recorded at the merge, see source-review-2503-fb724339.md. No fresh rendering, pixel comparison or capture is claimed. Retained at 9f2cce42 (DLSS 5 on RTX 20, 30 and 40 with the community FP16 file, on #2503) after reviewing its seven changed UI-source inputs and its one new fixture stand-in: its DLSS 5 model row, after DLSS 5, shows only while DLSS 5 is On on an RTX 50 with both DLSS 5 files, which the fixture, like a PC without a DLSS 5 file, has not. The pictured rows, values, help, tab strip and footer are unchanged; the PNG and capture provenance are kept. See source-review-9f2cce42.md; merged with main fb724339 through #2503's merge, see source-review-2513-fb724339.md. No fresh rendering, pixel comparison or capture is claimed."
       }
     },
     {

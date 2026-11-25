@@ -157,9 +157,14 @@ test('the registered Simulated turf page row takes its named help; another page 
 test('the DLSS 5 rows name their conditions; their registered preset and page rows only', () => {
   const settings = readGraphicsSettings(page, menu).flatMap(group => group.settings);
   const find = name => settings.find(setting => setting.name === name);
-  assert.deepEqual(find('DLSS 5').badges, ["With NVIDIA's DLSS 5 file"]);
+  assert.deepEqual(find('DLSS 5').badges, ['With a DLSS 5 file']);
   assert.deepEqual(find('DLSS 5 preset').badges, ['While DLSS 5 is On']);
   assert.deepEqual(find('DLSS 5 settings').badges, ['While DLSS 5 is On']);
+  // (the DLSS 5 model row: while On, on an RTX 50 with both files; it takes a restart, as the menu's row says)
+  assert.deepEqual(find('DLSS 5 model').badges, ['While DLSS 5 is On', 'RTX 50 with both DLSS 5 files']);
+  assert.equal(find('DLSS 5 model').restart, true);
+  assert.throws(() => readGraphicsSettings(page.replace('. Shown while DLSS 5 is On, and only on an RTX 50 card with both DLSS 5 files (Windows);', '.'), menu),
+    /no condition for DLSS 5 model/);
   assert.throws(() => readGraphicsSettings(page.replace("Shown only with NVIDIA's `nvngx_dlssnr.dll`", 'With'), menu),
     /no condition for DLSS 5,/);
   assert.throws(() => readGraphicsSettings(page.replace('. Shown while DLSS 5 is On |', ' |'), menu), /no condition for DLSS 5 preset/);
@@ -193,7 +198,7 @@ test('cards take the menu\'s help, the source restart flag and the table\'s cond
   assert(settings.every(setting => setting.summary), 'every card has the menu\'s description');
   assert(!settings.some(setting => /Applies after/.test(setting.summary)));
   assert.deepEqual(settings.filter(setting => setting.restart).map(setting => setting.name),
-    ['Aspect ratio', 'Output resolution', 'Custom output size', 'Profile', 'GPU device', 'Speaker layout', 'Skip title screen', 'Game language', 'Button prompts']);
+    ['Aspect ratio', 'Output resolution', 'Custom output size', 'Profile', 'DLSS 5 model', 'GPU device', 'Speaker layout', 'Skip title screen', 'Game language', 'Button prompts']);
   assert.deepEqual(find('NVIDIA Reflex').badges, ['NVIDIA GPUs only']);
   assert.deepEqual(find('HDR tone mapper').badges, ['With HDR on Native']);
   assert(find('HDR contrast').badges.includes('While HDR is on'));

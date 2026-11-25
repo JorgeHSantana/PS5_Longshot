@@ -69,6 +69,8 @@ struct Options {
     int dlss5_skin = 74;               // -100 follows the local structure, else 0 to 200
     int dlss5_auto_mask = 1;           // the model's automatic skin mask: Off, On
     int dlss5_highlight = 17;          // the most the model may brighten or darken a pixel: 10 to 80 tenths (1.7x)
+    int dlss5_model = 0;               // the file that runs it on an RTX 50 with both (dlss_nr_model.h): 0 Auto (NVIDIA's),
+                                       // 1 NVIDIA's, 2 the community FP16 one; after a restart (RX_VK_DLSS_NR_MODEL over it)
     int anisotropy = 4;   // (longshot) Anisotropic filtering: 0 the game's own (1x or 2x), 1 2x, 2 4x, 3 8x, 4 16x (the
                           // device's limit at most; gpu/vk/vk_draw.cpp aniso_override, RX_VK_ANISO over it)
     int grass_distance = 0;   // short blades: 0 the game's, 1 2x, 2 3x, 3 4x (RX_VK_GRASS_DISTANCE over it)

@@ -3,6 +3,9 @@
 DLSS 5 is NVIDIA's neural rendering model. It adds detail to faces, skin and surfaces after the upscaler, before the HUD.
 It costs a lot of GPU time: about 8.9 ms a frame at 3416x1440 on an RTX 5090.
 
+NVIDIA's own file holds its FP8 model, which runs on RTX 50 GPUs only. On Windows, RTX 20, 30 and 40 GPUs can run DLSS
+5 with the community FP16 conversion of that file ([below](#rtx-20-30-and-40-the-fp16-file)).
+
 ## Put NVIDIA's file in place
 
 Longshot does not include or download the model. Put NVIDIA's `nvngx_dlssnr.dll` in one of these folders:
@@ -12,18 +15,47 @@ Longshot does not include or download the model. Put NVIDIA's `nvngx_dlssnr.dll`
 - the folder `RX_VK_DLSS_DIR` names.
 
 Start the game. Longshot looks for the file once at each start. NVIDIA's runtime loads only a file that NVIDIA signed: a
-changed or converted file does not start. NVIDIA's FP8 model runs on RTX 50 GPUs.
+changed or converted file does not start there. NVIDIA's FP8 model runs on RTX 50 GPUs.
+
+## RTX 20, 30 and 40: the FP16 file
+
+On Windows, Longshot also runs the community FP16 conversion of `nvngx_dlssnr.dll` (a modified NVIDIA file: it runs on
+RTX 20, 30, 40 and 50 GPUs). Longshot does not include or download it either. Put it, named `nvngx_dlssnr.dll`, in an
+`fp16` folder inside one of the folders above, for example `%LOCALAPPDATA%\Longshot\ngx\fp16\nvngx_dlssnr.dll`.
+
+- Longshot uses only the known file: its SHA-256 must be
+  `CDFA6C1EC784867182164C7836F324F087B5C9F374D0C9FE46F54999FEABF3ED` (276,162,560 bytes, the file the Bloodborne PC port
+  checks for). Any other file there is not loaded (one of another size is not even read); the log says so. Longshot
+  checks the file once at each start, on a thread of its own (about 0.6 s on a Ryzen 7 9800X3D; until then the DLSS 5
+  row's line says it waits), and no program can change, move or delete it while the game runs: the file loaded is the
+  file checked.
+- NVIDIA's runtime refuses a modified file, so Longshot loads this one itself and calls it through
+  `longshot_nvngx.dll_nr.dll`, beside `longshot_vk.dll` (a build with NVIDIA DLSS makes it). It does not turn off any
+  check of NVIDIA's and changes no setting of Windows.
+- Linux: no. The FP16 file is a Windows file.
+
+Which file runs:
+
+| GPU | Files in place | Runs | DLSS 5 model row |
+|---|---|---|---|
+| RTX 50 | both | the row's choice: Auto (NVIDIA's), NVIDIA or FP16 | shown, applies after a restart |
+| RTX 50 | one | that one | not shown |
+| RTX 20, 30, 40 | the FP16 file (with or without NVIDIA's) | the FP16 file | not shown |
+| RTX 20, 30, 40 | NVIDIA's only | nothing: the DLSS 5 row's line says NVIDIA's file does not run there and names the FP16 file | not shown |
+
+`RX_VK_DLSS_NR_MODEL=auto`, `nvidia` or `fp16` sets the DLSS 5 model row for one run (only where the row shows).
 
 ## The rows
 
 The **DLSS 5** rows of the Graphics tab, under the Upscaler's rows (after Sharpness), show only when all of these are true:
 
-- the file is in one of the folders above;
+- the file (NVIDIA's, or on Windows the FP16 one) is in one of the folders above;
 - the GPU is an NVIDIA GPU;
 - the build has NVIDIA DLSS;
 - the Upscaler is NVIDIA DLSS, NVIDIA DLAA or AMD FSR.
 
-Without them there is no DLSS 5 row and no message. Turn **DLSS 5** On: **DLSS 5 preset** and **DLSS 5 settings** show.
+Without them there is no DLSS 5 row and no message. Turn **DLSS 5** On: **DLSS 5 preset** and **DLSS 5 settings** show,
+and **DLSS 5 model** on an RTX 50 GPU with both files ([above](#rtx-20-30-and-40-the-fp16-file)).
 **DLSS 5 settings** opens a page with the tuning rows below (Back returns to Graphics). The DLSS 5 row's line says what
 the model does now, or why it does not run.
 
@@ -55,13 +87,22 @@ runtime allocates more of its own).
 ## Switches
 
 `RX_VK_DLSS_NR=0/1` turns DLSS 5 off or on for one run. `RX_VK_DLSS_NR_DEBUG=1..5` shows its input, the model's raw
-output, the difference x20, depth or motion vectors, for one run. On Linux the rows show only with
+output, the difference x20, depth or motion vectors, for one run. `RX_VK_DLSS_NR_MODEL=auto/nvidia/fp16` chooses the
+file on an RTX 50 GPU with both, for one run. On Linux the rows show only with
 `RX_VK_DLSS_NR_LINUX=1`, and the native NGX must offer neural rendering: the Windows file cannot be used there.
 
 ## How it works
 
 DLSS 5 is NGX feature 18, made and evaluated through NGX's own API (`gpu/vk/vk_dlss.cpp`, `dlss_nr_chain`), with the
-NVIDIA-signed file NGX finds in the folders above. Longshot loads nothing itself and changes nothing in NVIDIA's files.
+NVIDIA-signed file NGX finds in the folders above. For that file Longshot loads nothing itself and changes nothing in
+NVIDIA's files.
+
+The FP16 file takes a second path (`NrDirect` in `gpu/vk/vk_dlss.cpp`, Windows only), as the Bloodborne PC port's DLSS
+bridge runs it (PMWork fork; after the OptiScaler DLSS-NR fork by Dagherbou): Longshot loads the file, starts it with
+its own `NVSDK_NGX_VULKAN_Init_Ext`, and makes, evaluates and lets go of its feature with its own exports, with the same
+`DLSSNR.*` parameters in a block NGX allocates. The model refuses a caller whose module name lacks `nvngx.dll`, so each
+call goes through `longshot_nvngx.dll_nr.dll` (`gpu/vk/dlss_nr_forwarder.c`), which only makes the call. Everything
+around the model (its inputs, the proxy, the composition, the rows) is the same for both files.
 The model runs over the upscaler's picture, before the HUD, with the scene's depth and motion at its size. Its answer
 comes back through a composition (`gpu/vk/shaders/dlss_nr_composite.comp`): the detail and colour strengths and the
 highlight guard, as the Bloodborne port composes it, except that the extra saturation above colour strength 1 follows

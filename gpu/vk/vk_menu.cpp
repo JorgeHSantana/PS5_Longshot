@@ -199,6 +199,7 @@ unsigned upscalers_available() {
 /// (FSR 3.1 has inputs of its own; DLSS, FSR 4 and XeSS run on the frame chain they share, temporal_mode; Off is neither)
 int upscaler() { return fsr3_wanted() ? (int)ur::FSR3 : temporal_off() ? (int)ur::OFF : temporal_mode(); }
 bool dlss5_offered() { return dlss_nr_offered(); }   // (vk_dlss.cpp: its DLL looked for once a run)
+bool dlss5_model_offered() { return dlss_nr_model_offered(); }   // (vk_dlss.cpp: an RTX 50 with both of DLSS 5's files)
 namespace {   // (#1633: the anonymous namespace again, after what the modules ask)
 /// Why DLSS and DLAA do not run here (vk_dlss.h DlssWhy), for the Upscaler row and Frame generation by; nullptr for DLSS_OK
 const char* dlss_why_text(int why) {
@@ -4398,6 +4399,8 @@ void menu_init() {
     if (fsr4_env >= 0) env_override(&opts.fsr4_model, fsr4_env);
     // (DLSS 5 for this run: RX_VK_DLSS_NR over the saved row; the renderer told what the DLSS 5 rows hold, menu/dlss5.cpp)
     if (const char* e = getenv("RX_VK_DLSS_NR"); e && *e) env_override(&opts.dlss5, !env_value_off(e));
+    // (DLSS 5's file for this run: RX_VK_DLSS_NR_MODEL over the saved DLSS 5 model row, menu/dlss5.cpp)
+    if (const int m = dlss5_model_env(); m >= 0) env_override(&opts.dlss5_model, m);
     dlss5_publish();
     fsr4_set_model(opts.fsr4_model ? FSR4_MODEL_LITE : FSR4_MODEL_AUTO);
     outputs_sync();   // (the Aspect ratio follows the size read)

@@ -72,6 +72,7 @@ int fsr4_model_env() {
 }
 Fsr4Model live_model = FSR4_MODEL_AUTO;
 void dlss5_publish() {}   // (menu/dlss5.cpp: the renderer told what the DLSS 5 rows hold)
+int dlss5_model_env() { return -1; }   // (menu/dlss5.cpp: RX_VK_DLSS_NR_MODEL, unset here)
 void fsr4_set_model(Fsr4Model model) { live_model = model; }
 }
 // (the screen's display modes: HOS_DISPLAY_MODES names them here)

@@ -56,6 +56,7 @@ FROZEN = {   # (a key: the value its row saves, as players' files hold them)
     "dlss5_skin": "&opts.dlss5_skin",
     "dlss5_auto_mask": "&opts.dlss5_auto_mask",
     "dlss5_highlight": "&opts.dlss5_highlight",
+    "dlss5_model": "&opts.dlss5_model",
     "dlss_model": "&opts.dlss_model",
     "dlss_pre_bloom": "&opts.dlss_pre_bloom",
     "draws_line": "&opts.fps_dev_show[2]",
