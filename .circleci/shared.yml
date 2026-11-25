@@ -121,7 +121,7 @@ commands:
           command: |
             set -euo pipefail
             python3 -m pip install --disable-pip-version-check --break-system-packages --no-deps \
-              zstandard==0.25.0 pillow==13.0.0 numpy==2.5.4 lz4==4.4.5 unicorn==2.1.4
+              zstandard==0.25.0 pillow==13.0.0 numpy==2.5.4 lz4==4.4.5 unicorn==2.1.4 fonttools==4.68.0
       - run:
           name: Pinned glslang 16.6.0 (x86_64 release tarball)
           command: |
