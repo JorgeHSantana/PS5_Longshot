@@ -478,10 +478,12 @@ jobs:
           else
             python3 -m pre_commit run --show-diff-on-failure --all-files
           fi
+      # (the runner's image has no ShellCheck: the distribution's, from apt)
       - name: ShellCheck (scripts/)
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
+          command -v shellcheck > /dev/null || scripts/ci_apt.sh "$RUNNER_TEMP/apt" shellcheck
           mapfile -d '' files < <(find scripts -type f -name '*.sh' -print0)
           shellcheck --version
           if [ ${#files[@]} -gt 0 ]; then shellcheck -S error "${files[@]}"; fi
@@ -497,7 +499,7 @@ jobs:
       matrix:
         shard: [1/4, 2/4, 3/4, 4/4]
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       # (main's tree from this runner's cache, so that checkout fetches only what the commit adds; anything amiss, and it
       # fetches all as before: scripts/ci_git_base.sh)
@@ -524,7 +526,9 @@ jobs:
       - name: The checkout's own objects
         run: scripts/ci_git_base.sh dissociate
       # (the distribution's packages, with apt's lists and downloads kept per runner by the month, written only by a push
-      # to main: scripts/ci_apt.sh. lld: tests/test_thinlto_tls.py links with -fuse-ld=lld, as the game's build does)
+      # to main: scripts/ci_apt.sh. lld: tests/test_thinlto_tls.py links with -fuse-ld=lld, as the game's build does;
+      # libclang-rt-18-dev: clang's sanitizer runtimes, which ci_apt.sh's --no-install-recommends leaves out
+      # (tests/test_obj_cache_size.py's -fsanitize=address); llvm: llvm-mc, for tests/test_lifter.py)
       - name: The apt cache's key
         id: apt
         run: echo "key=apt-tests-$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
@@ -537,7 +541,7 @@ jobs:
       - name: Compilers and the SPIR-V validator
         run: |
           scripts/ci_apt.sh "$RUNNER_TEMP/apt" \
-            g++ clang lld spirv-tools ccache libdav1d-dev
+            g++ clang lld spirv-tools ccache libdav1d-dev llvm libclang-rt-18-dev
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == '1/4' && steps.apt-cache.outputs.cache-hit != 'true'
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -598,13 +602,29 @@ jobs:
       # (the checks that build a site's Rust stub need cargo: mise.toml's Rust, its own step so its PATH reaches the next)
       - name: Rust (mise.toml's)
         run: scripts/ci_rust.sh
+      # (the checks that run the release longshot-builder (test_lifter_semantics.py) or build-driver's redact example
+      # (test_log_redact.py) build it with cargo first: from cold, under this part's other checks, that took more than a
+      # check's 600 s. Built here, before them, in the part that has them; their own cargo build then finds it made)
+      - name: The release longshot-builder, for the checks that run it
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          checks=$(python -I -B tests/run_all.py --list --shard "$SHARD")
+          if grep -qx 'tests/test_lifter_semantics.py' <<< "$checks"; then
+            cargo build --locked --release -q -p longshot-builder
+          fi
+          if grep -qx 'tests/test_log_redact.py' <<< "$checks"; then
+            (cd builder && cargo build -q --release -p build-driver --example redact)
+          fi
       # (--strict: a check whose compiler, headers or package is missing here fails instead of being skipped)
       - name: Every check of this part
         env:
           LONGSHOT_SPIRV_HEADERS: ${{ github.workspace }}/_deps/spirv-headers/include
           LONGSHOT_VULKAN_HEADERS: ${{ github.workspace }}/_deps/vulkan-headers/include
           SHARD: ${{ matrix.shard }}
-        run: python -I -B tests/run_all.py --strict --shard "$SHARD"
+        # (--timeout 900: tests/test_recorder_sync.py took 445 s on CircleCI and more than 600 s here, beside 9 others)
+        run: python -I -B tests/run_all.py --strict --timeout 900 --shard "$SHARD"
       - name: Compiler cache statistics
         if: ${{ !cancelled() }}
         run: ccache --show-stats

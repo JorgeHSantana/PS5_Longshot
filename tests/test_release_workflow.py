@@ -78,7 +78,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 tools = wf[wf.index("- name: The tools"):]
                 self.assertIn("$TOOLS check --require", tools)
                 self.assertIn("Run the Make tools workflow", tools)
-                self.assertLess(wf.index("- name: The tools"), wf.index("upload-artifact"))
+                self.assertLess(wf.index("- name: The tools"), wf.index("uses: https://data.forgejo.org/forgejo/upload-artifact@"))
         self.assertIn("needs: [version, linux, windows]", jobs(release)["publish"])
 
     def test_the_make_tools_workflow(self):
@@ -109,7 +109,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
                     step = workflow[workflow.rindex("\n      - ", 0, m.start()):m.end() + 600].split("\n      - ")[1]
                     self.assertRegex(step, r"key: release-downloads-")
                     self.assertIn("github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')", step)
-                    paths = re.search(r"path: \|\n((?:            .*\n)+)", step).group(1).split()
+                    # (one path a line: a path starts with ${{ runner.temp }}, which has spaces)
+                    paths = [p.strip() for p in re.search(r"path: \|\n((?:            .*\n)+)", step).group(1).splitlines()]
                     for path in paths:
                         self.assertRegex(path, r"/(rust/\*\.tar\.xz|rust/crates|tools-cache|llvm/\.cache)$")
                 upload = workflow.index("name: " + artifact)

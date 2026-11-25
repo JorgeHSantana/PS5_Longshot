@@ -7,10 +7,11 @@
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-# (g++ clang lld spirv-tools ccache libdav1d-dev are CI's, with what they recommend: clang's sanitizer libraries
-# among it. The rest is what its image has: Python 3.12, git, curl)
+# (g++ clang lld spirv-tools ccache libdav1d-dev llvm libclang-rt-18-dev are CI's (llvm: llvm-mc on PATH;
+# libclang-rt-18-dev: clang's sanitizer libraries, which CI's install without recommends would leave out), with what
+# they recommend. The rest is what its image has: Python 3.12, git, curl)
 RUN apt-get update \
- && apt-get install -y g++ clang lld spirv-tools ccache libdav1d-dev \
+ && apt-get install -y g++ clang lld spirv-tools ccache libdav1d-dev llvm libclang-rt-18-dev \
  && apt-get install -y --no-install-recommends python3 python3-venv git ca-certificates curl file make cmake pkg-config \
       zip unzip xz-utils procps \
  && rm -rf /var/lib/apt/lists/*

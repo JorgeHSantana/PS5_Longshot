@@ -108,6 +108,7 @@ static void WaitForSingleObject(HANDLE h, unsigned timeout) {
     ++waited;
 }
 static void hand_over(int, char**) {}   // (host/hos_main.c: started by itself in a version folder, the builder's to start)
+static int bc_claim() { return 0; }   // (host/builder_channel.c: the builder's channel ends kept; none here)
 static void load_longshot_env() {}
 static void profile_start_slot() {}   // (host/hos_main.c: the profile's start_slot handed on)
 static void hos_game_layout() {}   // (game/game_layout.c: the game folder's cache/ and logs/)

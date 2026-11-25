@@ -60,7 +60,7 @@ class WindowsOnLinuxTests(unittest.TestCase):
         wf = (WORKFLOWS / "build-windows.yml").read_text(encoding="utf-8")
         self.assertNotIn("dav1d.sh", wf)
         self.assertNotIn("meson", wf)
-        package = wf[wf.index("\n  package:"):wf.index("\n  vulkan:")]
+        package = wf[wf.index("\n  package:"):]   # (its only job: the Vulkan build check is a step of it)
         self.assertIn('dev tools install "$PWD" --system windows-x64', package)
         self.assertRegex(package, r"tests/test_dav1d_av1\.py --cross \"\$LLVM_MINGW/bin/x86_64-w64-mingw32-clang\" \\\n\s+--run ")
         self.assertLess(package.index("Wine, installed"), package.index("test_dav1d_av1.py"))
@@ -73,13 +73,13 @@ class WindowsOnLinuxTests(unittest.TestCase):
         self.assertIn('"$RELEASE_PY" released-as "$ref" --not "$tag"', release)
         self.assertEqual(release.count("checked: ${{ needs.version.outputs.checked }}"), 2)
         windows = (WORKFLOWS / "build-windows.yml").read_text(encoding="utf-8")
-        package = windows[windows.index("\n  package:"):windows.index("\n  vulkan:")]
-        vulkan = windows[windows.index("\n  vulkan:"):]
-        self.assertNotIn("RELEASE_CHECKED", package)
-        steps = re.split(r"\n      - ", vulkan)[1:]
-        self.assertTrue(steps)
-        for step in steps:
-            self.assertRegex(step, r"if: env\.RELEASE_CHECKED == ''", step.splitlines()[0])
+        # (the Windows Vulkan build check, once a job of its own, is the package job's last step: the only one gated, the
+        # files' steps all run)
+        package = windows[windows.index("\n  package:"):]
+        gated = re.findall(r"- name: (.*)\n\s+if: env\.RELEASE_CHECKED == ''", package)
+        self.assertEqual(gated, ["longshot_vk.dll (build check)"])
+        self.assertEqual(package.count("RELEASE_CHECKED"), 1)
+        self.assertNotIn("RELEASE_CHECKED", package[:package.index("- name: longshot_vk.dll (build check)")])
         linux = (WORKFLOWS / "build-linux.yml").read_text(encoding="utf-8")
         gated = re.findall(r"- name: (.*)\n\s+if: env\.RELEASE_CHECKED == ''", linux)
         self.assertEqual(gated, ["longshot_vk.so (build check)", "longshot_vk.so with AMD FSR 4 (build check)"])

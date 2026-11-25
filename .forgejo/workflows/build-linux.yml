@@ -39,7 +39,9 @@ concurrency:
   group: longshot-builder-linux-${{ inputs.tag }}
 
 jobs:
+  # (named to pair with release.yml's job that calls this workflow, which Forgejo lists beside it)
   linux:
+    name: "longshot-builder (Linux): build"
     runs-on: release  # (a release's build: only the runners kept for them take it, docs/dev/reference/ci.md)
     container: ubuntu:22.04
     # (about 4 minutes with the dependencies cached; building them all, as a release does, takes longer)

@@ -269,7 +269,10 @@ int hos_texts_romfs(const char *key, const char *mod, char *out, size_t cap) { (
         bare = tmp / "bare"
         put(bare / "romfs" / TABLE, raw_frame(restbl({"Model/A.bfres": 1300})))
         run("none", bare)
+        # (the game folder padded so its romfs folder's path is 60 bytes or more whatever the scratch folder's is: a short
+        # one, such as /tmp's, left the host path of the file below within MAX_PATH)
         long_game = tmp / "long"
+        long_game = tmp / ("long" + "-" * max(0, 60 - len(str(long_game / "mods/04-long/romfs"))))
         put(long_game / "romfs" / TABLE, raw_frame(restbl({"Model/A.bfres": 1300})))
         put(long_game / "mods/04-long/romfs/New/D.bgyml.zs", raw_frame(bytes(700)))
         # (a RomFS path of 4,040 bytes, 19 folders and a file: it fits MAX_PATH (4096 here), and so does its last

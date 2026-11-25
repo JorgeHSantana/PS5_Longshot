@@ -48,8 +48,9 @@ defaults:
     shell: bash
 
 jobs:
+  # (named to pair with release.yml's job that calls this workflow, which Forgejo lists beside it)
   package:
-    name: longshot-builder-<version>-windows-x64.exe
+    name: "longshot-builder (Windows): build"
     runs-on: release  # (a release's build: only the runners kept for them take it, docs/dev/reference/ci.md)
     timeout-minutes: 60
     steps:
