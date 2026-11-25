@@ -10,8 +10,7 @@ each face, one icon per pad input at U+F700 + 32 x HOS_PROMPT_* + HOS_PAD_* (gpu
 U+F700 + 32 x HOS_PROMPT_* + 24.., and each of those Switch buttons' and d-pad icons' code points in a cmap segment of its own: the
 game (host/prompts.c) points each one at the face's icon of the pad input bound to that button when it serves the font, and again
 when the face or the controls change while it runs, so the icons follow the controls, changed ones too. As built, the font's code
-points are the game's: its own images. The d-pad's icons follow the controls through glyphs of four pieces the game puts together
-(<out>/dpad.bin: where to write which, dpad_glyphs).
+points are the game's: its own images.
 
 The textures with button icons (the ocarina's notes, the letters on black, the controller in the pause menu) the same way, with
 Pillow, astc_encoder and texture2ddecoder: <out>/Common.bntx is the game's UI/Layout2Archive/Common bntx decompressed, and
@@ -151,220 +150,6 @@ def cmap4(mapping, single):
     return struct.pack(">HHHHIHHI", 0, 2, 0, 3, 20, 3, 1, 20) + sub
 
 
-# ---- (longshot) the d-pad's icons (STATIC) as bound. A text means the d-pad with them (the HUD's shortcuts: U+E049 between the
-# ocarina and Navi). With the d-pad's buttons bound elsewhere than the face's own d-pad (the keyboard face: on keys), host/
-# prompts.c shows in their place a glyph of four pieces, one in each of the game's whole d-pad's round buttons (U+E049's four
-# largest outlines): the icon of what is bound to that way, as large as fits with no piece over another, the ways the icon does
-# not show (U+E064: left and right, U+E065: up and down) hollow. The pieces are global subrs (each face's icon of each pad input,
-# each key's, each face's hollow piece: a ring, the keyboard's an empty key), drawn about the current point and back to it. Each
-# d-pad icon has DPAD_GLYPHS glyphs, at DPAD_BASE + DPAD_GLYPHS x icon + n: four moves and four calls, the calls' subr numbers
-# written by host/prompts.c (in 3 bytes each: 28, then the number big-endian), the first for the start (the icon's own code point
-# pointed at it), the others for texts rewritten while the game runs (a code each, never drawn before with other pieces).
-# prompts/dpad.bin: "HPDP", u16 faces, u16 PADS, u32 FNV-1a of the decrypted font and the rest of the sidecar, then, as written in a call (biased), each face's subr for each pad input and 256
-# for the keys by code (one without an icon: the keyboard's hollow piece), i16 each, each face's hollow piece, i16; then for each
-# d-pad icon (STATIC's order) and each of its glyphs, the offset in the font of each of its calls' numbers (left, up, right,
-# down), u32
-# The last glyph of each icon shows neutral rings only for its active directions when the live slots are exhausted.
-# U+F8E0..U+F8FD is private use and unused by the game's fonts and the other prompt codes.
-# Each icon has a startup glyph, eight live glyphs and a neutral fallback.
-DPAD_BASE, DPAD_GLYPHS = 0xF8E0, 10
-DPAD_WAYS = {0xE049: "lurd", 0xE064: "ud", 0xE065: "lr"}   # (the ways each d-pad icon shows: host/prompts.c static_ways)
-
-
-def dpad_places(glyph):
-    """the centre of each way's round button on the game's whole d-pad (its four largest outlines; l u r d), and the side of a
-    piece in it: the button's, or less where two pieces side by side would meet"""
-    from fontTools.pens.recordingPen import RecordingPen
-    rec, boxes, pts = RecordingPen(), [], []
-    glyph.draw(rec)
-    for op, args in rec.value:
-        pts += list(args)
-        if op in ("closePath", "endPath") and pts:
-            xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-            boxes.append((min(xs), min(ys), max(xs), max(ys)))
-            pts = []
-    buttons = sorted(boxes, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))[-4:]
-    centres = [((b[0] + b[2]) / 2, (b[1] + b[3]) / 2) for b in buttons]
-    at = {"l": min(centres), "u": max(centres, key=lambda c: c[1]), "r": max(centres), "d": min(centres, key=lambda c: c[1])}
-    side = min(min(b[2] - b[0] for b in buttons), abs(at["u"][0] - at["l"][0]), abs(at["u"][1] - at["l"][1]))
-    return [tuple(round(v) for v in at[w]) for w in "lurd"], side
-
-
-def dpad_piece(draw, bounds, side, hollow=None):
-    """a subr's program: what draw(pen) draws (bounds: its box) scaled to side about the current point, in whole units, and the
-    point back where it was; hollow ("ring" or "key"): that drawn instead"""
-    from fontTools.pens.basePen import BasePen
-    from fontTools.pens.transformPen import TransformPen
-
-    class Piece(BasePen):
-        def __init__(self):
-            super().__init__(None)
-            self.at, self.program = (0, 0), []
-
-        def _to(self, *pts):
-            out = []
-            for p in pts:
-                x, y = round(p[0]), round(p[1])
-                out += [x - self.at[0], y - self.at[1]]
-                self.at = (x, y)
-            return out
-
-        def _moveTo(self, p):
-            self.program += self._to(p) + ["rmoveto"]
-
-        def _lineTo(self, p):
-            self.program += self._to(p) + ["rlineto"]
-
-        def _curveToOne(self, p1, p2, p3):
-            self.program += self._to(p1, p2, p3) + ["rrcurveto"]
-
-    pen = Piece()
-    if hollow:
-        # (a ring, or a key's rounded square, its edge an eighth of the side: the outside anticlockwise, the inside clockwise)
-        for r, flip in ((side * 0.45, 1), (side * 0.45 - side / 8, -1)):
-            c = 0.3 * r if hollow == "key" else r   # (the corners' radius: a circle's is its radius)
-            e, k = r - c, 0.5523 * c   # (a corner's centre's distance from the middle; its curve's handles)
-            pen.moveTo((r, -e * flip))
-            for x, y in ((1, 1), (-1, 1), (-1, -1), (1, -1)):   # (each corner, anticlockwise: a side to it, then its curve)
-                if x == y:   # (up-right and down-left: from the vertical side to the horizontal one)
-                    pen.lineTo((x * r, y * e * flip))
-                    pen.curveTo((x * r, y * (e + k) * flip), (x * (e + k), y * r * flip), (x * e, y * r * flip))
-                else:   # (up-left and down-right: from the horizontal side to the vertical one)
-                    pen.lineTo((x * e, y * r * flip))
-                    pen.curveTo((x * (e + k), y * r * flip), (x * r, y * (e + k) * flip), (x * r, y * e * flip))
-            pen.closePath()
-    else:
-        x0, y0, x1, y1 = bounds
-        s = side / max(x1 - x0, y1 - y0, 1)
-        draw(TransformPen(pen, (s, 0, 0, s, -s * (x0 + x1) / 2, -s * (y0 + y1) / 2)))
-    return pen.program + [-pen.at[0], -pen.at[1], "rmoveto", "return"]
-
-
-def cff_charstrings(otf):
-    """the offset in the font (an OpenType font with a CFF table) of each glyph's charstring"""
-    tables = struct.unpack_from(">H", otf, 4)[0]
-    base = next(struct.unpack_from(">I", otf, 12 + 16 * t + 8)[0] for t in range(tables)
-                if otf[12 + 16 * t:16 + 16 * t] == b"CFF ")
-
-    def index(at):   # (an INDEX: its items' (start, end), and where it ends)
-        count = struct.unpack_from(">H", otf, at)[0]
-        if not count:
-            return [], at + 2
-        size = otf[at + 2]
-        offs = [int.from_bytes(otf[at + 3 + size * i:at + 3 + size * (i + 1)], "big") for i in range(count + 1)]
-        data = at + 3 + size * (count + 1) - 1
-        return [(data + offs[i], data + offs[i + 1]) for i in range(count)], data + offs[-1]
-
-    _, at = index(base + otf[base + 2])   # (the names)
-    tops, at = index(at)
-    a, z = tops[0]
-    stack, charstrings = [], None
-    while a < z:   # (the Top DICT: CharStrings is operator 17)
-        b = otf[a]
-        if b <= 21:
-            if b == 17:
-                charstrings = stack[-1]
-            stack, a = [], a + (2 if b == 12 else 1)
-        elif b == 28:
-            stack.append(struct.unpack_from(">h", otf, a + 1)[0])
-            a += 3
-        elif b == 29:
-            stack.append(struct.unpack_from(">i", otf, a + 1)[0])
-            a += 5
-        elif b == 30:   # (a real: its nibbles to the one that ends it)
-            a += 1
-            while otf[a] & 0x0F != 0x0F and otf[a] >> 4 != 0x0F:
-                a += 1
-            stack.append(0)
-            a += 1
-        elif b < 247:
-            stack.append(b - 139)
-            a += 1
-        else:
-            stack.append((b - 247) * 256 + otf[a + 1] + 108 if b < 251 else -(b - 251) * 256 - otf[a + 1] - 108)
-            a += 2
-    return [s for s, _ in index(base + charstrings)[0]]
-
-
-def dpad_glyphs(game, faces, cmap, chars, hmtx, placed, add):
-    """the d-pad's pieces into the font's global subrs, and each d-pad icon's glyphs (placed at their code points): the subr
-    number (as written) of each face's icon of each pad input, of each key's, of each face's hollow piece; and each glyph's name
-    and the places of its calls' numbers in its charstring"""
-    from fontTools.misc.psCharStrings import T2CharString
-    from fontTools.pens.boundsPen import BoundsPen
-
-    class Fixed(T2CharString):   # (its bytes as made, drawn or not: host/prompts.c writes its calls' numbers in place)
-        def compile(self, isCFF2=False):
-            self.bytecode = self.fixed
-
-    for code in range(DPAD_BASE, DPAD_BASE + DPAD_GLYPHS * len(STATIC)):
-        if code in cmap or code in placed:
-            raise ValueError(f"D-pad prompt code U+{code:04X} is already in the font")
-
-    gsubrs = game["CFF "].cff.GlobalSubrs
-    assert not len(gsubrs)   # (the game's font calls none: their numbers' bias is this one's alone)
-    whole = cmap[0xE049]
-    places, side = dpad_places(chars[whole])
-    private = chars[whole].private
-    made = {}
-
-    def subr(program):
-        gsubrs.append(T2CharString(program=program, private=private, globalSubrs=gsubrs))
-        return len(gsubrs) - 1
-
-    def piece(name):   # (a glyph's, once each: the Switch's icons are the keyboard face's too)
-        if name not in made:
-            bp = BoundsPen(None)
-            chars[name].draw(bp)
-            made[name] = subr(dpad_piece(chars[name].draw, bp.bounds or (0, 0, 1, 1), side))
-        return made[name]
-
-    ring, key = subr(dpad_piece(None, None, side, "ring")), subr(dpad_piece(None, None, side, "key"))
-    empty = subr(["return"])
-    pads = [[piece(placed[PAD_BASE + FACE_CODES * n + i]) for i in range(len(PADS))] for n in range(len(faces))]
-    keys = [piece(placed[prompt_keys.KEY_BASE + k]) if prompt_keys.KEY_BASE + k in placed else key for k in range(256)]
-    hollow = [key if face == "keyboard" else ring for face in faces]
-    bias = 107 if len(gsubrs) < 1240 else 1131   # (the CFF's rule for a call's number)
-    assert len(gsubrs) < 33900
-
-    def num(v):   # (always 3 bytes: a call's number written over it fits)
-        return b"\x1c" + struct.pack(">h", v)
-
-    glyphs = []
-    for k, code in enumerate(STATIC):
-        width = hmtx[cmap[code]][0]
-        for g in range(DPAD_GLYPHS):
-            cs, at, calls = num(width - private.nominalWidthX) if width != private.defaultWidthX else b"", (0, 0), []
-            for w, p in enumerate(places):   # (left, up, right, down: a move to its place, then its piece)
-                cs += num(p[0] - at[0]) + num(p[1] - at[1]) + b"\x15"
-                calls.append(len(cs))
-                initial = empty if g == DPAD_GLYPHS - 1 and "lurd"[w] not in DPAD_WAYS[code] else ring
-                cs += num(initial - bias) + b"\x1d"
-                at = p
-            fixed = Fixed(bytecode=cs + b"\x0e", private=private, globalSubrs=gsubrs)
-            fixed.fixed = fixed.bytecode
-            name = add(f"dpad_{code:04x}_{g}", fixed, width)
-            placed[DPAD_BASE + DPAD_GLYPHS * k + g] = name
-            glyphs.append((name, calls))
-    return [[n - bias for n in row] for row in pads], [n - bias for n in keys], [n - bias for n in hollow], glyphs
-
-
-def dpad_table(otf, gid, pads, keys, hollow, glyphs):
-    """prompts/dpad.bin (the d-pad's icons as bound, above), from the font as saved"""
-    starts = cff_charstrings(otf)
-    out = b"HPDP" + struct.pack("<HHI", len(pads), len(pads[0]), 0)
-    out += b"".join(struct.pack("<h", n) for row in pads for n in row) + b"".join(struct.pack("<h", n) for n in keys + hollow)
-    for name, calls in glyphs:
-        for c in calls:
-            at = starts[gid[name]] + c
-            assert otf[at] == 28, name   # (its bytes as made: Fixed)
-            out += struct.pack("<I", at)
-    digest = 2166136261
-    for byte in otf + b"\0" * (-len(otf) % 4) + out[:8] + out[12:]:
-        digest = ((digest ^ byte) * 16777619) & 0xFFFFFFFF
-    return out[:8] + struct.pack("<I", digest) + out[12:]
-
-
 def faces_font(otf, faces, label_otf=None):
     """the game's font (decrypted) with every face's icons (faces: their names, in HOS_PROMPT_* order), and each face's icons'
     advances ({face: [advance per pad input]}; the keyboard's: per key code): a pad icon per input at PAD_BASE + FACE_CODES x face +
@@ -457,7 +242,6 @@ def faces_font(otf, faces, label_otf=None):
             for i in range(len(PADS)):
                 placed[BIND_BASE + (n * len(SWITCH) + b) * len(PADS) + i] = placed[base + i]
 
-    dpad = dpad_glyphs(game, faces, cmap, chars, hmtx, placed, add)
     game.setGlyphOrder(order)
     gid = {n: i for i, n in enumerate(order)}
     mapping = {c: gid[n] for c, n in cmap.items() if c <= 0xFFFF}
@@ -470,7 +254,7 @@ def faces_font(otf, faces, label_otf=None):
     game["cmap"] = t
     out = io.BytesIO()
     game.save(out)
-    return out.getvalue(), widths, dpad_table(out.getvalue(), gid, *dpad)
+    return out.getvalue(), widths
 
 
 # ---- the textures with button icons (UI/Layout2Archive/Common.*.bntx: 878 textures, ASTC 4x4 and BC4, the Switch 2's block-linear
@@ -1577,13 +1361,11 @@ def generate(a):
         label = unwrap(read_zs(a.romfs, prompt_keys.LABEL_FONT, dictionary))[1]
     except OSError:
         label = None
-    plain, widths, dpad = faces_font(otf, faces, label)
+    plain, widths = faces_font(otf, faces, label)
     font = wrap(key, plain)
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, "External.bfotf"), "wb") as f:
         f.write(font)
-    with open(os.path.join(a.out, "dpad.bin"), "wb") as f:
-        f.write(dpad)
     for face in faces:
         d = os.path.join(a.out, face)
         os.makedirs(d, exist_ok=True)

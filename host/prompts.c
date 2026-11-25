@@ -84,10 +84,8 @@ static const unsigned char switch_pad[HOS_SW_N] = {
     HOS_PAD_EAST, HOS_PAD_SOUTH, HOS_PAD_NORTH, HOS_PAD_WEST, HOS_PAD_LSTICK, HOS_PAD_RSTICK, HOS_PAD_LSHOULDER,
     HOS_PAD_RSHOULDER, HOS_PAD_LTRIGGER, HOS_PAD_RTRIGGER, HOS_PAD_START, HOS_PAD_BACK, HOS_PAD_LEFT, HOS_PAD_UP,
     HOS_PAD_RIGHT, HOS_PAD_DOWN};
-/* the d-pad's icons (nx2/prompt_assets.py STATIC): the face's, or with its ways bound elsewhere a glyph of four pieces (dpad
-   below); the ways each one shows (a bit each, in HOS_SW_LEFT's order: left, up, right, down) */
+/* the d-pad icons that follow the face, not the controls (nx2/prompt_assets.py STATIC) */
 static const uint16_t static_code[3] = {0xE049, 0xE064, 0xE065};
-static const unsigned char static_ways[3] = {15, 10, 5};
 /* the sticks' icons the keyboard face shows as keys (nx2/prompt_keys.py STICKS): L down, up, left-right, right, left, up-down,
    any way; R the same; R's four ways */
 static const uint16_t stick_code[15] = {0xE050, 0xE052, 0xE054, 0xE058, 0xE05A, 0xE05C, 0xE05E, 0xE051, 0xE053, 0xE055,
@@ -171,19 +169,10 @@ static int first_key(int b) {
     return k > 0 && k <= 0xFF ? k : 0;
 }
 
-/* the primary pad binding, or the secondary when the first is clear */
-static int first_pad(int b) {
-    const int pad = hos_binding(HOS_BIND_PAD, b, 0);
-    return pad >= 0 ? pad : hos_binding(HOS_BIND_PAD, b, 1);
-}
-
 /* the controls now (BINDS: hos_binding's, as the Controls page sets them): the pad input bound to each Switch button, then its
    first key, then the first key of each way the keys move */
 static void current_binds(int *bind) {
-    for (int b = 0; b < HOS_SW_N; b++) {
-        bind[b] = first_pad(b);
-        bind[HOS_SW_N + b] = first_key(b);
-    }
+    for (int b = 0; b < HOS_SW_N; b++) bind[b] = hos_binding(HOS_BIND_PAD, b, 0), bind[HOS_SW_N + b] = first_key(b);
     for (int m = 0; m < 4; m++) bind[BUTTON_BINDS + m] = first_key(HOS_KEY_MOVE_UP + m);
 }
 
@@ -242,105 +231,6 @@ static unsigned rd16(const uint8_t *p) { return p[0] << 8 | p[1]; }
 static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
 static void wr16(uint8_t *p, unsigned v) { p[0] = (uint8_t)(v >> 8), p[1] = (uint8_t)v; }
 
-/* the d-pad's icons as bound (prompts/dpad.bin, nx2/prompt_assets.py dpad_glyphs): each face's icon of each pad input, each
-   key's, each face's hollow piece, as the font's calls take them (global subr numbers, biased), and where in the font each
-   d-pad icon's glyphs call them (left, up, right, down). Glyph 0 is the start's (bind_font), the others given out to texts as
-   they come (dpad_slot) */
-#define DPAD_BASE 0xF8E0   /* private-use codes reserved by nx2/prompt_assets.py */
-#define DPAD_GLYPHS 10
-static struct dpad_table {
-    int faces;   /* (0: no file, the faces' own d-pad icons) */
-    int16_t pad[HOS_PROMPT_N][HOS_PAD_ART_N], key[256], hollow[HOS_PROMPT_N];
-    uint32_t at[3][DPAD_GLYPHS][4];
-} dpad;
-
-static uint8_t *read_all(const char *path, const char *magic, long *n);
-static int16_t rd16sle(const uint8_t *p) { return (int16_t)(p[0] | p[1] << 8); }
-
-static void dpad_read(const char *dir, const uint8_t *otf, size_t size, struct dpad_table *table) {
-    struct dpad_table next = {0};
-    char path[MAX_PATH];
-    snprintf(path, sizeof path, "%sprompts/dpad.bin", dir);
-    long n = 0;
-    uint8_t *b = read_all(path, "HPDP", &n);
-    const int faces = b && n >= 12 ? rd16sle(b + 4) : 0, pads = b && n >= 12 ? rd16sle(b + 6) : 0;
-    uint32_t hash = 2166136261u;
-    for (size_t i = 0; i < size; i++) hash = (hash ^ otf[i]) * 16777619u;
-    if (b && n >= 12) {
-        for (long i = 0; i < 8; i++) hash = (hash ^ b[i]) * 16777619u;
-        for (long i = 12; i < n; i++) hash = (hash ^ b[i]) * 16777619u;
-    }
-    if (faces > 0 && faces <= HOS_PROMPT_N && pads == HOS_PAD_ART_N &&
-        n == 12 + 2 * (faces * pads + 256 + faces) + 4 * 3 * DPAD_GLYPHS * 4 && rd32le(b + 8) == hash) {
-        const uint8_t *q = b + 12;
-        for (int f = 0; f < faces; f++)
-            for (int i = 0; i < pads; i++, q += 2) next.pad[f][i] = rd16sle(q);
-        for (int k = 0; k < 256; k++, q += 2) next.key[k] = rd16sle(q);
-        for (int f = 0; f < faces; f++, q += 2) next.hollow[f] = rd16sle(q);
-        for (int k = 0; k < 3; k++)
-            for (int g = 0; g < DPAD_GLYPHS; g++)
-                for (int w = 0; w < 4; w++, q += 4) next.at[k][g][w] = rd32le(q);
-        int valid = 1;
-        for (int k = 0; k < 3; k++)
-            for (int g = 0; g < DPAD_GLYPHS; g++)
-                for (int w = 0; w < 4; w++) {
-                    const uint32_t a = next.at[k][g][w];
-                    if (a >= size || size - a < 4 || otf[a] != 28 || otf[a + 3] != 29) valid = 0;
-                }
-        if (valid) next.faces = faces;
-    } else {
-        hos_log("prompts: no %s: the d-pad's icons stay the face's whatever its buttons are bound to", path);
-    }
-    free(b);
-    *table = next;
-}
-
-/* the pieces d-pad icon k shows on the face with these controls (bind: current_binds'): the icon of what each way it shows is
-   bound to (the keyboard face: its first key; a key without an icon, none: an empty key), the face's hollow piece on the
-   others; 0 when the face's own icon shows it (each way on the face's own d-pad), or none was built */
-static int dpad_pieces(const struct dpad_table *table, int k, int face, const int *bind, int16_t piece[4]) {
-    if (face >= table->faces) return 0;
-    int own = face != HOS_PROMPT_KEYBOARD;
-    for (int w = 0; w < 4; w++) {
-        const int b = HOS_SW_LEFT + w;
-        if (!(static_ways[k] >> w & 1)) {
-            piece[w] = table->hollow[face];
-        } else if (face == HOS_PROMPT_KEYBOARD) {
-            piece[w] = table->key[bind[HOS_SW_N + b] & 0xFF];
-        } else {
-            const int pad = bind[b];
-            own &= pad == switch_pad[b];
-            piece[w] = pad >= 0 && pad < HOS_PAD_ART_N ? table->pad[face][pad] : table->hollow[face];
-        }
-    }
-    return !own;
-}
-
-/* glyph g of d-pad icon k in the decrypted font (otf, n bytes) made of these pieces */
-static int dpad_write(const struct dpad_table *table, uint8_t *otf, size_t n, int k, int g, const int16_t piece[4]) {
-    for (int w = 0; w < 4; w++) {
-        const uint32_t a = table->at[k][g][w];
-        if (a >= n || n - a < 4 || otf[a] != 28 || otf[a + 3] != 29) return 0;
-    }
-    for (int w = 0; w < 4; w++) {
-        const uint32_t a = table->at[k][g][w];
-        wr16(otf + a + 1, (uint16_t)piece[w]);
-    }
-    return 1;
-}
-
-/* the start's d-pad icons on the face with the controls now: each one's glyph 0 made of its pieces in the decrypted font, and
-   show[k] its code (0: the face's own icon) */
-static void dpad_bind(const struct dpad_table *table, uint8_t *otf, size_t n, int face, unsigned show[3]) {
-    int bind[BINDS];
-    current_binds(bind);
-    for (int k = 0; k < 3; k++) {
-        int16_t piece[4];
-        show[k] = dpad_pieces(table, k, face, bind, piece) ? DPAD_BASE + DPAD_GLYPHS * (unsigned)k : 0;
-        if (show[k] && !dpad_write(table, otf, n, k, 0, piece)) show[k] = 0;
-    }
-}
-
 /* the glyph of a code point in a format 4 subtable (st: its start, n its bytes), 0 none */
 static unsigned cmap4_glyph(const uint8_t *st, size_t n, unsigned code) {
     const unsigned segs = rd16(st + 6) / 2;
@@ -371,10 +261,9 @@ static int cmap4_point(uint8_t *st, unsigned segs, unsigned code, unsigned gid) 
 }
 
 /* the face's icons: each Switch button's segment pointed at the face's icon of its pad input (unbound: of its default's; the
-   keyboard face: the icon of its first key, if it has one), the d-pad's at the face's (or at the glyph made of its pieces:
-   dpad[k], bind_font), and the sticks' at the keyboard's for the movement keys now (stick_shows; a key without an icon: the
-   game's own) or the game's own; how many buttons bound */
-static int cmap4_bind(uint8_t *st, size_t n, int face, const unsigned *pieces) {
+   keyboard face: the icon of its first key, if it has one), the d-pad's at the face's, and the sticks' at the keyboard's for
+   the movement keys now (stick_shows; a key without an icon: the game's own) or the game's own; how many buttons bound */
+static int cmap4_bind(uint8_t *st, size_t n, int face) {
     const unsigned segs = rd16(st + 6) / 2;
     if (14 + 8 * (size_t)segs + 2 > n) return 0;   /* (as cmap4_glyph: the ranges' last entry too) */
     const unsigned base = PAD_BASE + FACE_CODES * (unsigned)face;
@@ -387,13 +276,12 @@ static int cmap4_bind(uint8_t *st, size_t n, int face, const unsigned *pieces) {
             done++;
             continue;
         }
-        const int pad = first_pad(b), bound = pad >= 0 && pad < HOS_PAD_ART_N;   /* (a paddle: the default's icon) */
+        const int pad = hos_binding(HOS_BIND_PAD, b, 0), bound = pad >= 0 && pad < HOS_PAD_ART_N;   /* (a paddle: the default's icon) */
         const unsigned gid = cmap4_glyph(st, n, base + (unsigned)(bound ? pad : switch_pad[b]));
         if (gid && cmap4_point(st, segs, switch_code[b], gid)) done += bound && !keys;
     }
     for (int k = 0; k < 3; k++) {
-        unsigned gid = pieces[k] ? cmap4_glyph(st, n, pieces[k]) : 0;
-        if (!gid) gid = cmap4_glyph(st, n, base + STATIC_AT + (unsigned)k);
+        const unsigned gid = cmap4_glyph(st, n, base + STATIC_AT + (unsigned)k);
         if (gid) cmap4_point(st, segs, static_code[k], gid);
     }
     int move[4];
@@ -406,12 +294,9 @@ static int cmap4_bind(uint8_t *st, size_t n, int face, const unsigned *pieces) {
     return done;
 }
 
-/* the face and the controls into the decrypted font: its format 4 subtables, and the start's glyph of each d-pad icon made of
-   its pieces (dpad_bind); how many buttons */
-static int bind_font(const struct dpad_table *table, uint8_t *otf, size_t n, int face) {
+/* the face and the controls into the decrypted font's format 4 subtables; how many buttons */
+static int bind_font(uint8_t *otf, size_t n, int face) {
     if (n < 12) return 0;
-    unsigned pieces[3];
-    dpad_bind(table, otf, n, face, pieces);
     const unsigned tables = rd16(otf + 4);
     for (unsigned t = 0; t < tables && 12 + 16 * (size_t)(t + 1) <= n; t++) {
         const uint8_t *rec = otf + 12 + 16 * t;
@@ -430,7 +315,7 @@ static int bind_font(const struct dpad_table *table, uint8_t *otf, size_t n, int
             if (dup) continue;
             if (nseen < 8) seen[nseen++] = so;
             const unsigned sl = rd16(cmap + so + 2);
-            done = cmap4_bind(cmap + so, sl <= len - so ? sl : len - so, face, pieces);
+            done = cmap4_bind(cmap + so, sl <= len - so ? sl : len - so, face);
         }
         return done;
     }
@@ -1236,7 +1121,7 @@ static int live_layouts(const char *dir, int face, const int *bind) {
 
 /* the font with the face's icons on these controls (prompts/External.bfotf, cmap4_bind: hos_binding's), decrypted behind
    its header (key: the XOR key); bound: how many buttons. NULL none */
-static uint8_t *font_bound(const char *dir, int face, long *n, uint32_t *key, int *bound, struct dpad_table *table) {
+static uint8_t *font_bound(const char *dir, int face, long *n, uint32_t *key, int *bound) {
     char path[MAX_PATH];
     snprintf(path, sizeof path, "%sprompts/External.bfotf", dir);
     uint8_t *b = read_all(path, NULL, n);
@@ -1247,8 +1132,7 @@ static uint8_t *font_bound(const char *dir, int face, long *n, uint32_t *key, in
     }
     *key = rd32le(b) ^ MAGIC;
     for (long i = 8; i < *n; i += 4) wr32le(b + i, rd32le(b + i) ^ *key);
-    dpad_read(dir, b + 8, (size_t)*n - 8, table);
-    *bound = bind_font(table, b + 8, (size_t)*n - 8, face);
+    *bound = bind_font(b + 8, (size_t)*n - 8, face);
     return b;
 }
 
@@ -1294,15 +1178,8 @@ static SRWLOCK slot_lock = SRWLOCK_INIT;
 static uint8_t slot_button[SLOTS], slot_key[SLOTS];
 static volatile int nslots;
 
-/* the d-pad icons' glyphs given out to texts (dpad_slot): each one's pieces, from glyph 1 */
-static int16_t dpad_given[3][DPAD_GLYPHS][4];
-static int dpad_ngiven[3] = {1, 1, 1};
-
 static void slots_point(uint8_t *otf, size_t n) {   /* (slot_lock held) */
     for (int s = 0; s < nslots; s++) font_point(otf, n, SLOT_BASE + (unsigned)s, KEY_BASE + slot_key[s]);
-    if (dpad.faces)
-        for (int k = 0; k < 3; k++)
-            for (int g = 1; g < dpad_ngiven[k]; g++) dpad_write(&dpad, otf, n, k, g, dpad_given[k][g]);
 }
 
 /* the code of Switch button b (or stick icon b - HOS_SW_N) on key k in a text; -1 when the key has no icon, the font is not
@@ -1328,26 +1205,6 @@ static int key_slot(int b, int k) {
     return s < 0 ? -1 : SLOT_BASE + s;
 }
 
-/* the code of d-pad icon k made of these pieces in a text: a glyph of its own, made where the game keeps the font as it is given
-   out (the game keeps a code's glyph drawn); -1 when the font is not found or all are given out */
-static int dpad_slot(int k, const int16_t piece[4]) {   /* (slot_lock held) */
-    int g = 1;
-    while (g < dpad_ngiven[k] && memcmp(dpad_given[k][g], piece, sizeof dpad_given[k][g])) g++;
-    if (g == dpad_ngiven[k]) {
-        uint8_t *q = g < DPAD_GLYPHS - 1 && font.at ? (uint8_t *)hos_guest_range(font.at, font.n - 8) : NULL;
-        if (q && dpad_write(&dpad, q, font.n - 8, k, g, piece)) {
-            memcpy(dpad_given[k][g], piece, sizeof dpad_given[k][g]);
-            dpad_ngiven[k] = g + 1;
-        } else {
-            static int full_said;
-            if (g == DPAD_GLYPHS - 1 && !full_said++)
-                hos_log("prompts: the d-pad's icons are all given out: new bindings show a neutral icon until the next start");
-            g = g == DPAD_GLYPHS - 1 && dpad.faces ? g : -1;
-        }
-    }
-    return g < 0 ? -1 : DPAD_BASE + DPAD_GLYPHS * k + g;
-}
-
 static int text_code(unsigned c, int face, const int *bind) {   /* the code that shows c's button now, else -1 */
     int b = -1, k = -1, stick = -1;
     for (int i = 0; i < 15 && keyboard_built && stick < 0; i++)
@@ -1369,14 +1226,7 @@ static int text_code(unsigned c, int face, const int *bind) {   /* the code that
     if (c >= PAD_BASE + STATIC_AT && c < PAD_BASE + FACE_CODES * HOS_PROMPT_N && (c - PAD_BASE) % FACE_CODES >= STATIC_AT &&
         (c - PAD_BASE) % FACE_CODES < STATIC_AT + 3)
         k = (int)((c - PAD_BASE) % FACE_CODES - STATIC_AT);
-    if (c >= DPAD_BASE && c < DPAD_BASE + 3 * DPAD_GLYPHS) k = (int)((c - DPAD_BASE) / DPAD_GLYPHS);
-    if (k >= 0) {   /* (the face's own d-pad icon, or a glyph of the pieces it is bound to now) */
-        int16_t piece[4];
-        AcquireSRWLockExclusive(&slot_lock);
-        const int s = dpad_pieces(&dpad, k, face, bind, piece) ? dpad_slot(k, piece) : -1;
-        ReleaseSRWLockExclusive(&slot_lock);
-        return s >= 0 ? s : PAD_BASE + FACE_CODES * face + STATIC_AT + k;
-    }
+    if (k >= 0) return PAD_BASE + FACE_CODES * face + STATIC_AT + k;
     if (b < 0) return -1;
     if (face == HOS_PROMPT_KEYBOARD && bind[HOS_SW_N + b]) {   /* (its key's code; none: the Switch's icon, as unbound) */
         const int s = key_slot(b, bind[HOS_SW_N + b]);
@@ -1468,13 +1318,11 @@ static int live_font(const char *dir, int face) {
     long n;
     uint32_t key;
     int bound;
-    struct dpad_table table;
-    uint8_t *b = font_bound(dir, face, &n, &key, &bound, &table);
+    uint8_t *b = font_bound(dir, face, &n, &key, &bound);
     uint8_t *q = b && (uint32_t)n == font.n ? (uint8_t *)hos_guest_range(font.at, (uint64_t)n - 8) : NULL;
     const int ok = q && !memcmp(q, b + 8, 64);   /* (still the font: its tables' directory, which a binding leaves as is) */
     if (ok) {
         AcquireSRWLockExclusive(&slot_lock);   /* (the keys' codes given out stay on their keys) */
-        dpad = table;
         slots_point(b + 8, (size_t)n - 8);
         memcpy(q, b + 8, (size_t)n - 8);
         ReleaseSRWLockExclusive(&slot_lock);
@@ -1727,8 +1575,7 @@ static int build(char *out, size_t cap) {
     long n;
     uint32_t key;
     int bound;
-    struct dpad_table dpad_data;
-    uint8_t *b = font_bound(dir, face, &n, &key, &bound, &dpad_data);
+    uint8_t *b = font_bound(dir, face, &n, &key, &bound);
     if (!b) return 0;
     if (n >= 8 + 64) memcpy(font.head, b + 8, sizeof font.head);
     for (long i = 8; i < n; i += 4) wr32le(b + i, rd32le(b + i) ^ key);
@@ -1737,9 +1584,6 @@ static int build(char *out, size_t cap) {
     snprintf(out, cap, "%sExternal.bfotf.zs", made);
     const int ok = have && write_zstd_raw(out, b, (size_t)n);
     if (ok) {
-        AcquireSRWLockExclusive(&slot_lock);
-        dpad = dpad_data;
-        ReleaseSRWLockExclusive(&slot_lock);
         int bind[BINDS];
         current_binds(bind);
         part_served(PART_FONT, face, bind);

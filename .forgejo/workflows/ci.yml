@@ -93,7 +93,7 @@ jobs:
       # itself needs none)
       - name: Python packages for the tests
         run: >-
-          python -m pip install --disable-pip-version-check --no-deps zstandard==0.25.0 pillow==13.0.0 numpy==2.5.4 fonttools==4.68.0
+          python -m pip install --disable-pip-version-check --no-deps zstandard==0.25.0 pillow==13.0.0 numpy==2.5.4
           lz4==4.4.5 unicorn==2.1.4
       # (lld: tests/test_thinlto_tls.py links with -fuse-ld=lld, as the game's build does)
       - name: Compilers and the SPIR-V validator
