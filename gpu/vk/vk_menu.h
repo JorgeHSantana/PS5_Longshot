@@ -54,6 +54,21 @@ struct Options {
     int dlss_pre_bloom = 0;   // (longshot) DLAA before the bloom: 0 off (DLAA after the game's bloom and tone map), 1 on
                               // (vk_temporal.cpp pre_bloom_wanted; DLAA only). Saved as dlss_pre_bloom; RX_VK_DLSS_PRE_BLOOM over it
     int sharpness = 0;    // 0 to 100
+    // (longshot) DLSS 5, NVIDIA's neural rendering after the upscaler (gpu/vk/menu/dlss5.cpp: its rows, shown only with NVIDIA's
+    // nvngx_dlssnr.dll found; vk_dlss.cpp dlss_nr_chain). Its values at first are the Default preset's (menu/dlss5.h);
+    // a row that shows 0 to 2 holds hundredths
+    int dlss5 = 0;                     // Off, On (RX_VK_DLSS_NR over it)
+    int dlss5_resolution = 65;         // the model's working size: 25 to 100 % of the picture, in fives
+    int dlss5_detail = 164;            // how far the picture moves to the model's, 0 to 200
+    int dlss5_colour = 126;            // how much of the model's colour comes too, 0 to 200
+    int dlss5_style = 2;               // 0 Standard, 1 Natural, 2 Cinematic
+    int dlss5_strengths = 2;           // 0 as in OptiScaler, 1 the model's defaults, 2 applied (the four below reach it)
+    int dlss5_intensity = 162;         // the model's own strength, 0 to 200
+    int dlss5_local_structure = 122;   // 0 to 200
+    int dlss5_local_tone = 114;        // 0 to 200
+    int dlss5_skin = 74;               // -100 follows the local structure, else 0 to 200
+    int dlss5_auto_mask = 1;           // the model's automatic skin mask: Off, On
+    int dlss5_highlight = 17;          // the most the model may brighten or darken a pixel: 10 to 80 tenths (1.7x)
     int anisotropy = 4;   // (longshot) Anisotropic filtering: 0 the game's own (1x or 2x), 1 2x, 2 4x, 3 8x, 4 16x (the
                           // device's limit at most; gpu/vk/vk_draw.cpp aniso_override, RX_VK_ANISO over it)
     int grass_distance = 0;   // short blades: 0 the game's, 1 2x, 2 3x, 3 4x (RX_VK_GRASS_DISTANCE over it)

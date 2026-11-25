@@ -1084,8 +1084,10 @@ void temporal_reset_failure() {
 
 void temporal_idle() {
     State& s = st();
-    if (!s.holding.load(std::memory_order_relaxed)) return;
+    if (!s.holding.load(std::memory_order_relaxed) && !dlss_nr_pending()) return;
     std::lock_guard lk(s.mu);
+    dlss_nr_idle();
+    if (!s.holding.load(std::memory_order_relaxed)) return;
     const uint64_t now = texture_frame_no();
     if (now - s.asked <= 120) return;   // (in use, or off for under 120 frames (2 s): kept, a row stepped through comes back at once)
     // (longshot, a stutter: kept too while DLSS or FSR 4 is still the Upscaler's choice. Each area change's loading screen has no
@@ -1762,9 +1764,14 @@ bool draw_engine(VkCommandBuffer cmd, State& s, int mode, const Camera& cam, uin
         engine.failed = true;
         return false;   // (the network writes its output over whatever the evaluation did)
     }
+    // (longshot) DLSS 5 over the upscaler's picture, before the HUD (vk_dlss.cpp dlss_nr_chain, its own barriers): its picture
+    // shown instead
+    f.nr_scale = dlss_nr_scale();
+    TemporalImage final_picture = f.output, nr_picture;
+    if (dlss_nr_chain(cmd, f, hdr, nr_picture)) final_picture = nr_picture;
     {
         const int32_t opc[2] = {(int32_t)ow, (int32_t)oh};
-        const VkDescriptorImageInfo info[2] = {{native ? s.linear : s.point, s.output.view, VK_IMAGE_LAYOUT_GENERAL},
+        const VkDescriptorImageInfo info[2] = {{native ? s.linear : s.point, final_picture.view, VK_IMAGE_LAYOUT_GENERAL},
                                                {VK_NULL_HANDLE, out_view, VK_IMAGE_LAYOUT_GENERAL}};
         VkWriteDescriptorSet w[2]{{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
         w[0].dstBinding = 0, w[0].descriptorCount = 1, w[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;

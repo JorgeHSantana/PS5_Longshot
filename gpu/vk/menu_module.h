@@ -41,6 +41,7 @@ const char* motion_gyro_text(int v);   // (the Motion controls row: On or Off, a
 void menu_row_top(const int* value, int hi);   // (the row of this value ends at hi now: a list counted again)
 int upscaler();   // (the upscaler that runs now, upscaler_rows.h's: what the Upscaler row shows)
 unsigned upscalers_available();   // (one bit per upscaler that runs here: upscaler_rows.h bit)
+bool dlss5_offered();   // (DLSS 5 can run here: NVIDIA's nvngx_dlssnr.dll found, an NVIDIA GPU, a build with DLSS)
 void env_release(const int* value);   // (a row the environment held for the run, set by the menu: saved from now on)
 void weak_laptop_apply();   // (Set up for a weak laptop: Minimum's rows and lighter still, the restart asked, saved)
 extern bool laptop_applied;   // (it was, this run)

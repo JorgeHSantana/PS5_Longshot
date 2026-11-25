@@ -115,6 +115,7 @@ Keys whose numbers are not obvious from the row:
 | `hud_health_x/y/scale`, `hud_buttons_x/y/scale`, `hud_minimap_x/y/scale` | Custom HUD placement, with horizontal and vertical offsets in percent of the picture and scale in percent of the usual size |
 | `key_toggle_hud`, `pad_toggle_hud` | Session HUD shortcut, unbound by default. Uses the Controls page's normal binding format |
 | `walk_mode` | 0 Hold, 1 Toggle |
+| `dlss5_detail`, `dlss5_colour`, `dlss5_intensity`, `dlss5_local_structure`, `dlss5_local_tone`, `dlss5_skin` | The DLSS 5 rows that show 0 to 2, in hundredths (`154` is 1.54); `dlss5_skin=-100` follows the local structure. `dlss5_highlight` is in tenths (`20` is 2.0x), `dlss5_resolution` a percent of the picture, `dlss5_style` 0 Standard, 1 Natural, 2 Cinematic, `dlss5_strengths` 0 As in OptiScaler, 1 Model defaults, 2 Applied |
 | `threaded_rendering` | The Debug tab's Threaded rendering row (`gpu/vk/threaded_rendering.h`): 0 Auto (default), 1 On (`RX_VK_ASYNC=1` and `RX_VK_RECORDER=thread`), 2 Off. Auto goes by the physical cores the process may run on (`usable_cores` in `gpu/vk/vk_progcache.cpp`): 4 or more cores, the render thread and the recorder thread, as On; fewer, Off. Where only buffer-pool mirrors are absent (integrated GPUs where `!f.discrete()`, or `RX_VK_MIRROR=0`), Auto keeps the render thread off and runs the recorder thread alone with 6 or more physical cores (`kAutoRecorderOnlyCores`), and Off with fewer. Auto is also Off, whatever the cores, where the mode is not safe on the run (the capture off, `RX_VK_LOW_SPEC`, a frame dump, a benchmark replay). `threaded::kAutoEnabled` turned off makes Auto Off on every PC |
 
 A new row on the Graphics, Audio, Gameplay, Controls or NFC tab needs its line in the settings table of
@@ -339,3 +340,11 @@ The memory budget and its `vk: budget:` lines are in [architecture](architecture
 | `RX_VK_REFLEX_LOG=1`, `RX_VK_DLSS_LOG=1` | NVIDIA Reflex's latency timings, NGX's own lines ([upscalers](upscalers.md#dlsss-log-and-memory)) |
 | `HOS_MIC_LOG=1` | Each microphone stream's frames read and its peak, once a second (`audio in:`) |
 | `HOS_MOTION_DEBUG=1` | The motion sensors: what the game gets, twice a second |
+
+## DLSS 5
+
+| Switch | Use |
+|---|---|
+| `RX_VK_DLSS_NR=0/1` | DLSS 5 (NVIDIA's neural rendering after the upscaler) off or on for one run, over its row; NVIDIA's `nvngx_dlssnr.dll` and a temporal upscaler are still needed ([DLSS 5](../../user/dlss5.md)) |
+| `RX_VK_DLSS_NR_DEBUG=0..5` | A view of DLSS 5 for one run, never saved: 1 its input, 2 the model's raw output, 3 the difference x20, 4 depth, 5 motion vectors |
+| `RX_VK_DLSS_NR_LINUX=1` | Linux: the DLSS 5 rows shown and the native NGX asked for neural rendering (an experiment; a Windows DLL cannot be used there) |

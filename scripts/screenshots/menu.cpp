@@ -45,6 +45,13 @@ int dlss_fg_skip(unsigned* most) { if (most) *most = 0; return FG_SKIP_NOT_BUILT
 int dlss_fg_unavailable() { return FG_SKIP_NOT_BUILT; }
 bool dlss_fg_forced() { return false; }
 int dlss_fg_most() { return 0; }   // (no DLSS FG top: the Frame generation row's own values)
+// No DLSS 5 (gpu/vk/menu/dlss5.cpp): no nvngx_dlssnr.dll, so its rows stay hidden; nothing runs, nothing to show
+bool dlss_nr_offered() { return false; }
+DlssNrStatus dlss_nr_status() { return NR_WAITING; }
+dlss_nr::Issue dlss_nr_issue() { return dlss_nr::Issue::not_built; }
+void dlss_nr_retry() {}
+void dlss_nr_publish(const DlssNrControls&) {}
+dlss_nr::MetricsView dlss_nr_metrics() { return {}; }
 int framegen_capped(int framegen, int) { return framegen; }
 // No FSR 4 (the FSR 4 model row): no switch over it, no Lite, nothing to set
 int fsr4_model_env() { return -1; }

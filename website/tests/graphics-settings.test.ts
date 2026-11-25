@@ -154,6 +154,23 @@ test('the registered Simulated turf page row takes its named help; another page 
   }
 });
 
+test('the DLSS 5 rows name their conditions; their registered preset and page rows only', () => {
+  const settings = readGraphicsSettings(page, menu).flatMap(group => group.settings);
+  const find = name => settings.find(setting => setting.name === name);
+  assert.deepEqual(find('DLSS 5').badges, ["With NVIDIA's DLSS 5 file"]);
+  assert.deepEqual(find('DLSS 5 preset').badges, ['While DLSS 5 is On']);
+  assert.deepEqual(find('DLSS 5 settings').badges, ['While DLSS 5 is On']);
+  assert.throws(() => readGraphicsSettings(page.replace("Shown only with NVIDIA's `nvngx_dlssnr.dll`", 'With'), menu),
+    /no condition for DLSS 5,/);
+  assert.throws(() => readGraphicsSettings(page.replace('. Shown while DLSS 5 is On |', ' |'), menu), /no condition for DLSS 5 preset/);
+  // (gpu/vk/menu/dlss5.cpp registers them: the preset a view of the page's rows, the page row with no option pointer)
+  for (const [from, to, name] of [['.value = &preset_ui', '.value = &other_ui', 'DLSS 5 preset'],
+    ['.opens = "dlss5_settings"', '.opens = "other_page"', 'DLSS 5 settings']]) {
+    assert(menu.includes(from), from);
+    assert.throws(() => readGraphicsSettings(page, menu.replace(from, to)), new RegExp(`coverage mismatch at ${name}`));
+  }
+});
+
 test('the menu table reader joins C strings, reads escapes and skips comments', () => {
   const rows = readMenuRows(`Row rows[] = {
     // {TAB_GRAPHICS, "Commented out", &opts.x},
