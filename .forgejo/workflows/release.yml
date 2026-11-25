@@ -7,33 +7,33 @@
 #   a tag vX.Y.Z         a stable (the stable channel), on a tested nightly's commit. Longshot's first is v3.0.0
 #
 # 1. version: the version's name first; a tag is checked too (Tooling's scripts/release.py check-tag: its form, on main,
-#    above every release, and as high as the commits since the last stable call for). Then, only when there is a version
-#    to build (a nightly with nothing new is none), tools.lock (`longshot-builder dev tools check --require`: every tool
-#    the Windows and the Linux builder carry has its line, and every line's archive is in Longshot's store with its size
-#    and SHA-256). Either refused builds nothing. A release only downloads the pinned tools: the Make tools workflow
-#    (tools.yml, started by hand) makes and uploads them, never a release.
+#    above every release, and as high as the commits since the last stable call for). A refused tag builds nothing.
+#    tools.lock is checked by each build job (`longshot-builder dev tools check --require`, with the builder it builds
+#    anyway: every tool the Windows and the Linux builder carry has its line, and every line's archive is in Longshot's
+#    store with its size and SHA-256), before it uploads anything; publish needs both builds, so a refusal ships nothing.
+#    A release only downloads the pinned tools: the Make tools workflow (tools.yml, started by hand) makes and uploads
+#    them, never a release.
 #    A tag whose commit CI has released already (for a stable, the nightly of its commit) names that release in
 #    `checked` (Tooling's scripts/release.py released-as: published, its SHA256SUMS signed by a key the launcher trusts and naming its
 #    every file; one that is not stops the run). Its run passed every check of the commit, so the build checks that ship
 #    no file are not run again. Its files are not reused: each carries its version (the VERSION in what longshot-builder
 #    carries), and a release never ships a file that names another version.
 #    The builds take every tool from the store (`longshot-builder dev tools install`) into what longshot-builder carries.
-#    version builds a longshot-builder of its own (mise.toml's Rust, scripts/ci_rust.sh), which reads the lock and needs
-#    none of the tools to be built.
 # 2. linux, windows (build-linux.yml, build-windows.yml), per platform p (linux-x64, windows-x64):
 #    longshot-builder-<v>-<p> (.exe on Windows), the deltas to it from the channel's last 5 releases,
 #    longshot-builder-<from>-to-<v>-<p>.zst-patch, its manifest, longshot-builder-<v>-<p>.json, and RecompLauncher's
 #    longshot-builder-<v>-<p>-recomplauncher.zip (the program as Longshot.exe or Longshot.x86_64, and recomplauncher.json)
 #    (`longshot-builder dev release files` and `recomplauncher`, run by each job's own Linux longshot-builder), uploaded
-#    before any build check runs; no cache is restored in them.
+#    before any build check runs. They run only on the server's release runner (scripts/ci_release_runner.sh) and restore
+#    only the release's own cache, of downloads each checked by its SHA-256 when used (docs/dev/reference/ci.md).
 # 3. publish: SHA256SUMS over the builds' files and tools.lock, SHA256SUMS.sig (the release key), the notes (git-cliff,
 #    cliff.toml), then a draft release with every file, published last: until then no launcher sees it. A nightly also
 #    prunes the nightlies past the newest 20 that are 5 days old or more. Nothing is committed back to the repository.
 #
 # Secret (docs/dev/reference/releases.md, One-time setup): RELEASE_SIGNING_KEY_SEALED (the release key's private PEM, sealed:
 # scripts/ci_secret.sh). version and publish run on the runner kept for them (runs-on: deploy); publish gets the seal.key
-# that opens it from the seal broker, which hands it to a run of main or a v* tag only; the builds run on the release
-# runners (docs/dev/reference/ci.md, Runners). publish compiles no Rust and runs no program the checkout builds: what
+# that opens it from the seal broker, which hands it to a run of main or a v* tag only; the builds run on the server's
+# release runner only (docs/dev/reference/ci.md, Runners). publish compiles no Rust and runs no program the checkout builds: what
 # they sign or upload was made and checked elsewhere, and each secret (the sealed ones, the job's token) is given only to
 # the steps that use it, never to the job.
 # Releases are made with the job's own token (forgejo.token, passed to Tooling's scripts/release.py as RELEASE_TOKEN; no secret, no bot account): on a push to this repository Forgejo gives it write access to this repository's every
@@ -60,7 +60,7 @@ jobs:
   version:
     name: The version
     runs-on: deploy  # (only the runner kept for deploys and releases: the version and commit it names are what is built and signed)
-    timeout-minutes: 20   # (with the builder that reads tools.lock: a debug build, a few minutes)
+    timeout-minutes: 15
     outputs:
       tag: ${{ steps.name.outputs.tag }}
       ref: ${{ steps.name.outputs.ref }}
@@ -132,31 +132,6 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "$tag, from $ref"
-      # (only for a version: a nightly with nothing new builds nothing. The builder that reads tools.lock, mise.toml's
-      # Rust: scripts/ci_rust.sh)
-      # (its own step: the PATH ci_rust.sh hands on through $GITHUB_PATH reaches the steps after it only)
-      - name: Rust (mise.toml's)
-        if: steps.name.outputs.tag != ''
-        run: scripts/ci_rust.sh
-      - name: longshot-builder for the tools
-        if: steps.name.outputs.tag != ''
-        run: |
-          cargo build --locked -q -p longshot-builder
-          echo "TOOLS=$PWD/target/debug/longshot-builder dev tools" >> "$GITHUB_ENV"
-      - name: The tools
-        if: steps.name.outputs.tag != ''
-        run: |
-          # (every tool the Windows and the Linux builder carry is in tools.lock, every line's first URLs Longshot's store's,
-          # and every line's archive there with its size and SHA-256: before any build. A release uploads no tool: a line
-          # whose archive is not there yet is the Make tools workflow's to make and upload)
-          if ! $TOOLS check; then
-            echo "::error::tools.lock lacks a tool a builder needs; docs/dev/reference/releases.md, Bumping a tool"
-            exit 1
-          fi
-          if ! $TOOLS check --require; then
-            echo "::error::a tools.lock line's archive is not in Longshot's store (above): a release uploads no tool. Run the Make tools workflow (Actions > Make tools, on main) for it, or fix the line; docs/dev/reference/releases.md, Bumping a tool"
-            exit 1
-          fi
 
   linux:
     name: longshot-builder (Linux)

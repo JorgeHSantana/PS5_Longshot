@@ -51,7 +51,7 @@ jobs:
   package:
     name: longshot-builder-<version>-windows-x64.exe
     runs-on: release  # (a release's build: only the runners kept for them take it, docs/dev/reference/ci.md)
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Check out source
         uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,6 +64,11 @@ jobs:
         uses: https://github.com/actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
+      # (the server's release runner only: scripts/ci_release_runner.sh; docs/dev/reference/ci.md, Runners)
+      - name: The server's release runner
+        env:
+          SEAL_BROKER_PIN: ${{ vars.SEAL_BROKER_PIN }}
+        run: scripts/ci_release_runner.sh
 
       # (Wine starts the program and the dav1d test; its apt, about 30 s, runs in the background beside the build steps,
       # and "Wine, installed" waits for it. Detached, so this step ends at once; its status is written last, whole, by mv)
@@ -77,9 +82,21 @@ jobs:
       - name: llvm-mingw version
         id: llvm
         run: echo "name=$(python -I scripts/longshot_builder.py llvm-mingw --name --host linux)" >> "$GITHUB_OUTPUT"
-      # (no cache in this job, which makes the release's files: every download (llvm-mingw, the tools, the pinned Rust,
-      # the crates) is fetched afresh and checked by its SHA-256, and unpacked into this run's own $RUNNER_TEMP. A cache's
-      # key is anyone's to save first, and what a release ships must come from nothing a cache holds)
+      # (the release's own cache, of downloads only: the pinned Rust's archives, Cargo.lock's .crate files, tools.lock's
+      # archives, llvm-mingw. Each is checked by its SHA-256 every time it is used, against the pins in this checkout, so
+      # whoever saved the cache can't change what is built; nothing unpacked or compiled is kept. Read and written only by a
+      # run of main or a v* tag (docs/dev/reference/ci.md, The release's cache))
+      - id: release-cache
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/rust/*.tar.xz
+            ${{ runner.temp }}/rust/crates
+            ${{ runner.temp }}/tools-cache
+            ${{ runner.temp }}/llvm/.cache
+          key: release-downloads-windows-${{ hashFiles('Cargo.lock', 'scripts/renhdrum.py', 'tools.lock') }}
+          restore-keys: release-downloads-windows-
       - name: llvm-mingw
         run: echo "LLVM_MINGW=$(python -I scripts/longshot_builder.py llvm-mingw "$RUNNER_TEMP/llvm" --host linux)" >> "$GITHUB_ENV"
 
@@ -94,6 +111,22 @@ jobs:
         run: >-
           python -I scripts/longshot_builder.py build --target linux --profile release
           --cache "$RUNNER_TEMP/rust" --out "$RUNNER_TEMP/host/longshot-builder" --this-pc
+
+      # (every tool the Windows and the Linux builder carry is in tools.lock, every line's first URLs Longshot's store's,
+      # and every line's archive there with its size and SHA-256: checked here, with the runner's builder, before anything
+      # is uploaded. A release uploads no tool: a line whose archive is not there yet is the Make tools workflow's to make
+      # and upload. publish needs both builds, so a refusal here ships nothing)
+      - name: The tools
+        run: |
+          TOOLS="$RUNNER_TEMP/host/longshot-builder dev tools"
+          if ! $TOOLS check; then
+            echo "::error::tools.lock lacks a tool a builder needs; docs/dev/reference/releases.md, Bumping a tool"
+            exit 1
+          fi
+          if ! $TOOLS check --require; then
+            echo "::error::a tools.lock line's archive is not in Longshot's store (above): a release uploads no tool. Run the Make tools workflow (Actions > Make tools, on main) for it, or fix the line; docs/dev/reference/releases.md, Bumping a tool"
+            exit 1
+          fi
 
       # (tools.lock's windows-x64 bundle, at tools/<name>/ of the checkout (`longshot-builder dev tools install`, by the
       # runner's longshot-builder above: the builder needs none of these tools to be built), where longshot-builder --root
@@ -203,6 +236,15 @@ jobs:
 
       # (an artifact goes to Forgejo by its public address, ROOT_URL, behind Cloudflare: a request there can fail once, and
       # the action does not send a block again. Sent once more when it failed: Forgejo takes the same name again)
+      - if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.release-cache.outputs.cache-hit != 'true'
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/rust/*.tar.xz
+            ${{ runner.temp }}/rust/crates
+            ${{ runner.temp }}/tools-cache
+            ${{ runner.temp }}/llvm/.cache
+          key: release-downloads-windows-${{ hashFiles('Cargo.lock', 'scripts/renhdrum.py', 'tools.lock') }}
       - id: upload_1
         continue-on-error: true
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
@@ -217,53 +259,16 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  # (a build check, which ships nothing: no cache restored and no artifact uploaded. It runs in the same run as the
-  # package job, and any job of a run can upload an artifact by any name, longshot-builder-windows too: so it takes nothing
-  # a cache holds, only the commit's own code and downloads checked by their SHA-256, as the package job does)
-  vulkan:
-    name: Windows Vulkan back end (llvm-mingw)
-    runs-on: release  # (a release's build: only the runners kept for them take it, docs/dev/reference/ci.md)
-    timeout-minutes: 45
-    steps:
-      - name: Check out source
-        if: env.RELEASE_CHECKED == ''
-        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.ref }}
-          persist-credentials: false
-      - name: Set up Python
-        if: env.RELEASE_CHECKED == ''
-        uses: https://github.com/actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.12'
-      # (RX_TARGET=windows: longshot-builder builds the Windows back end on Linux, README.md "The Windows game, built on Linux")
-      - name: llvm-mingw
-        if: env.RELEASE_CHECKED == ''
-        run: |
-          echo "LONGSHOT_MINGW=$(python -I scripts/longshot_builder.py llvm-mingw "$RUNNER_TEMP/llvm" --host linux)" >> "$GITHUB_ENV"
-          echo "RX_TARGET=windows" >> "$GITHUB_ENV"
-      # (the pinned Rust and the crates, fetched afresh and checked by their SHA-256 as the package job's: a Linux
-      # longshot-builder, this runner's, compiles the back end)
-      - name: longshot-builder for this runner
-        if: env.RELEASE_CHECKED == ''
-        run: >-
-          python -I scripts/longshot_builder.py build --target linux --profile release
-          --cache "$RUNNER_TEMP/longshot-builder-rust" --out "$RUNNER_TEMP/longshot-builder" --this-pc
-      # (tools.lock's windows-x64 CPM cache, what a player's Windows build compiles the back end with: the Vulkan, SPIR-V
-      # and VMA headers, at the pins it was made from, checked by its SHA-256 and installed by the builder above)
-      - name: tools.lock's cpm
-        if: env.RELEASE_CHECKED == ''
-        run: |
-          "$RUNNER_TEMP/longshot-builder" dev tools install "$RUNNER_TEMP/win-tools" --system windows-x64 --only cpm \
-            --cache "$RUNNER_TEMP/tools-cache"
-          echo "RX_CPM=$RUNNER_TEMP/win-tools/tools/cpm" >> "$GITHUB_ENV"
-      # (as build-linux.yml builds Linux's: the back end alone (compile --only renderer), no lift, no game, into an object
-      # store of this run's own)
-      - name: longshot_vk.dll
+      # (a build check, which ships nothing, after the upload as build-linux.yml's: the Windows Vulkan back end alone
+      # (compile --only renderer: no lift, no game), as a player's Windows build compiles it, with tools.lock's
+      # windows-x64 CPM cache (installed above) and the runner's longshot-builder already built, into an object store of
+      # this run's own. It was a job of its own, which built that builder a second time)
+      - name: longshot_vk.dll (build check)
         if: env.RELEASE_CHECKED == ''
         env:
           RX_RELEASE: '1'
+          RX_TARGET: windows
         run: |
-          "$RUNNER_TEMP/longshot-builder" compile --only renderer --work "$RUNNER_TEMP/vk-work" \
-            --store "$RUNNER_TEMP/vk-store" --root "$PWD" --jobs "$(nproc)"
+          LONGSHOT_MINGW="$LLVM_MINGW" RX_CPM="$BUNDLE/tools/cpm" "$RUNNER_TEMP/host/longshot-builder" compile --only renderer \
+            --work "$RUNNER_TEMP/vk-work" --store "$RUNNER_TEMP/vk-store" --root "$PWD" --jobs "$(nproc)"
           ls -l "$RUNNER_TEMP/vk-work/build/longshot_vk.dll"

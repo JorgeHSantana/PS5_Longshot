@@ -7,8 +7,11 @@
 # docs/dev/reference/releases.md, "Windows tester". Caches are read by every run and written only by a push to main, so a
 # pull request never writes what another reads (docs/dev/reference/ci.md, Caches). Main's tree is one: the jobs on a
 # runner outside the server seed their checkout with it (scripts/ci_git_base.sh), since git.magicbean.dev's whole tree
-# took them minutes to fetch; the registry crates' builds, without the workspace's own (scripts/ci_cargo_prune.py); the
-# downloads.
+# took them minutes to fetch; the registry crates' builds, without the workspace's own (scripts/ci_cargo_prune.py), restored
+# from the newest entry for the same Rust when Cargo.lock has changed; mise.toml's Rust toolchain (~/.rustup); apt's lists
+# and packages (scripts/ci_apt.sh); the downloads. A pull request that changes only the site, the docs or the other CIs'
+# files skips the compiling jobs (job changes, scripts/ci_changes.py); a push to main runs every job. A pull request's
+# newer push cancels its older run.
 name: CI
 
 on:
@@ -65,12 +68,43 @@ jobs:
           print("ok: %s" % title)
           PY
 
+  # (whether rust, e2e and host-windows are needed: on a pull request, not when it changes only the site, the docs or
+  # the other CIs' files (scripts/ci_changes.py; anything unsure runs them). A push or a run by hand runs everything. A
+  # job not needed shows as skipped, which Forgejo and forge.py count as passed. Only the file list is read, from the
+  # API, with the base's script: the pull request's code is not run for it)
+  changes:
+    name: What the change needs
+    runs-on: quick  # (a quick job: the runner kept free for these takes it, or any runner with room)
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.files.outputs.code || 'true' }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts
+      - id: files
+        if: github.event_name == 'pull_request'
+        env:
+          FORGEJO_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -f scripts/ci_changes.py ]; then
+            python3 -I scripts/ci_changes.py --server "${{ github.server_url }}" --repo "${{ github.repository }}" --pr "$PR_NUMBER"
+          else
+            echo "code=true" >> "$GITHUB_OUTPUT"   # (a base from before the script: everything runs)
+          fi
+
   # (the Rust workspace's checks: longshot-builder's crates, its lifter among them, and longshot-rs, as `mise run rust` runs
   # them. build-compile's compile_link test compiles and links with clang and ld.lld, a64's llvm_mc test compares the
   # decoder with llvm-mc: both fail when their tool is missing (LONGSHOT_NO_CLANG=1 skips them, never here), so the
   # distribution's clang, lld and llvm are installed and LLVM_MC names llvm-mc. tools.lock's llvm is trimmed to the
   # compile's tools and has no llvm-mc)
   rust:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Rust (rustfmt, clippy, cargo test)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -107,18 +141,53 @@ jobs:
         with:
           path: ${{ runner.temp }}/git-base
           key: git-base
-      # (mise.toml's pinned Rust, through a checksum-pinned rustup: scripts/ci_rust.sh)
+      # (mise.toml's pinned Rust, through a checksum-pinned rustup: scripts/ci_rust.sh. ~/.rustup and cargo's bin/ are
+      # kept per runner for that version, written only by a push to main: with them, ci_rust.sh finds the toolchain
+      # installed and downloads nothing)
+      - name: The Rust version
+        id: rust
+        run: echo "version=$(sed -n 's/^rust = { version = "\([0-9.]*\)".*/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+      - id: rustup-cache
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.rustup
+            ~/.cargo/bin
+          key: rustup-${{ steps.rust.outputs.version }}-rust
       - name: Rust (mise.toml's; rustfmt and clippy)
         run: scripts/ci_rust.sh rustfmt,clippy
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rustup-cache.outputs.cache-hit != 'true'
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.rustup
+            ~/.cargo/bin
+          key: rustup-${{ steps.rust.outputs.version }}-rust
+      # (the distribution's packages, with apt's lists and downloads kept per runner by the month, written only by a push
+      # to main: scripts/ci_apt.sh)
+      - name: The apt cache's key
+        id: apt
+        run: echo "key=apt-rust-$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - id: apt-cache
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apt
+          key: ${{ steps.apt.outputs.key }}
+          restore-keys: apt-rust-
       - name: clang, lld and llvm-mc
         run: |
           if ! command -v clang > /dev/null || ! command -v ld.lld > /dev/null || ! command -v llvm-mc > /dev/null; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends clang lld llvm
+            scripts/ci_apt.sh "$RUNNER_TEMP/apt" clang lld llvm
           fi
           mc=$(command -v llvm-mc || find /usr/lib -path '/usr/lib/llvm-*/bin/llvm-mc' 2>/dev/null | sort -V | tail -1)
           if [ -z "$mc" ] || ! "$mc" --version > /dev/null; then echo "::error::no llvm-mc"; exit 1; fi
           clang --version && ld.lld --version
           echo "LLVM_MC=$mc" >> "$GITHUB_ENV"
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.apt-cache.outputs.cache-hit != 'true'
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apt
+          key: ${{ steps.apt.outputs.key }}
       # (the registry crates, downloaded and built, for Cargo.lock and mise.toml's Rust: a checkout's new times make cargo
       # build the workspace's own crates again whatever a cache holds, so only the dependencies are kept
       # (scripts/ci_cargo_prune.py), one entry per lock. Read by every run, written only by a push to main; host-windows
@@ -130,7 +199,8 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             target
-          key: rust-deps-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          key: rust-deps-${{ steps.rust.outputs.version }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: rust-deps-${{ steps.rust.outputs.version }}-
       - name: rustfmt
         run: cargo fmt --all --check
       - name: clippy
@@ -149,12 +219,14 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             target
-          key: rust-deps-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          key: rust-deps-${{ steps.rust.outputs.version }}-${{ hashFiles('Cargo.lock') }}
 
   # (the builder end to end on a synthetic game (builder/crates/synthetic-game): a made-up AArch64 program packed as a game,
   # lifted, compiled and linked by longshot-builder's stages, and run; no game data. clang and lld from the distribution:
   # an AArch64-capable clang assembles the synthetic program)
   e2e:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: longshot-builder end to end (synthetic game)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -191,15 +263,50 @@ jobs:
         with:
           path: ${{ runner.temp }}/git-base
           key: git-base
+      # (the distribution's packages, with apt's lists and downloads kept per runner by the month, written only by a push
+      # to main: scripts/ci_apt.sh)
+      - name: The apt cache's key
+        id: apt
+        run: echo "key=apt-e2e-$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - id: apt-cache
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apt
+          key: ${{ steps.apt.outputs.key }}
+          restore-keys: apt-e2e-
       - name: clang and lld
         run: |
           if ! command -v clang > /dev/null || ! command -v ld.lld > /dev/null; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends clang lld
+            scripts/ci_apt.sh "$RUNNER_TEMP/apt" clang lld
           fi
           clang --version
-      # (mise.toml's pinned Rust, through a checksum-pinned rustup: scripts/ci_rust.sh)
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.apt-cache.outputs.cache-hit != 'true'
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apt
+          key: ${{ steps.apt.outputs.key }}
+      # (mise.toml's pinned Rust, through a checksum-pinned rustup: scripts/ci_rust.sh. ~/.rustup and cargo's bin/ are
+      # kept per runner for that version, written only by a push to main: with them, ci_rust.sh finds the toolchain
+      # installed and downloads nothing)
+      - name: The Rust version
+        id: rust
+        run: echo "version=$(sed -n 's/^rust = { version = "\([0-9.]*\)".*/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+      - id: rustup-cache
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.rustup
+            ~/.cargo/bin
+          key: rustup-${{ steps.rust.outputs.version }}-e2e
       - name: Rust (mise.toml's)
         run: scripts/ci_rust.sh
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rustup-cache.outputs.cache-hit != 'true'
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.rustup
+            ~/.cargo/bin
+          key: rustup-${{ steps.rust.outputs.version }}-e2e
       # (the registry crates' release builds, as the rust job's cache: scripts/ci_cargo_prune.py)
       - id: cache-restore
         uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -208,7 +315,8 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             target
-          key: rust-e2e-deps-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          key: rust-e2e-deps-${{ steps.rust.outputs.version }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: rust-e2e-deps-${{ steps.rust.outputs.version }}-
       - name: The synthetic game, end to end
         env:
           LONGSHOT_E2E: '1'
@@ -223,12 +331,14 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             target
-          key: rust-e2e-deps-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          key: rust-e2e-deps-${{ steps.rust.outputs.version }}-${{ hashFiles('Cargo.lock') }}
 
   # (the host's C as a player's Windows build compiles it, with llvm-mingw's Linux build of tools.lock's release: every
   # host unit build-compile plans, with its flags, compiled -fsyntax-only against a synthetic gen/rt (the lift's runtime
   # headers): the Windows branches of host code are compiled on every change, with no game and no Windows runner)
   host-windows:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Host C for Windows (llvm-mingw, compile only)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -265,9 +375,28 @@ jobs:
         with:
           path: ${{ runner.temp }}/git-base
           key: git-base
-      # (mise.toml's pinned Rust, through a checksum-pinned rustup: scripts/ci_rust.sh)
+      # (mise.toml's pinned Rust, through a checksum-pinned rustup: scripts/ci_rust.sh. ~/.rustup and cargo's bin/ are
+      # kept per runner for that version, written only by a push to main: with them, ci_rust.sh finds the toolchain
+      # installed and downloads nothing)
+      - name: The Rust version
+        id: rust
+        run: echo "version=$(sed -n 's/^rust = { version = "\([0-9.]*\)".*/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+      - id: rustup-cache
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.rustup
+            ~/.cargo/bin
+          key: rustup-${{ steps.rust.outputs.version }}-host-windows
       - name: Rust (mise.toml's)
         run: scripts/ci_rust.sh
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rustup-cache.outputs.cache-hit != 'true'
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.rustup
+            ~/.cargo/bin
+          key: rustup-${{ steps.rust.outputs.version }}-host-windows
       - name: llvm-mingw version
         id: llvm
         run: echo "name=$(python3 -I scripts/longshot_builder.py llvm-mingw --name --host linux)" >> "$GITHUB_OUTPUT"
@@ -290,7 +419,8 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             target
-          key: rust-deps-${{ hashFiles('Cargo.lock', 'mise.toml') }}
+          key: rust-deps-${{ steps.rust.outputs.version }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: rust-deps-${{ steps.rust.outputs.version }}-
       - name: llvm-mingw
         run: echo "LONGSHOT_MINGW=$(python3 -I scripts/longshot_builder.py llvm-mingw "$RUNNER_TEMP/llvm" --host linux)" >> "$GITHUB_ENV"
       # (tools.lock's windows-x64 CPM cache, what a player's Windows build compiles with: the Vulkan, SPIR-V and VMA

@@ -1,7 +1,7 @@
 # The player website (website/, Astro) on Cloudflare: longshot.magicbean.dev, the Worker longshot-website.
 # - A push to main that changes website/ or the docs it publishes (or Run workflow) builds it, runs its checks and
 #   deploys it. It is also rebuilt every hour, since the build collects progress data from Forgejo (website/PROGRESS.md).
-# - A pull request that changes those sources is built and checked (job check), on a runner with no secrets.
+# - A pull request's build and checks are ci.yml's website job (scripts/website_check.sh), on every pull request.
 # - It also gets a preview: its built site (dist/) is uploaded as a new version of the Worker (`wrangler versions
 #   upload`, which leaves the site as it is) with the alias pr-<number>, served at
 #   https://pr-<number>-longshot-website.<subdomain>.workers.dev, and the link is posted on the PR.
@@ -31,9 +31,6 @@ name: Website
 on:
   push:
     branches: [main]
-    paths: ['website/**', 'docs/**', 'CONTRIBUTING.md', '.forgejo/workflows/website.yml']
-  pull_request:
-    types: [opened, synchronize, reopened]
     paths: ['website/**', 'docs/**', 'CONTRIBUTING.md', '.forgejo/workflows/website.yml']
   pull_request_target:
     types: [opened, synchronize, reopened, labeled]
@@ -87,27 +84,6 @@ jobs:
           echo "::add-mask::$CLOUDFLARE_API_TOKEN"
           export CLOUDFLARE_API_TOKEN
           npx wrangler deploy --message "main @ ${GITHUB_SHA:0:12}"
-
-  # (a pull request: built and checked, no secret, no deploy runner)
-  check:
-    name: Website builds
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/catthehacker/ubuntu:act-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Build and check
-        run: |
-          if [ ! -f website/package.json ]; then echo "::notice::No website/ at this commit: nothing to build"; exit 0; fi
-          cd website
-          node --version
-          npm ci --no-audit --no-fund
-          npm run build
-          npm run check
 
   # (a preview, 1 of 2: the PR's code, built where nothing can be opened)
   preview-build:

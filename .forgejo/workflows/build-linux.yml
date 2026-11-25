@@ -5,7 +5,9 @@
 # it builds is for (glibc 2.35: RenHDrum's library is linked here). No game data is involved.
 # Called by release.yml with the version's name, it also makes the deltas from the channel's last releases and the
 # release's manifest for this platform (`longshot-builder dev release files`) and RecompLauncher's zip (`dev release
-# recomplauncher`), by the runner's own longshot-builder, and uploads them before the build checks; it restores no cache. It carries the version, so a tag
+# recomplauncher`), by the runner's own longshot-builder, and uploads them before the build checks. It runs only on the server's
+# release runner (scripts/ci_release_runner.sh), checks tools.lock with that builder before anything is uploaded, and
+# restores only the release's own cache of downloads, each checked by its SHA-256 when used. It carries the version, so a tag
 # always builds it again; a tag whose commit CI released already (release.yml's `checked`) skips only the build checks
 # that ship nothing (the back end, without and with AMD FSR 4).
 name: longshot-builder (Linux)
@@ -86,12 +88,29 @@ jobs:
       - name: Trust the checkout
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      # (the server's release runner only: scripts/ci_release_runner.sh; docs/dev/reference/ci.md, Runners)
+      - name: The server's release runner
+        env:
+          SEAL_BROKER_PIN: ${{ vars.SEAL_BROKER_PIN }}
+        run: scripts/ci_release_runner.sh
+
       - name: Version
         run: echo "TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
 
-      # (no cache in this job, which makes the release's files: every download (the tools, the pinned Rust, the crates)
-      # is fetched afresh and checked by its SHA-256, and unpacked into this run's own $RUNNER_TEMP. A cache's key is
-      # anyone's to save first, and what a release ships must come from nothing a cache holds)
+      # (the release's own cache, of downloads only: the pinned Rust's archives, Cargo.lock's .crate files, tools.lock's
+      # archives. Each is checked by its SHA-256 every time it is used, against the pins in this checkout, so
+      # whoever saved the cache can't change what is built; nothing unpacked or compiled is kept. Read and written only by a
+      # run of main or a v* tag (docs/dev/reference/ci.md, The release's cache))
+      - id: release-cache
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/rust/*.tar.xz
+            ${{ runner.temp }}/rust/crates
+            ${{ runner.temp }}/tools-cache
+          key: release-downloads-linux-${{ hashFiles('Cargo.lock', 'scripts/renhdrum.py', 'tools.lock') }}
+          restore-keys: release-downloads-linux-
       # (the pinned Rust (scripts/renhdrum.py's RUST) and Cargo.lock's crates, each checked by its SHA-256, into
       # $RUNNER_TEMP/rust, which RenHDrum's build below takes too)
       # (a longshot-builder that carries nothing, the release profile: it makes the third-party objects from the checkout
@@ -101,6 +120,22 @@ jobs:
         run: >-
           python3 -I scripts/longshot_builder.py build --target linux --profile release --cache "$RUNNER_TEMP/rust"
           --out "$RUNNER_TEMP/host/longshot-builder" --this-pc --jobs "$(nproc)"
+
+      # (every tool the Windows and the Linux builder carry is in tools.lock, every line's first URLs Longshot's store's,
+      # and every line's archive there with its size and SHA-256: checked here, with the runner's builder, before anything
+      # is uploaded. A release uploads no tool: a line whose archive is not there yet is the Make tools workflow's to make
+      # and upload. publish needs both builds, so a refusal here ships nothing)
+      - name: The tools
+        run: |
+          TOOLS="$RUNNER_TEMP/host/longshot-builder dev tools"
+          if ! $TOOLS check; then
+            echo "::error::tools.lock lacks a tool a builder needs; docs/dev/reference/releases.md, Bumping a tool"
+            exit 1
+          fi
+          if ! $TOOLS check --require; then
+            echo "::error::a tools.lock line's archive is not in Longshot's store (above): a release uploads no tool. Run the Make tools workflow (Actions > Make tools, on main) for it, or fix the line; docs/dev/reference/releases.md, Bumping a tool"
+            exit 1
+          fi
 
       # (tools.lock's linux-x64 bundle: each tool from Longshot's packages, checked by its SHA-256, unpacked at
       # tools/<name>/ of the checkout (`longshot-builder dev tools install`, by the runner's longshot-builder above: the
@@ -179,6 +214,14 @@ jobs:
       # request there can fail once, and the action does not send a block again (2026-11-13, the launcher's nightly: one
       # 8 MB block, "SSL alert bad record mac"). Sent once more when it failed: Forgejo takes the same name again. Sent
       # before the build checks below, which ship nothing)
+      - if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.release-cache.outputs.cache-hit != 'true'
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/rust/*.tar.xz
+            ${{ runner.temp }}/rust/crates
+            ${{ runner.temp }}/tools-cache
+          key: release-downloads-linux-${{ hashFiles('Cargo.lock', 'scripts/renhdrum.py', 'tools.lock') }}
       - id: upload_1
         continue-on-error: true
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)

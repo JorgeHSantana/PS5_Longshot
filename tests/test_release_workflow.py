@@ -1,8 +1,8 @@
 """Game-free checks of the release's workflows (.forgejo/workflows/release.yml, build-linux.yml, build-windows.yml;
 docs/dev/reference/releases.md) and of the Make tools workflow (tools.yml): the jobs on the deploy runner, which opens the
 sealed secrets, compile no Rust and run no program the checkout builds, and give each secret to the steps that use it
-only; the jobs that make the release's files restore no cache and upload them before any build check runs; the version
-is decided before tools.lock is read; a release uploads no tool and stops on a line whose archive is not in the store;
+only; the jobs that make the release's files run only on the server's release runner, restore only their own cache of downloads and upload
+the release's files before any build check runs; each build checks tools.lock before it uploads anything; a release uploads no tool and stops on a line whose archive is not in the store;
 tools.yml uploads only on main, what its make job made twice; and scripts/ci_tools_publish.py refuses an archive whose
 version tools.lock names with other bytes before it uploads anything. Reads the files, runs nothing over the network.
 
@@ -71,10 +71,15 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(sorted(jobs(release)), ["linux", "publish", "version", "windows"])
         for gone in ("PACKAGES_TOKEN", "ci_tools_publish", "make.sh", "dev tools missing", "dev tools publish"):
             self.assertNotIn(gone, release)
-        tools = jobs(release)["version"]
-        tools = tools[tools.index("- name: The tools"):]
-        self.assertIn("$TOOLS check --require", tools)
-        self.assertIn("Run the Make tools workflow", tools)
+        # (each build checks tools.lock with its runner's builder, before it uploads anything; publish needs both)
+        for name in ("build-linux.yml", "build-windows.yml"):
+            with self.subTest(name):
+                wf = text(name)
+                tools = wf[wf.index("- name: The tools"):]
+                self.assertIn("$TOOLS check --require", tools)
+                self.assertIn("Run the Make tools workflow", tools)
+                self.assertLess(wf.index("- name: The tools"), wf.index("upload-artifact"))
+        self.assertIn("needs: [version, linux, windows]", jobs(release)["publish"])
 
     def test_the_make_tools_workflow(self):
         wf = text("tools.yml")
@@ -91,30 +96,34 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("secrets.PACKAGES_TOKEN_SEALED", publish)
         self.assertIn("enable-openid-connect: true", publish)
 
-    def test_the_builds_restore_no_cache_and_upload_before_the_checks(self):
+    def test_the_builds_restore_only_their_downloads_and_upload_before_the_checks(self):
         for name, artifact in (("build-linux.yml", "longshot-builder-linux"), ("build-windows.yml", "longshot-builder-windows")):
             workflow = text(name)
             with self.subTest(name):
-                self.assertNotIn("actions/cache", workflow)
+                # (the server's release runner only, checked before anything is built)
+                guard = workflow.index("run: scripts/ci_release_runner.sh")
+                self.assertLess(guard, workflow.index("longshot_builder.py build"))
+                # (the release's own cache: its own keys, main's and the tags' runs only, downloads only, each checked by
+                # its SHA-256 when used; never an unpacked Rust, a target folder or a key the checks write)
+                for m in re.finditer(r"uses: https://github.com/actions/cache/(?:restore|save)@", workflow):
+                    step = workflow[workflow.rindex("\n      - ", 0, m.start()):m.end() + 600].split("\n      - ")[1]
+                    self.assertRegex(step, r"key: release-downloads-")
+                    self.assertIn("github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')", step)
+                    paths = re.search(r"path: \|\n((?:            .*\n)+)", step).group(1).split()
+                    for path in paths:
+                        self.assertRegex(path, r"/(rust/\*\.tar\.xz|rust/crates|tools-cache|llvm/\.cache)$")
                 upload = workflow.index("name: " + artifact)
                 for made in ("dev release files", "dev release recomplauncher"):
                     self.assertLess(workflow.index(made), upload)
                 # (every build check after the upload: what it runs can't change what ships)
                 for check in re.finditer(r"compile --only renderer", workflow):
-                    if name == "build-linux.yml":
-                        self.assertGreater(check.start(), upload)
-        # (the Windows back end's job runs beside the package job in the same run: it uploads nothing)
-        vulkan = jobs(text("build-windows.yml"))["vulkan"]
-        self.assertNotIn("upload-artifact", vulkan)
+                    self.assertGreater(check.start(), upload)
+        self.assertEqual(sorted(jobs(text("build-windows.yml"))), ["package"])
 
-    def test_the_version_comes_first(self):
+    def test_the_version_builds_nothing(self):
         version = jobs(text("release.yml"))["version"]
-        name = version.index("      - id: name\n")
-        for step in ("- name: longshot-builder for the tools", "- name: The tools"):
-            at = version.index(step)
-            self.assertLess(name, at)
-            self.assertTrue(version[at:].split("\n      - ")[0].count("if: steps.name.outputs.tag != ''"), step)
-
+        for gone in ("cargo", "ci_rust.sh", "longshot-builder dev", "actions/cache"):
+            self.assertNotIn(gone, version)
 
     def test_node_for_the_actions_is_one_pin(self):
         """The Node a job in ubuntu:22.04 installs for its actions, before the checkout (which needs it), so in each such

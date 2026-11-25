@@ -92,6 +92,12 @@ jobs:
       # (the builder whose `dev tools make` packs every archive, mise.toml's Rust: scripts/ci_rust.sh. It needs none of
       # the tools to be built)
       # (its own step: the PATH ci_rust.sh hands on through $GITHUB_PATH reaches the steps after it only)
+      # (main's run, on `release`: the server's release runner only, scripts/ci_release_runner.sh)
+      - name: The server's release runner
+        if: github.ref == 'refs/heads/main'
+        env:
+          SEAL_BROKER_PIN: ${{ vars.SEAL_BROKER_PIN }}
+        run: scripts/ci_release_runner.sh
       - name: Rust (mise.toml's)
         run: scripts/ci_rust.sh
       - name: longshot-builder for the tools

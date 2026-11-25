@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+# (a pull request's newer push cancels its older run; main's and the nightly's runs are never cancelled)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   review:
     name: Guide images and local UI source review

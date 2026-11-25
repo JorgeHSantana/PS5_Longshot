@@ -69,14 +69,14 @@ After 14 days with no push the label is removed.
 
 | Workflow | When | What it does |
 |---|---|---|
-| `ci.yml` | Pull request, push to `main` | The pull request's title; `rust`: rustfmt, clippy and `cargo test` (with clang, lld and llvm-mc); `e2e`: the synthetic game end to end; `host-windows`: the host's C for Windows with llvm-mingw; actionlint; the website's checks (`scripts/website_check.sh`). `tests/run_all.py` and the SPIR-V fixtures run on CircleCI only |
+| `ci.yml` | Pull request, push to `main` | The pull request's title; `rust`: rustfmt, clippy and `cargo test` (with clang, lld and llvm-mc); `e2e`: the synthetic game end to end; `host-windows`: the host's C for Windows with llvm-mingw; actionlint; the website's checks (`scripts/website_check.sh`). `tests/run_all.py` and the SPIR-V fixtures run on CircleCI only. On a pull request, `changes` skips `rust`, `e2e` and `host-windows` when [only docs change](#what-a-pull-request-runs) |
 | `pr-description.yml` | Pull request | The description against the template (`scripts/check_pr_description.py`) |
 | `third-party.yml` | Pull request, push, nightly | `scripts/check_third_party.py`, and the upstream comparison at night |
 | `guide-screenshots.yml` | Pull request, push | The guide screenshots' source review |
-| `release.yml` | Push to `main`, tag `v*` | The nightly or the stable release: checks every tools.lock line's archive is in the store (it uploads none), calls `build-linux.yml` and `build-windows.yml`, signs and publishes ([releases](releases.md)) |
+| `release.yml` | Push to `main`, tag `v*` | The nightly or the stable release: names the version, calls `build-linux.yml` and `build-windows.yml` (each checks every tools.lock line's archive is in the store before it uploads anything; a release uploads no tool), signs and publishes ([releases](releases.md)) |
 | `tools.yml` | By hand (any branch; uploads on `main` only) | Make tools: the build tools named made twice from their pins (`builder/tools/make.sh --check`), uploaded to the store and given as `tools.lock` lines ([bumping a tool](releases.md#bumping-a-tool)) |
-| `build-linux.yml`, `build-windows.yml` | Called by `release.yml` | `longshot-builder-<v>-<p>` per platform, its deltas and manifest (`scripts/longshot_builder.py build`; then the runner's longshot-builder's `dev release`: `sources`, `dry-run`, `files`) |
-| `website.yml` | Push to `main` that changes the site's sources, hourly, pull request | Deploys longshot.magicbean.dev; a pull request gets a preview |
+| `build-linux.yml`, `build-windows.yml` | Called by `release.yml` | `longshot-builder-<v>-<p>` per platform, its deltas and manifest (`scripts/longshot_builder.py build`; then the runner's longshot-builder's `dev tools check`, `dev release`: `sources`, `dry-run`, `files`), then the back end's build checks in the same job |
+| `website.yml` | Push to `main` that changes the site's sources, hourly, pull request | Deploys longshot.magicbean.dev (hourly too, for the progress data the build collects); a pull request that changes the site's sources gets a preview. Its build and checks are `ci.yml`'s `website` job |
 | `vulkan-dlss.yml` | By hand | The Windows Vulkan back end built with NVIDIA's DLSS SDK and AMD FSR 4 |
 | `vulkan-fixtures.yml` | By hand | The authored Vulkan fixtures on Mesa's software driver |
 
@@ -88,9 +88,11 @@ started under Wine. The labels the workflows ask for, all on the image `docker:/
 | Label | For |
 |---|---|
 | `ubuntu-latest`, `ubuntu-24.04` | the checks. No secrets: a runner anyone in the team lends can carry these |
-| `quick` | jobs of a few minutes (title, description, third-party, actionlint, guide screenshots), on a runner kept for them so they never wait behind a build |
-| `release` | the release's `longshot-builder` builds, and the Make tools workflow's build of `main`'s tools (another branch's runs on `ubuntu-24.04`), on a runner that carries no other label, so CI never takes it. It needs about 50 GB of disk |
+| `quick` | jobs of a few minutes (title, `changes`, description, third-party, actionlint, guide screenshots), on a runner kept for them so they never wait behind a build |
+| `release` | the release's `longshot-builder` builds, and the Make tools workflow's build of `main`'s tools (another branch's runs on `ubuntu-24.04`). **Only the server's release runner, `unraid-linux-1`**, which carries no other label, so CI never takes it; never anyone else's runner. Each such job starts with [scripts/ci_release_runner.sh](../../../scripts/ci_release_runner.sh), which fails unless the job reaches the seal broker with its pinned key, so a runner given the label anywhere else builds nothing. A pull request's own code never runs on it. It needs about 50 GB of disk |
 | `deploy` | the jobs that sign, publish or deploy: a release's version and publish, the Make tools workflow's upload, the website's deploy and preview upload. Only the server's quick runner, on the seal broker's network ([below](#secrets-only-our-runners-can-open)). A pull request's own code never runs on it |
+
+The server's runners share 2 cores (MagicBeanDev/Infra, `runner-dind`): a release's jobs run there one at a time.
 
 Register a runner with `forgejo-runner register --instance https://git.magicbean.dev --token <token> --labels ...` from
 MagicBeanDev's *Settings > Actions > Runners*, and run `forgejo-runner daemon`. A runner lent by someone else gets
@@ -102,17 +104,56 @@ setup](releases.md#one-time-setup)).
 
 Each runner keeps its own cache (forgejo-runner's, on its disk): `ci.yml`'s jobs read it on every run and write it only
 on a push to `main`. forgejo-runner 13 keeps a pull request's writes to that pull request (its write isolation key), so a
-pull request can't put anything there that another run reads. The jobs that make, sign or publish a release, and the
-website's deploy, read no cache at all ([below](#secrets-only-our-runners-can-open)).
+pull request can't put anything there that another run reads. The jobs that sign or publish a release, and the
+website's deploy, read no cache at all; the jobs that build a release read only [their own](#the-releases-cache).
 
 | Cache (key) | What it holds | Who reads it |
 |---|---|---|
 | `git-base` | main's tree, a bare repository at depth 1 ([scripts/ci_git_base.sh](../../../scripts/ci_git_base.sh)) | `rust`, `e2e`, `host-windows`, `website`: before `actions/checkout`, the workspace borrows its objects, so the fetch takes only what the commit adds (a lent runner fetched the whole tree, 26 MB, through Cloudflare in 2 to 4.5 minutes: now seconds). After the checkout every object is copied in and checked against its name (`git fsck`) |
-| `rust-deps-<Cargo.lock and mise.toml>`, `rust-e2e-deps-...` | the registry crates, downloaded and built (dev, release), without the workspace's own: a checkout's new file times make cargo build those again whatever a cache holds ([scripts/ci_cargo_prune.py](../../../scripts/ci_cargo_prune.py)). One entry per lock, written when missing | `rust`, `e2e`; `host-windows` reads `rust-deps` |
+| `rust-deps-<Rust>-<Cargo.lock>`, `rust-e2e-deps-...` | the registry crates, downloaded and built (dev, release), without the workspace's own: a checkout's new file times make cargo build those again whatever a cache holds ([scripts/ci_cargo_prune.py](../../../scripts/ci_cargo_prune.py)). One entry per lock, written when missing. When the lock has changed, the newest entry for the same Rust is restored instead, and cargo builds only the crates that changed | `rust`, `e2e`; `host-windows` reads `rust-deps` |
+| `rustup-<Rust>-<job>` | `~/.rustup` and `~/.cargo/bin`: mise.toml's toolchain with the job's components, as [scripts/ci_rust.sh](../../../scripts/ci_rust.sh) installs it (its rustup checked by SHA-256, the toolchain by rustup against the release's manifest). With it, `ci_rust.sh` finds the toolchain installed and downloads nothing | `rust`, `e2e`, `host-windows` |
+| `apt-<job>-<month>` | apt's package lists and the packages it downloaded ([scripts/ci_apt.sh](../../../scripts/ci_apt.sh)): the job installs clang, lld and llvm from them without `apt-get update`, and updates only when that fails. apt checks each package against the lists' hashes as it installs it; a new month starts from the last month's entry | `rust`, `e2e` |
 | `<llvm-mingw>-archive`, `windows-tools-downloads-<tools.lock>` | the downloads, each checked by its size and SHA-256 when taken, written when missing | `host-windows` |
 
 `ci.yml`'s jobs run with `CARGO_INCREMENTAL=0` and `CARGO_PROFILE_DEV_DEBUG=0`: incremental state is only ever
 written in CI, and the dev builds link faster without debug info (a failing test still names its file and line).
+
+### The release's cache
+
+`build-linux.yml` and `build-windows.yml` keep `release-downloads-<platform>-<Cargo.lock, renhdrum.py, tools.lock>`: the
+downloads only, never anything unpacked or compiled. That is the pinned Rust's archives (`$RUNNER_TEMP/rust/*.tar.xz`),
+Cargo.lock's `.crate` files (`rust/crates`), tools.lock's archives (`tools-cache`) and, on Windows, llvm-mingw's archive
+(`llvm/.cache`). It is restored and saved only by a run of `main` or a `v*` tag, on the server's release runner. A key
+change restores the newest entry for the platform.
+
+Why it keeps the guarantee that what a release ships comes from nothing a cache holds:
+
+- **Every file is checked by its SHA-256 each time it is used**, against the pins in the release's own checkout:
+  `scripts/renhdrum.py`'s `fetch()` and `vendor_crates()` hash each archive and crate before unpacking it, and download
+  it again when it differs. `scripts/longshot_builder.py llvm-mingw` does the same for its archive, and
+  `longshot-builder dev tools install` checks each tool by its size and SHA-256. A wrong file costs a download, never a
+  different build.
+- **Nothing unpacked or built is kept.** The Rust toolchain is unpacked again from the checked archives every run
+  (renhdrum.py trusts an unpacked toolchain without checking, so it is never cached). Every program, object and file
+  that publish signs is compiled in that run, from that checkout.
+- **Who can write a `release-` key:** forgejo-runner's cache is per runner and per repository, and keeps a pull
+  request's writes to that pull request. A run of another branch on the release runner could still save a key of this
+  name, since the label only routes a job. That is why nothing rests on who wrote the cache: the hash checks above.
+
+### What a pull request runs
+
+`ci.yml`'s `changes` job reads the pull request's changed files from the API ([scripts/ci_changes.py](../../../scripts/ci_changes.py))
+and skips `rust`, `e2e` and `host-windows` when every one of them is in a place those jobs never read: `website/`,
+`docs/` (but `docs/dev/reference/build-events.md`, which the builder's tests compare with its codes), `.circleci/`, the
+other workflows' files and the top-level documents. The Rust workspace's tests and build scripts read `host/`, `gpu/`,
+`game/`, `assets/`, `third_party/`, `scripts/`, `tests/` and `tools.lock`, so any other change runs them all. Anything
+unsure runs them too: a push to `main`, a run by hand, an API that doesn't answer. The title, actionlint and the
+website's checks run on every pull request (the site reads files from all over the repository).
+
+A skipped job is not a failed one: `main` requires no status checks, and Tooling's `forge.py pr status` counts
+`skipped` as passed. A pull request's newer push cancels its older runs of `ci.yml`, `third-party.yml`,
+`guide-screenshots.yml` and `pr-description.yml` (one run per pull request at a time, the newest); `release.yml` is never
+cancelled, and runs of `main` aren't either.
 
 ### Secrets only our runners can open
 
@@ -167,11 +208,12 @@ What the `deploy` jobs run is kept to what they need, since every step of such a
 - `release.yml`'s and `tools.yml`'s `publish` compile no Rust and run no program the checkout builds (a build script or a proc
   macro would run where `seal.key` is). The build jobs make every file publish signs, RecompLauncher's zips too;
   `tools.yml`'s uploads with `scripts/ci_tools_publish.py`, Python's standard library, the archives its make job made
-  twice on a `release` runner, refusing one whose version `tools.lock` names with other bytes. The version job compiles the builder that reads `tools.lock`, with
-  no secret and no `seal.key` mounted, and only when there is a version to build.
+  twice on a `release` runner, refusing one whose version `tools.lock` names with other bytes. The version job compiles
+  nothing: tools.lock is checked by the build jobs, with the builder they build anyway.
 - A secret, sealed or the job's token, is given in the `env:` of the steps that use it, never the job's.
-- The jobs that make a release's files (`build-linux.yml`, `build-windows.yml`) restore no cache: a cache's key is
-  anyone's to save first. Their build checks compile into an object store of the run's own, after `dist/` is uploaded.
+- The jobs that make a release's files (`build-linux.yml`, `build-windows.yml`) restore only [the release's
+  cache](#the-releases-cache), of downloads each checked by its SHA-256 when used: a cache's key is anyone's to save
+  first. Their build checks compile into an object store of the run's own, after `dist/` is uploaded.
 
 Lend runners only to people you'd trust that far.
 
