@@ -29,7 +29,7 @@ use std::fmt::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: longshot-builder dev site-hooks --tables <host/game> --build <build id> --out <file.ll>
+const USAGE: &str = "usage: longshot-builder dev site-hooks --tables <game> --build <build id> --out <file.ll>
                                        <name>=<site>[@<pc>[:[<callee>]]][/<ident>] ...";
 
 const SVC_1: u32 = 0xd400_0021; // svc #1
@@ -404,7 +404,7 @@ int main(void) {
         if !(cfg!(target_arch = "x86_64") && cfg!(target_os = "linux")) {
             return;
         }
-        let tables = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../host/game");
+        let tables = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../game");
         let specs: Vec<Spec> = [
             "h_after=text.letterStep",
             "h_entry=opening.request",

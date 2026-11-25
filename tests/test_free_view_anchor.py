@@ -1,5 +1,5 @@
-"""The free camera's hook goes at the head of the view's loop in f_804e48c0: the hook site camera.view (host/game/sites.toml),
-before the instruction at +0x7a8, with host/oot_sites.c's callback hos_oot_free_view(c, x20).
+"""The free camera's hook goes at the head of the view's loop in f_804e48c0: the hook site camera.view (game/sites/sites.toml),
+before the instruction at +0x7a8, with game/oot_sites.c's callback hos_oot_free_view(c, x20).
 
 A before site is placed by the instruction's address, on every way into it: the loop's entry and each time round, whatever
 the lift writes there. The hook, as the lift lowers it (tests/sitehooks.py), with its callback runs against a stub

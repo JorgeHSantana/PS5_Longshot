@@ -47,7 +47,7 @@ pub(crate) fn table(sites: &[&str]) -> String {
 }
 
 pub(crate) fn read(text: &str, engine: Option<&BTreeSet<String>>) -> Result<Vec<Site>, TableError> {
-    parse_table(text, "host/game/sites/x/sites.toml", Some(BUILD), engine)
+    parse_table(text, "game/sites/x/sites.toml", Some(BUILD), engine)
 }
 
 fn bad(text: &str, words: &[&str]) -> String {
@@ -55,7 +55,7 @@ fn bad(text: &str, words: &[&str]) -> String {
     for w in words {
         assert!(e.contains(w), "{w:?} not in: {e}");
     }
-    assert!(e.contains("host/game/sites/x/sites.toml"), "{e}");
+    assert!(e.contains("game/sites/x/sites.toml"), "{e}");
     e
 }
 
@@ -409,7 +409,7 @@ fn each_rule_of_the_split() {
     let e = parse_definitions(&(DEFS.to_string() + "offset = 4\n"), "d.toml").unwrap_err().to_string();
     assert!(e.contains("its locations.toml"), "{e}");
     let e = parse_locations(&(locs() + "shape = \"data\"\n"), "l.toml", Some(BUILD)).unwrap_err().to_string();
-    assert!(e.contains("host/game/sites.toml"), "{e}");
+    assert!(e.contains("game/sites/sites.toml"), "{e}");
     let e = parse_definitions(&(DEFS.to_string() + "[[site]]\nname = \"a.one\"\n"), "d.toml").unwrap_err().to_string();
     assert!(e.contains("defined twice"), "{e}");
     assert!(parse_definitions(&DEFS.replace("format = 2", "format = 1"), "d.toml").is_err());

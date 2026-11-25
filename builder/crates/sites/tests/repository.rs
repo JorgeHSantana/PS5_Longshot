@@ -1,4 +1,4 @@
-//! The repository's own tables (`host/game`): every build's locations read with its definitions, every site with its
+//! The repository's own tables (`game`): every build's locations read with its definitions, every site with its
 //! line in the host's list, and every engine site placed by a table. Game-free: the tables hold names, offsets and a
 //! few masked words per site, nothing else of the game.
 
@@ -9,7 +9,7 @@ use std::path::PathBuf;
 const SUPPORTED: &str = "e0f3ccfaf50065ae4ea01eb5aeb13b1a45da3348";
 
 fn game() -> PathBuf {
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../host/game"))
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../game"))
 }
 
 fn host_text() -> String {
@@ -17,9 +17,12 @@ fn host_text() -> String {
 }
 
 fn builds() -> Vec<String> {
+    // (a build's folder each; sites.toml, the definitions, is beside them)
     let mut b: Vec<String> = std::fs::read_dir(game().join("sites"))
         .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .map(|e| e.unwrap())
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     b.sort();
     b
@@ -28,11 +31,11 @@ fn builds() -> Vec<String> {
 #[test]
 fn every_table_reads_and_has_its_host_lines() {
     let tables = Tables::new(game());
-    let host = tables.host().unwrap().expect("host/game/sites.def");
+    let host = tables.host().unwrap().expect("game/sites.def");
     let builds = builds();
     assert!(builds.iter().any(|b| b == SUPPORTED), "no table for the supported build");
     let defs_path = tables.definitions();
-    let defs = parse_definitions(&std::fs::read_to_string(&defs_path).unwrap(), "host/game/sites.toml").unwrap();
+    let defs = parse_definitions(&std::fs::read_to_string(&defs_path).unwrap(), "game/sites/sites.toml").unwrap();
     let mut placed = std::collections::BTreeSet::new();
     for b in &builds {
         assert!(b.len() == 40 && b.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')), "{b}: not a build id");
@@ -64,7 +67,7 @@ fn every_table_reads_and_has_its_host_lines() {
         assert_eq!(got, want, "{b}");
     }
     // (every engine callback's site is a row of a table, or nothing places its hook and the feature is silently gone)
-    assert!(!host.engine.is_empty(), "host/game/sites.def has no HOS_SITE_ENGINE line: this check reads it wrong");
+    assert!(!host.engine.is_empty(), "game/sites.def has no HOS_SITE_ENGINE line: this check reads it wrong");
     let unplaced: Vec<&String> = host.engine.iter().filter(|n| !placed.contains(*n)).collect();
     assert!(unplaced.is_empty(), "HOS_SITE_ENGINE lines whose site no table has: {unplaced:?}");
     // (each definition has its host line, or is a rule)
@@ -76,16 +79,16 @@ fn every_table_reads_and_has_its_host_lines() {
 
 #[test]
 fn the_worker_outcome_sites_are_listed() {
-    // (host/game/sites.def's HOS_SITE_OUTCOME lines are exactly the sites that change the game's outcome on a worker
+    // (game/sites.def's HOS_SITE_OUTCOME lines are exactly the sites that change the game's outcome on a worker
     // thread, so the host refuses them a run-time handler; the lift stops on one missing or one too many)
     let tables = Tables::new(game());
-    let host = tables.host().unwrap().expect("host/game/sites.def");
+    let host = tables.host().unwrap().expect("game/sites.def");
     for b in builds() {
         let sites = load(&tables, &b, Some(&host)).unwrap().unwrap();
         let want: std::collections::BTreeMap<String, String> =
             sites.iter().filter(|s| s.decides_on_worker()).map(|s| (s.ident(), s.name.clone())).collect();
         assert!(!want.is_empty(), "no worker-thread outcome site in {b}: this check reads the table wrong");
-        assert_eq!(host.outcome, want, "host/game/sites.def's HOS_SITE_OUTCOME lines are not {b}'s outcome sites");
+        assert_eq!(host.outcome, want, "game/sites.def's HOS_SITE_OUTCOME lines are not {b}'s outcome sites");
     }
     let starts = host_text().lines().filter(|l| l.starts_with("HOS_SITE_OUTCOME(")).count();
     assert_eq!(starts, host.outcome.len(), "a HOS_SITE_OUTCOME line the reader does not take, or one named twice");
@@ -97,7 +100,7 @@ fn the_host_list_names_each_site_once() {
     let lines = HostList::site_lines(&text);
     assert!(!lines.is_empty());
     let idents: std::collections::BTreeSet<&String> = lines.iter().map(|(i, _)| i).collect();
-    assert_eq!(idents.len(), lines.len(), "an identifier named twice in host/game/sites.def");
+    assert_eq!(idents.len(), lines.len(), "an identifier named twice in game/sites.def");
     for (i, n) in &lines {
         assert!(is_name(n), "{n}: not a site name");
         assert_eq!(&ident(n), i, "{n}: its identifier is not {i}");

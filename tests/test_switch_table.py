@@ -2,7 +2,7 @@
 
 Every RX_, HOS_ and LONGSHOT_ name the source reads from the environment has a row, every row is read somewhere, and a removed name (GONE)
 is read nowhere: a switch added without a row, a row left behind by a deleted read and a removal that left a read all
-fail here. A read is a whole string literal "RX_...", "HOS_..." or "LONGSHOT_..." in code under gpu/ or host/ (not in a comment, not part of a
+fail here. A read is a whole string literal "RX_...", "HOS_..." or "LONGSHOT_..." in code under gpu/, host/ or game/ (not in a comment, not part of a
 longer string): the reads go through getenv, env_on and helpers that are handed the name, so the literal is what they
 share. A name the builder (builder/crates/build-compile) hands a C file as a macro (-DNAME="RX_...") is a read too. PREFIXES are the literals that are no switch themselves: the start of a family, matched against the names the
 environment holds.
@@ -72,7 +72,7 @@ def table():
 def literals():
     """{name: ["file:line", ...]} of the whole "RX_...", "HOS_..." and "LONGSHOT_..." literals in code"""
     found = {}
-    for base in ("gpu", "host"):
+    for base in ("gpu", "host", "game"):
         for path in sorted((ROOT / base).rglob("*")):
             if path.suffix not in (".c", ".cpp", ".h", ".inc") or SKIP_DIRS & set(path.relative_to(ROOT).parts):
                 continue

@@ -1,7 +1,7 @@
-"""The movie site (wide.movie, host/oot_wide_sites.c's hos_site_wide_movie) keeps a centred 16:9 viewport on wide and
+"""The movie site (wide.movie, game/oot_wide_sites.c's hos_site_wide_movie) keeps a centred 16:9 viewport on wide and
 narrow pictures: side bars on a wider one, bars above and below on a narrower one (#2358).
 
-The callback is cut out of host/oot_wide_sites.c and run on made-up viewports, game-free.
+The callback is cut out of game/oot_wide_sites.c and run on made-up viewports, game-free.
 
 python -I -B tests/test_movie_shape.py [--cc gcc] [--sites /path/to/oot_wide_sites.c]
 """
@@ -88,7 +88,7 @@ int main(void) {
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cc", default=os.environ.get("CC", "gcc"))
-    parser.add_argument("--sites", type=Path, default=ROOT / "host" / "oot_wide_sites.c")
+    parser.add_argument("--sites", type=Path, default=ROOT / "game" / "oot_wide_sites.c")
     args = parser.parse_args()
     sites = args.sites.read_text(encoding="utf-8")
     callback = re.search(r"^int hos_site_wide_movie\(Ctx \*A64_NOESC c\) \{.*?^\}", sites, re.M | re.S)

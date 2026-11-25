@@ -180,6 +180,8 @@ void WakeAllConditionVariable(CONDITION_VARIABLE *cv);
 BOOL SleepConditionVariableSRW(CONDITION_VARIABLE *cv, SRWLOCK *l, DWORD ms, ULONG flags);
 BOOL SleepConditionVariableCS(CONDITION_VARIABLE *cv, CRITICAL_SECTION *cs, DWORD ms);
 BOOL WaitOnAddress(volatile void *addr, void *compare, SIZE_T size, DWORD ms);
+int hos_posix_wait_atomic32(volatile uint32_t *word, uint32_t expected, DWORD ms);
+void hos_posix_wake_atomic32(volatile uint32_t *word, int all);
 void WakeByAddressSingle(void *addr);
 void WakeByAddressAll(void *addr);
 

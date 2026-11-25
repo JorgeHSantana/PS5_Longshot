@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import { createMarkdownProcessor } from '@astrojs/markdown-remark';
-import { readGraphicsSettings, formatGraphicsSettings, readMenuRows, MODULES_MARKER, SHORT_CHOICES } from '../src/repo-docs/graphics-settings.ts';
+import { readGraphicsSettings, formatGraphicsSettings, readMenuRows, GAME_ROWS_MARKER, MODULES_MARKER, SHORT_CHOICES } from '../src/repo-docs/graphics-settings.ts';
 import { matchesSetting, installGraphicsSettings } from '../src/lib/graphics-settings.ts';
 
 // The settings page holds the table of every menu row's choices and defaults; the menu's source holds the rest.
@@ -11,8 +11,17 @@ const page = await readFile(new URL('../../docs/user/graphics-and-controls.md', 
 const moduleDir = new URL('../../gpu/vk/menu/', import.meta.url);
 const modules = await Promise.all((await readdir(moduleDir)).filter(name => name.endsWith('.cpp')).sort()
   .map(name => readFile(new URL(name, moduleDir), 'utf8')));
-const menu = await readFile(new URL('../../gpu/vk/vk_menu.cpp', import.meta.url), 'utf8') + MODULES_MARKER + modules.join('\n');
+const menu = await readFile(new URL('../../gpu/vk/vk_menu.cpp', import.meta.url), 'utf8') + MODULES_MARKER + modules.join('\n') +
+  GAME_ROWS_MARKER + await readFile(new URL('../../game/menu/rows.c', import.meta.url), 'utf8');
 const processor = await createMarkdownProcessor();
+
+test('game rows supply the published menu help, section and restart flag', () => {
+  const groups = readGraphicsSettings(page, menu);
+  const find = name => groups.flatMap(group => group.settings).find(setting => setting.name === name);
+  assert(groups.find(group => group.name === 'Screen')?.settings.some(setting => setting.name === 'Ultrawide menus'));
+  assert.match(find('Field of view').summary, /100% is the original view/);
+  assert.equal(find('Skip title screen').restart, true);
+});
 
 test('frame-generation visibility has a badge and still requires its documented condition', () => {
   const setting = readGraphicsSettings(page, menu).flatMap(group => group.settings)
@@ -182,12 +191,12 @@ test('restart, coverage and condition drift between the table and the menu stop 
   assert.notEqual(noSpeakerRestart, page, 'Speaker layout fixture must remove its restart annotation');
   assert.throws(() => readGraphicsSettings(noSpeakerRestart, menu), /restart mismatch at Speaker layout/);
   // (a row of another tab added to the menu, or one the table lists that the menu lacks)
-  assert.throws(() => readGraphicsSettings(page, menu + '\nMENU_MODULE(balance) {\n    menu::tab("audio")\n        .row({.key = "balance", .label = "Balance", .help = "x", .value = &opts.volume});\n}\n'), /Audio coverage mismatch/);
+  assert.throws(() => readGraphicsSettings(page, menu.replace(GAME_ROWS_MARKER, '\nMENU_MODULE(balance) {\n    menu::tab("audio")\n        .row({.key = "balance", .label = "Balance", .help = "x", .value = &opts.volume});\n}\n' + GAME_ROWS_MARKER)), /Audio coverage mismatch/);
   assert.throws(() => readGraphicsSettings(page.replace(/^\| \| Mute in background .*\n/m, ''), menu), /Audio coverage mismatch/);
   assert.throws(() => readGraphicsSettings(page.replace('| | Text size |', '| | Text sizes |'), menu), /Gameplay coverage mismatch/);
   // (a row the menu hides on some PCs, with no condition in the table)
   assert.throws(() => readGraphicsSettings(page.replace(' (shown only on AMD GPUs with `VK_AMD_anti_lag`)', ''), menu), /no condition for AMD Anti-Lag 2/);
-  assert.throws(() => readGraphicsSettings(page, menu.replace('.label = "Field of view",', '.label = "Field of view",\n              .shown = [] { return false; },')), /no condition for Field of view/);
+  assert.throws(() => readGraphicsSettings(page, menu.replace('.label = "Game speed",', '.label = "Game speed",\n              .shown = [] { return false; },')), /no condition for Game speed/);
 });
 
 test('escaped pipes remain choices and do not become extra cells', () => {

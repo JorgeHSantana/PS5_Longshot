@@ -1,4 +1,4 @@
-"""The hook site tables (host/game/sites.toml, host/game/sites/<build id>/locations.toml, host/game/sites.def) as the
+"""The hook site tables (game/sites/sites.toml, game/sites/<build id>/locations.toml, game/sites.def) as the
 site tests read them, and the checks a feature's hook sites (docs/dev/reference/hooks.md) make of them, game-free.
 Standard library only. The builder's own reader and its every rule of the format are builder/crates/sites; here a site
 is only what a check needs of it: its name, form and place. Its hook as the lifted code runs it is tests/sitehooks.py's
@@ -8,11 +8,11 @@ is only what a check needs of it: its name, form and place. Its hook as the lift
     from sitecheck import site, callback
 
 load(build): the build's sites (definitions joined with its locations, in the definitions' order), None for a build
-with no table; host_sites(), engine_sites(), engine_callback(ident), host_values(): host/game/sites.def's lines.
+with no table; host_sites(), engine_sites(), engine_callback(ident), host_values(): game/sites.def's lines.
 site(name, function, at, offset=None, can_return=False): the supported build's site of that name, at that place and of
-that form, with its host slot (host/game/sites.def); the Site. callback(marker, source="host/oot_sites.c"): the C of a
+that form, with its host slot (game/sites.def); the Site. callback(marker, source="game/oot_sites.c"): the C of a
 callback of that host file, from its marker to its closing brace, after the file's block of the build's address names.
-slot(x, on=1): C defining the site's flag (on or off) and its slot, holding the engine's callback host/game/sites.def
+slot(x, on=1): C defining the site's flag (on or off) and its slot, holding the engine's callback game/sites.def
 names for it (a fixture defines or cuts the callback before it); engine_fn(x): that callback's name. hooked(x, marker):
 the callback cut at marker with its flag and slot, and the site's hook (sitehooks.line). run(cc, code): a fixture's C with
 hooks in it, compiled with cc and the hooks' object, run: its output. looks(cc, sites, stubs): each (site, marker) of
@@ -37,9 +37,9 @@ import sitehooks  # noqa: E402
 from srccut import block, between  # noqa: E402
 
 BUILD = sitehooks.BUILD   # (the supported dump's build: the one table)
-GAME = ROOT / "host" / "game" / "sites"   # (each build's folder: its locations.toml)
-DEFS = ROOT / "host" / "game" / "sites.toml"   # (each site's definition: the same for every build)
-SITES_DEF = ROOT / "host" / "game" / "sites.def"   # (the host's flag and slot for each site)
+GAME = ROOT / "game" / "sites"   # (each build's folder: its locations.toml)
+DEFS = ROOT / "game" / "sites" / "sites.toml"   # (each site's definition: the same for every build)
+SITES_DEF = ROOT / "game" / "sites.def"   # (the host's flag and slot for each site)
 TABLE = "locations.toml"
 
 __all__ = ["BUILD", "ROOT", "check", "site", "callback", "slot", "engine_fn", "hooked", "load", "host_sites",
@@ -160,7 +160,7 @@ def load(build_id, game=GAME, defs=DEFS):
 
 
 def site_lines(path=SITES_DEF):
-    """[(ident, name, engine callback or None)] of host/game/sites.def's HOS_SITE and HOS_SITE_ENGINE lines, in order:
+    """[(ident, name, engine callback or None)] of game/sites.def's HOS_SITE and HOS_SITE_ENGINE lines, in order:
     the one reader of them"""
     with open(path, encoding="utf-8") as f:
         text = f.read()
@@ -170,12 +170,12 @@ def site_lines(path=SITES_DEF):
 
 
 def host_sites(path=SITES_DEF):
-    """{ident: name} of the sites the host gives a flag and a slot (host/game/sites.def's HOS_SITE lines)"""
+    """{ident: name} of the sites the host gives a flag and a slot (game/sites.def's HOS_SITE lines)"""
     return {i: n for i, n, _ in site_lines(path)}
 
 
 def engine_sites(path=SITES_DEF):
-    """The names of the sites the engine's own features own (host/game/sites.def's HOS_SITE_ENGINE lines)"""
+    """The names of the sites the engine's own features own (game/sites.def's HOS_SITE_ENGINE lines)"""
     return {n for _, n, fn in site_lines(path) if fn}
 
 
@@ -185,7 +185,7 @@ def engine_callback(ident, path=SITES_DEF):
 
 
 def host_values(path=SITES_DEF):
-    """{name: (ident, C type, symbol)} of the values the host gives the rules (host/game/sites.def's HOS_VALUE lines)"""
+    """{name: (ident, C type, symbol)} of the values the host gives the rules (game/sites.def's HOS_VALUE lines)"""
     with open(path, encoding="utf-8") as f:
         return {n: (i, t, sym) for i, n, t, sym in
                 re.findall(r'^HOS_VALUE\((\w+),\s*"([^"]+)",\s*(\w+),\s*(\w+)\)', f.read(), re.M)}
@@ -203,23 +203,23 @@ def site(name, function, at="entry", offset=None, can_return=False):
     check(offset is None or x.offset == offset, "%s is not at %s+%#x" % (name, function, offset or 0))
     check(bool(x.can_return) == bool(can_return), "%s %s return from the function" % (name, "cannot" if can_return else "can"))
     if not x.rule:
-        check(host_sites().get(x.ident) == name, "host/game/sites.def has no HOS_SITE line for %s" % name)
+        check(host_sites().get(x.ident) == name, "game/sites.def has no HOS_SITE line for %s" % name)
     return x
 
 
 ADDRESSES = ("/* ---- build e0f3ccfa's addresses", "/* ---- end of the build's addresses")
 
 
-def callback(marker, source="host/oot_sites.c"):
+def callback(marker, source="game/oot_sites.c"):
     """the callback's C, after the build's address names it may use (each cut repeats them: a macro defined the same twice is
-    one). source: the host file it is in (host/oot_wide_sites.c for widescreen's)"""
+    one). source: the host file it is in (game/oot_wide_sites.c for widescreen's)"""
     text = (ROOT / source).read_text(encoding="utf-8")
     return between(text, *ADDRESSES) + block(text, marker)
 
 
 def engine_fn(x):
     fn = engine_callback(x.ident)
-    check(fn is not None, "host/game/sites.def has no HOS_SITE_ENGINE line for %s" % x.name)
+    check(fn is not None, "game/sites.def has no HOS_SITE_ENGINE line for %s" % x.name)
     return fn
 
 
@@ -229,7 +229,7 @@ def slot(x, on=1):
 
 
 def hooked(x, marker):
-    """(the C a fixture puts at file scope before the hooked code: the site's callback, cut from host/oot_sites.c at marker,
+    """(the C a fixture puts at file scope before the hooked code: the site's callback, cut from game/oot_sites.c at marker,
     and its flag (on) and slot; the hook's line at the site, as the lifted code runs it: sitehooks.line)"""
     return ("#ifndef A64_NOESC\n#define A64_NOESC\n#endif\n" + callback(marker) + "\n" + slot(x), sitehooks.line(x))
 
@@ -293,7 +293,7 @@ int main(void) {
 
 def looks(cc, sites, stubs):
     """[(on, off)] for each (x, marker) of sites, each a Looked: the site's hook (sitehooks.line), as the lift lowers it,
-    first in a function that then goes on, its callback cut from host/oot_sites.c at marker (each marker once) and the
+    first in a function that then goes on, its callback cut from game/oot_sites.c at marker (each marker once) and the
     stubs (C defining what the callbacks call; each adds one to calls and records its arguments in got, a uint64_t[8],
     the context as (uint64_t)(uintptr_t)c), run over registers x[r] = REG + r with the site's flag on, then off"""
     markers, defs, fns, runs = [], "", "", ""

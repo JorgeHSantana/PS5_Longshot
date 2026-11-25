@@ -570,10 +570,10 @@ class Scenario(unittest.TestCase):
         self.assertIn("const int timed = fps_max() != 60 && timed_step && hos_step_probe;", vi)   # (the self-check's B)
 
     def test_the_lines_relied_on_are_the_sources(self):
-        mods = (ROOT / "host" / "mods.c").read_text(encoding="utf-8")
+        mods = (ROOT / "game" / "mods.c").read_text(encoding="utf-8")
         self.assertIn('hos_log("mods: none in %s', mods)
         self.assertIn('hos_log("mods: %d mods from %s', mods)
-        self.assertIn('"save trace: reason=', (ROOT / "host" / "hos_main.c").read_text(encoding="utf-8"))
+        self.assertIn('"save trace: reason=', (ROOT / "game" / "oot_tools.c").read_text(encoding="utf-8"))
 
 
 class FakeGame:

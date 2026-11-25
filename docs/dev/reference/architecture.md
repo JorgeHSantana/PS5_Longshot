@@ -15,7 +15,8 @@ how the renderer accounts for memory and decides per PC, and the rules the code 
 |---|---|---|
 | The builder | [`builder/`](../../../builder) | `longshot-builder`: reads the dump, lays out the image, lifts each guest function to LLVM IR through its mid IR, compiles and links the game and the renderer, writes the game folder ([the builder](builder.md)) |
 | The host | [`host/`](../../../host) | Horizon OS: threads, SVCs, memory, file system, HID, audio, display, and NVN2 (`nvn_native.c`) |
-| The hook sites | [`host/game/`](../../../host/game) | Where Longshot changes the game's functions, as data the lift reads, and the host's callbacks ([hook sites](hooks.md)) |
+| The game | [`game/`](../../../game) | Everything about Ocarina of Time: the hook sites (as data the lift reads) and their callbacks ([hook sites](hooks.md)), the game's features, the mods' loader, its Insert menu rows and its Rust; behind [`game/game.h`](../../../game/game.h) and [`host/game_host.h`](../../../host/game_host.h) ([the game side](#the-game-side)) |
+| The game's Rust | [`longshot-rs/`](../../../longshot-rs), [`game/crates/`](../../../game/crates) | The one staticlib the game links (`liblongshot_rs.a`): the game's crates, ported from its C one part at a time |
 | The renderer | [`gpu/vk/`](../../../gpu/vk) | The Vulkan back end: replays NVN2 command streams, translates shaders, presents, runs upscalers and frame generation |
 | Vendored code | [`third_party/`](../../../third_party), `gpu/vk/eden`, `gpu/vk/sirit` | Eden's SM86 shader recompiler, SDL, ImGui, zstd, libopus, Tracy, the upscaler SDKs' headers. Each part of `third_party/` is checked against its `PROVENANCE.md`; `gpu/vk/eden` and `gpu/vk/sirit` are adapted copies kept in the tree |
 
@@ -39,6 +40,27 @@ flowchart TD
 The lineage: mkw-recomp (Mario Kart World) supplied the first lifter, runtime, NVN2 layer and Vulkan back end, and
 Longshot continues [Hookshot](https://git.magicbean.dev/MagicBeanDev/Hookshot). `host/` and `gpu/` stay close to
 mkw-recomp so its fixes still apply as a patch, which is why game-specific code goes in new files where possible.
+
+### The game side
+
+`host/` and `gpu/` are the generic Switch: Horizon OS and the NVN2 replay, which know nothing of the game. Everything
+about Ocarina of Time is in `game/` ([its README](../../../game/README.md)). The line between them is two headers:
+
+- [`host/game_host.h`](../../../host/game_host.h): what the host gives the game. Guest memory and `Ctx`, calling the
+  game's functions (`game_call`), the RomFS and the file readers, logging, the options (`rx_option`), input, the
+  frame's clock, the input recordings and the button prompts. `game/` includes it and nothing else of `host/` or
+  `gpu/` (bar the lift's runtime, `a64.h`).
+- [`game/game.h`](../../../game/game.h): what the game gives the host and the renderer. Its start (`game_init`), the
+  frame's hooks, the input hooks, the control bridge's game commands, the Mods and Cheats pages, the performance
+  summary, the files mods replace and the game's rows of the Insert menu. With [`game/options.h`](../../../game/options.h), the game's option ids, it is
+  all `host/` and `gpu/` include of `game/`. Its names are generic (`game_*`): no file of `host/` or `gpu/` names an
+  `oot_` symbol.
+
+`tests/test_game_boundary.py` checks both sides. Each hook is a plain C function; a table of function pointers is used
+only where the host keeps one already (the control bridge's `HosControlGame`). The game's C is compiled with the
+host's flags into the same game binary, and the game's Rust is linked into it through `longshot-rs`, the one
+staticlib: two would each carry Rust's standard library. A player's build compiles no Rust: the release carries a
+`liblongshot_rs.a` of the tree's Rust sources for each platform (`builder/crates/build-compile/src/rust.rs`).
 
 ### From dump to game folder
 
@@ -84,7 +106,7 @@ changed, and a new builder release reuses the object store ([the builder](builde
 The lifter does not write C and patch it. Each guest function is built as mid IR (`builder/crates/mir`): blocks of typed
 SSA values over the guest state's locations, each instruction's semantics from the Arm ARM (`crates/sem`). Every change
 Longshot makes to a function is an edit of that IR, in Rust data (`crates/edits`): each [hook site](hooks.md)'s form,
-placed by `crates/sites` from `host/game/`'s tables, the supported build's patches, and the host's entry hooks of the
+placed by `crates/sites` from `game/`'s tables, the supported build's patches, and the host's entry hooks of the
 SDK's functions. The function builder writes them in as it builds the function, where it knows each instruction's
 place, so nothing matches lifted text. The passes then share page marks and remove the guest state's dead reads and
 writes, and the LLVM writer syncs the state with the context only where it must: guest memory never aliases the CPU
@@ -130,7 +152,7 @@ A folder of the RomFS is listed from `romfs.h` with the mods' own entries added.
 What the build puts in it is listed in [the builder](builder.md#the-game-folder): the game and the renderer (a folder an
 older builder made has them in `bin/`, which the host still reads), `image.bin`, `longshot_romfs.idx`, the
 assets and the build's records. It has no `romfs` folder: the game reads the .nup in place, so the .nup must stay where
-it was. What the game writes at run time goes in two subfolders, which the host creates (`host/game_layout.c`,
+it was. What the game writes at run time goes in two subfolders, which the host creates (`game/game_layout.c`,
 `gpu/vk/vk_paths.h`):
 
 - `cache/`: the program cache (`longshot_programs.bin` and `.idx`), pipeline caches, this PC's pipeline state list
@@ -546,7 +568,8 @@ Each line below is enforced by a game-free check under `tests/` ([run the checks
 ## The Insert menu
 
 Every row of the Insert (F1) menu belongs to a feature module: one feature's rows in a file of `gpu/vk/menu/`, with the
-code that is theirs (state, texts, hints, actions), placed by the module itself. `gpu/vk/menu_model.h` is the model (no
+code that is theirs (state, texts, hints, actions), placed by the module itself. A row that changes the game, not the
+picture, is the game's: see [the game's rows](#the-games-rows). `gpu/vk/menu_model.h` is the model (no
 ImGui or Vulkan in it), `gpu/vk/menu_module.h` what a module includes, and `vk_menu.cpp` draws what the model builds. The
 build compiles every `gpu/vk/menu/*.cpp`, so a new feature is a new file. A section and its rows (`gpu/vk/menu/hdr.cpp`):
 
@@ -575,12 +598,29 @@ MENU_MODULE(hdr) {
   declared in `menu_module.h`'s "what modules ask the renderer" section.
 - **Room for 256** module rows and headings (`kModuleRowsMax`, `tests/test_menu_module_slots.py`).
 
+### The game's rows
+
+A row is the game's when it changes the game, not the picture, and is plain data: Field of view, Text speed, Text size,
+Skip title screen, Skip opening, Discord status, Ultrawide menus. It goes in `game/menu/` as a `GameMenuRow`
+([`game/game.h`](../../../game/game.h)): its key, texts, tab, kind (toggle, slider or choice), option id
+([`game/options.h`](../../../game/options.h)), range, default, choices and hints, and its place (`after` or `before` a
+key, `order`). The game's build compiles `game/menu/*.c` with the game's C, and the host hands the table to the renderer
+(`MkwVkHost`'s `game_menu_rows`).
+
+One generic module, `gpu/vk/menu/game_rows.cpp`, adds the rows to the menu in place, as any module adds its own. The
+renderer keeps their values, one int by option id. The menu loads and saves them as every row, under their keys, and the
+option callback (`vk_replay.cpp`) answers `rx_option` for their ids. A row that needs the renderer's code (a `shown`,
+`hint` or `on_change` hook, an action, ImGui) stays in `gpu/vk/menu/`, even when it is about the game: the HUD layout and
+its placement, Damage taken and Autosave (the Debug tools'), Game language.
+
+### The core's rows and the checks
+
 `vk_menu.cpp`'s own table keeps only the core's three section headings (`resolution`, `screen`, `developer`) and the
 custom rows it still draws itself (Custom output size's text field, the Controls row's bindings grid, the Debug tools'
 panel: `Custom` items in the model, `bespoke_row`); the Mods tab's lines are drawn by `draw_mods`. Checks:
 `tests/test_menu_modules.py` builds every module (no game) and fails on a missing anchor, a cycle or a doubled key; a
-check that reads rows uses `tests/menu_model_fixture.py` (`menu_text()`, `built_menu()`), and
-`tests/test_settings_table.py` compares the menu as built with the settings table in
+check that reads rows uses `tests/menu_model_fixture.py` (`menu_text()`, `built_menu()`, and `game_rows()` for the
+game's), and `tests/test_settings_table.py` compares the menu as built with the settings table in
 [graphics and controls](../../user/graphics-and-controls.md).
 
 ## Tools

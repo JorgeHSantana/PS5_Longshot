@@ -12,7 +12,7 @@ function builder (`lift`) writes in as it builds the function.
   `FunctionEdits::key`; `Edits`, a map by entry; `EditError`.
 - [`src/code.rs`](src/code.rs): the small statement language an edit is written in (`Stmt`, `Expr`, `Cond`, `Target`,
   `Wrap`) and its translation into mid IR (`emit`, through `Emit`, which the function builder implements).
-- [`src/site.rs`](src/site.rs): each `sites::Placed` as code by its form, over the host's ABI (`host/game/sites.h`:
+- [`src/site.rs`](src/site.rs): each `sites::Placed` as code by its form, over the host's ABI (`game/sites.h`:
   `hos_site_on_<ident>`, `hos_site_fn_<ident>`, `hos_site_callee`).
 - [`src/patches.rs`](src/patches.rs): the supported build's patches no site form expresses (the output size, the
   gameplay HUD's wrapper), each found by the instructions at its place, with the host functions it calls.

@@ -2,7 +2,7 @@
 https://github.com/NotRexed/Hookshot/pull/2843) moves a HUD layout's side panes out
 to a wider screen's edges, and only while the picture is not 16:9.
 
-The hook sites ui.* (host/oot_wide_sites.c) call host/hos_wide_ui.c from f_8154cab0, where the game makes a pane's final transform: the parent it is
+The hook sites ui.* (game/oot_wide_sites.c) call game/hos_wide_ui.c from f_8154cab0, where the game makes a pane's final transform: the parent it is
 made from, then the transform stored (the translation at +0x4c). A pane at one side of the 3840-wide canvas whose ancestors
 were not moved has its x moved out by the screen's extra half width; its children keep the move they were made with; a
 pane spanning the canvas is drawn the screen's width instead; the HUD's gauges move by name, a pointer placed from the world
@@ -46,7 +46,7 @@ static void recomp_store32(Ctx *c, uint64_t a, uint32_t v) { (void)c; memcpy(mem
 static void recomp_store64(Ctx *c, uint64_t a, uint64_t v) { (void)c; memcpy(mem + (a - BASE), &v, 8); }
 typedef void (*A64Fn)(Ctx *);
 A64Fn a64_lookup(uint64_t addr);
-/* (host/game/game.h's calls as host/game/game.c makes them, over this context: x0.. the arguments, x8 and LR as given (LR
+/* (host/game_call.h's calls as host/game_call.c makes them, over this context: x0.. the arguments, x8 and LR as given (LR
    0 otherwise), the context put back; in_call while the callee runs) */
 typedef struct { int set_x8; uint64_t x8; int set_lr; uint64_t lr; float *s0, *s1; } GameCallMore;
 static int in_call;
@@ -441,7 +441,7 @@ def main():
     a = p.parse_args()
     sitehooks.use(a.cc, a.cargo)
 
-    host = (ROOT / "host" / "hos_wide_ui.c").read_text(encoding="utf-8")
+    host = (ROOT / "game" / "hos_wide_ui.c").read_text(encoding="utf-8")
     backend = (ROOT / "host" / "rx_backend.c").read_text(encoding="utf-8")
 
     check("hos_wide_ui_tick();" in backend, "the host does not plan the HUD each present")
@@ -455,9 +455,9 @@ def main():
                  "ui.paneParent": 0x8154cdd4, "ui.panePlaced": 0x8154ce64, "ui.paneSize": 0x8154ac40,
                  "ui.pictureConstants": 0x815506f4, "ui.pictureDraw": 0x81550740, "ui.layoutBuilt": 0x81545ca0},
           "the pane transform sites moved")
-    api = (ROOT / "gpu" / "vk" / "vk_api.h").read_text(encoding="utf-8")
+    api = (ROOT / "game" / "options.h").read_text(encoding="utf-8")   # (the game's option ids)
     opt = re.search(r"HOS_OPT_WIDE_MENUS = (\d+), HOS_WIDE_MENUS_EXTENDED = (\d+)", api)
-    check(opt is not None, "vk_api.h no longer names the Ultrawide menus option")
+    check(opt is not None, "game/options.h no longer names the Ultrawide menus option")
     check(opt.groups() == ("102", "3"), "the Ultrawide menus option or its Extended value moved: update FIXTURE_HEAD")
     for name in ("hos_wide_ui_parent(uint64_t parent)", "hos_wide_ui_placed(Ctx *c, uint64_t pane)",
                  "hos_wide_ui_size(Ctx *c, uint64_t pane)"):
@@ -467,7 +467,7 @@ def main():
     for decl in ("extern volatile float hos_wide_ratio;\n",):
         check(decl in body, "the host file no longer declares " + decl.strip())
         body = body.replace(decl, "", 1)
-    defs, line = hook("ui.paneDirty")   # (the force site, its callback from host/oot_wide_sites.c, as the lift lowers it)
+    defs, line = hook("ui.paneDirty")   # (the force site, its callback from game/oot_wide_sites.c, as the lift lowers it)
     src = FIXTURE_HEAD + body + "#define A64_NOESC\n" + defs + FIXTURE_MAIN.replace("FORCE_SITE", line)
     with tempfile.TemporaryDirectory(prefix="wide-ui-") as tmp:
         c = Path(tmp) / "fixture.c"

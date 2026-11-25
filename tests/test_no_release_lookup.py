@@ -9,7 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 # (the code that used to ask GitHub for a release or install a newer builder, and must not now)
-SOURCES = ["host/hos_main.c", "builder/crates/longshot-builder/src/main.rs", "builder/crates/build-driver/src/sources.rs"]
+SOURCES = ["host/hos_main.c", "game/oot_tools.c", "builder/crates/longshot-builder/src/main.rs", "builder/crates/build-driver/src/sources.rs"]
 
 
 class NoLookup(unittest.TestCase):

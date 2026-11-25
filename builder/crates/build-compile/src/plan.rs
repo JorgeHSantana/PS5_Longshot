@@ -460,7 +460,8 @@ const ZSTD_HOST: [&str; 2] = ["hos_zstd.c", "zs.c"];
 
 /// The host's C files the game compiles: host/'s own (not pgo_rt.c, the renderer's profile counters' writer, compiled
 /// into the renderer alone; on Linux not the Windows window, movies and wgpu stand-in; dav1d's movies only with dav1d),
-/// host/game/'s (the frame phases and what runs in them), and on Linux the POSIX stand-ins.
+/// the game's, `game/` beside `host/` (compiled as the host's, with its flags, into the same game binary:
+/// game/README.md), and on Linux the POSIX stand-ins.
 pub(crate) fn host_sources(host: &Path, posix: &Path, linux: bool, dav1d: bool) -> Vec<PathBuf> {
     let mut srcs = sorted_files(host, |f| {
         f.ends_with(".c")
@@ -468,7 +469,11 @@ pub(crate) fn host_sources(host: &Path, posix: &Path, linux: bool, dav1d: bool) 
             && !(linux && matches!(f, "display.c" | "mf_av1.c" | "rx_nowgpu.c"))
             && (f != "dav1d_av1.c" || dav1d)
     });
-    srcs.extend(sorted_files(&host.join("game"), |f| f.ends_with(".c")));
+    if let Some(tree) = host.parent() {
+        srcs.extend(sorted_files(&tree.join("game"), |f| f.ends_with(".c")));
+        // (and its Insert menu rows, game/menu/: data the renderer's menu adds, through MkwVkHost's game_menu_rows)
+        srcs.extend(sorted_files(&tree.join("game").join("menu"), |f| f.ends_with(".c")));
+    }
     if linux {
         srcs.extend(["win32_posix.c", "display_sdl.c", "linux_stubs.c", "prof.c"].iter().map(|f| posix.join(f)));
     }
@@ -493,6 +498,9 @@ fn plan_host(
     }
     p.dav1d = dav1d.clone();
     let srcs = host_sources(host, posix, linux, dav1d.is_some());
+    // (the game's C, game/: its objects named game_<file>.o, beside the host's host_<file>.o)
+    let game_dir = l.r("game");
+    let game_menu_dir = game_dir.join("menu");
     let mut hf = [tc.target.clone(), tc.cpu.clone()].concat();
     if linux {
         hf.extend([inc(posix), "-D_GNU_SOURCE".into()]);
@@ -508,8 +516,12 @@ fn plan_host(
     let zstd_inc = inc(&l.r("third_party/zstd/lib"));
     for src in srcs {
         let name = file_name(&src);
-        let in_game = src.parent() == Some(host.join("game").as_path());
-        let obj = format!("{}{}.o", if in_game { "host_game_" } else { "host_" }, &name[..name.len() - 2]);
+        let prefix = match src.parent() {
+            Some(d) if d == game_dir.as_path() => "game_",
+            Some(d) if d == game_menu_dir.as_path() => "game_menu_",
+            _ => "host_",
+        };
+        let obj = format!("{}{}.o", prefix, &name[..name.len() - 2]);
         let mut f = hf.clone();
         f.push(opus_inc.clone());
         if let Some(ff) = &p.ffmpeg_windows {

@@ -1,4 +1,4 @@
-"""The game's job barriers waiting for their work (host/oot_barrier.h, host/oot_barrier.c; HOS_OOT_BARRIER_WAIT), game-free.
+"""The game's job barriers waiting for their work (game/oot_barrier.h, game/oot_barrier.c; HOS_OOT_BARRIER_WAIT), game-free.
 
 Three of OoT's parallel-for jobs sleep 20 us and look again while the masks they poll are not full; with the switch the sleep
 is a wait that ends when a polled mask word moves, and the thread that ORs into such a word wakes the waiters after the OR.
@@ -16,7 +16,7 @@ Then broken variants (the header or the glue edited in the temporary copy), each
 look at the words after arming, the waiter not counted, a wake that wakes nobody, a wake that does not move the slot's word,
 no timeout, a wake for another job ending the wait, the core not given up, the switch not read, the wrong slot woken.
 
-And the hook sites that put the calls in (host/game/sites.toml barrier.*, host/oot_sites.c; the text patch they
+And the hook sites that put the calls in (game/sites/sites.toml barrier.*, game/oot_sites.c; the text patch they
 replaced, nx2/oot_patches.py patch_barrier_wait, is deleted): five replace sites on the sleeps and seven after sites on the
 ORs into polled words, each where the patch put its text. Each place is built with the site's hook as the lift lowers it (tests/sitehooks.py)
 and, side by side, with the patch's text there (OLD_PLACES, made-up places of the lift's form), and run over stand-ins that log every call
@@ -466,7 +466,7 @@ static void recomp_barrier(void) { note(0x2000); }
 void f_85106220(Ctx *c) { note(0x3000), note(c->x[30]); }
 static void f_80001200(Ctx *c) { note(0x4000), note(c->x[30]); }
 A64Fn a64_lookup(uint64_t a) { return a == 0x85106220ull ? f_85106220 : NULL; }
-_Thread_local uint64_t hos_site_callee;   /* (host/game/sites.c's: a replaced bl's callee, which its hook stores) */
+_Thread_local uint64_t hos_site_callee;   /* (game/sites.c's: a replaced bl's callee, which its hook stores) */
 int hos_oot_barrier_on(void) { note(0x5000); return on; }
 int hos_oot_barrier_wait(uint64_t p, uint32_t o1, uint32_t s1, uint32_t o2, uint32_t s2, uint32_t full) {
     note(0x6000), note(p), note(o1), note(s1), note(o2), note(s2), note(full);
@@ -508,7 +508,7 @@ int main(void) {
 
 def side_by_side(callbacks_text=None):
     """the C of the side-by-side run: each place hooked (the sites' hooks around or after the lifted text) and as the patch
-    made it, the callbacks (host/oot_sites.c's, or callbacks_text) and the sites' slots ahead"""
+    made it, the callbacks (game/oot_sites.c's, or callbacks_text) and the sites' slots ahead"""
     sites = [site(name, function, at, offset) for name, function, at, offset in PLACE_SITES]
     functions, hooked_names, patched_names, fns = [], [], [], []
     for k, (x, lifted, (function, old)) in enumerate(zip(sites, LIFTED_PLACES, OLD_PLACES)):
@@ -576,7 +576,7 @@ def sites_checks(cc, tmp):
             fns.append(fn)
     good = "".join(callback("int %s(" % fn) + "\n" for fn in fns)
     for i, (old, new, what) in enumerate(BROKEN_CALLBACKS):
-        check(good.count(old) == 1, "host/oot_sites.c no longer has the text broken callback %d changes: %r" % (i, old))
+        check(good.count(old) == 1, "game/oot_sites.c no longer has the text broken callback %d changes: %r" % (i, old))
         r = run_side(cc, tmp, side_by_side(good.replace(old, new, 1)), "broken-cb-%d" % i)
         check(r.returncode != 0 and "FAIL" in r.stdout, "broken callback %d (%s) passed the side-by-side run" % (i, what))
 
@@ -587,8 +587,8 @@ def main():
     p.add_argument("--cargo")
     a = p.parse_args()
     sitehooks.use(a.cc, a.cargo)
-    header = (ROOT / "host" / "oot_barrier.h").read_text(encoding="utf-8")
-    glue = (ROOT / "host" / "oot_barrier.c").read_text(encoding="utf-8")
+    header = (ROOT / "game" / "oot_barrier.h").read_text(encoding="utf-8")
+    glue = (ROOT / "game" / "oot_barrier.c").read_text(encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if not k.startswith("HOS_")}
 
     def build(tmp, name, h=header, g=glue):
@@ -597,6 +597,7 @@ def main():
         (d / "oot_barrier.h").write_text(h, encoding="utf-8", newline="\n")
         (d / "oot_barrier.c").write_text(g, encoding="utf-8", newline="\n")
         (d / "hos.h").write_text(STUB_HOS, encoding="utf-8", newline="\n")
+        (d / "game_host.h").write_text('#include "hos.h"\n', encoding="utf-8", newline="\n")   # (host/game_host.h: the stub hos.h)
         (d / "fixture.c").write_text(FIXTURE, encoding="utf-8", newline="\n")
         exe = d / "fixture.exe"
         extra = [] if os.name == "nt" else ["-I", str(ROOT / "host" / "posix"), "-pthread"]
@@ -626,7 +627,7 @@ def main():
         for i, (where, edits, mode, what) in enumerate(BROKEN):
             text = header if where == "header" else glue
             for old, _ in edits:
-                check(text.count(old) == 1, "host/oot_barrier.%s no longer has the text broken variant %d changes: %r"
+                check(text.count(old) == 1, "game/oot_barrier.%s no longer has the text broken variant %d changes: %r"
                       % ("h" if where == "header" else "c", i, old))
             for old, new in edits:
                 text = text.replace(old, new, 1)

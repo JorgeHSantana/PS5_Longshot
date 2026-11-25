@@ -1,5 +1,5 @@
 """The neighbouring map the OptimizeChangeBank thread preloads, kept while the game's choice only flickers
-(host/oot_ocb_hold.h, the hook site preload.choice: host/game/sites.toml, host/oot_sites.c).
+(game/oot_ocb_hold.h, the hook site preload.choice: game/sites/sites.toml, game/oot_sites.c).
 
 The preload manager's update (f_832b9880) picks one of the map's neighbours every frame, and a change cancels the one loading
 or loaded (the thread lets go of all of it and loads the other from the start). A choice flickering between two neighbours,
@@ -417,7 +417,7 @@ int main(void) {
 """
 
 # (the update as the lift writes it around its choice with the site's hook as the lift lowers it (tests/sitehooks.py): the registers in the
-# context. pick() stands for host/oot_ocb_hold.c's rule: the held unit 7 while the game chose another)
+# context. pick() stands for game/oot_ocb_hold.c's rule: the held unit 7 while the game chose another)
 LIFTED = r'''
 #include <stdint.h>
 #include <stdio.h>
@@ -464,7 +464,7 @@ class OcbHoldTests(unittest.TestCase):
             tmp = Path(tmp)
             (tmp / "rule.c").write_text(FIXTURE, encoding="utf-8")
             binary = tmp / "rule.exe"
-            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-O1", "-I", str(ROOT / "host"),
+            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-O1", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"),
                                     str(tmp / "rule.c"), "-o", str(binary)], text=True, capture_output=True)
             self.assertEqual(build.returncode, 0, build.stderr)
             run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)
@@ -497,13 +497,13 @@ class OcbHoldTests(unittest.TestCase):
     def test_supported_build_only(self):
         # (the host's reading of the manager is the supported build's: the site is in that build's table alone, so another
         # build's lift has no hook there)
-        tables = sorted((ROOT / "host" / "game" / "sites").glob("*/locations.toml"))
+        tables = sorted((ROOT / "game" / "sites").glob("*/locations.toml"))
         self.assertTrue(tables)
         having = [t.parent.name for t in tables if 'name = "preload.choice"' in t.read_text(encoding="utf-8")]
         self.assertEqual(having, [BUILD])
 
     def test_host_calls_the_rule(self):
-        host = (ROOT / "host" / "oot_ocb_hold.c").read_text(encoding="utf-8")
+        host = (ROOT / "game" / "oot_ocb_hold.c").read_text(encoding="utf-8")
         for needle in ('getenv("HOS_OCB_HOLD_MS")',
                        "oot_ocb_step(&hold, guest_load, c, mgr, want, hold_ns, hos_input_movie_time(&hold_time, hos_now_ns()))",
                        "uint64_t hos_oot_ocb_pick(Ctx *c, uint64_t mgr, uint64_t chosen) {",

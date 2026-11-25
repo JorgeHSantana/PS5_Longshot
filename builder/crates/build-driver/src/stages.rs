@@ -40,7 +40,7 @@ pub struct GameRead {
 pub struct Patches {
     /// The patch files, as the image stage reads them back (game-files' `patches::to_json`).
     pub files: Vec<u8>,
-    /// The list the game folder keeps (`exefs_patches.txt`: host/mods.c says which mods wait for a build).
+    /// The list the game folder keeps (`exefs_patches.txt`: game/mods.c says which mods wait for a build).
     pub list: String,
     /// How many files apply (code or data); 0: the image is the game's own.
     pub applied: usize,
@@ -129,7 +129,7 @@ pub struct AssetPlaces<'a> {
 /// The finish's game-derived files. Each writes into the game folder, reading the game's files through the romfs as
 /// the game reads them (its index, or its linked folder), and keeps what it made while its inputs stay the same.
 pub trait Assets: Sync {
-    /// The texts that name the console, reworded for a PC in every language (`out/texts`, host/texts.c).
+    /// The texts that name the console, reworded for a PC in every language (`out/texts`, game/texts.c).
     fn texts(&self, at: &AssetPlaces<'_>, r: &Reporter) -> Result<()>;
     /// The button prompts of other controllers, the game's icon font redrawn (`out/prompts`, host/prompts.c).
     fn prompts(&self, at: &AssetPlaces<'_>, r: &Reporter) -> Result<()>;
@@ -265,7 +265,7 @@ pub fn profiling(root: &Path, g: &crate::GuestProfile) -> lift::whole::Profiling
 pub fn lift_options(ask: &LiftAsk) -> lift::whole::LiftOptions {
     let mut o = lift::whole::LiftOptions::new(&ask.image, &ask.gen_dir);
     o.host = Some(ask.root.join("host"));
-    o.tables = Some(ask.root.join("host").join("game"));
+    o.tables = Some(ask.root.join("game"));
     o.npdm = Some(ask.npdm.clone());
     o.jobs = ask.jobs.max(1);
     o.store = ask.store.clone();

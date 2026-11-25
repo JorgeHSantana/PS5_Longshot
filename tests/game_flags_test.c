@@ -1,4 +1,4 @@
-/* The game's flags (host/game/flags.c) over a GameDataMgr made up here, in two bounded windows of guest memory (the
+/* The game's flags (game/flags.c) over a GameDataMgr made up here, in two bounded windows of guest memory (the
    singleton slots and a heap; every address outside them reads as unmapped). tests/test_game_flags.py builds it with a
    hos.h of its own (game/../hos.h) and runs it. No flag name, value or layout is taken from a dump: the layout is the
    one flags.c declares, the names are made up or the few the host names in its source. */

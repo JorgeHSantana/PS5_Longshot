@@ -2,7 +2,7 @@
 
 The engine's rate is a whole number of display intervals, 60 at most, and it puts 60 back over a higher one: with only the
 rate raised, every frame above 60 fps still stepped 1/60 s. The engine's two step divides are hook sites with inline data
-rules (frame.stepDivide, frame.globalStepDivide: host/game/sites.toml, the rule mul_f32), which put base * the
+rules (frame.stepDivide, frame.globalStepDivide: game/sites/sites.toml, the rule mul_f32), which put base * the
 host's measured frame time (hos_frame_seconds_bits, sites.def's frame.seconds) in place of the quotient, and
 host/nn_vi.c realtime_step publishes it while the cap is above 60 and the hook is in the build (frame.stepProbe's note_u64
 sets hos_step_probe); Uncapped (frame_rate_cap=6) is a cap of 1000, whose frames step by their own time down to
@@ -251,7 +251,7 @@ def main():
           "the frame's step does not tell the host the hook is there")
     check(values.get("frame.seconds", (None, None, None))[1:] == ("uint32_t", "hos_frame_seconds_bits") and
           values.get("frame.stepObject", (None, None, None))[1:] == ("uint64_t", "hos_step_probe"),
-          "host/game/sites.def does not give the rules host/nn_vi.c's values")
+          "game/sites.def does not give the rules host/nn_vi.c's values")
     step = sites["frame.stepDivide"]
     check(step.ident not in host_sites(), "the step's rule is not inline: sites.def gives it a callback slot")
     rule = sitehooks.line(step)

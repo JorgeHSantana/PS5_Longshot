@@ -246,7 +246,7 @@ impl Stores {
 
 /// Whether `dir` is the builder's tree: the game's sources the compile reads.
 pub fn is_tree(dir: &Path) -> bool {
-    ["host", "gpu/vk", "third_party", "assets"].iter().all(|d| dir.join(d).is_dir())
+    ["host", "game", "gpu/vk", "third_party", "assets"].iter().all(|d| dir.join(d).is_dir())
 }
 
 /// The builder's tree: `given`, else `LONGSHOT_ROOT`, else the sources the program carries, unpacked into the cache
@@ -262,7 +262,10 @@ pub fn tree_root(given: Option<&Path>, get: impl Fn(&str) -> Option<String>) -> 
         }
         return Err(Error::player(
             "tools_incomplete",
-            format!("{} is not Longshot's tools (no host/, gpu/vk/, third_party/ and assets/ in it).", dir.display()),
+            format!(
+                "{} is not Longshot's tools (no host/, game/, gpu/vk/, third_party/ and assets/ in it).",
+                dir.display()
+            ),
         ));
     }
     let carried = crate::sources::embedded();

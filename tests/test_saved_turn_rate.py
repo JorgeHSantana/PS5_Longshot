@@ -1,7 +1,7 @@
 """The saved steering rate in f_8263e8e0 does not decay on short steps (#312).
 
 The two bounds' multiplies are the replace sites steer.rateLower and steer.rateUpper
-(host/game/sites.toml, host/oot_sites.c). An authored update with the two
+(game/sites/sites.toml, game/oot_sites.c). An authored update with the two
 multiplies is built with the sites' hooks as the lift lowers them (tests/sitehooks.py) and, side by
 side, with the text patch's arithmetic they replaced (OLD_ANCHOR, as main had it),
 then compiled and its saved rate checked. Both signs, rate-limited and

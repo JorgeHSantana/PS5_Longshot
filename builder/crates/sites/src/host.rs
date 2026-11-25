@@ -1,4 +1,4 @@
-//! The host's list of sites, `host/game/sites.def`: a flag byte and a callback slot for each site (`HOS_SITE`, and
+//! The host's list of sites, `game/sites.def`: a flag byte and a callback slot for each site (`HOS_SITE`, and
 //! `HOS_SITE_ENGINE` for a site the engine's own feature uses, on from the start), the values the inline rules read
 //! (`HOS_VALUE`), and the sites that change the game's outcome on a worker thread (`HOS_SITE_OUTCOME`, which the host
 //! refuses a callback set at run time). A site with no line here would not link, so the lift stops first.

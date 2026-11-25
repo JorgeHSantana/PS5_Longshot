@@ -1,6 +1,6 @@
 """Game-free Shadow resolution hook: the site, the sun's object only, raise-only, live changes, menu wiring.
 
-Compile the actual host helper (host/oot_shadow.c) with the hook site shadow.cascadeSize's callback (host/oot_sites.c) and
+Compile the actual host helper (game/oot_shadow.c) with the hook site shadow.cascadeSize's callback (game/oot_sites.c) and
 its hook as the lift lowers it (tests/sitehooks.py), against an authored shadow object.
 No dump, lifted code or game assets are needed.
 
@@ -44,7 +44,7 @@ class InstallTests(unittest.TestCase):
 
     def test_lift_and_menu_wiring(self):
         menu = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
-        api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
+        api = (ROOT / "game/options.h").read_text(encoding="utf-8")   # (the game's option ids)
         options = (ROOT / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")
         replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
         self.assertIn("HOS_OPT_SHADOW_RES = 56", api)
@@ -144,7 +144,7 @@ def main():
     result = unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(InstallTests))
     if not result.wasSuccessful():
         raise SystemExit(1)
-    host = (ROOT / "host/oot_shadow.c").read_text(encoding="utf-8")
+    host = (ROOT / "game/oot_shadow.c").read_text(encoding="utf-8")
     body = "".join(line for line in host.splitlines(keepends=True) if not line.startswith("#include"))
     with tempfile.TemporaryDirectory(prefix="oot-shadow-") as temporary:
         source = Path(temporary) / "fixture.c"

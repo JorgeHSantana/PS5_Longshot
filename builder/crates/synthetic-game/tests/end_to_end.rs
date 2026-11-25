@@ -129,9 +129,9 @@ fn write_nup(path: &Path, main: Vec<u8>) {
 fn write_tree(tree: &Path) {
     let (repo, g) = (repo(), game_dir());
     let host = tree.join("host");
-    for d in ["game", "posix"] {
-        std::fs::create_dir_all(host.join(d)).unwrap();
-    }
+    std::fs::create_dir_all(host.join("posix")).unwrap();
+    // (the game's side, game/: empty, the synthetic game has no sites and no game C)
+    std::fs::create_dir_all(tree.join("game")).unwrap();
     for f in ["synthetic_host.c", "zs.c"] {
         std::fs::copy(g.join("host").join(f), host.join(f)).unwrap();
     }

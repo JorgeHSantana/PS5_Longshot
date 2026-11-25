@@ -529,9 +529,10 @@ It goes as the release's workflows do (`.forgejo/workflows/build-linux.yml`, `bu
    `scripts/renhdrum.py` builds it (kept by the hash of what it is made from); the third-party objects
    (`compile --third-party-objects`, by the running builder, from the source's tree and its tools, into an object
    store kept in the cache: a player's build takes each object by its key, so one the source's own compile would key
-   otherwise is compiled at that build); and the pack, by build-driver's writer (`sources::write`), of the files the
-   source's own `build-driver/src/sources.rs` `TREE` and `LEFT_OUT` name, `VERSION`, the objects, the library and the
-   tools, each member compressed quickly (zstd `-3`, else ruzstd's fastest).
+   otherwise is compiled at that build). Sources with Rust game code also get a `liblongshot_rs.a` built with the
+   pinned toolchain and its source key. Build these commits with a version of `from-source` that can package the archive.
+   The pack writer (`sources::write`) combines these artifacts with the source's `TREE` and `LEFT_OUT` file selection,
+   `VERSION` and the tools. Each member is compressed quickly (zstd `-3`, else ruzstd's fastest).
 6. **The builder** (`builder`): `cargo build --profile dist -p longshot-builder --target <triple> --locked --offline`
    with the pack inside (`LONGSHOT_SOURCES`) and the release's flags (no path of this PC in it; Linux: linked by the
    tools' clang against their sysroot, glibc 2.35, with lld; Windows: by their llvm-mingw, the C runtime linked in).

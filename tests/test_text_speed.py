@@ -2,12 +2,12 @@
 site that does it does exactly what the text patch it replaced did.
 
 Text speed and Text size were a text patch after the letter count's test at the head of f_80b1e140's letters' block. They
-are the hook site text.letterStep now (host/game/sites.toml),
-placed after the instruction that loads the count, with host/oot_text_step.c's hos_text_letter_step as the engine's
+are the hook site text.letterStep now (game/sites/sites.toml),
+placed after the instruction that loads the count, with game/oot_text_step.c's hos_text_letter_step as the engine's
 callback. Checked here, game-free:
 
   - the site is in the supported build's table, after f_80b1e140+0x74, with the arguments the callback reads, and the host
-    gives it its slot with that callback (host/game/sites.def);
+    gives it its slot with that callback (game/sites.def);
   - the site's hook as the lift lowers it (tests/sitehooks.py), with the callback, and the patch's C, each where it ran (the patch after the count's test,
     the hook before it), leave the whole guest context and the Text size calls the same, for every count, scale and time
     tried, with other bits in the rest of v0: the patch's C is kept below as main had it;
@@ -25,7 +25,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves the check's own folder off the path)
-from menu_model_fixture import menu_text  # noqa: E402
+from menu_model_fixture import GAME_OPTION_ANSWER, game_row, menu_text  # noqa: E402
 
 RUN_ALL_ARGS = ["--cc", "{clang}", "--cargo", "{cargo}"]
 
@@ -62,8 +62,8 @@ def main():
           "text.letterStep is not after f_80b1e140+0x74 (the letter count's load)")
     check({"x19:ptr:anim", "w9:u32:letters", "s0:f32:time"} <= set(site.args), "the site does not name what the callback reads")
     check(site.shape == "data" and site.thread == "worker", "text.letterStep is not a data rule reachable off the serial thread")
-    check(host_sites().get("text_letterStep") == "text.letterStep", "host/game/sites.def has no slot for text.letterStep")
-    sites_def = (ROOT / "host" / "game" / "sites.def").read_text(encoding="utf-8")
+    check(host_sites().get("text_letterStep") == "text.letterStep", "game/sites.def has no slot for text.letterStep")
+    sites_def = (ROOT / "game" / "sites.def").read_text(encoding="utf-8")
     check('HOS_SITE_ENGINE(text_letterStep, "text.letterStep", hos_text_letter_step)' in sites_def,
           "the engine does not subscribe hos_text_letter_step to the site")
 
@@ -72,11 +72,16 @@ def main():
     menu = menu_text()   # (vk_menu.cpp and its modules' rows, #1633)
     option = replay[replay.index("t.option = "):]
     option = option[:option.index("};") + 2]
-    check("id == 5 ? opts.text_speed" in option, "the host cannot see the menu's row (option 5)")
-    check('"Text speed", &opts.text_speed, 0, 3, 1' in menu, "the Insert menu has no row for it")
+    options_h = (ROOT / "game" / "options.h").read_text(encoding="utf-8")
+    check("enum { HOS_OPT_TEXT_SPEED = 5 };" in options_h and "rx_option(5, 0)" in vi, "the menu's row is not option 5")
+    check(GAME_OPTION_ANSWER in option and "id == 5 ?" not in option, "the host cannot see the menu's row (option 5)")
+    row = game_row("text_speed")   # (the game's row, game/menu/rows.c)
+    check(row is not None and (row["label"], row["option"], row["lo"], row["hi"], row["step"]) ==
+          ('"Text speed"', "HOS_OPT_TEXT_SPEED", "0", "3", "1"), "the Insert menu has no row for it")
+    check("Instant" in menu, "the Text speed row's choices are gone")
     check("hos_text_scale = text_scale(" in block(vi, "static void realtime_step("), "the scale is not set each present")
 
-    step = (ROOT / "host" / "oot_text_step.c").read_text(encoding="utf-8")
+    step = (ROOT / "game" / "oot_text_step.c").read_text(encoding="utf-8")
     fixture = r'''#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -90,7 +95,7 @@ static void hos_oot_text_pane(Ctx *c, uint64_t anim) { (void)c; if (panes < 8) p
 static inline void a64_vset64(uint64_t *d, uint64_t v) { d[0] = v; d[1] = 0; }
 volatile float hos_text_scale = 1.0f;
 ''' + block(vi, "static float text_scale(") + "\n" + block(step, "int hos_text_letter_step(") + r'''
-/* the site's flag and slot as host/game/sites.c gives them (HOS_SITE_ENGINE: on from the start) */
+/* the site's flag and slot as game/sites.c gives them (HOS_SITE_ENGINE: on from the start) */
 volatile uint8_t hos_site_on_text_letterStep = 1;
 int (*volatile hos_site_fn_text_letterStep)(Ctx *A64_NOESC) = hos_text_letter_step;
 /* main's f_80b1e140 at the letters' block, with the text patch: the count loaded, its test, then the patch's C */

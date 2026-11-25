@@ -9,7 +9,7 @@ the `busy` sent to a client over the limit).
 
 | Tool | What it is |
 |---|---|
-| [`host/control.c`](../../../host/control.c) | The bridge, in the game. Its hooks live in `host/nn_hid.c` (controller read), `gpu/vk/vk_replay.cpp` (shots), `gpu/vk/vk_menu.cpp` (settings), `host/hos_main.c` (start, map, teleport, age), `host/oot_state_tap.c` (game snapshots and flags), `host/hos_mem.c` (guest memory bounds), `host/nn_fs.c` (save folder), `host/hos_relaunch.c` (relaunch) and `host/rx_backend.c` (renderer) |
+| [`host/control.c`](../../../host/control.c) | The bridge, in the game. Its hooks live in `host/nn_hid.c` (controller read), `gpu/vk/vk_replay.cpp` (shots), `gpu/vk/vk_menu.cpp` (settings), `host/hos_main.c` (start), `game/oot_tools.c` (map, teleport, age), `game/oot_state_tap.c` (game snapshots and flags), `host/hos_mem.c` (guest memory bounds), `host/nn_fs.c` (save folder), `host/hos_relaunch.c` (relaunch) and `host/rx_backend.c` (renderer) |
 | [`scripts/longshot_ctl.py`](../../../scripts/longshot_ctl.py) | The command line: starts a game with the bridge on, sends commands, manages run folders |
 | [`scripts/longshot_bridge.py`](../../../scripts/longshot_bridge.py) | The client library the command line, the tours and the tests import: the connection, run folders and their supervisor. Standard library only |
 | [`scripts/memtour.py`](../../../scripts/memtour.py) | A memory tour built on the client (Linux): loads a save, teleports through areas and samples RAM, swap and the renderer's `vk: budget:` line |

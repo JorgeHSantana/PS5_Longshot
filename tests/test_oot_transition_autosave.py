@@ -1,6 +1,6 @@
 """Run the OoT save-request hook against synthetic requests, without game data: the hook site save.request (the entry of
-f_80bc72d0, which can return: host/game/sites.toml), as the lift lowers it (tests/sitehooks.py), with its callback
-(host/oot_sites.c) and host/hos_main.c's hos_oot_trace_save. A request Transition autosave drops returns from the
+f_80bc72d0, which can return: game/sites/sites.toml), as the lift lowers it (tests/sitehooks.py), with its callback
+(game/oot_sites.c) and game/oot_tools.c's hos_oot_trace_save. A request Transition autosave drops returns from the
 function at once with x0 = 0; every other goes on into it, x0 as it was; with the site off, every request goes on.
 
 python -I -B tests/test_oot_transition_autosave.py [--cc clang] [--cargo cargo]
@@ -86,9 +86,9 @@ def main():
     parser.add_argument("--cargo")
     args = parser.parse_args()
     sitehooks.use(args.cc, args.cargo)
-    host = (ROOT / "host/hos_main.c").read_text(encoding="utf-8")
-    api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
-    hook = re.search(r"^int hos_oot_trace_save\(Ctx \*c\) \{.*?^\}", host, re.M | re.S).group()
+    tools = (ROOT / "game/oot_tools.c").read_text(encoding="utf-8")
+    api = (ROOT / "game/options.h").read_text(encoding="utf-8")   # (the game's option ids)
+    hook = re.search(r"^int hos_oot_trace_save\(Ctx \*c\) \{.*?^\}", tools, re.M | re.S).group()
     option = re.search(r"enum \{ HOS_OPT_TRANSITION_AUTOSAVE = \d+ \};", api).group()
     x = sitecheck.site("save.request", "f_80bc72d0", "entry", can_return=True)
     sitecheck.check(sitecheck.engine_fn(x) == "hos_site_save_request", "save.request's slot does not name hos_site_save_request")

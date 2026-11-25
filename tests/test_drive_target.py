@@ -1,18 +1,18 @@
-"""Link's driven body's target above 60 fps (the hook sites physics.driveTarget*, host/oot_high_fps.h oot_drive_carry).
+"""Link's driven body's target above 60 fps (the hook sites physics.driveTarget*, game/oot_high_fps.h oot_drive_carry).
 
 While Link pulls himself up a ledge his animation drives his body: each update f_804f5030 (a rigid body's update before the
 physics step, on its path for a body driven to a target) reads the controller's target (+0x3c), which the game set to the
 body's position plus this frame's move, and asks the physics for (target - position) / dt. At 60 fps the body lands on the
 target. Above 60 Havok's solve delivers only part of the move (measured in the game: 1.00 at 60, 0.94 at 90, 0.86 at 120,
 0.82 at 144, 0.78 at 170 fps, close to 1 - 0.126 (1/step - 1)), and the next target starts from where the body ended up:
-the pull-up fell 0.3 m short and Link slid back on the lip (issue 1494). The sites (host/game/sites.toml, after each
-copy's load of the body; host/oot_sites.c) have the host add last update's shortfall to the target before it is read.
+the pull-up fell 0.3 m short and Link slid back on the lip (issue 1494). The sites (game/sites/sites.toml, after each
+copy's load of the body; game/oot_sites.c) have the host add last update's shortfall to the target before it is read.
 
 An authored f_804f5030 (the game's gate to the path, the controller's flags +0x100 bit 0x80, then both copies of the path's
 load of the body and reads of the target as the lift writes them) is built with the sites' hooks as the lift lowers them (tests/sitehooks.py)
 and, side by side, with the text patch's lines they replaced (OLD_CALL, as main had them), each compiled with the host's
-part cut from host/oot_high_fps.c (Link's body and his update count from his components, the target's carry); guest memory,
-the time object and the switches are stand-ins. Each update calls hos_oot_note_link (Link's update, host/hos_main.c), then
+part cut from game/oot_high_fps.c (Link's body and his update count from his components, the target's carry); guest memory,
+the time object and the switches are stand-ins. Each update calls hos_oot_note_link (Link's update, game/oot_tools.c), then
 the body update; a stand-in physics moves the body by the measured share of the target read. The pull-up's lift (1.92 m up,
 0.08 m in, over 0.4 s) is played update by update:
 - at a cap of 60 the body follows the lift (both ways); with the body held back, nothing is carried, at a step of 1 or with
@@ -27,7 +27,7 @@ the body update; a stand-in physics moves the body by the measured share of the 
   mid-climb, reads the same target as the first, and body updates with no update of Link's before them still follow
   the game's renewed targets (none held back);
 - a body the physics holds back is given at most three frames' moves more than the game's target (it is not flung);
-- host/hos_main.c's Link update calls hos_oot_note_link on every update, before the cheats' lock and under no condition
+- game/oot_tools.c's Link update calls hos_oot_note_link on every update, before the cheats' lock and under no condition
   (the wiring the game needs; the fixture calls it itself);
 - the update without the hooks (or with their flags off) compiled the same way fails the 120 fps check (the bug, shown
   without the fix);
@@ -384,7 +384,7 @@ def build_and_run(cc, update, host, directory):
     text = FIXTURE.replace("@HOST@", host + stubs).replace("@UPDATE@", update)
     source.write_text(text, encoding="utf-8")
     subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-Wno-unused-const-variable",
-                    "-Wno-unused-label", "-I", str(ROOT / "host"), str(source), *sitehooks.objects(directory, text),
+                    "-Wno-unused-label", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"), str(source), *sitehooks.objects(directory, text),
                     "-o", str(binary), "-lm"], check=True)
     return subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)
 
@@ -398,7 +398,7 @@ def main():
     sites = (site("physics.driveTarget", "f_804f5030", "after", 0x1b4),
              site("physics.driveTargetOther", "f_804f5030", "after", 0xe6c))
     placed(sites)
-    text = (ROOT / "host" / "oot_high_fps.c").read_text(encoding="utf-8")
+    text = (ROOT / "game" / "oot_high_fps.c").read_text(encoding="utf-8")
     host = between(text, "static volatile uint64_t link_body;", "/* The time f_81b3aa48 loads from the cloth's step context")
     callbacks = "\n" + callback("int hos_site_drive_target(") + "\n" + callback("int hos_site_drive_target_other(") + "\n"
     old = UPDATE
@@ -418,13 +418,13 @@ def main():
         print("PASS: the update without the hooks compiles and fails the 120 fps check (%s)"
               % native.stdout.split("FAIL: 120 fps: ")[1].split("\n")[0])
     # (the game needs Link's update to give his body and count his updates: the fixture calls it itself)
-    main_c = (ROOT / "host" / "hos_main.c").read_text(encoding="utf-8")
-    lift_player = block(main_c, "void hos_oot_lift_player(Ctx *c, uint64_t actor) {")
+    tools_c = (ROOT / "game" / "oot_tools.c").read_text(encoding="utf-8")
+    lift_player = block(tools_c, "void hos_oot_lift_player(Ctx *c, uint64_t actor) {")
     call = lift_player.find("\n    hos_oot_note_link(components);\n")   # (a statement of its own, not under a condition)
     if call < 0 or call > lift_player.find("TryAcquireSRWLockExclusive(&cheats_lock)"):
-        raise SystemExit("FAIL: host/hos_main.c's hos_oot_lift_player does not call hos_oot_note_link(components) on every update of "
+        raise SystemExit("FAIL: game/oot_tools.c's hos_oot_lift_player does not call hos_oot_note_link(components) on every update of "
                          "Link's, before the cheats' lock")
-    print("PASS: Link's update gives his body and counts his updates, every update (host/hos_main.c)")
+    print("PASS: Link's update gives his body and counts his updates, every update (game/oot_tools.c)")
 
 
 if __name__ == "__main__":

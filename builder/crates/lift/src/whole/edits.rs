@@ -1,4 +1,4 @@
-//! The lift's edits: every change Longshot makes to the game's functions (the hook sites of host/game's tables, placed
+//! The lift's edits: every change Longshot makes to the game's functions (the hook sites of game/'s tables, placed
 //! by the `sites` crate; the supported build's patches; the host's entry hooks of the SDK's functions), planned by the
 //! `edits` crate per function. The function builder writes each function's edits in as it builds it
 //! ([`crate::Program::new`]), and each function's key holds its edits' key ([`Edits::key`]), so one site's or one

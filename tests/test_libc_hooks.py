@@ -40,10 +40,10 @@ HOOK_RE = re.compile(r"^ENTRY_HOOK_SYM(?:\((\w+)\)|_FROM\((\w+),\s*(\d+)\))", re
 
 
 def hooks():
-    """{symbol: the smallest size (x2) the hook is called for, 0 for any} of the hooks host/*.c and host/game/*.c define
+    """{symbol: the smallest size (x2) the hook is called for, 0 for any} of the hooks host/*.c and game/*.c define
     (lines that start ENTRY_HOOK_SYM, as the lift reads them)"""
     out = {}
-    for d in (ROOT / "host", ROOT / "host" / "game"):
+    for d in (ROOT / "host", ROOT / "game"):
         for path in sorted(d.glob("*.c")):
             for plain, sym, least in HOOK_RE.findall(path.read_text(encoding="utf-8", errors="replace")):
                 out[plain or sym] = int(least) if sym else 0

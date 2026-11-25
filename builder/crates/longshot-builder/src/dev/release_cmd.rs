@@ -217,9 +217,22 @@ fn objects_line(out: &str) -> Option<(String, String)> {
     })
 }
 
-/// What a dry run's two outputs (without and with AMD FSR 4) must show; the first thing wrong.
-fn check_dry_runs(none: &str, fsr4: &str) -> Result<(), String> {
+/// The dry run's line about the game's Rust (build-compile), printed when the tree it reads has it.
+const RUST_LINE: &str = "dry run: the game's Rust: ";
+/// That line when the tree carries a prebuilt `liblongshot_rs.a` of its own Rust sources.
+const RUST_PREBUILT: &str = "dry run: the game's Rust: prebuilt for its sources";
+
+/// What a dry run's two outputs (without and with AMD FSR 4) must show; the first thing wrong. The game's Rust
+/// (`longshot-rs`) must be prebuilt for its sources, or a player's build would need cargo: in both runs when either
+/// speaks of it (the tree the dry run read has it), or when `rust` (the checkout it runs in has it).
+fn check_dry_runs(none: &str, fsr4: &str, rust: bool) -> Result<(), String> {
+    let rust = rust || none.contains(RUST_LINE) || fsr4.contains(RUST_LINE);
     for (up, out) in [("none", none), ("fsr4", fsr4)] {
+        if rust && !out.contains(RUST_PREBUILT) {
+            return Err(format!(
+                "the dry run ({up}): no prebuilt liblongshot_rs.a of the tree's Rust sources: a player's build would need cargo"
+            ));
+        }
         if !files_line(out) {
             return Err(format!("the dry run ({up}): files missing, or none to compile"));
         }
@@ -306,7 +319,10 @@ fn dry_run_cmd(a: &Args) -> Result<(), String> {
         }
         outs.push(String::from_utf8_lossy(&o.stdout).into_owned());
     }
-    check_dry_runs(&outs[0], &outs[1])?;
+    // (the tree it reads: --root, else the checkout it runs in, as the release does; a --clean run without --root
+    // reads the tree it carries, whose Rust its own lines show)
+    let rust = Path::new(root.unwrap_or(".")).join("longshot-rs").join("Cargo.toml").is_file();
+    check_dry_runs(&outs[0], &outs[1], rust)?;
     say("the dry runs passed".into());
     Ok(())
 }
@@ -546,17 +562,30 @@ mod tests {
         let good = "dry run: 812 files to compile besides the lift's, 0 missing\n\
                     dry run: the third-party objects: 40 of 40 in the tools' set\n";
         let fsr = format!("{good}with AMD FSR 4\n");
-        assert_eq!(check_dry_runs(good, &fsr), Ok(()));
-        assert!(check_dry_runs(good, good).is_err(), "no AMD FSR 4 where it is asked for");
-        assert!(check_dry_runs(&fsr, &fsr).is_err(), "AMD FSR 4 where it is not");
+        assert_eq!(check_dry_runs(good, &fsr, false), Ok(()));
+        assert!(check_dry_runs(good, good, false).is_err(), "no AMD FSR 4 where it is asked for");
+        assert!(check_dry_runs(&fsr, &fsr, false).is_err(), "AMD FSR 4 where it is not");
         let missing = good.replace(", 0 missing", ", 3 missing");
-        assert!(check_dry_runs(&missing, &fsr).is_err());
+        assert!(check_dry_runs(&missing, &fsr, false).is_err());
         let none = good.replace("812 files", "0 files");
-        assert!(check_dry_runs(&none, &fsr).is_err());
+        assert!(check_dry_runs(&none, &fsr, false).is_err());
         let compiled = good.replace("40 of 40", "39 of 40");
-        assert!(check_dry_runs(&compiled, &fsr).is_err());
+        assert!(check_dry_runs(&compiled, &fsr, false).is_err());
         let zero = good.replace("40 of 40", "0 of 0");
-        assert!(check_dry_runs(&zero, &fsr).is_err());
+        assert!(check_dry_runs(&zero, &fsr, false).is_err());
+        // (a tree with the game's Rust: its prebuilt library, in both runs)
+        assert!(check_dry_runs(good, &fsr, true).is_err(), "no prebuilt liblongshot_rs.a");
+        let rust = format!("{good}{RUST_PREBUILT}\n");
+        let rust_fsr = format!("{rust}with AMD FSR 4\n");
+        assert_eq!(check_dry_runs(&rust, &rust_fsr, true), Ok(()));
+        assert!(check_dry_runs(&rust, &fsr, true).is_err(), "prebuilt in one run only");
+        // (the tree the dry run read had the Rust, though the checkout it ran in did not: still checked)
+        assert!(check_dry_runs(&rust, &fsr, false).is_err(), "prebuilt in one run only, Rust unseen in the checkout");
+        let cargo =
+            format!("{good}dry run: the game's Rust: no prebuilt library of its sources: cargo would build it\n");
+        let cargo_fsr = format!("{cargo}with AMD FSR 4\n");
+        assert!(check_dry_runs(&cargo, &cargo_fsr, false).is_err(), "cargo would build it");
+        assert!(check_dry_runs(&rust, &cargo_fsr, false).is_err(), "cargo would build it in one run");
     }
 
     #[test]

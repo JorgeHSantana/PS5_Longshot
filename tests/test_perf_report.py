@@ -86,18 +86,18 @@ def wiring():
     summarize = cpp[cpp.index("void summarize("):]
     check("if (now) finish_sample();" in summarize[:summarize.index("\n}\n")],
           "a summary mid-second keeps the second being sampled: the frames after it are sampled too")
-    host = (ROOT / "host" / "hos_main.c").read_text(encoding="utf-8")
-    pose_fn = host[host.index("static void oot_perf_pose("):]
+    tools = (ROOT / "game" / "oot_tools.c").read_text(encoding="utf-8")
+    pose_fn = tools[tools.index("static void oot_perf_pose("):]
     pose_fn = pose_fn[:pose_fn.index("\n}\n")]
     check("if (now - last < PERF_POSE_EVERY_NS) return;" in pose_fn and
           pose_fn.index("PERF_POSE_EVERY_NS") < pose_fn.index("oot_gameplay_view(c)"),
           "Link's pose is read a few times a second, not at every update")
     check("recomp_load64(c, view) != 0x84c18a88ULL" in pose_fn and "oot_event_playing(c)" in pose_fn and
           "isfinite" in pose_fn, "the pose is read only from the gameplay camera's view while no event plays, and a stray value is no pose")
-    info_fn = host[host.index("const char *hos_perf_info("):]
+    info_fn = tools[tools.index("const char *hos_perf_info("):]
     check("now - perf_pose_ns < PERF_POSE_STALE_NS" in info_fn[:info_fn.index("\n}\n")],
           "a pose Link's update no longer sets (the title, a load) is no pose")
-    title = host[host.index("if (!loaded && logged[0]) {"):]
+    title = tools[tools.index("if (!loaded && logged[0]) {"):]
     check("perf_pose_clear();" in title[:title.index("\n    }\n")], "back at the title: no pose from the last map")
 
 

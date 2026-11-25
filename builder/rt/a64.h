@@ -136,7 +136,7 @@ uint32_t recomp_stxp(GuestContext *A64_NOESC c, uint64_t addr, uint32_t size, ui
 void recomp_clrex(GuestContext *A64_NOESC c);
 uint64_t recomp_cntpct(GuestContext *A64_NOESC c);
 
-/* Exact single-precision arithmetic for host code that stands in for guest instructions (host/oot_sites.c): the
+/* Exact single-precision arithmetic for host code that stands in for guest instructions (game/oot_sites.c): the
    lifter's float model (builder/crates/sem/src/fp.rs: FPCR.FZ and DN read, Arm's NaNs, no cumulative flags), in a64_fp.c.
    Bits in, bits out (the low 32 bits of each). recomp_fpe_fma32 is addend + a * b rounded once (FPMulAdd: NaNs in
    the order addend, a, b); a multiply is it with a zero addend of the product's sign. */

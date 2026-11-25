@@ -213,8 +213,8 @@ the game's threads and child processes (`/proc`).
 
 | What | Rule |
 |---|---|
-| the mods loader | the log has `mods: none in <folder>` (`host/mods.c` `hos_mods_init`; the run's `HOS_MODS` is an empty folder). A line for a mod found (`mods: N mods from`, `mods: <path> <- <file>`, `mods: <mod>: N RomFS files`) makes the run not one with no mods: inconclusive |
-| the mods' folder | `modcache` (`host/mods.c`'s merged size table and the list's note, with mods only): no `modcache: ` log line, and no such folder in the game folder, the run's user folder or its working folder |
+| the mods loader | the log has `mods: none in <folder>` (`game/mods.c` `hos_mods_init`; the run's `HOS_MODS` is an empty folder). A line for a mod found (`mods: N mods from`, `mods: <path> <- <file>`, `mods: <mod>: N RomFS files`) makes the run not one with no mods: inconclusive |
+| the mods' folder | `modcache` (`game/mods.c`'s merged size table and the list's note, with mods only): no `modcache: ` log line, and no such folder in the game folder, the run's user folder or its working folder |
 | reserved names | a log line beginning with one of `RESERVED_LOG`'s names, a thread named `lsmod-<what>` (`RESERVED_THREADS`) or a child process of `RESERVED_PROCESSES`' names: none. Nothing in the game uses them yet; they are held for parts to come, whose pull requests say when they start in these words |
 
 A child process of another name is listed and does not fail the gate. Threads and children that could not be read (a

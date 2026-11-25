@@ -87,7 +87,7 @@ CACHES = ("longshot_programs.bin", "longshot_programs.idx", "longshot_programs.z
           "longshot_fsr4_pipelines.bin")
 PLAY_FILES = re.compile(r"longshot_vk_pipelines_play_[0-9]+\.bin")   # (what play adds to the pipeline cache: gpu/vk/vk_draw.cpp play_path)
 # (what the game writes into its folder at run time, never a build's output: the caches (and the button prompts it makes) in
-# cache/, the logs in logs/ (host/game_layout.c)
+# cache/, the logs in logs/ (game/game_layout.c)
 RUNTIME_DIRS = (CACHE_DIR + "/", "logs/")
 BUSY = "dev_packs.busy"   # (in a base's folder while a job builds, warms or copies from it)
 SEED = "longshot_shaders.bin"   # (the shader list the prepare goes through: a new one is prepared again)
@@ -100,10 +100,10 @@ MODULES = ((("longshot.exe", "longshot.map", "objs.rsp", "host_version.o"),
 GAME, RENDERER = MODULES[0][0], MODULES[1][0]
 STAMPED_SOURCES = ("host/version.c", "gpu/vk/vk_version.cpp")
 # (what a build reads: longshot-builder's sources and the Rust workspace's (Cargo.toml, Cargo.lock, longshot-rs/, the
-# Rust the game links), the game's (host/, gpu/, third_party/), the assets it makes the game
+# Rust the game links), the game's (host/, game/, gpu/, third_party/), the assets it makes the game
 # folder's files from, the files it puts in it, the release's name and the hook sites' addresses. Anything else (docs,
 # checks, CI, the website, scripts/: the developer tools) no build reads)
-BUILT = ("builder/", "Cargo.toml", "Cargo.lock", "longshot-rs/", "host/", "gpu/", "third_party/", "assets/profiles/", "assets/pipeline_states/", "assets/prompt_faces/",
+BUILT = ("builder/", "Cargo.toml", "Cargo.lock", "longshot-rs/", "host/", "game/", "gpu/", "third_party/", "assets/profiles/", "assets/pipeline_states/", "assets/prompt_faces/",
          "assets/longshot.png", "assets/longshot.ico", "assets/addresses.ini", "VERSION")
 HEADERS = (".h", ".hpp", ".hh", ".inc", ".inl")
 SOURCES = (".c", ".cc", ".cpp") + HEADERS
@@ -226,9 +226,9 @@ def module_changed(base_build, build, rsp, stamped, stamped_may_differ):
 def link_inputs_changed(paths):
     """A change that reaches the modules besides their objects, which the link lists do not show: longshot-builder's own code
     (builder/: the flags, the link's options and libraries, the resources it makes), the Rust the game links (the
-    workspace's Cargo.toml and Cargo.lock, longshot-rs/: liblongshot_rs.a), or a file under host/, gpu/ or
+    workspace's Cargo.toml and Cargo.lock, longshot-rs/: liblongshot_rs.a), or a file under host/, game/, gpu/ or
     third_party/ that is not C or C++ (libraries, resources, shader sources). The pack then keeps both modules"""
-    return any(p.startswith(("builder/", "longshot-rs/", "Cargo.")) or (p.startswith(("host/", "gpu/", "third_party/")) and not p.endswith(SOURCES))
+    return any(p.startswith(("builder/", "longshot-rs/", "Cargo.")) or (p.startswith(("host/", "game/", "gpu/", "third_party/")) and not p.endswith(SOURCES))
                for p in built_paths(paths))
 
 

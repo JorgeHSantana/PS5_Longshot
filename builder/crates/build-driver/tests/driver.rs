@@ -147,10 +147,10 @@ fn events(buf: &Buf) -> Vec<serde_json::Value> {
     text.lines().map(|l| serde_json::from_str(l).unwrap()).collect()
 }
 
-/// A tree with what the driver reads of one: host/ (a host function), the site tables' folder, the others empty.
+/// A tree with what the driver reads of one: host/ (a host function), the site tables' folder (game/), the others empty.
 fn tree(d: &Path) -> PathBuf {
     let root = d.join("tree");
-    for sub in ["host/game", "gpu/vk", "third_party/stb_image", "assets"] {
+    for sub in ["host", "game/sites", "gpu/vk", "third_party/stb_image", "assets"] {
         std::fs::create_dir_all(root.join(sub)).unwrap();
     }
     std::fs::write(root.join("host/a.c"), "void imp_hosted(Ctx *c) { }\n").unwrap();

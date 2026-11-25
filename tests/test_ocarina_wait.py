@@ -1,6 +1,6 @@
 """The game's note-wait action (ExecuteWaitOcarinaInputCommon: start f_828a9190, tick f_828a9280) reports itself to the host
 (hos_oc_wait / hos_oc_last_kind / hos_oc_beat in host/nn_hid.c, for the ocarina's five note controls) through seven hook sites,
-ocarina.wait* (host/game/sites.toml, host/oot_sites.c), where the text patch they replaced (nx2/oot_patches.py
+ocarina.wait* (game/sites/sites.toml, game/oot_sites.c), where the text patch they replaced (nx2/oot_patches.py
 patch_ocarina_wait, deleted) put its lines. The start decides from the input kind, every running tick re-arms and stamps the
 beat (the input resets between note windows keep the action running), and the not-running branch, the input-reset branch and
 the done store clear it. The tick's three gates (the mode check, the input context, the wait's owner) also clear it: a tick
@@ -154,7 +154,7 @@ def main():
     p.add_argument("--cargo")
     a = p.parse_args()
     sitehooks.use(a.cc, a.cargo)
-    calls = (Path(__file__).resolve().parents[1] / "host" / "oot_sites.c").read_text(encoding="utf-8")
+    calls = (Path(__file__).resolve().parents[1] / "game" / "oot_sites.c").read_text(encoding="utf-8")
     kinds = {int(k) for k in re.findall(r"\(k\) == (\d+)", calls.split("#define HOS_OC_BUTTONS(k)")[1].split("\n")[0])}
     check(kinds == {1, 2, 3, 7, 10, 11}, "the kinds that arm the note buttons are not the ocarina's performances: "
           + " ".join(str(k) for k in sorted(kinds)))

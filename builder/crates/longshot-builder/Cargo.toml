@@ -9,6 +9,7 @@ rust-version.workspace = true
 [dependencies]
 a64.workspace = true
 build-assets.workspace = true
+build-compile.workspace = true
 build-core.workspace = true
 build-driver.workspace = true
 cfg.workspace = true

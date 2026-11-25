@@ -1,4 +1,4 @@
-"""Sprint (host/nn_hid.c, the Controls page's line, the Controls tab's Sprint row, gpu/vk/menu/sprint.cpp, host/oot_sprint.c): a
+"""Sprint (host/nn_hid.c, the Controls page's line, the Controls tab's Sprint row, gpu/vk/menu/sprint.cpp, game/oot_sprint.c): a
 control past the Switch's buttons with keys and gamepad inputs that sets the game's dash input in Link's flags, the game's own
 run after a roll, while held or from a press to the next with its Toggle. Off by default.
 
@@ -7,10 +7,10 @@ Sprint module's apply_sprint_layout cut out of gpu/vk/menu/sprint.cpp (C++), aga
 install's defaults are the ones from before Sprint (Shift B, the left stick's press LS) and give Sprint nothing; the row
 turned on gives it Shift and the press (B to V, LS keeping its other input) and turned off puts them back; a player who
 rebound B, Shift or the press, or whose V is taken, or who bound Sprint, keeps theirs. The sources are checked for the
-rest: read_input reads Sprint's key and gamepad input (and a test run's SPRINT, which never reaches the game), npad_states hands host/oot_sprint.c its input only with the row on, the
+rest: read_input reads Sprint's key and gamepad input (and a test run's SPRINT, which never reaches the game), npad_states hands game/oot_sprint.c its input only with the row on, the
 module's row is on the Controls tab and lays the controls out as it changes, the Controls page has Sprint's line, writes
 its pad_ line and lays them out again as it resets.
-host/oot_sprint.c is compiled alone against a fake game (Link's state chain, the actor and event managers): the dash input
+game/oot_sprint.c is compiled alone against a fake game (Link's state chain, the actor and event managers): the dash input
 while held or toggled, ended by Link's state, ZL, standing still (by the frames' time) or the host's reset, kept through
 a roll; A never added; in a conversation the left stick's press handed to the game as LS. The fake game reaches it through
 the hook sites sprint.link and sprint.stance (after the loads of Link's input flags) as the lift lowers them (tests/sitehooks.py).
@@ -220,7 +220,7 @@ class SprintTests(unittest.TestCase):
         self.assertLess(read.index("binds_load();"), read.index("AcquireSRWLockShared(&input_bind_lock);"))
         self.assertLess(read.index("AcquireSRWLockShared(&input_bind_lock);"), read.index(enabled))
         self.assertLess(read.index(enabled), read.index("bound_down(HOS_KEY_SPRINT, captured)"))
-        self.assertLess(read.index("ReleaseSRWLockShared(&input_bind_lock);"), read.index("hos_oot_autoload_input();"))
+        self.assertLess(read.index("ReleaseSRWLockShared(&input_bind_lock);"), read.index("game_autoload_input();"))
         self.assertLess(read.index("input_pads[i][k] = pad_bind[i][k]"), read.index("ReleaseSRWLockShared(&input_bind_lock);"))
         self.assertLess(npad.index("read_input(&buttons, &taps, stick);"), npad.index("const int sprint_enabled = sprint_frame;"))
         self.assertIn("const int sprint_down = (sprint_enabled ? sprint_now : 0) | (sprint_enabled && synthetic_sprint ? SPRINT_KEY : 0);",
@@ -312,7 +312,7 @@ class SprintTests(unittest.TestCase):
                         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
 
-# host/oot_sprint.c against a fake game: Link's pointer chain and the actor and event managers in a small memory map. Each
+# game/oot_sprint.c against a fake game: Link's pointer chain and the actor and event managers in a small memory map. Each
 # frame reads the controller (hos_sprint_input, as npad_states hands it Sprint's input) and then runs Link's movement
 # update (hos_sprint_link, at 0x804ce798) and his stance update (hos_sprint_stance, at 0x80c27f3c), which must find the
 # dash input (bit 4) in his flags exactly while the sprint is on.
@@ -391,7 +391,7 @@ static void walk_on(void) {
 }
 
 /* What npad_states hands over this frame (the Sprint row, its Toggle, the left stick's press as Sprint's input) */
-/* (blocked: host/oot_sprint.c's SPRINT_BLOCKED and SPRINT_AWAY; Insert open is both, the focus lost AWAY) */
+/* (blocked: game/oot_sprint.c's SPRINT_BLOCKED and SPRINT_AWAY; Insert open is both, the focus lost AWAY) */
 enum { BLOCKED = 1, AWAY = 2, PAUSE = 4 };   /* (and PAUSE: Plus or Minus pressed) */
 static int on = 1, toggle, l3 = 1, blocked, reset;
 /* one frame: the controller read with Sprint held or not and these buttons (what reaches the game in *game_saw), then
@@ -682,12 +682,12 @@ def sprint_sites():
 
 def engine_source():
     from sitecheck import callback, slot
-    text = (ROOT / "host" / "oot_sprint.c").read_text(encoding="utf-8")
+    text = (ROOT / "game" / "oot_sprint.c").read_text(encoding="utf-8")
     text = re.sub(r"^#include.*$", "", text, flags=re.M)
     text = text.replace("extern volatile uint32_t hos_frame_seconds_bits;", "")
     text = text.replace("int hos_mem_region(uint64_t addr, uint64_t size);", "")
-    # (the sites' callbacks from host/oot_sites.c, their slots, and each site's hook as the lift lowers it (tests/sitehooks.py): Link's two
-    # updates are the hooks after the loads, so the fake game reaches host/oot_sprint.c the way the lifted game does)
+    # (the sites' callbacks from game/oot_sites.c, their slots, and each site's hook as the lift lowers it (tests/sitehooks.py): Link's two
+    # updates are the hooks after the loads, so the fake game reaches game/oot_sprint.c the way the lifted game does)
     link, stance = sprint_sites()
     sites = ("#define A64_NOESC\n" + callback("int hos_site_sprint_link(") + "\n" + callback("int hos_site_sprint_stance(") + "\n"
              + slot(link) + slot(stance)
@@ -697,7 +697,7 @@ def engine_source():
 
 
 class SprintEngineTests(unittest.TestCase):
-    """host/oot_sprint.c: the game's dash input while Sprint runs, held or toggled, against a fake game"""
+    """game/oot_sprint.c: the game's dash input while Sprint runs, held or toggled, against a fake game"""
 
     def test_engine(self):
         with tempfile.TemporaryDirectory(prefix="longshot-sprint-engine-") as tmp:
@@ -717,7 +717,7 @@ class SprintEngineTests(unittest.TestCase):
         npad = test_bound_keys.block(hid, "static void npad_states(")
         self.assertIn("const int sprint_toggle = sprint_enabled && sprint_toggle_frame;", npad)
         self.assertIn("buttons = hos_sprint_input(buttons, sprint_enabled, sprint_down & (SPRINT_KEY | SPRINT_PAD),", npad,
-                      "npad_states does not hand Sprint's input to host/oot_sprint.c")
+                      "npad_states does not hand Sprint's input to game/oot_sprint.c")
         self.assertLess(npad.index("buttons = hold_toggle_apply("), npad.index("buttons = hos_sprint_input("),
                         "Sprint must see the buttons as the game will get them")
         self.assertIn("SPRINT_L3", test_bound_keys.block(hid, "static int pad_sprint_down("),
@@ -738,7 +738,7 @@ class SprintEngineTests(unittest.TestCase):
 
 
 class SprintSiteTests(unittest.TestCase):
-    """the hook sites sprint.link and sprint.stance (host/game/sites.toml) in place of the text patch"""
+    """the hook sites sprint.link and sprint.stance (game/sites/sites.toml) in place of the text patch"""
 
     def test_sites(self):
         link, stance = sprint_sites()

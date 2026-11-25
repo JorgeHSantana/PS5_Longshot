@@ -8,7 +8,7 @@ The substeps are carried instead: at 108 fps with 4 substeps a frame, every fram
 the console runs at 60.
 
 The check takes the lifted lines of the site (the substeps' load, the cut, the multiply and its store) with the replace
-site's hook on the cut as the lift lowers it (tests/sitehooks.py) (host/oot_sites.c's callback), and, side by side, with the text patch's line it
+site's hook on the cut as the lift lowers it (tests/sitehooks.py) (game/oot_sites.c's callback), and, side by side, with the text patch's line it
 replaced, and compiles each with host/nn_vi.c's own entry points cut out of it, over frames at 108 and 144 fps, a cap of 60
 and 30 fps. (A lift is translated again whenever the site table changes: no lift patched by an earlier build is met.) Needs
 clang and cargo.
@@ -145,7 +145,7 @@ class WaterSubstepTests(unittest.TestCase):
             (tmp / "patched.c").write_text(patched, encoding="utf-8")
             (tmp / "t.c").write_text(DRIVER % {"host": host_entry_points()}, encoding="utf-8")
             binary = tmp / "t.exe"
-            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-O1", "-I", str(tmp), "-I", str(ROOT / "host"),
+            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-O1", "-I", str(tmp), "-I", str(ROOT / "host"), "-I", str(ROOT / "game"),
                                     str(tmp / "t.c"), *sitehooks.objects(tmp, patched), "-o", str(binary), "-lm"],
                                    text=True, capture_output=True)
             self.assertEqual(build.returncode, 0, build.stderr)

@@ -18,6 +18,7 @@
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
+#include "../game/game.h"   /* (the game's hooks this file calls) */
 
 /* (longshot) A game folder whose deepest file passes 260 characters (MAX_PATH: "E:\Games\...\romfs\Event\EventSetting\
    Ev..." at 262) is read too. The host paths here are up to HOS_FS_PATH bytes, and on Windows each file call goes through
@@ -196,8 +197,6 @@ static int mount_entry(const char *name, const char *root, int writable, Save *s
 
 static int mount(const char *name, const char *root, int writable) { return mount_entry(name, root, writable, NULL); }
 
-int hos_mods_romfs(const char *rel, char *out, size_t cap);   /* mods.c */
-int hos_mods_dir_extras(const char *rel, int all, void (*fn)(void *, const char *, int, uint64_t), void *arg);
 
 /* (longshot) a guest path below its mount stays below it on the host: no "." or ".." part, no \\ or : (a drive or a
    Windows stream), no control characters; on Windows also no part ending in a dot or a space (Windows drops them) and

@@ -1,6 +1,6 @@
 """The temporal upscalers' camera jitter (DLSS, FSR 4, FSR 3.1): its hook sites jitter.viewRows, jitter.viewRowX and
-jitter.viewRowY (host/game/sites.toml) are after the loads of a view's projection where the game fills the
-views' uniform buffers, and their callbacks (host/oot_sites.c) add the jitter to the loaded registers only (the third
+jitter.viewRowY (game/sites/sites.toml) are after the loads of a view's projection where the game fills the
+views' uniform buffers, and their callbacks (game/oot_sites.c) add the jitter to the loaded registers only (the third
 lane: P[0][2], P[1][2]), never to the game's memory, where the shadow cascades' fit and culling would see it too (#841:
 shadows flickered). The callbacks, with the hooks as the lift lowers them (tests/sitehooks.py: longshot-builder dev
 site-hooks, compiled by clang), are built against a stand-in context and run. No game or GPU needed.
@@ -43,7 +43,7 @@ class SiteTests(unittest.TestCase):
         for x, (_, off, word, _, _) in zip(sites(), SITES):
             self.assertEqual(x.signature_offset, off, "%s's signature does not start at its load" % x.name)
             self.assertEqual(x.signature[0], (word, 0xffffffff), "%s is not after the load main hooked" % x.name)
-        text = (ROOT / "host" / "oot_sites.c").read_text(encoding="utf-8")
+        text = (ROOT / "game" / "oot_sites.c").read_text(encoding="utf-8")
         self.assertIn("hos_dlss_jitter_clip(c->x[28] + 0x1a8, j)", text)
         self.assertNotIn("recomp_store", callback("static void jitter_rows("))   # (the game's memory is left alone)
 

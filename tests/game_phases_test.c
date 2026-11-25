@@ -1,4 +1,4 @@
-/* The frame phases (host/game/phases.c, built alone) against callbacks of this test's: the order they run in, adds and
+/* The frame phases (game/phases.c, built alone) against callbacks of this test's: the order they run in, adds and
    removes from inside a callback and from another thread while one runs, a full table, stale handles, and the empty run
    that does nothing. tests/test_game_phases.py builds and runs it (and checks in the source that the empty run is one
    relaxed load). */

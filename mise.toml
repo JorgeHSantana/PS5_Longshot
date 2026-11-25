@@ -21,7 +21,8 @@ node = "22.23.5"
 "github:koalaman/shellcheck" = "0.10.0"
 # (longshot-builder's and the lifter's: docs/dev/reference/builder.md, "Building and checking the builder";
 # scripts/renhdrum.py's RUST_VERSION; the Windows target checks the builder for Windows: `cargo clippy --target
-# x86_64-pc-windows-gnullvm`. The release's Linux program is this system's own target, x86_64-unknown-linux-gnu, linked
+# x86_64-pc-windows-gnullvm`, and is the game's Rust on Windows, build-compile's rust.rs, which a developer's
+# llvm-mingw build compiles. The release's Linux program is this system's own target, x86_64-unknown-linux-gnu, linked
 # against glibc 2.35: scripts/longshot_builder.py)
 rust = { version = "1.99.1", components = "rustfmt,clippy", targets = "x86_64-pc-windows-gnullvm" }
 # glslang 16.6.0 linux x86_64 tarball (checksum in test-deps-linux and [tasks.test-deps]); no arm64 release.

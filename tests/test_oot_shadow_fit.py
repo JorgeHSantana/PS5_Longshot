@@ -1,8 +1,8 @@
-"""Game-free checks of the steady sun shadows (host/oot_shadow_fit.c, the hook sites shadow.fitBasis and shadow.fitBox): the sites, the
+"""Game-free checks of the steady sun shadows (game/oot_shadow_fit.c, the hook sites shadow.fitBasis and shadow.fitBox): the sites, the
 sun's cascade 0 only, a world-fixed basis, a steady square on whole texels that holds the game's box, the switch, and by
 default the steady fit on Shadow resolution Highest's 3072 texels only, the game's below.
 
-The host helper is compiled with the sites' callbacks (host/oot_sites.c) and their hooks as the lift lowers them (tests/sitehooks.py) against
+The host helper is compiled with the sites' callbacks (game/oot_sites.c) and their hooks as the lift lowers them (tests/sitehooks.py) against
 authored game objects: a camera turning and walking
 over a slice like Hyrule Field's (0.1 to about 10 m, an ultrawide view). No dump, lifted code or game assets are needed.
 
@@ -361,7 +361,7 @@ def main():
     result = unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(InstallTests))
     if not result.wasSuccessful():
         raise SystemExit(1)
-    host = (ROOT / "host/oot_shadow_fit.c").read_text(encoding="utf-8")
+    host = (ROOT / "game/oot_shadow_fit.c").read_text(encoding="utf-8")
     body = "".join(line for line in host.splitlines(keepends=True) if not line.startswith("#include"))
     with tempfile.TemporaryDirectory(prefix="oot-shadow-fit-") as temporary:
         source = Path(temporary) / "fixture.c"

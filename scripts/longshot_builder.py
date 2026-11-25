@@ -249,6 +249,60 @@ def cmd_build(a):
     return 0
 
 
+# (the game's Rust, longshot-rs: a staticlib for the game's own target, not the builder's static one)
+GAME_RUST_TARGETS = {"linux": "x86_64-unknown-linux-gnu", "windows": "x86_64-pc-windows-gnullvm"}
+GAME_RUST_STD = {"linux": "linux", "windows": "windows"}   # (renhdrum.RUST_STD's keys)
+
+
+def cmd_game_rust(a):
+    """liblongshot_rs.a, the game's Rust (longshot-rs over game/crates), for target, with the pinned Rust and the
+    crates Cargo.lock pins, offline: the library a player's build links instead of compiling Rust (build-compile's
+    rust.rs). The release writes the sources' key beside it (longshot-builder dev rust-key) and carries both at
+    longshot-rs/prebuilt/<platform>/."""
+    target = a.target or renhdrum.host()
+    triple = GAME_RUST_TARGETS[target]
+    cache = os.path.abspath(a.cache or os.path.join(ROOT, "build", "longshot-builder-rust"))
+    bin_dir = renhdrum.toolchain(cache, GAME_RUST_STD[target])
+    work = os.path.abspath(a.work or cache + "-game-work")
+    shutil.rmtree(os.path.join(work, "cargo-home"), ignore_errors=True)
+    shutil.rmtree(os.path.join(work, "crates"), ignore_errors=True)
+    home = os.path.join(work, "cargo-home")
+    renhdrum.vendor_crates(cache, os.path.join(work, "crates"), lock=os.path.join(ROOT, "Cargo.lock"))
+    os.makedirs(home)
+    with open(os.path.join(home, "config.toml"), "w", encoding="utf-8") as f:
+        f.write('[source.crates-io]\nreplace-with = "pinned"\n\n[source.pinned]\ndirectory = "%s"\n'
+                % os.path.join(work, "crates").replace("\\", "/"))
+    exe = ".exe" if os.name == "nt" else ""
+    env = dict(os.environ)
+    env.update({
+        "PATH": os.pathsep.join([bin_dir, env.get("PATH", "")]),
+        "RUSTC": os.path.join(bin_dir, "rustc" + exe),
+        "CARGO_HOME": home,
+        "CARGO_TARGET_DIR": os.path.join(work, "target"),
+        # (no path of this machine in it: the tree's folder by a name of its own. Encoded, one flag: RUSTFLAGS would
+        # split a tree path with a space in it)
+        "CARGO_ENCODED_RUSTFLAGS": "--remap-path-prefix=%s=longshot" % ROOT,
+    })
+    for k in ("RUSTUP_TOOLCHAIN", "CARGO_BUILD_TARGET", "RUSTFLAGS"):
+        env.pop(k, None)
+    cmd = [os.path.join(bin_dir, "cargo" + exe), "build", "--profile", "game", "--locked", "--offline",
+           "-p", "longshot-rs", "--target", triple] + (["--jobs", str(a.jobs)] if a.jobs else [])
+    print("longshot_builder: %s (Rust %s)" % (" ".join(cmd[1:]), renhdrum.RUST_VERSION), flush=True)
+    if subprocess.run(cmd, cwd=ROOT, env=env).returncode:
+        fail("cargo build -p longshot-rs failed")
+    built = os.path.join(work, "target", triple, "game", "liblongshot_rs.a")
+    if not os.path.isfile(built):
+        fail("cargo made no %s" % built)
+    os.makedirs(a.out, exist_ok=True)
+    out = os.path.join(a.out, "liblongshot_rs.a")
+    shutil.copyfile(built, out + ".new")
+    os.replace(out + ".new", out)
+    with open(out, "rb") as f:
+        data = f.read()
+    print("longshot_builder: %s, %d bytes, sha256 %s" % (out, len(data), hashlib.sha256(data).hexdigest()))
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     s = p.add_subparsers(dest="what", required=True)
@@ -271,6 +325,13 @@ def main(argv=None):
     m.add_argument("--name", action="store_true")
     m.add_argument("--host", choices=("linux",), default="linux")
     m.set_defaults(fn=cmd_llvm_mingw)
+    g = s.add_parser("game-rust", help="liblongshot_rs.a, the game's Rust, with the pinned Rust (for the release)")
+    g.add_argument("--target", choices=sorted(GAME_RUST_TARGETS), help="linux or windows (default: this system's)")
+    g.add_argument("--cache", help="the pinned Rust's and the crates' downloads (default: build/longshot-builder-rust)")
+    g.add_argument("--work", help="where it is built (default: <cache>-game-work)")
+    g.add_argument("--out", required=True, help="the folder liblongshot_rs.a is put in")
+    g.add_argument("--jobs", type=int, help="cargo's jobs")
+    g.set_defaults(fn=cmd_game_rust)
     c = s.add_parser("check", help="check a longshot-builder program's headers: x86-64, and no library a player lacks")
     c.add_argument("file")
     c.add_argument("--target", choices=sorted(TARGETS), help="its system (default: by its name)")

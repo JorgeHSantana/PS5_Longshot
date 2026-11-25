@@ -188,8 +188,10 @@ pub fn run(asked: &Asked, r: &Reporter) -> Result<()> {
     took("time: RenHDrum");
     let objects = third_party_objects(&src, &fs, &cache, jobs, r)?;
     took("time: the third-party objects");
+    let target = fs.join("target");
+    let game_rust = build_game_rust(&src, &tc, &target, cargo_jobs, r)?;
     let pack = fs.join("sources.pack");
-    let w = make_pack(&src, &version, &objects, renhdrum.as_deref(), &pack)?;
+    let w = make_pack(&src, &version, &objects, renhdrum.as_deref(), game_rust.as_deref(), &pack)?;
     took("time: the pack");
     r.log(format!(
         "pack: {} members, {} files, {} MB, {} MB compressed",
@@ -202,7 +204,6 @@ pub fn run(asked: &Asked, r: &Reporter) -> Result<()> {
 
     // ---- the builder ----
     say(Stage::Builder, "Compiling the builder");
-    let target = fs.join("target");
     let artifact =
         cargo::out_dir(&target, "dist").join(if cfg!(windows) { "longshot-builder.exe" } else { "longshot-builder" });
     let whole = cargo::units(&tc, &src, "longshot-builder");
@@ -509,14 +510,57 @@ fn third_party_objects(src: &Path, fs: &Path, cache: &Path, jobs: usize, r: &Rep
     Ok(set)
 }
 
+fn game_rust_target() -> build_compile::rust::Target {
+    use build_compile::rust::Target;
+    if cfg!(windows) { Target::WindowsGnu } else { Target::Linux }
+}
+
+/// Compile the archive that the source's builder will link from the unpacked tree.
+fn build_game_rust(
+    src: &Path,
+    tc: &cargo::Toolchain,
+    target: &Path,
+    jobs: usize,
+    r: &Reporter,
+) -> Result<Option<PathBuf>> {
+    use build_compile::rust;
+    // Older sources may have the placeholder longshot-rs workspace member but no game link or game profile.
+    if !src.join("builder/crates/build-compile/src/rust.rs").is_file() || !rust::has_rust(src) {
+        return Ok(None);
+    }
+    let folder = cargo::out_dir(target, "game");
+    let archive = folder.join(game_rust_target().library());
+    let key = rust::source_key(src)?;
+    let flags = [("CARGO_ENCODED_RUSTFLAGS".into(), format!("--remap-path-prefix={}=longshot", src.display()))];
+    let built = cargo::build(
+        tc,
+        src,
+        &["--profile", "game", "-p", "longshot-rs", "--lib"],
+        "",
+        &flags,
+        jobs,
+        target,
+        &archive,
+        0,
+        "The game's Rust archive",
+        r,
+        &|_| {},
+    )?;
+    let stamp = folder.join(rust::KEY_FILE);
+    std::fs::write(&stamp, key).map_err(|e| Error::io(&stamp, e))?;
+    r.log(format!("The game's Rust archive compiled in {:.1} s", built.seconds));
+    Ok(Some(built.file))
+}
+
 /// The pack the new builder carries, written to `pack`: the source's tree as its own build-driver's `TREE` and
 /// `LEFT_OUT` name it (this builder's when they can't be read), `VERSION`, the third-party objects, RenHDrum's library
-/// and the source's tools, each member compressed quickly (a pack for this PC: build_driver::sources::compress_fast).
+/// and the game's Rust archive, plus the source's tools. Each member is compressed quickly (a pack for this PC: build_driver::sources::compress_fast).
 fn make_pack(
     src: &Path,
     version: &str,
     objects: &Path,
     renhdrum: Option<&Path>,
+    game_rust: Option<&Path>,
     pack: &Path,
 ) -> Result<build_driver::sources::Written> {
     use build_driver::sources;
@@ -528,8 +572,17 @@ fn make_pack(
     let fail = |e: String| Error::player("pack_failed", format!("What the builder carries could not be made: {e}"));
     let listed = sources::listed(src, &present).map_err(fail)?;
     let name = if cfg!(windows) { "renhdrum.dll" } else { "renhdrum.so" };
-    let add: Vec<String> =
-        renhdrum.map(|f| format!("third_party/renhdrum/{name}={}", f.display())).into_iter().collect();
+    let mut add = Vec::new();
+    if let Some(f) = renhdrum {
+        add.push(format!("third_party/renhdrum/{name}={}", f.display()));
+    }
+    if let Some(archive) = game_rust {
+        use build_compile::rust::KEY_FILE;
+        let target = game_rust_target();
+        let folder = format!("longshot-rs/prebuilt/{}", target.platform());
+        add.push(format!("{folder}/{}={}", target.library(), archive.display()));
+        add.push(format!("{folder}/{KEY_FILE}={}", archive.with_file_name(KEY_FILE).display()));
+    }
     let entries = sources::tree_entries_leaving(src, &listed, version, Some(objects), &add, &left).map_err(fail)?;
     let mut tools: Vec<(String, PathBuf)> = std::fs::read_dir(src.join("tools"))
         .map_err(|e| Error::io(src.join("tools"), e))?
@@ -615,6 +668,37 @@ mod tests {
         assert_eq!(built_already(&d, c, "f", "v"), None, "another commit");
         std::fs::write(d.join(NOTE), note(c, &"0".repeat(64))).unwrap();
         assert_eq!(built_already(&d, c, "f", "v"), None, "the program changed");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn the_from_source_pack_contains_its_game_rust() {
+        use build_compile::rust;
+        let d = source::tests::scratch("pack-game-rust");
+        let src = d.join("src");
+        let objects = d.join("objects");
+        for rel in ["assets/pipeline_states", "longshot-rs/src", "game/crates/guest", "tools"] {
+            std::fs::create_dir_all(src.join(rel)).unwrap();
+        }
+        std::fs::create_dir_all(&objects).unwrap();
+        std::fs::write(objects.join("set.json"), b"{}").unwrap();
+        std::fs::write(src.join("assets/pipeline_states/fixture.bin.xz"), b"fixture").unwrap();
+        std::fs::write(src.join("Cargo.toml"), b"[workspace]\n").unwrap();
+        std::fs::write(src.join("longshot-rs/Cargo.toml"), b"[package]\n").unwrap();
+        std::fs::write(src.join("game/crates/guest/fixture.rs"), b"fn guest() {}").unwrap();
+
+        let target = game_rust_target();
+        let archive = d.join(target.library());
+        std::fs::write(&archive, b"fixture static library").unwrap();
+        let key = rust::source_key(&src).unwrap();
+        std::fs::write(d.join(rust::KEY_FILE), &key).unwrap();
+        let pack = d.join("sources.pack");
+        make_pack(&src, "source-test", &objects, None, Some(&archive), &pack).unwrap();
+
+        let unpacked = build_driver::sources::unpack(&std::fs::read(pack).unwrap(), &d.join("cache")).unwrap();
+        assert_eq!(rust::source_key(&unpacked.dir).unwrap(), key);
+        let archive = rust::prebuilt(&unpacked.dir, target, &key).expect("the archive must match its packed sources");
+        assert_eq!(std::fs::read(archive).unwrap(), b"fixture static library");
         std::fs::remove_dir_all(&d).unwrap();
     }
 

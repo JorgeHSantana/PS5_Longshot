@@ -1,4 +1,4 @@
-"""The game's texture heap compaction asked for once in a while (host/oot_tex_compact.h, the hook site texture.compactAsk).
+"""The game's texture heap compaction asked for once in a while (game/oot_tex_compact.h, the hook site texture.compactAsk).
 
 The texture data manager's per-frame step (f_80797240) asks its Compaction thread for a round at every frame none runs, and
 every texture a round moved is made again; here that is a batch of new textures to the renderer every few frames (the long frames
@@ -8,7 +8,7 @@ The rule (the header, compiled alone): a gap of 0 says yes at every ask, as the 
 yes at the first ask and then only once the gap has passed since the last yes. The switch's value: not set or empty is the
 default, a whole number its milliseconds, "off" or "never" or a negative number never, anything else the default.
 
-The site: a branch site on the request's second test (tbz w8, #1 past the ask) whose callback (host/oot_sites.c) asks the host
+The site: a branch site on the request's second test (tbz w8, #1 past the ask) whose callback (game/oot_sites.c) asks the host
 only when the flag is set. The step is built with the hook as the lift lowers it (tests/sitehooks.py) and, side by side, with the text patch it replaced (OLD, as
 main had it): for every flag and answer the same way out and the same asks of the host.
 
@@ -141,7 +141,7 @@ class TexCompactTests(unittest.TestCase):
             tmp = Path(tmp)
             (tmp / "rule.c").write_text(FIXTURE, encoding="utf-8")
             binary = tmp / "rule.exe"
-            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-O1", "-I", str(ROOT / "host"),
+            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-O1", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"),
                                     str(tmp / "rule.c"), "-o", str(binary)], text=True, capture_output=True)
             self.assertEqual(build.returncode, 0, build.stderr)
             run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)
@@ -170,7 +170,7 @@ class TexCompactTests(unittest.TestCase):
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
     def test_host_calls_the_rule(self):
-        host = (ROOT / "host" / "oot_tex_compact.c").read_text(encoding="utf-8")
+        host = (ROOT / "game" / "oot_tex_compact.c").read_text(encoding="utf-8")
         for needle in ('getenv("HOS_TEX_COMPACT_MS")', "oot_tex_compact_due(&compact, compact_gap, now)",
                        "int hos_oot_tex_compact_due(void) {", "#define OOT_TEX_COMPACT_DEFAULT_MS 1000\n",
                        "oot_tex_compact_gap_ns(getenv(\"HOS_TEX_COMPACT_MS\"), OOT_TEX_COMPACT_DEFAULT_MS)"):

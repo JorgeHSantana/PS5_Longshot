@@ -1,5 +1,5 @@
 //! Each placed hook site (the `sites` crate's [`Placed`]) as code, by its form (docs/dev/reference/hooks.md#forms),
-//! over the host's ABI (host/game/sites.h): the site's flag byte `hos_site_on_<ident>`, its callback slot
+//! over the host's ABI (game/sites.h): the site's flag byte `hos_site_on_<ident>`, its callback slot
 //! `hos_site_fn_<ident>` (an `int (*)(Ctx *)`), the replaced call's `hos_site_callee`, and a data rule's value.
 
 use crate::code::{Arg, Cond, Expr, Stmt, Target};

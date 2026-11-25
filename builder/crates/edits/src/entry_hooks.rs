@@ -3,7 +3,7 @@
 //! returns at once; else the function runs as the SDK has it. `ENTRY_HOOK_SYM_FROM(sym, min)` asks only when X2, the
 //! size, is `min` or more. host/nn_libc.c's memcpy, memmove, memset, memcmp, strlen and strcmp are such hooks.
 //!
-//! The hooks are read from the host's C (every `.c` of `host/` and `host/game/`, the files every game build compiles),
+//! The hooks are read from the host's C (every `.c` of `host/` and of `game/` beside it, the files every game build compiles),
 //! and each symbol found where the SDK's module defines it (the image's exports): a symbol no module exports, one
 //! outside the SDK's code, an HLE'd one or one at no entry of the lift is left out, with a note.
 
@@ -55,10 +55,12 @@ pub fn parse(text: &str) -> Vec<EntryHook> {
     out
 }
 
-/// The hooks of the host's C files in `host` (and `host/game`), by symbol (the last definition of one wins).
+/// The hooks of the host's C files in `host` (and the game's, in `game` beside it), by symbol (the last definition of one
+/// wins).
 pub fn read(host: &Path) -> std::io::Result<Vec<EntryHook>> {
     let mut hooks: Vec<EntryHook> = Vec::new();
-    for dir in [host.to_path_buf(), host.join("game")] {
+    let game = host.parent().map(|p| p.join("game"));
+    for dir in std::iter::once(host.to_path_buf()).chain(game) {
         if !dir.is_dir() {
             continue;
         }

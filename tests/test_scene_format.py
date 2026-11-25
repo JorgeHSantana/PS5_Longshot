@@ -1,6 +1,6 @@
 """With HDR set to Native and the PsychoV35 tone mapper the game's scene buffer is RGBA16F, not R11G11B10F; otherwise the game picks it as shipped.
 
-The hook site render.sceneFormat (host/game/sites.toml, a replace site on f_80672260's mov w9, #0x1a; host/oot_sites.c)
+The hook site render.sceneFormat (game/sites/sites.toml, a replace site on f_80672260's mov w9, #0x1a; game/oot_sites.c)
 makes the R11G11B10F choice (26) RGBA16F (44) while hos_scene_rgba16f is set, which host/nn_vi.c sets from the tone mapper row
 (HOS_OPT_HDR_TONEMAP: Native HDR with PsychoV35) at each present. Only the supported build has a table. The pick is built with
 the hook as the lift lowers it (tests/sitehooks.py) and, side by side, with the text patch it replaced (as main had it): the same formats for

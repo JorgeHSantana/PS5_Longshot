@@ -1,10 +1,10 @@
-"""Compile the save picture's hook site (wide.savePicture, host/oot_wide_sites.c; issue 952) around authored registers.
+"""Compile the save picture's hook site (wide.savePicture, game/oot_wide_sites.c; issue 952) around authored registers.
 
 The pause menu draws the whole picture into the save's 543 x 306 JPEG through the game's viewport helper. Past 16:9 the
 patch widens that one SetViewport, centred, so the middle 16:9 of the picture fills the texture; narrower than 16:9 (4:3,
 16:10) it makes it taller, centred, so the picture's middle band fills the texture at its own shape; every other
 viewport, and a 16:9 window, stay as the game set them. No game or image is used: the site's hook is as the lift lowers
-it (tests/sitehooks.py), its callback cut from host/oot_wide_sites.c. The site is after main+0x284824 (ldr x8, [x8], before blr x8).
+it (tests/sitehooks.py), its callback cut from game/oot_wide_sites.c. The site is after main+0x284824 (ldr x8, [x8], before blr x8).
 """
 import argparse
 import os

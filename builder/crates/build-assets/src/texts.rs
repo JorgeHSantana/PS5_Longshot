@@ -2,7 +2,7 @@
 //!
 //! One of the game's texts names the console: the hint for playing the ocarina by microphone says to use its built-in
 //! one. On a PC that is the wrong advice (the game listens to the microphone the menu's Microphone row chooses), so the
-//! string is reworded in the player's own text archives at the build, and `host/texts.c` serves the result in place of
+//! string is reworded in the player's own text archives at the build, and `game/texts.c` serves the result in place of
 //! the game's file (a mod's own file wins; `HOS_TEXTS=0`: the game's own texts).
 //!
 //! The texts are `romfs/Mals/<language>.Product.<n>.sarc.zs`, one archive a language: a zstd frame (made with the
@@ -16,7 +16,7 @@
 //! room filled with NULs, so no offset in the MSBT or the SARC moves and the archive keeps its size, which the game's
 //! resource size table goes by.
 //!
-//! Every language whose string was reworded gets `<out>/<the archive's name in lower case>` (`host/texts.c` looks it
+//! Every language whose string was reworded gets `<out>/<the archive's name in lower case>` (`game/texts.c` looks it
 //! up by the romfs path's lower-case key), a zstd frame made without the dictionary, its size in its header; the
 //! others keep the game's own.
 

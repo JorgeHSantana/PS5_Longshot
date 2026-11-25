@@ -403,12 +403,16 @@ fn write_files(m: &Member<'_>, dir: &Path) -> Result<u64> {
 
 // ---- the writer (`longshot-builder dev release sources`, `unpack`): the one that makes what the reader above reads ----
 
-/// The tree a player's build reads, as tracked: the game's sources, the third-party code it compiles and the licences
-/// the game folder gets, the assets the finish makes its files from.
-pub const TREE: [&str; 12] = [
+/// The tree a player's build reads, as tracked: the game's sources (`host/`, `game/`, `gpu/`, and the game's Rust, whose
+/// key says whether the prebuilt `liblongshot_rs.a` added with `--add` is theirs: build-compile's `rust`), the
+/// third-party code it compiles and the licences the game folder gets, the assets the finish makes its files from.
+pub const TREE: [&str; 15] = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "longshot-rs",
     "host",
+    "game",
     "gpu",
-    "game/features.txt",
     "third_party",
     "assets/profiles",
     "assets/pipeline_states",

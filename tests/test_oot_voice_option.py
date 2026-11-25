@@ -1,4 +1,4 @@
-"""The game's Voice Language option is applied after a restart (host/oot_voice.c, the hook site options.voiceWritten; issue 430).
+"""The game's Voice Language option is applied after a restart (game/oot_voice.c, the hook site options.voiceWritten; issue 430).
 
 The game's voice resource picks the voice files' language at its first update (the text language's default) and after that
 only when GameDataMgr lists OptionData.VoiceLanguage among the flags written since its last pass (f_80a9d1c0). option.sav is
@@ -6,8 +6,8 @@ read after that first update and replaces the option's value without listing it,
 showed on the game's Options screen and was never applied: Japanese chosen, English voices.
 
 The update's check, in text shaped as the lift writes it, with the site's hook in place of its call as the lift lowers it
-(tests/sitehooks.py: a replace site on the call: x30 set, then host/oot_sites.c's callback, which calls the game's function through
-a64_lookup), and side by side with the text patch's call it replaced (OLD, as main had it), is compiled with host/oot_voice.c and host/game/flags.c as they are, over a guest memory of its own with a made-up GameDataMgr (the enum table and its
+(tests/sitehooks.py: a replace site on the call: x30 set, then game/oot_sites.c's callback, which calls the game's function through
+a64_lookup), and side by side with the text patch's call it replaced (OLD, as main had it), is compiled with game/oot_voice.c and game/flags.c as they are, over a guest memory of its own with a made-up GameDataMgr (the enum table and its
 entries) and stand-ins for the game's "was it written" and for the branch that reads the option and applies it. Then:
 
 - the start: the default is applied once, when its write is listed; updates with nothing new apply nothing;
@@ -41,7 +41,7 @@ from sitecheck import site, callback, slot  # noqa: E402
 import sitehooks  # noqa: E402
 
 CALL = "c->x[30] = 0x80a9ca9cULL; f_80a9d1c0(c);"   # (the bl as the lift writes it; OLD the text patch's on main)
-OLD = "c->x[30] = 0x80a9ca9cULL; hos_oot_voice_option(c, f_80a9d1c0);   /* (nx2/oot_patches.py: host/oot_voice.c) */"
+OLD = "c->x[30] = 0x80a9ca9cULL; hos_oot_voice_option(c, f_80a9d1c0);   /* (nx2/oot_patches.py: game/oot_voice.c) */"
 
 A64_H = r'''#pragma once
 #include <stdint.h>
@@ -140,7 +140,7 @@ void f_80a9d1c0(Ctx *c) {
 }
 /* (the runtime's lookup of a function by its guest address) */
 A64Fn a64_lookup(uint64_t addr) { return addr == 0x80a9d1c0ull ? f_80a9d1c0 : NULL; }
-_Thread_local uint64_t hos_site_callee;   /* (host/game/sites.c's: the replaced bl's callee, which its hook stores) */
+_Thread_local uint64_t hos_site_callee;   /* (game/sites.c's: the replaced bl's callee, which its hook stores) */
 /* the update's branch at 0x80a9cd30: the option read and applied */
 void voice_apply(Ctx *c) { applied = (uint32_t)recomp_load32(c, ENTRIES + 0x38 * 3 + 0x1c); applies++; }
 void f_80a9ca30(Ctx *c);
@@ -260,14 +260,14 @@ def main():
             tmp = Path(tmp)
             (tmp / "a64.h").write_text(A64_H, encoding="utf-8")
             (tmp / "hos.h").write_text(HOS_H, encoding="utf-8")
+            (tmp / "game_host.h").write_text('#include "hos.h"\n', encoding="utf-8")   # (host/game_host.h: the hos.h above)
             (tmp / "fixture.c").write_text(FIXTURE, encoding="utf-8")
             (tmp / "code_009.c").write_text(out, encoding="utf-8")
             sources = [str(tmp / "fixture.c"), str(tmp / "code_009.c")]
-            (tmp / "oot_voice.c").write_text((ROOT / "host" / "oot_voice.c").read_text(encoding="utf-8"), encoding="utf-8")
-            (tmp / "game").mkdir()   # (the flags service the option is read through: its "../hos.h" is the one above)
-            for name in ("flags.c", "flags.h"):
-                (tmp / "game" / name).write_text((ROOT / "host" / "game" / name).read_text(encoding="utf-8"), encoding="utf-8")
-            sources += [str(tmp / "oot_voice.c"), str(tmp / "game" / "flags.c"), "-DHOOKED"]
+            (tmp / "game").mkdir()   # (oot_voice.c and the flags service the option is read through, beside its flags.h:
+            for name in ("oot_voice.c", "flags.c", "flags.h"):   # their "game_host.h" is the one above)
+                (tmp / "game" / name).write_text((ROOT / "game" / name).read_text(encoding="utf-8"), encoding="utf-8")
+            sources += [str(tmp / "game" / "oot_voice.c"), str(tmp / "game" / "flags.c"), "-DHOOKED"]
             exe = tmp / ("fixture.exe" if os.name == "nt" else "fixture")
             subprocess.run([cc, "-std=gnu11", "-O1", "-include", ENV_ON_H, "-Wall", "-Wextra", "-Werror", "-I", str(tmp)] + sources
                            + sitehooks.objects(tmp, out) + ["-o", str(exe)],

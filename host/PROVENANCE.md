@@ -27,7 +27,7 @@ mkw-recomp's changes:
   loop header too (`mkw_glue.c` `a64_poll`), and equal-priority holders yield after a 2 ms slice.
 - **Left out:** files bound to TOTK or its Maxwell GPU: `gpu.c`, `nvn_trace.c`, `hos_prof.c`, `mods.c`, `movie*.c`,
   `nn_image_debug.c`, `totk_*.c`. `mkw_glue.c` stands in for the hooks the taken files call into them. `mods.c`
-  came back later as Hookshot's `host/mods.c`: the RomFS part of Skybound's loader (`NotRexed/SkyboundTotk`, MIT).
+  came back later as Hookshot's `game/mods.c`: the RomFS part of Skybound's loader (`NotRexed/SkyboundTotk`, MIT).
   Its list, order and switches, the resource size table's merge (`restbl.c`, `restbl.h`) and the cheat VM (`cheats.c`)
   are after valentderah/totk-pc-recomp's `runtime/mods.c`, `romfs.c`, `restbl.c` and `cheats.c` (MIT, Copyright (c) 2026
   Valiantsin Dzerakh; its notice is in `restbl.h`), and the ExeFS patches' parse (builder/crates/game-files/src/patches.rs) after its `tools/exefs_patches.py`.

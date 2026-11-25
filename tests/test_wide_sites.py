@@ -1,11 +1,11 @@
-"""Widescreen and ultrawide's 23 hook sites (wide.*, ui.*: host/game/sites.toml, host/oot_wide_sites.c) do
+"""Widescreen and ultrawide's 23 hook sites (wide.*, ui.*: game/sites/sites.toml, game/oot_wide_sites.c) do
 what main's C spliced after the same instructions did (nx2/oot_wide.py, deleted with them), game-free.
 
 - Each site is at the instruction main's C went after (main offset + 0x80020000, an after site, its host slot), and its
   signature holds that instruction's word as main checked it.
 - Differential: main's after-texts, kept below verbatim as nx2/oot_wide.py at a2dc5385 wrote them (wide.movie's as
   d2c9f7cc, #2358, left it: movies at 16:9 on narrower pictures too) (MAIN_SITES), and each site's hook as the lift
-  lowers it (tests/sitehooks.py) with its callback (host/oot_wide_sites.c, compiled whole) run on the same contexts:
+  lowers it (tests/sitehooks.py) with its callback (game/oot_wide_sites.c, compiled whole) run on the same contexts:
   thousands of each, every register and lane drawn from pools that reach every branch (16:9 and near it, the UI
   projection's 2/3840 and 2/2160, the save picture's 0, 0, 543, 306, the kept screens' vtables, ratios of 0, 16:9, 21:9,
   32:9, 4:3, 16:10 and -1, scales 0, 1 and others, the flags on and off), with guest memory and the host's values drawn the
@@ -243,10 +243,10 @@ def main():
               "%s's signature does not hold main's word %08x at its instruction" % (name, word))
         sites.append(x)
     check(len({MAIN + off for _, off, _, _ in MAIN_SITES}) == len(MAIN_SITES), "two sites at one instruction")
-    host = (ROOT / "host" / "oot_wide_sites.c").read_text(encoding="utf-8")
+    host = (ROOT / "game" / "oot_wide_sites.c").read_text(encoding="utf-8")
     host = re.sub(r"^#include.*$", "", host, flags=re.M)
     keep = re.findall(r"#define WIDE_KEEP_\w+ (0x[0-9a-f]+ULL)", host)
-    check(len(keep) == 5, "host/oot_wide_sites.c does not name the five kept screens")
+    check(len(keep) == 5, "game/oot_wide_sites.c does not name the five kept screens")
     old = "".join("static void old_%d(Ctx *c) {\n    (void)c;\n%s\n}\n" % (i, text) for i, (_, _, _, text) in enumerate(MAIN_SITES))
     new = "".join("static void new_%d(Ctx *c) {\n%s\n}\n" % (i, sitehooks.line(x)) for i, x in enumerate(sites))
     source = (FIXTURE.replace("@CALLBACKS@", host).replace("@SLOTS@", "".join(slot(x) for x in sites))

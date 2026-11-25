@@ -1,4 +1,4 @@
-"""The counters cut to whole frames (the hook sites frame.whole*, host/game/sites.toml; host/oot_sites.c's callbacks over
+"""The counters cut to whole frames (the hook sites frame.whole*, game/sites/sites.toml; game/oot_sites.c's callbacks over
 host/nn_vi.c's hos_frame_whole) for the checks that compile authored lifted functions with them. Standard library,
 tests/sitecheck.py and tests/sitehooks.py only.
 
@@ -7,7 +7,7 @@ tests/sitecheck.py and tests/sitehooks.py only.
 
 hook_whole(text): text (a lifted file: '#include "a64.h"' and functions) with each site's cut, in its function, wrapped in the
 replace site's hook as the lift lowers it (tests/sitehooks.py: the check links sitehooks.objects(tmp, its C)), and the
-callbacks (cut from host/oot_sites.c), their flags (on) and slots after the include: (the text, how many cuts were hooked). A function the text does not have is left out; a cut not found exactly once in
+callbacks (cut from game/oot_sites.c), their flags (on) and slots after the include: (the text, how many cuts were hooked). A function the text does not have is left out; a cut not found exactly once in
 its function (with the lines around it the site's signature stands for) is left as it is. old_whole(text): the same with the
 text patch's line in place of each cut, as nx2/oot_patches.py patch_whole_frames made it on main, for a side-by-side check.
 Neither declares hos_frame_whole or hos_frame_whole_times beyond a prototype: the check gives them.

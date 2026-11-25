@@ -38,7 +38,7 @@ using DWORD = uint32_t;
 int64_t clock_ns = 1000000000LL, slept_ns;
 int64_t hos_now_ns() { return clock_ns; }
 void hos_log(const char*, ...) {}
-enum GamePhase { GAME_PHASE_ACQUIRE = 0 };   // (host/game/phases.h: the frame phases; nothing added here)
+enum GamePhase { GAME_PHASE_ACQUIRE = 0 };   // (game/phases.h: the frame phases; nothing added here)
 void game_phase_run(GamePhase, uint64_t) {}
 void hos_sleep_ns(int64_t ns) { slept_ns = ns; }
 int hos_ini_option(const char*, int fallback) { return fallback; }

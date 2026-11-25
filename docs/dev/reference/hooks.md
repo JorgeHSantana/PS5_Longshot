@@ -8,13 +8,13 @@ wrote its line. What is done another way, and why, is [below](#what-is-done-anot
 
 | What | Where |
 |---|---|
-| The sites' definitions: what each is, its form and its callback's arguments, the same in every build | `host/game/sites.toml` |
-| Where each is, one file per supported game build | `host/game/sites/<build id>/locations.toml` |
+| The sites' definitions: what each is, its form and its callback's arguments, the same in every build | `game/sites/sites.toml` |
+| Where each is, one file per supported game build | `game/sites/<build id>/locations.toml` |
 | The reader, the resolver and the placement | `builder/crates/sites`, called by the lift (`lift::whole`) after discovery |
 | Each form as mid IR, over the host's ABI | `builder/crates/edits/src/site.rs`, written in by the function builder (`builder/crates/lift`) |
-| Each site's flag byte and callback slot, and the handlers on it | `host/game/sites.def` (the list), `host/game/sites.c`, `host/game/sites.h` |
+| Each site's flag byte and callback slot, and the handlers on it | `game/sites.def` (the list), `game/sites.c`, `game/sites.h` |
 | The checks | `cargo test -p sites`, `cargo test -p edits`, `cargo test -p lift` (game-free tables and functions), and each feature's own: its callback run behind its hook as the lift lowers it (`tests/sitehooks.py`, `longshot-builder dev site-hooks`: [the builder](builder.md#building-and-checking-the-builder)) |
-| Skip title screen's (`menu.buttonWait`, `menu.buttonWaitNoDecideAnim`: the enter of the sequence nodes that wait for a screen's button, which tell the screen's name; the title's, the file list's and the check's get A, on every user of the skip: the row, `dev.py ab`, the game's test mode) | `host/oot_autoload.c`, `host/oot_sites.c`; how they were found: the table's comment |
+| Skip title screen's (`menu.buttonWait`, `menu.buttonWaitNoDecideAnim`: the enter of the sequence nodes that wait for a screen's button, which tell the screen's name; the title's, the file list's and the check's get A, on every user of the skip: the row, `dev.py ab`, the game's test mode) | `game/oot_autoload.c`, `game/oot_sites.c`; how they were found: the table's comment |
 
 The build id is main's 40-digit build id in lower case, as the lift reads it from the image (the supported dump's is
 `e0f3ccfaf50065ae4ea01eb5aeb13b1a45da3348`, `e0f3ccfa` for short). A build with no locations file gets no hooks, and
@@ -23,12 +23,12 @@ the host's callbacks and their contract stay as they are.
 
 ## The format
 
-A site is written twice, in two files. Its **definition**, in `host/game/sites.toml`, says what the site is and what its
-callback may expect. That is the same in every game build. Its **location**, in `host/game/sites/<build id>/locations.toml`,
+A site is written twice, in two files. Its **definition**, in `game/sites/sites.toml`, says what the site is and what its
+callback may expect. That is the same in every game build. Its **location**, in `game/sites/<build id>/locations.toml`,
 says only where the site is in that build:
 
 ```toml
-# host/game/sites.toml
+# game/sites/sites.toml
 format = 2
 
 [[site]]
@@ -41,7 +41,7 @@ args = ["x19:ptr:anim", "w9:u32:letters", "s0:f32:time"]
 ```
 
 ```toml
-# host/game/sites/e0f3ccfaf50065ae4ea01eb5aeb13b1a45da3348/locations.toml
+# game/sites/e0f3ccfaf50065ae4ea01eb5aeb13b1a45da3348/locations.toml
 format = 2
 build = "e0f3ccfaf50065ae4ea01eb5aeb13b1a45da3348"   # (the folder's name)
 
@@ -53,7 +53,7 @@ signature_offset = 0x74
 signature = "79409289 34000009/ff00001f 37100008/fff8001f"   # (ldrh w9, [x20, #0x48]; cbz w9, *; tbnz w8, #2, *)
 ```
 
-That is the shape of the supported build's first site, the Insert menu's Text speed and Text size (`host/oot_text_step.c`),
+That is the shape of the supported build's first site, the Insert menu's Text speed and Text size (`game/oot_text_step.c`),
 with a made-up signature in place of the table's. The order of
 the definitions is the order of several hooks at one instruction. The locations may come in any order, but are kept in
 the same one.
@@ -66,7 +66,7 @@ the same one.
 | `at` | definition | the form: `entry`, `return`, `after`, `before`, `replace`, `branch`, `allow` or `jump` ([below](#forms)) | `entry` |
 | `can_return` | definition | `entry` only: the callback's non-zero answer returns from the function at once | `false` |
 | `rule` | definition | an inline data rule's template ([below](#inline-data-rules)) in place of a callback; `shape = "data"` | |
-| `value` | definition | a rule's host value, by name (`host/game/sites.def`'s `HOS_VALUE` lines) | |
+| `value` | definition | a rule's host value, by name (`game/sites.def`'s `HOS_VALUE` lines) | |
 | `shape` | definition | `event` (tells), `filter` (may change the outcome; a serial site only) or `data` (a rule applied in C) | required |
 | `thread` | definition | `serial` or `worker`: where the site is reached. A filter needs `serial`; say `worker` when not sure | required |
 | `args` | definition; a location may repeat them | `<register>:<type>[:<name>]` for each register the site's subscribers read: `x` registers hold `ptr`, `u64`, `i64`; `w` ones `u32`, `i32`, `u16`, `i16`, `u8`, `i8`, `bool`; `s` ones `f32`; `d` ones `f64`. A build whose code holds them in other registers gives them in its location, each the same type and name, in the same order | `[]` |
@@ -218,12 +218,12 @@ its place) is `replace` on the call.
 
 A replaced call: the callback is the call's wrapper ([several handlers](#several-handlers-on-one-site) wrap it in turn). It finds the callee as the guest would: for a `bl`,
 `a64_lookup(hos_site_callee)`, the function the lift calls there (past any PLT stub), which the hook stores on the thread
-before the callback (`host/game/sites.h`), so the callback names no address of this build's; for a `blr`,
+before the callback (`game/sites.h`), so the callback names no address of this build's; for a `blr`,
 `a64_icall(c, c->x[<n>])`. It calls it with the context; x30 is already the return address. It may also not call it (the call
 held), or call it and then change what it returned. A `bl` to a function the lift does not call plainly (no entry, or a
 setjmp owner, whose call takes a host setjmp) cannot be replaced: the lift stops.
 
-A callback that names an address of the game's, a global's slot (the time object's, the cloth's clock) or a function, belongs to the one build whose table names its site: `host/oot_sites.c` and `host/oot_wide_sites.c` keep those in
+A callback that names an address of the game's, a global's slot (the time object's, the cloth's clock) or a function, belongs to the one build whose table names its site: `game/oot_sites.c` and `game/oot_wide_sites.c` keep those in
 one block each, named, for build e0f3ccfa. A second build's table brings its own values for them before it can reuse the callbacks. What a
 callback reads elsewhere in the function (a register a loop's head loaded, a stack slot written at the entry) the site
 checks with `guards`, so code that moved them does not resolve.
@@ -238,7 +238,7 @@ loop; a `before` site after a call on an instruction other paths reach (a label)
 ### Several handlers on one site
 
 A site has one slot, its own callback: the engine's (`HOS_SITE_ENGINE`), or one set at run time with `hos_site_set`. More
-handlers chain around it with `hos_site_add(name, fn, priority)` (`host/game/sites.h`), as MixinExtras' wrap handlers do
+handlers chain around it with `hos_site_add(name, fn, priority)` (`game/sites.h`), as MixinExtras' wrap handlers do
 where a replacement would shut every other out:
 
 - they run lowest `priority` first, the earlier added first among equal priorities, and the site's own callback last,
@@ -255,7 +255,7 @@ where a replacement would shut every other out:
   a rule's table is freed), at the acquire phase's reclaim: where what the handler used may go.
 
 While no handler is added, nothing changes: the hook calls the site's own callback, and a dormant site costs its flag's
-load and a predicted branch. With handlers, the hook calls the site's dispatcher (`host/game/sites.c` `run`), one more
+load and a predicted branch. With handlers, the hook calls the site's dispatcher (`game/sites.c` `run`), one more
 call, and each `hos_site_next` another, and the dispatcher counts the hooks in it. A chain is published whole, so a hook
 that loaded the old one runs the old one, and a replaced chain is kept, never freed. A hook reached inside a handler's
 call runs its own site's chain, and the first chain goes on after it. The place in a chain is the guest context's, not
@@ -270,16 +270,16 @@ with no frame phase around it to hand anything over. There, a site that changes 
 (`branch`, `allow`, `jump`, and `entry` with `can_return`) or what an instruction or a call does (`replace`: the callback
 does the work in its place), is one of two things:
 
-- **an engine feature's**: a `HOS_SITE_ENGINE` line in `host/game/sites.def`, its callback Longshot's own C, on from the
+- **an engine feature's**: a `HOS_SITE_ENGINE` line in `game/sites.def`, its callback Longshot's own C, on from the
   start (Disable camera centering's `jump`, a moving floor's carry's `allow`, the zstd decodes' `can_return`, the heap
   retries' replaced calls); or
 - **an inline data rule** (below): the lifter's own code over a host value, no callback at all.
 
 Never a callback set at run time (a `HOS_SITE` line, off until `hos_site_set()`): nothing orders its answer with the
 game's other threads. The reader checks it (`sites::check_site`, with the engine's site names from
-`host/game/sites.def` when it reads a build's table): a site with one of those forms on a worker thread that is
+`game/sites.def` when it reads a build's table): a site with one of those forms on a worker thread that is
 neither stops the lift, naming the site. Each such site has a `HOS_SITE_OUTCOME(<ident>, "<name>")` line in
-`host/game/sites.def` too (the lift stops when those lines are not exactly the table's such sites: `sites::apply`), and
+`game/sites.def` too (the lift stops when those lines are not exactly the table's such sites: `sites::apply`), and
 the host refuses it a handler or a callback at run time (`hos_site_add`, `hos_site_set` answer 0). The other forms
 (`entry` without `can_return`, `return`, `after`, `before`) leave the game's own instructions and branches in place
 (their callbacks may still change the registers the game reads next), and are not checked here; on the `serial` thread
@@ -300,7 +300,7 @@ template's type instead). Off is a value of 0: one load and a predicted branch.
 A table names a template and its registers, never code. Templates are added to `Rule` (`builder/crates/sites/src/table.rs`)
 and their lowering to `builder/crates/edits/src/site.rs` with their first user.
 
-How the host fills a rule, with no lock on the game's side (`host/game/sites.h`):
+How the host fills a rule, with no lock on the game's side (`game/sites.h`):
 
 - a **value** is one word (`HOS_VALUE(<ident>, "<name>", <type>, <symbol>)`, the symbol the feature already owns): the host
   stores it with one atomic store (`hos_value_set`, or the feature's own store), the hook reads it with one load and sees a
@@ -314,7 +314,7 @@ How the host fills a rule, with no lock on the game's side (`host/game/sites.h`)
 #### When a replaced table is freed
 
 There is no point in the game's frame where no game thread can be inside a hook, so a table is not freed at one. The
-frame phase `GAME_PHASE_ACQUIRE` (`host/game/phases.h`) is the main thread's alone: the game's background threads (actor
+frame phase `GAME_PHASE_ACQUIRE` (`game/phases.h`) is the main thread's alone: the game's background threads (actor
 create/delete, loading, placement) run through it, and that the job workers have joined there is not proven.
 A hook on any of those threads may be between its load of the pointer and its last read of the table at that moment.
 
@@ -350,7 +350,7 @@ A virtual method's slot in a vtable, hooked at run time by a host thunk in the s
 per build, not a signature:
 
 ```toml
-# host/game/sites.toml
+# game/sites/sites.toml
 [[site]]
 name = "actor.update"
 kind = "vslot"
@@ -359,7 +359,7 @@ shape = "event"         # (events and data rules only: the hook runs on the call
 thread = "worker"
 args = ["x0:ptr:actor"]
 
-# host/game/sites/<build id>/locations.toml
+# game/sites/<build id>/locations.toml
 [[site]]
 name = "actor.update"
 vtable = 0x80100000     # (the vtable's guest address in this build: 8-aligned; made up here)
@@ -372,7 +372,7 @@ The reader checks these keys today; the lift stops on a `vslot` site with a note
 
 At lift time, after the lift has found the game's functions:
 
-1. **Read**: `sites::load` reads `host/game/sites.toml` and `host/game/sites/<build id>/locations.toml` for main's build
+1. **Read**: `sites::load` reads `game/sites/sites.toml` and `game/sites/<build id>/locations.toml` for main's build
    id, and joins them. No locations file, or no sites: nothing is placed, and the functions are lifted as they are.
 2. **Resolve**: each signature is looked for in main's code as the lift translates it (after the ExeFS patch mods are
    written into it). It must be found **exactly once**; zero or several places stop the build, naming every such site and
@@ -384,7 +384,7 @@ At lift time, after the lift has found the game's functions:
 4. **Check against the lift**: the function found must be one the lift found, and the one `function` names; an `after`
    point must be a plain instruction of it (a branch has no "after" inside the function: pick the instruction before it
    and test the branch's condition in the callback, as text speed does with the letter count). The host must list the
-   site in `host/game/sites.def`, or the game would not link.
+   site in `game/sites.def`, or the game would not link.
 5. **Edit**: the placed site (`sites::Placed`) becomes its form's code as mid IR (`edits::site`), planned with the
    function's other edits (`edits::plan_edits`) and written in by the function builder at the instruction it belongs
    to, never by matching lifted text. A site whose instruction is lifted in several functions (code they share) is in
@@ -412,10 +412,10 @@ if (hos_site_on_text_letterStep) hos_site_fn_text_letterStep(c);    /* the state
 | `the fingerprint matches N functions` / `no function passes the fingerprint; nearest: ...` | the fingerprint's tests do not tell one function apart | another test (a call, a string), or the failed test fixed |
 | `it names <site>, which does not resolve` | the site waits on another that stops | that one first |
 | `its signature finds f_..., the table names f_...` | the signature (or `in`, or the fingerprint) found a unique place, but in another function | the signature is wrong for this build |
-| `not located in this build, and host/game/sites.toml requires it` | the build's locations leave a required site out | locate it, or `require = false` in its definition |
+| `not located in this build, and game/sites/sites.toml requires it` | the build's locations leave a required site out | locate it, or `require = false` in its definition |
 | `... is a cbz, not a plain instruction` | the form needs another kind of instruction there | another form (`before`, `branch`), or the instruction before |
 | `... no HOS_VALUE line of the rule's type` | the host has no value for the rule, or one of another width | add the line, of the template's type |
-| `host/game/sites.def has no HOS_SITE line` | the host has no flag and slot for the site | add the line |
+| `game/sites.def has no HOS_SITE line` | the host has no flag and slot for the site | add the line |
 | `vslot sites ... not implemented yet` | | take the site out for now |
 
 ## Adding a site
@@ -423,7 +423,7 @@ if (hos_site_on_text_letterStep) hos_site_fn_text_letterStep(c);    /* the state
 1. Find the function and the point, and the instructions there: `gen/functions.txt` in your work folder names each
    function's unit, the unit's `.ll` holds `f_<entry>`, and `longshot-builder dev decode <hex word>` prints an instruction as
    the decoder reads it (the words from `image/image.bin`). All of it is made from your dump: it stays on your PC.
-2. Write its definition in `host/game/sites.toml` (where its feature's other sites are: that order is the order of hooks at
+2. Write its definition in `game/sites/sites.toml` (where its feature's other sites are: that order is the order of hooks at
    one instruction) and its location in the build's `locations.toml`. Find the function with a short signature. Find
    the point with an `offset` when the signature covers it, or with an [anchor](#anchors) when it is a call, a virtual
    call or a string and the signature would have to borrow words from elsewhere in the function. A site in a function
@@ -431,9 +431,9 @@ if (hos_site_on_text_letterStep) hos_site_fn_text_letterStep(c);    /* the state
 3. Check it: `longshot-builder lift --work <work folder>` places every site as a build does and prints a line per site
    saying how it was found, or stops naming what did not resolve ([below](#why-a-build-stops-here)); with every other
    function's key unchanged it lifts only the units the new site touches. Without a lift, `longshot-builder dev sites --image
-   <work folder>/image --tables host/game` places the sites over the image's own discovery, a line each, and exits 1
+   <work folder>/image --tables game` places the sites over the image's own discovery, a line each, and exits 1
    naming any that does not resolve or fit, as the lift would stop.
-4. Give the host its line in `host/game/sites.def`: `HOS_SITE_ENGINE(<ident>, "<name>", <callback>)` for an engine
+4. Give the host its line in `game/sites.def`: `HOS_SITE_ENGINE(<ident>, "<name>", <callback>)` for an engine
    feature, on from the start; `HOS_SITE(<ident>, "<name>")` for a named hook nothing in the engine uses yet; and
    `HOS_SITE_OUTCOME(<ident>, "<name>")` as well for a site that changes the outcome on a worker thread. The callback
    is `int <callback>(Ctx *A64_NOESC c)` (`HosSiteFn`), reads and writes the registers `args` names in `c`, and returns
@@ -457,10 +457,10 @@ if (hos_site_on_text_letterStep) hos_site_fn_text_letterStep(c);    /* the state
 - **At build time**: the resolver reads main's code once and searches it once per signature; an anchor is searched in
   its function alone; a fingerprint's calls, strings or words are one more pass over the code each. It runs right
   after discovery, which takes about two seconds on the game; the sites' own share is not measured apart.
-- **What builds again**: the site tables of this build and the host's list (`host/game/sites.def`, whose `HOS_VALUE`
+- **What builds again**: the site tables of this build and the host's list (`game/sites.def`, whose `HOS_VALUE`
   symbols the lift writes and whose lines it checks) are in the lift's key, and each function's edits in its own key
   ([the builder](builder.md#the-lifts-cache)), so a table changed lifts and compiles only the units of the functions
-  whose sites changed. A change to `host/game/`'s C alone only compiles the host again.
+  whose sites changed. A change to `game/`'s C alone only compiles the host again.
 
 ## ExeFS patch mods
 
@@ -500,6 +500,6 @@ in `builder/crates/edits` rather than as a site of the table:
   its locals.
 - **Boot and a thread's entry** (`host/hos_main.c` `call_guest_args`, `host/hos_thread.c`): they start the game's code on
   a fresh stack, before anything a `game_call` needs exists. Every other call the host makes into the game's functions
-  goes through `game_call` (`host/game/game.h`), or `game_call_more` where it needs x8, its own LR or s0 and s1 back.
-- **The SDK's functions** are hooked by symbol (`edits::entry_hooks`, from `host/`'s `ENTRY_HOOK_SYM` lines), not by
+  goes through `game_call` (`host/game_call.h`), or `game_call_more` where it needs x8, its own LR or s0 and s1 back.
+- **The SDK's functions** are hooked by symbol (`edits::entry_hooks`, from `host/`'s and `game/`'s `ENTRY_HOOK_SYM` lines), not by
   the table: they are found by name in every build.

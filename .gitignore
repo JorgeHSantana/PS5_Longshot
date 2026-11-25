@@ -50,6 +50,8 @@ build-linux/
 /target/
 # (the builder's crates' own target folder from before the root workspace: a stale one, or a test that still writes there)
 /builder/target/
+# (the release's prebuilt liblongshot_rs.a and its key: made by CI, carried by longshot-builder, never committed)
+/longshot-rs/prebuilt/
 
 # ---- a checkout's own development builds on Windows (scripts/dev.py) ----
 build-windows/

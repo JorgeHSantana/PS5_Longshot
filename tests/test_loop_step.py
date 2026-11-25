@@ -7,7 +7,7 @@ f_802cfca0 advances the clock of each animation entry (time +4, start +16, end +
 f_80944aa0 writes the time into the list the skeletons read, wrapped into the range kept beside it (+4, +8).
 
 This compiles the production hook sites (anim.loop*: replace sites on the two multiplies and the store, whose callbacks do the
-instruction's work with the host's step or time, as the lift lowers them (tests/sitehooks.py) with host/oot_sites.c's callbacks) in authored
+instruction's work with the host's step or time, as the lift lowers them (tests/sitehooks.py) with game/oot_sites.c's callbacks) in authored
 updates cut the way the lifted ones are, with host/loop_step.h's functions the callbacks reach; and, side by side, the text
 patch's lines they replaced (OLD_*, as main had them). The same checks run on the updates without the hooks (and with them
 off): they must fail there, or the test checks nothing. And each of the three places is run alone, hooked and as the patch
@@ -229,7 +229,7 @@ def tbz(site_text):
 
 
 def head(on=1):
-    """the callbacks (cut from host/oot_sites.c) and the sites' slots, for a fixture that has the host's functions"""
+    """the callbacks (cut from game/oot_sites.c) and the sites' slots, for a fixture that has the host's functions"""
     by = [site(name, function, "replace", offset) for name, function, offset in SITES]
     return ("uint32_t hos_loop_step(uint64_t at, uint32_t step, uint32_t start, uint32_t end);\n"
             "uint32_t hos_loop_pose(uint32_t time, uint32_t start, uint32_t end);\n"
@@ -332,7 +332,7 @@ def run(cc, directory, clock, pose):
     updates = clock.replace('#include "a64.h"\n', "", 1) + pose.replace('#include "a64.h"\n', "", 1)
     text = FIXTURE.replace("@HOOKS@", hooks).replace("@UPDATES@", updates)
     source.write_text(text, encoding="utf-8")
-    command = [cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-I", str(ROOT / "host"), str(source),
+    command = [cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"), str(source),
                *sitehooks.objects(directory, text), "-o", str(binary), "-lm"]
     subprocess.run(command, check=True)
     return subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)

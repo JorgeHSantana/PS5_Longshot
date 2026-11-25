@@ -33,7 +33,7 @@ with. It parses the command line and hands the work to `build-driver`.
   left out of the main usage; `longshot-builder dev --help` lists it:
   - [`mod.rs`](src/dev/mod.rs): the usage and `decode <hex word> ...`, each word as the decoder sees it;
   - [`discover.rs`](src/dev/discover.rs): `discover --image <dir>`: the image's discovery, its counts and time;
-  - [`sites_cmd.rs`](src/dev/sites_cmd.rs): `sites --image <dir> --tables <host/game>`: the build's hook sites read,
+  - [`sites_cmd.rs`](src/dev/sites_cmd.rs): `sites --image <dir> --tables <game>`: the build's hook sites read,
     resolved and placed over the image's discovery, a line each; exit 1 naming a site that does not resolve or fit;
   - [`lift_cmd.rs`](src/dev/lift_cmd.rs): `lift`: the whole lift, from the image to gen/ (`lift::whole`), with its
     switches: `--profile-generate`, `--profile`, the IR's (`--no-polls`, `--no-mark-bitmap`, `--sync-all-at-calls`,
@@ -41,7 +41,7 @@ with. It parses the command line and hands the work to `build-driver`.
     writes the units' texts;
   - [`profile_cmd.rs`](src/dev/profile_cmd.rs): `profile --map <profile_map.txt> --raw <counts> ... [--into <profile>]
     --out <profile>`: a run's raw counts made a guest profile;
-  - [`site_hooks.rs`](src/dev/site_hooks.rs): `site-hooks --tables <host/game> --build <build id> --out <file.ll>
+  - [`site_hooks.rs`](src/dev/site_hooks.rs): `site-hooks --tables <game> --build <build id> --out <file.ll>
     <name>=<site>...`: hook sites as the lift lowers them, each a function a C test calls, for the site tests
     (`tests/sitehooks.py`; docs/dev/reference/builder.md, "Building and checking the builder");
   - [`words.rs`](src/dev/words.rs): `words --in <file> --pc <hex> --out <file.ll> --list <file> [--count-checks]`:

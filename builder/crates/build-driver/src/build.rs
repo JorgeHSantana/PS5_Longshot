@@ -459,7 +459,7 @@ pub fn build(o: &BuildOptions, p: &Places, st: &Stages, r: &Reporter) -> Result<
             (placed, secs, made)
         });
         let rest = (|| -> Result<_> {
-            let tables = p.root.join("host").join("game");
+            let tables = p.root.join("game");
             let patches = st.game.patches(&p.work.exefs, o.profile.as_deref(), &tables, r)?;
             if patches.applied > 0 {
                 r.log(format!("the mods' ExeFS patches: {} files applied", patches.applied));
@@ -734,7 +734,7 @@ pub fn read_only(
     r.stage(Stage::Read, "Reading your game files");
     std::fs::create_dir_all(out).at(out)?;
     st.game.read_exefs(game, &work.exefs, &work.finish(), r)?;
-    let patches = st.game.patches(&work.exefs, profile, &root.join("host/game"), r)?;
+    let patches = st.game.patches(&work.exefs, profile, &root.join("game"), r)?;
     st.game.image(&work.exefs, &patches, &crate::hle::for_exefs(root, &work.exefs, r)?, &work.image, r)?;
     r.progress(1.0);
     Ok(())

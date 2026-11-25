@@ -88,7 +88,7 @@ bool is_dir(const std::string& p) {
     const DWORD a = GetFileAttributesA(p.c_str());
     return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
 }
-/// The mods the game loaded, by host/mods.c's rule: under the game folder's mods (or HOS_MODS), a folder holding romfs or exefs,
+/// The mods the game loaded, by game/mods.c's rule: under the game folder's mods (or HOS_MODS), a folder holding romfs or exefs,
 /// up to four folders deep; names starting with '-' or '_' are off
 void share_find_mods(const std::string& dir, const std::string& name, int depth, std::vector<std::string>& out) {
     if (depth > 0 && (is_dir(dir + "/romfs") || is_dir(dir + "/exefs"))) {

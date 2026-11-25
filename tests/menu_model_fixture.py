@@ -9,7 +9,11 @@ fixture that compiles vk_menu.cpp's Row, ini_key, row_shown, is_slider or set_ro
 module's, Row.setting); "" for a checkout without the model (an older one a check is run against, --source).
 menu_model_member(root): the member a fixture's own Row stub needs for those to compile, "" likewise.
 
-menu_sources(root): the menu's source text, vk_menu.cpp's and every module's, for a check that looks for the menu's texts.
+menu_sources(root): the menu's source text, vk_menu.cpp's, every module's and the game's rows' (game/menu/*.c), for a check
+that looks for the menu's texts.
+
+game_rows(root): the game's rows (game/menu/*.c, game/game.h GameMenuRow) as written, which gpu/vk/menu/game_rows.cpp adds;
+module_rows gives them too, in a module row's shape, their value "menu_game_value(<option id>)".
 
 built_menu(cxx): the menu as the model orders it, tab by tab: the model and every module compiled (gpu/vk/menu_module.h with
 vk_menu.h's Options in place of vk_menu.h, no Vulkan; MENU_LAYOUT_ONLY, so a module's hooks that ask the renderer, MENU_HOOK, are none) over a stand-in for the core module made from vk_menu.cpp's own text
@@ -48,10 +52,14 @@ def menu_model_member(root=None):
     return "const menu::Setting* setting = nullptr; " if (_vk(root) / "menu_model.h").exists() else ""
 
 
+def _game_menu(root):
+    return Path(root or ROOT) / "game" / "menu"
+
+
 def menu_sources(root=None):
     vk = _vk(root)
     return "\n".join(p.read_text(encoding="utf-8") for p in [vk / "vk_menu.cpp", vk / "menu_module.h"] +
-                     sorted((vk / "menu").glob("*.cpp")))
+                     sorted((vk / "menu").glob("*.cpp")) + sorted(_game_menu(root).glob("*.c")))
 
 
 TAB_OF_PAGE = {"graphics": "TAB_GRAPHICS", "audio": "TAB_AUDIO", "gameplay": "TAB_GAMEPLAY", "controls": "TAB_CONTROLS",
@@ -88,9 +96,72 @@ def _fields(text):
     return out
 
 
+def _braced(text, i):
+    """The end of the braces opened just before text[i] (strings respected): the index after the closing one"""
+    depth = 1
+    while depth:
+        c = text[i]
+        if c == '"':
+            j = i + 1
+            while text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            i = j + 1
+            continue
+        depth += c == "{"
+        depth -= c == "}"
+        i += 1
+    return i
+
+
+def game_rows(root=None):
+    """The game's rows (game/menu/*.c): dicts of each GameMenuRow's designated fields, as written, and "file". A row is a
+    {.key = ...} in the file's table of GameMenuRow"""
+    out = []
+    for path in sorted(_game_menu(root).glob("*.c")):
+        text = re.sub(r"/\*.*?\*/", "", path.read_text(encoding="utf-8"), flags=re.S)
+        for m in re.finditer(r"\{\s*\.key\s*=", text):
+            end = _braced(text, m.start() + 1)
+            row = {"file": "game/menu/" + path.name}
+            for f in _fields(text[m.start() + 1:end - 1]):
+                if f.startswith(".") and "=" in f:
+                    name, value = f[1:].split("=", 1)
+                    row[name.strip()] = value.strip()
+            out.append(row)
+    return out
+
+
+def game_row(key, root=None):
+    """The game's row of this key (game_rows), None for none"""
+    return next((g for g in game_rows(root) if g.get("key") == '"%s"' % key), None)
+
+
+# (vk_replay.cpp's option callback answers the game's rows by their option ids: gpu/vk/menu/game_rows.cpp)
+GAME_OPTION_ANSWER = "if (int v; menu_game_option(id, &v)) return v;"
+
+
+GAME_KINDS = {"GAME_MENU_TOGGLE": "menu::Kind::Toggle", "GAME_MENU_SLIDER": "menu::Kind::Slider"}
+
+
+def _as_module_row(g):
+    """A game row in a module row's shape: its value the storage gpu/vk/menu/game_rows.cpp keeps by its option id"""
+    row = {"page": g.get("tab", '""').strip('"'), "file": g["file"], "game": "true"}
+    for name in ("key", "label", "help", "lo", "hi", "step"):
+        if name in g:
+            row[name] = g[name]
+    if g.get("kind") in GAME_KINDS:
+        row["kind"] = GAME_KINDS[g["kind"]]
+    row["value"] = "menu_game_value(%s)" % g.get("option", "-1")
+    row["host_option"] = g.get("option", "-1")
+    for name in ("restart", "preset_exempt"):
+        if g.get(name, "0") not in ("0", ""):
+            row[name] = "true"
+    return row
+
+
 def module_rows(root=None):
-    """The rows the modules describe (gpu/vk/menu/*.cpp), in each file's order: dicts of their designated fields (as
-    written) and "page", "file". A row is a .row({...}) after a menu::tab("x") or menu::page("x")"""
+    """The rows the modules describe (gpu/vk/menu/*.cpp), in each file's order, then the game's (game_rows, in a module
+    row's shape): dicts of their designated fields (as written) and "page", "file". A row is a .row({...}) after a
+    menu::tab("x") or menu::page("x")"""
     out = []
     for path in sorted((_vk(root) / "menu").glob("*.cpp")):
         text = path.read_text(encoding="utf-8")
@@ -117,7 +188,7 @@ def module_rows(root=None):
                     name, value = f[1:].split("=", 1)
                     row[name.strip()] = value.strip()
             out.append(row)
-    return out
+    return out + [_as_module_row(g) for g in game_rows(root)]
 
 
 def unhook(text):
@@ -262,10 +333,17 @@ def compile_menu(cxx, main_cpp, tmp, root=None):
     (Path(tmp) / "menu_module.h").write_text(module_header(root), encoding="utf-8")
     (Path(tmp) / "main.cpp").write_text(main_cpp.replace("// CORE", core) + renderer_stand_ins(root), encoding="utf-8")
     exe = Path(tmp) / "menu"
+    # (the game's rows, game/menu/*.c: C, which game_rows.cpp asks for directly with MENU_LAYOUT_ONLY)
+    objects = []
+    for c in sorted(_game_menu(root).glob("*.c")):
+        obj = Path(tmp) / ("game_menu_" + c.stem + ".o")
+        subprocess.run([cxx, "-x", "c", "-std=c11", "-Wall", "-Wextra", "-Werror", "-c", str(c), "-o", str(obj)], check=True)
+        objects.append(str(obj))
     # (the stand-in menu_module.h first, then gpu/vk for a module's own includes: fps_stats.h)
     subprocess.run([cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-DMENU_LAYOUT_ONLY", "-I" + str(tmp), "-I" + str(vk),
                     str(Path(tmp) / "main.cpp")] +
-                   [str(m) for m in sorted((vk / "menu").glob("*.cpp"))] + [str(vk / "menu_model.cpp"), "-o", str(exe)],
+                   [str(m) for m in sorted((vk / "menu").glob("*.cpp"))] + [str(vk / "menu_model.cpp")] + objects +
+                   ["-o", str(exe)],
                    check=True)
     return exe
 

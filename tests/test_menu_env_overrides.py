@@ -63,6 +63,7 @@ FIXTURE = r"""
 #include "hos_wide_size.h"   // (host/: the output sizes the menu accepts, hos_output_size_valid)
 #include "display_modes.h"   // (gpu/vk/: the sizes the Output resolution offers)
 #include "vk_fsr4.h"
+#include "../../game/options.h"   // (the game's option ids: HOS_OPT_SKIP_OPENING, whose row is the game's)
 using namespace mkwvk;
 namespace mkwvk {
 int fsr4_model_env() {
@@ -81,6 +82,9 @@ bool host_screen_size(uint32_t*, uint32_t*) { return false; }
 std::string monitor_shape() { return {}; }
 int ultrawide_read = 1, aspect_started = -1;
 bool aspect_follows_host(int) { return false; }
+// (the game's rows' values, game/menu/rows.c: Skip opening's alone is read by the overrides, HOS_SKIP_OPENING)
+static int skip_opening_value;
+int* menu_game_value(int id) { return id == HOS_OPT_SKIP_OPENING ? &skip_opening_value : nullptr; }
 #ifdef _WIN32
 static int setenv(const char* name, const char* value, int) { return _putenv_s(name, value); }
 #endif

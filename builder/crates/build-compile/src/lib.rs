@@ -25,6 +25,7 @@ pub mod options;
 pub mod packages;
 pub mod plan;
 pub mod prebuilt;
+pub mod rust;
 pub mod schedule;
 pub mod state;
 pub mod store;
@@ -395,6 +396,20 @@ pub fn run(o: &Options, r: &Reporter) -> Result<Outcome> {
             None => 0,
         };
         r.log(format!("dry run: {} files to compile besides the lift's, {} missing", units.len(), missing.len()));
+        // (a release's check: the game's Rust it carries is the prebuilt library of its own sources, so a player's
+        // build compiles no Rust; `longshot-builder dev release dry-run` looks for the line)
+        if rust::has_rust(&o.root) {
+            let target = rust::Target::of(&tc);
+            let held = rust::prebuilt(&o.root, target, &rust::source_key(&o.root)?).is_some();
+            r.log(format!(
+                "dry run: the game's Rust: {}",
+                if held {
+                    "prebuilt for its sources"
+                } else {
+                    "no prebuilt library of its sources: cargo would build it"
+                }
+            ));
+        }
         for m in &missing {
             r.log(format!("    missing: {}", m.display()));
         }
@@ -890,6 +905,14 @@ fn links(
         let exe = l.out.join(game_exe_name(linux));
         let rsp = l.out.join("objs.rsp");
         link::response_file(&rsp, &objs(Module::Game))?;
+        // (the game's Rust, longshot-rs: the tree's prebuilt library of its sources, else cargo's build: rust.rs)
+        let rust_target = rust::Target::of(tc);
+        let rust_lib = rust::library(&l.root, &l.work, rust_target, s.cargo.as_deref(), r)?;
+        let rust_link: Vec<String> = rust_lib
+            .iter()
+            .map(|p| p.display().to_string())
+            .chain(rust_lib.iter().flat_map(|_| rust_target.system_libs().iter().map(|l| l.to_string())))
+            .collect();
         let mut cmd: Vec<String>;
         if linux {
             // (Tracy's client is C++: the C++ driver links, its runtime inside, its C API exported for the renderer)
@@ -910,6 +933,7 @@ fn links(
                 "-Wl,--export-dynamic-symbol=hos_posix_*".into(),
                 format!("@{}", rsp.display()),
             ]);
+            cmd.extend(rust_link.iter().cloned());
             if s.tracy {
                 cmd.extend(
                     ["-Wl,--export-dynamic-symbol=___tracy_*", "-static-libstdc++", "-static-libgcc"].map(String::from),
@@ -924,6 +948,7 @@ fn links(
             cmd.extend(["-o".into(), exe.display().to_string()]);
             cmd.extend(tc.linker(&[format!("/map:{}", exe.with_extension("map").display())]));
             cmd.extend([tc.link_opt("/stack:8388608"), format!("@{}", rsp.display())]);
+            cmd.extend(rust_link.iter().cloned());
             cmd.extend(host_libs.iter().cloned());
             cmd.extend(exe_resources(o, l)?.iter().map(|p| p.display().to_string()));
             if s.release {

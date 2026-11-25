@@ -2,9 +2,9 @@
 
 f_80825aa0 tests the engine's config flag (tbz w8, #0 to the fixed path); the patch made it `if (hos_fixed_resolution ||
 !(w8 & 1)) goto fixed; hos_dynres_runs++;` and put hos_fixed_scale_bits in place of the fixed path's 1.0 (mov w9,
-#0x3f800000). The sites (host/game/sites.toml): dynres.fixedPath, a branch site before the tbz; dynres.dynamicFrame,
+#0x3f800000). The sites (game/sites/sites.toml): dynres.fixedPath, a branch site before the tbz; dynres.dynamicFrame,
 before the instruction after it (reached only from it); dynres.fixedScale, a replace site on the mov. Checked here, game-free:
-the sites are in the table where the patch was, the host gives them the callbacks of host/oot_sites.c, and the patch's C
+the sites are in the table where the patch was, the host gives them the callbacks of game/oot_sites.c, and the patch's C
 and the hooks as the lift lowers them (tests/sitehooks.py), with those callbacks, run side by side over every flag and setting, leave the same
 registers, the same count of dynamic frames and take the same path.
 
@@ -51,9 +51,9 @@ def main():
         x = sites.get(name)
         check(x is not None and (x.function, x.at, x.offset) == ("f_80825aa0", at, offset),
               "%s is not the %s site at f_80825aa0+%#x" % (name, at, offset))
-        check(host_sites().get(ident(name)) == name, "host/game/sites.def has no slot for " + name)
+        check(host_sites().get(ident(name)) == name, "game/sites.def has no slot for " + name)
 
-    calls = (ROOT / "host" / "oot_sites.c").read_text(encoding="utf-8")
+    calls = (ROOT / "game" / "oot_sites.c").read_text(encoding="utf-8")
     branch = sitehooks.line(sites["dynres.fixedPath"]).replace(sitehooks.GOTO, "goto L_fixed;")
     before = sitehooks.line(sites["dynres.dynamicFrame"])
     replace = sitehooks.line(sites["dynres.fixedScale"])

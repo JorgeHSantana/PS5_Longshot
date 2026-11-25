@@ -107,7 +107,7 @@ static void *hos_guest_range(uint64_t a, uint64_t n) {
     if (allow_large_range) return heap;   /* range-validation-only boundary fixture; never copied */
     return NULL;
 }
-#define HOS_WRITTEN(p, n) ((void)0)   /* (host/hos.h's mark, for host/game/flags.c: nothing reads the marks here) */
+#define HOS_WRITTEN(p, n) ((void)0)   /* (host/hos.h's mark, for game/flags.c: nothing reads the marks here) */
 static void scan_probe(void);
 static unsigned scan_log_count;
 static char scan_log[256];
@@ -226,22 +226,22 @@ static int fake_map(char *out, size_t cap) {
     return have;
 }
 static int fake_poll(int slot, char *out, size_t cap) {
-    return __atomic_load_n(&poll_held, __ATOMIC_ACQUIRE) ? 0 : hos_oot_poll(slot, out, cap);
+    return __atomic_load_n(&poll_held, __ATOMIC_ACQUIRE) ? 0 : game_poll(slot, out, cap);
 }
-static void fake_watch(int slot, const HosControlOotWatch *watch) {
-    hos_oot_watch(slot, watch);
+static void fake_watch(int slot, const HosControlGameWatch *watch) {
+    game_watch(slot, watch);
     if (watch) __atomic_fetch_or(&watch_mask, 1u << slot, __ATOMIC_RELEASE);
     else {
-        char pending[HOS_CONTROL_OOT_JSON];
-        CHECK(!hos_oot_poll(slot, pending, sizeof pending));
+        char pending[HOS_CONTROL_GAME_JSON];
+        CHECK(!game_poll(slot, pending, sizeof pending));
         __atomic_fetch_and(&watch_mask, ~(1u << slot), __ATOMIC_RELEASE);
     }
 }
 static void fake_log(const char *line) { fprintf(stderr, "%s\n", line); }
 static HosControlGame game = {
-    .frame = fake_frame, .map = fake_map, .oot_state = fake_state, .oot_sample_ask = hos_oot_sample_ask,
-    .oot_sample_cancel = hos_oot_sample_cancel, .oot_sample = hos_oot_sample,
-    .oot_watch = fake_watch, .oot_poll = fake_poll, .log = fake_log, .version = "state-fixture"
+    .frame = fake_frame, .map = fake_map, .game_state = fake_state, .game_sample_ask = game_sample_ask,
+    .game_sample_cancel = game_sample_cancel, .game_sample = game_sample,
+    .game_watch = fake_watch, .game_poll = fake_poll, .log = fake_log, .version = "state-fixture"
 };
 static void setup(void) {
     mgr = alloc(0x800), holder = alloc(16);
@@ -271,7 +271,7 @@ static void setup(void) {
     char escaped[64];
     memset(escaped, 0x80, 63), escaped[0] = 1, escaped[63] = 0;
     escaped_text = text(escaped);
-    for (int i = 0; i < HOS_CONTROL_OOT_FLAGS; i++) {
+    for (int i = 0; i < HOS_CONTROL_GAME_FLAGS; i++) {
         char name[48];
         snprintf(name, sizeof name, "Test.Escaped.%034u", (unsigned)i);
         CHECK(strlen(name) == 47);
@@ -314,15 +314,15 @@ static uint32_t tear_value;
 static int replace_during_scan;
 static void scan_probe(void) {
     CHECK(!snapshot_depth);
-    char scratch[HOS_CONTROL_OOT_JSON];
-    (void)hos_oot_sample(0, scratch, sizeof scratch);
-    for (int i = 0; i < HOS_CONTROL_OOT_CLIENTS; i++) (void)hos_oot_poll(i, scratch, 1);
+    char scratch[HOS_CONTROL_GAME_JSON];
+    (void)game_sample(0, scratch, sizeof scratch);
+    for (int i = 0; i < HOS_CONTROL_GAME_CLIENTS; i++) (void)game_poll(i, scratch, 1);
     if (tear_at && scan_visits == tear_at) {
         w32(tear_target, tear_value);
         tear_at = 0;
     }
     if (replace_during_scan) {
-        hos_oot_watch(0, NULL);
+        game_watch(0, NULL);
         replace_during_scan = 0;
     }
 }
@@ -338,9 +338,9 @@ static void shared_scan_cases(void) {
         values[t] = flag(large, kind, 0x100 + (uint32_t)t);
     }
     w64(holder, large);
-    HosControlOotWatch watch = {.every = 1, .changes = 1};
+    HosControlGameWatch watch = {.every = 1, .changes = 1};
     hos_control_on = 1;
-    for (int i = 0; i < HOS_CONTROL_OOT_CLIENTS; i++) hos_oot_watch(i, &watch);
+    for (int i = 0; i < HOS_CONTROL_GAME_CLIENTS; i++) game_watch(i, &watch);
     unsigned allocations = 0;
     for (int f = 1; f <= 6; f++) {
         scan_visits = scan_calls = 0;
@@ -355,10 +355,10 @@ static void shared_scan_cases(void) {
             CHECK(!strcmp(scan_log, "control: oot changes scan: Bool=2049 Int=2049 Enum=2049 UInt=2049 slots=8196 slice=4096 presents=3"));
         if (f == 3) allocations = tap_allocations;
         if (f > 3) CHECK(tap_allocations == allocations);
-        char first[HOS_CONTROL_OOT_JSON], next[HOS_CONTROL_OOT_JSON];
-        CHECK(hos_oot_poll(0, first, sizeof first));
-        for (int i = 1; i < HOS_CONTROL_OOT_CLIENTS; i++) {
-            CHECK(hos_oot_poll(i, next, sizeof next));
+        char first[HOS_CONTROL_GAME_JSON], next[HOS_CONTROL_GAME_JSON];
+        CHECK(game_poll(0, first, sizeof first));
+        for (int i = 1; i < HOS_CONTROL_GAME_CLIENTS; i++) {
+            CHECK(game_poll(i, next, sizeof next));
             CHECK(!strcmp(first, next));
         }
     }
@@ -407,9 +407,9 @@ static void shared_scan_cases(void) {
     replace_during_scan = 1;
     hos_present_count = 7;
     hos_oot_state_tap(actor);
-    char out[HOS_CONTROL_OOT_JSON];
-    CHECK(!hos_oot_poll(0, out, sizeof out));
-    for (int i = 0; i < HOS_CONTROL_OOT_CLIENTS; i++) hos_oot_watch(i, NULL);
+    char out[HOS_CONTROL_GAME_JSON];
+    CHECK(!game_poll(0, out, sizeof out));
+    for (int i = 0; i < HOS_CONTROL_GAME_CLIENTS; i++) game_watch(i, NULL);
     w64(holder, small_mgr);
     state_scan_kind = state_scanning = 0;
     state_last = -1;
@@ -423,11 +423,11 @@ int main(int argc, char **argv) {
     table_caps();
     setup();
     shared_scan_cases();
-    char scratch[HOS_CONTROL_OOT_JSON];
-    CHECK(!hos_oot_sample(0, scratch, sizeof scratch));
-    hos_oot_watch(-1, NULL), hos_oot_watch(HOS_CONTROL_OOT_CLIENTS, NULL);
-    CHECK(!hos_oot_poll(-1, scratch, sizeof scratch));
-    CHECK(!hos_oot_poll(HOS_CONTROL_OOT_CLIENTS, scratch, sizeof scratch));
+    char scratch[HOS_CONTROL_GAME_JSON];
+    CHECK(!game_sample(0, scratch, sizeof scratch));
+    game_watch(-1, NULL), game_watch(HOS_CONTROL_GAME_CLIENTS, NULL);
+    CHECK(!game_poll(-1, scratch, sizeof scratch));
+    CHECK(!game_poll(HOS_CONTROL_GAME_CLIENTS, scratch, sizeof scratch));
     CHECK(hos_control_serve(argv[1], &game));
     static const char *const names[] = {"Sequence_CurrentBanc", "PlayerStatus.Life", "abc", "ab", "a", "", "Test.Flag"};
     printf("{\"ready\":true,\"murmur\":{");
@@ -543,12 +543,13 @@ def block(text, head):
 
 def wiring(root, tap, mutation):
     main_c = (root / "host" / "hos_main.c").read_text(encoding="utf-8")
-    sites = (root / "host" / "oot_sites.c").read_text(encoding="utf-8")
-    table = (root / "host" / "game" / "sites.toml").read_text(encoding="utf-8")   # (the sites' definitions)
+    tools_c = (root / "game" / "oot_tools.c").read_text(encoding="utf-8")
+    sites = (root / "game" / "oot_sites.c").read_text(encoding="utf-8")
+    table = (root / "game" / "sites" / "sites.toml").read_text(encoding="utf-8")   # (the sites' definitions)
     control = (root / "host" / "control.c").read_text(encoding="utf-8")
     docs = (root / "docs" / "dev" / "developing.md").read_text(encoding="utf-8")
     protocol = (root / "docs" / "dev" / "reference" / "control-bridge.md").read_text(encoding="utf-8")
-    lift = block(main_c, "void hos_oot_lift_player(Ctx *c, uint64_t actor) {")
+    lift = block(tools_c, "void hos_oot_lift_player(Ctx *c, uint64_t actor) {")
     if mutation == "hook":
         lift = lift.replace("hos_oot_state_tap(actor);", "")
     took, call, gave = (lift.find("TryAcquireSRWLockExclusive(&cheats_lock)"), lift.find("hos_oot_state_tap(actor);"),
@@ -558,23 +559,24 @@ def wiring(root, tap, mutation):
           "Link's update (the hook site player.update) does not call hos_oot_lift_player")
     check("void hos_oot_state_tap(uint64_t actor) {" in tap, "the tap's hook has another signature")
     check("HOS_CONTROL_MEM" in protocol and "GameDataMgr" in protocol, "flag access boundary is not documented")
-    for name in ("oot_sample_ask", "oot_sample_cancel", "oot_sample", "oot_watch", "oot_poll"):
-        check(".%s = hos_%s" % (name, name) in control, "production control callback missing: " + name)
+    for name in ("game_sample_ask", "game_sample_cancel", "game_sample", "game_watch", "game_poll"):
+        check(".%s = %s," % (name, name) in control, "production control callback missing: " + name)
     check("control-bridge.md" in docs, "docs/dev/developing.md no longer points to the control bridge's page")
     for name in ("oot", "flags", "changes", "every", "game", "frame"):
         check("`%s`" % name in protocol or '"%s"' % name in protocol, "control protocol does not describe " + name)
 
     defs = dict(re.findall(r"#define (STATE_\w+) (0x[0-9a-fA-F]+)", tap))
-    flags_h = (root / "host" / "game" / "flags.h").read_text(encoding="utf-8")
+    flags_h = (root / "game" / "flags.h").read_text(encoding="utf-8")
     check(re.search(r"#define GAME_FLAGS_SLOT 0x84c9e180ULL\b", flags_h) is not None, "GameDataMgr's slot is not the flags service's")
-    check("0x84c9e180" not in tap and "0x84c9e180" not in main_c, "a copy of GameDataMgr's slot outside host/game/")
-    check(re.search(r"#define OOT_EVENTMGR_SLOT %sULL\b" % defs["STATE_EVENTMGR_SLOT"], main_c) is not None,
-          "EventMgr's slot differs from hos_main.c's")
-    check("recomp_load64(c, %sULL)" % defs["STATE_CAMERAS_SLOT"] in block(main_c, "static uint64_t oot_gameplay_view("),
+    check("0x84c9e180" not in tap and "0x84c9e180" not in main_c and "0x84c9e180" not in tools_c,
+          "a copy of GameDataMgr's slot outside game/flags.h")
+    check(re.search(r"#define OOT_EVENTMGR_SLOT %sULL\b" % defs["STATE_EVENTMGR_SLOT"], tools_c) is not None,
+          "EventMgr's slot differs from game/oot_tools.c's")
+    check("recomp_load64(c, %sULL)" % defs["STATE_CAMERAS_SLOT"] in block(tools_c, "static uint64_t oot_gameplay_view("),
           "the camera manager's slot differs from oot_gameplay_view's")
-    check("recomp_load64(c, view) != %sULL" % defs["STATE_VIEW_VTABLE"] in main_c,
+    check("recomp_load64(c, view) != %sULL" % defs["STATE_VIEW_VTABLE"] in tools_c,
           "the view's vtable differs from hos_oot_free_view's")
-    check(int(defs["STATE_LINK_POS"], 16) == 796 and "actor + 796" in main_c, "Link's position differs from the mark's")
+    check(int(defs["STATE_LINK_POS"], 16) == 796 and "actor + 796" in tools_c, "Link's position differs from the mark's")
     named = {"STATE_MAP": "Sequence_CurrentBanc", "STATE_LOADING": "Sequence_IsLoadingBanc", "STATE_CHILD": "Sequence_IsChildhood",
              "STATE_ROT": "Player_Rot_For_Map", "STATE_LIFE": "PlayerStatus.Life", "STATE_MAX_LIFE": "PlayerStatus.MaxLife",
              "STATE_RUPEES": "PlayerStatus.CurrentRupee"}
@@ -582,7 +584,7 @@ def wiring(root, tap, mutation):
         value = int(defs[macro], 16)
         check(value == murmur(name), "%s is not the hash of %s" % (macro, name))
         if name.startswith("Sequence_"):
-            check("0x%08xu" % value in main_c, "hos_main.c has another hash for " + name)
+            check("0x%08xu" % value in tools_c, "game/oot_tools.c has another hash for " + name)
 
 
 CORE_FIELDS = ("t", "frame", "map", "pos", "facing", "camera", "event", "loading", "age", "life", "max_life",
@@ -648,27 +650,27 @@ def mutate_sources(tap, flags, control, mode):
         tap = once(tap, "seen->valid = 0, seen->cursor = 0, seen->changes = (StateChanges){0};\n            if",
                    "seen->valid = seen->valid && seen->table.table == h.table, seen->cursor = 0, seen->changes = (StateChanges){0};\n            if")
     elif mode == "replace":
-        control = once(control, "if (G.game->oot_watch) G.game->oot_watch(ci, oot ? &watch : NULL);",
-                       "if (G.game->oot_watch && !c->sub_oot) G.game->oot_watch(ci, oot ? &watch : NULL);")
+        control = once(control, "if (G.game->game_watch) G.game->game_watch(ci, oot ? &watch : NULL);",
+                       "if (G.game->game_watch && !c->sub_oot) G.game->game_watch(ci, oot ? &watch : NULL);")
     elif mode == "unsubscribe":
-        control = within(control, "static void request(", "if (G.game->oot_watch) G.game->oot_watch(ci, NULL);",
+        control = within(control, "static void request(", "if (G.game->game_watch) G.game->game_watch(ci, NULL);",
                          "/* mutation: unsubscribe forgot the sampler */")
     elif mode == "disconnect":
         for head in ("static void conn_reset(", "static void conn_gone(", "static void conn_eof("):
-            control = within(control, head, "if (G.game->oot_watch) G.game->oot_watch((int)(c - G.conns), NULL);",
+            control = within(control, head, "if (G.game->game_watch) G.game->game_watch((int)(c - G.conns), NULL);",
                              "/* mutation: disconnect forgot the sampler */")
     elif mode == "pending":
         tap = once(tap, "if (state_sub[slot].ready) continue;", "/* mutation: overwrite pending samples */")
     elif mode == "retained":
-        tap = within(tap, "int hos_oot_sample(", "if (have) memcpy(out, state_latest.text, state_latest.n + 1);",
+        tap = within(tap, "int game_sample(", "if (have) memcpy(out, state_latest.text, state_latest.n + 1);",
                      "if (have) { memcpy(out, state_latest.text, state_latest.n + 1); state_latest.n = 0; }")
     elif mode == "json-cap":
-        tap = once(tap, "char text[HOS_CONTROL_OOT_JSON];", "char text[8192];")
+        tap = once(tap, "char text[HOS_CONTROL_GAME_JSON];", "char text[8192];")
     elif mode == "flag-validation":
-        control = within(control, "static int oot_watch_args(", "|| s[j] == '_' || s[j] == '.'",
+        control = within(control, "static int watch_args(", "|| s[j] == '_' || s[j] == '.'",
                          "|| s[j] == '_' || s[j] == '.' || s[j] == '-'")
     elif mode == "changes-validation":
-        control = within(control, "static int oot_watch_args(",
+        control = within(control, "static int watch_args(",
                          "if (changes && changes->type != J_TRUE && changes->type != J_FALSE) return 0;",
                          "/* mutation: accept non-boolean changes */")
     elif mode in ("demand-guard", "due-guard"):
@@ -677,7 +679,7 @@ def mutate_sources(tap, flags, control, mode):
         tap = once(tap, "if (frame < due) return;", "(void)due; /* capture before the deadline */")
         tap = once(tap, "if (frame < __atomic_load_n(&state_due, __ATOMIC_RELAXED)) {", "if (0) {")
     elif mode == "status-demand":
-        control = once(control, "p->sample_ticket = G.game->oot_sample_ask();", "p->sample_ticket = 0;")
+        control = once(control, "p->sample_ticket = G.game->game_sample_ask();", "p->sample_ticket = 0;")
     elif mode == "status-fresh":
         tap = once(tap, "if (ticket && __atomic_load_n(&state_published, __ATOMIC_ACQUIRE) < ticket) return 0;",
                    "(void)ticket; /* answer with an old snapshot before demand is fulfilled */")
@@ -1200,8 +1202,8 @@ def main():
     parser.add_argument("--mutate", choices=MUTATIONS, default="", help="inject this regression in temporary source; must fail")
     args = parser.parse_args()
     root = args.source_root.resolve()
-    tap = (root / "host" / "oot_state_tap.c").read_text(encoding="utf-8")
-    flags = (root / "host" / "game" / "flags.c").read_text(encoding="utf-8")
+    tap = (root / "game" / "oot_state_tap.c").read_text(encoding="utf-8")
+    flags = (root / "game" / "flags.c").read_text(encoding="utf-8")
     if args.mutate == "hook":
         print("MUTATION: hook (expected source-wiring failure, not a compiled negative)", flush=True)
     wiring(root, tap, args.mutate)
@@ -1211,10 +1213,10 @@ def main():
         print("MUTATION: %s (temporary production source; expected behavioral failure)" % args.mutate, flush=True)
     # Substitute platform declarations and count scan entry/slots; production decisions stay unchanged.
     body = "".join(line for line in tap.splitlines(keepends=True)
-                   if not line.startswith('#include "hos.h"') and not line.startswith("#include <windows.h>"))
+                   if not line.startswith('#include "game_host.h"') and not line.startswith("#include <windows.h>"))
     # (the flags service the sampler reads the game's flags through, ahead of it: its guest reads are the fixture's too)
     flags_body = "".join(line.replace('#include "flags.h"', '#include "game/flags.h"') for line in flags.splitlines(keepends=True)
-                         if not line.startswith('#include "../hos.h"'))
+                         if not line.startswith('#include "game_host.h"'))
     check(body.count("budget--;") == 1, "scan slot counter has no unique instrumentation point")
     body = body.replace("budget--;", "budget--; scan_visits++; scan_probe();")
     body = body.replace("static int state_scan(uint64_t mgr, StateChanges *out) {",
@@ -1233,7 +1235,7 @@ def main():
         warnings = ["-Wno-format-truncation"] if "clang" not in Path(args.cc).name else []
         libraries = ["-ladvapi32", "-lm"] if windows else ["-lpthread", "-lm"]
         subprocess.run([args.cc, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers",
-                        "-D_GNU_SOURCE", "-D_CRT_SECURE_NO_WARNINGS", "-DHOS_CONTROL_NO_GAME", "-I", str(root / "host"), str(src),
+                        "-D_GNU_SOURCE", "-D_CRT_SECURE_NO_WARNINGS", "-DHOS_CONTROL_NO_GAME", "-I", str(root / "host"), "-I", str(root / "game"), "-I", str(root), str(src),
                         str(bridge_src), "-o", str(exe)] + warnings + libraries, check=True)
         address = "longshot-oot-test-%d" % os.getpid() if windows else str(tmp / "control.sock")
         env = dict(os.environ)

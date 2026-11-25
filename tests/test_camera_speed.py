@@ -1,7 +1,7 @@
 """The Insert menu's Camera speed scales the right stick's camera turn speeds, and only when the player asks for it.
 
 The returns of the turn-speed functions (f_80643f10, f_80643b60 and their level-2 pair f_82ea21f0, f_82ea2220) are hook
-sites (host/game/sites.toml, at = "return"), whose callback, host/oot_sites.c's hos_site_camera_turn_speed, multiplies
+sites (game/sites/sites.toml, at = "return"), whose callback, game/oot_sites.c's hos_site_camera_turn_speed, multiplies
 s0 by hos_camera_scale, which host/nn_vi.c sets from the row (HOS_OPT_CAMERA_SPEED) at each present. At 100% the register
 stays as the game left it. The callback and the text patch it replaced (kept below as main had it) leave the same
 registers: the callback through each site's hook as the lift lowers it (tests/sitehooks.py), its flag on (off, the
@@ -49,7 +49,7 @@ def site_checks():
         x = sites.get(name)
         check(x is not None and (x.at, x.function) == ("return", function), "%s is not the return of %s" % (name, function))
         check("s0:f32:speed" in x.args, "%s does not name the speed it scales" % name)
-        check(sitecheck.host_sites().get(sitecheck.ident(name)) == name, "host/game/sites.def has no slot for " + name)
+        check(sitecheck.host_sites().get(sitecheck.ident(name)) == name, "game/sites.def has no slot for " + name)
         check(sitecheck.engine_fn(x) == "hos_site_camera_turn_speed", "%s does not call hos_site_camera_turn_speed" % name)
 
 
@@ -59,17 +59,21 @@ def source_checks():
           "the scale is not set from the menu's row at each present (100% without the renderer's menu)")
     replay = (ROOT / "gpu" / "vk" / "vk_replay.cpp").read_text(encoding="utf-8")
     api = (ROOT / "gpu" / "vk" / "vk_api.h").read_text(encoding="utf-8")
+    api += (ROOT / "game" / "options.h").read_text(encoding="utf-8")   # (the game's ids: one space with vk_api.h's)
     value = {}   # (every HOS_OPT_* enum)
     for first, start, rest in re.findall(r"enum \{ (HOS_OPT_\w+) = (\d+)(?:, ([^}]*))? \}", api):
-        names = [first] + [n.strip() for n in (rest or "").split(",") if n.strip()]
-        value.update({n: int(start) + i for i, n in enumerate(names)})
-    check("HOS_OPT_CAMERA_SPEED" in value, "vk_api.h has no HOS_OPT_CAMERA_SPEED")
+        at = int(start) - 1
+        for n in [first + " = " + start] + [n.strip() for n in (rest or "").split(",") if n.strip()]:
+            name, _, given = n.partition("=")   # (a later name's own value: game/options.h's HOS_OPT_SKIP_TITLE = 44)
+            at = int(given) if given.strip() else at + 1
+            value[name.strip()] = at
+    check("HOS_OPT_CAMERA_SPEED" in value, "gpu/vk/vk_api.h has no HOS_OPT_CAMERA_SPEED")
     table = block(replay, "t.option = [](int id) -> int {")
     ids = [int(n) if n.isdigit() else value[n] for n in re.findall(r"\bid == (\w+)", table)]
     check(len(ids) == len(set(ids)), "vk_replay.cpp: an option id is read twice: %s" % sorted(ids))
     check("if (id == HOS_OPT_CAMERA_SPEED) return opts.camera_speed;" in table, "the host cannot see the menu's row")
     users = []
-    for folder in ("host", "gpu"):
+    for folder in ("host", "gpu", "game"):
         for path in (ROOT / folder).rglob("*.c*"):
             text = path.read_text(encoding="utf-8", errors="replace")
             if re.search(r"\brx_option(_set)?\(\s*(HOS_OPT_CAMERA_SPEED|%d)\s*," % value["HOS_OPT_CAMERA_SPEED"], text):

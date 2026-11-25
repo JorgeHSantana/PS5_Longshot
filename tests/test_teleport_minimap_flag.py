@@ -4,7 +4,7 @@ An area's saved MapIconDeactivateByAreaActor flag can outlive a debug teleport. 
 the HUD but leaves the save's copy hidden. The teleport must use the game's queued Bool setter, which owns both.
 
 Linux only (the stand-in game is a mapping of the guest's addresses). Builds oot_teleport and what it calls from the
-source (with the game services it goes through, host/game/flags.c and game.c) over a stand-in GameDataMgr, event manager
+source (game/oot_tools.c) (with the game services it goes through, game/flags.c and host/game_call.c) over a stand-in GameDataMgr, event manager
 and guest functions. The fixture keeps the live flags and serialized
 flags separate: only processing an engine-setter request updates both. It checks:
 
@@ -92,7 +92,7 @@ static A64Fn a64_lookup(uint64_t a) {
            a == 0x80d99f10ULL ? game_make_arg : a == 0x80d9a820ULL ? game_request :
            a == 0x802dc440ULL || a == 0x8022b6f0ULL ? game_nothing : NULL;
 }
-/* (host/hos.h's, for host/game/game.c and flags.c: one guest thread, holding its core) */
+/* (host/hos.h's, for host/game_call.c and flags.c: one guest thread, holding its core) */
 #define HOS_WRITTEN(p, n) ((void)0)
 static Ctx *running;   /* (the guest thread's context: main's, which game_call takes as the caller's own) */
 static Ctx *hos_ctx(void) { return running; }
@@ -112,7 +112,7 @@ static void game_start(void) {
     recomp_store64(&c, OOT_EVENTMGR_SLOT, 0x1f000100), recomp_store64(&c, 0x1f000100, EVENTS);
     recomp_store64(&c, MGR + 32, TABLE), recomp_store32(&c, MGR + 44, SLOTS);
     recomp_store64(&c, MGR + 24, BOOLS), recomp_store32(&c, MGR + 16, 3);
-    for (uint32_t i = 0; i < 3; i++) {   /* (open addressing from hash % size, as host/game/flags.c walks it) */
+    for (uint32_t i = 0; i < 3; i++) {   /* (open addressing from hash % size, as game/flags.c walks it) */
         uint32_t slot = flags[i] % SLOTS;
         while (recomp_load32(&c, TABLE + slot * 8)) slot = (slot + 1) % SLOTS;
         recomp_store32(&c, TABLE + slot * 8, flags[i]), recomp_store32(&c, TABLE + slot * 8 + 4, i);
@@ -193,23 +193,24 @@ def block_end(text, start):
 
 
 def service(name):
-    """host/game/<name>.c with its header, as one text over the stand-in (its own includes of the runtime's left out)"""
+    """<name>.c with its header (game/flags, host/game_call), as one text over the stand-in (its own includes of the
+    runtime's left out)"""
     text = ""
     for part in ("%s.h" % name, "%s.c" % name):
-        text += "".join(line for line in (ROOT / "host" / "game" / part).read_text(encoding="utf-8").splitlines(keepends=True)
+        text += "".join(line for line in (ROOT / part).read_text(encoding="utf-8").splitlines(keepends=True)
                         if not line.startswith('#include "') and not line.startswith("typedef struct GuestContext Ctx;"))
     return text
 
 
 def build(cc, tmp, source_path=None):
-    source = (source_path or ROOT / "host" / "hos_main.c").read_text(encoding="utf-8")
+    source = (source_path or ROOT / "game" / "oot_tools.c").read_text(encoding="utf-8")
     places = source.index("typedef struct {\n    const char *child_banc")   # (OotDestination and the table of them)
     places = source[places:source.index("};", source.index("static const OotDestination oot_destinations[] = {")) + 2]
     start = source.index("#define OOT_EVENTMGR_SLOT")
     end = block_end(source, source.index("static int oot_teleport(Ctx *c, uint64_t actor, unsigned index) {"))
     src, exe = tmp / "teleport.c", tmp / "teleport"
-    # (the game services the teleport reads the flags and calls the game through: host/game/flags.c and game.c as they are)
-    src.write_text(STAND_IN + service("flags") + service("game") + places + "\n" + source[start:end] + RUN, encoding="utf-8")
+    # (the game services the teleport reads the flags and calls the game through: game/flags.c and host/game_call.c as they are)
+    src.write_text(STAND_IN + service("game/flags") + service("host/game_call") + places + "\n" + source[start:end] + RUN, encoding="utf-8")
     subprocess.run([cc, "-std=gnu11", "-O1", "-w", str(src), "-o", str(exe)], check=True)
     return exe
 
@@ -217,7 +218,7 @@ def build(cc, tmp, source_path=None):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--cc", default="gcc")
-    p.add_argument("--source", type=Path, help="host/hos_main.c from another revision (the regression negative)")
+    p.add_argument("--source", type=Path, help="game/oot_tools.c from another revision (the regression negative)")
     a = p.parse_args()
     if os.name == "nt" or sys.platform == "darwin":
         print("SKIP: the stand-in game maps the guest's addresses as Linux does")

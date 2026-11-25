@@ -1,15 +1,15 @@
-"""A horse's jump blend above 60 fps (the hook site horse.jumpStep, host/oot_high_fps.h oot_horse_whole_step).
+"""A horse's jump blend above 60 fps (the hook site horse.jumpStep, game/oot_high_fps.h oot_horse_whole_step).
 
 While a horse gets ready to jump an obstacle, its jump state machine (f_82c59eb0) sets each frame the blend frames into its
 JumpReady animation. With a step under 1 (slow motion at 60 fps) it takes them from last frame's plus the step. Above 60 fps
 every step is under 1, so the blend frames grew each frame, the blend into the jump hardly started, and Epona galloped through
-the fence while her body went over it. The site horse.jumpStep (host/game/sites.toml), a branch site on the game's
+the fence while her body went over it. The site horse.jumpStep (game/sites/sites.toml), a branch site on the game's
 "step < 1" branch (b.pl past the slow-motion branch), takes that branch too when the host's whole-frame test says the step is
 the whole frame's (the time object's step).
 
 An authored update with the step test, its branch and a stand-in for the slow-motion branch is built with the branch site's hook
-as the lift lowers it (tests/sitehooks.py) (its callback cut from host/oot_sites.c) and, side by side, with the text patch it replaced (OLD_SKIP,
-as main had it), each compiled with hos_oot_horse_whole_step cut from host/oot_high_fps.c (guest memory, the time object and
+as the lift lowers it (tests/sitehooks.py) (its callback cut from game/oot_sites.c) and, side by side, with the text patch it replaced (OLD_SKIP,
+as main had it), each compiled with hos_oot_horse_whole_step cut from game/oot_high_fps.c (guest memory, the time object and
 the switches as stand-ins) and run frame by frame, carrying the blend frames from one frame to the next as the game does:
 - at 70, 120, 144 and 240 fps, with jitter between the horse's step and the frame's, the blend frames stay the game's own (they
   grew by the step each frame before the fix);
@@ -144,7 +144,7 @@ def build_and_run(cc, code, directory):
     text = FIXTURE.replace("@CODE@", code)
     source.write_text(text, encoding="utf-8")
     subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-Wno-unused-const-variable",
-                    "-I", str(ROOT / "host"),
+                    "-I", str(ROOT / "host"), "-I", str(ROOT / "game"),
                     str(source), *sitehooks.objects(directory, text), "-o", str(binary), "-lm"], check=True)
     return subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)
 
@@ -156,7 +156,7 @@ def main():
     args = parser.parse_args()
     sitehooks.use(args.cc, args.cargo)
     x = site("horse.jumpStep", "f_82c59eb0", "branch", 0xf70)
-    text = (ROOT / "host" / "oot_high_fps.c").read_text(encoding="utf-8")
+    text = (ROOT / "game" / "oot_high_fps.c").read_text(encoding="utf-8")
     host = block(text, "int hos_oot_horse_whole_step(uint32_t step_bits, uint64_t slot) {")
     slot = ("\n" + callback("int hos_site_horse_jump_step(") + "\nvolatile uint8_t hos_site_on_horse_jumpStep = %d;\n"
             "int (*volatile hos_site_fn_horse_jumpStep)(Ctx *) = hos_site_horse_jump_step;\n")

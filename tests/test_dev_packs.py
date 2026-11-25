@@ -69,7 +69,7 @@ def test_built_covers_what_rust_reads():
             continue
         text = f.read_text(encoding="utf-8", errors="replace")
         named |= set(re.findall(r'root\.join\("([^"]+)"\)', text))
-    named = {n for n in named if n.split("/")[0] in ("host", "gpu", "third_party", "assets")}
+    named = {n for n in named if n.split("/")[0] in ("host", "game", "gpu", "third_party", "assets")}
     check("builder/ names tree paths (%s)" % sorted(named)[:3], named)
     missed = sorted(n for n in named if not n.startswith(packs.BUILT) and not packs.built_paths([n + "/x.c"]))
     check("every tree path builder/ reads is BUILT (%s)" % missed, not missed)

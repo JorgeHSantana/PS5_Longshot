@@ -199,7 +199,7 @@ def calm_after(g, want, start, limit_frames):
     return g.calm(want, max(60, limit_frames - (g.frame - start)))
 
 
-# what in a refusal's message says that asking again will never do (host/hos_main.c oot_teleport's teleport.why: no map for
+# what in a refusal's message says that asking again will never do (game/oot_tools.c oot_teleport's teleport.why: no map for
 # Link's age there, no such destination, a request the game could not build, Link's age not in its data, an input recording
 # playing, which takes its own and none of the bridge's: host/input_movie.c); the rest (an event playing, a map loading,
 # another teleport in the last 8 s, the event manager not there yet) pass

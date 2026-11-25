@@ -116,7 +116,7 @@ def main():
     # (asked only whether it is set, on purpose, where the value is read by the rule elsewhere)
     set_at_all = {"HOS_FULLSCREEN": "gpu/vk/vk_menu.cpp: a run that names it at all keeps the menu's Fullscreen row out of it"}
     reads, presence = {}, {}
-    for path in sorted(p for d in ("host", "gpu") for p in (ROOT / d).rglob("*") if p.suffix in (".c", ".cpp", ".h")):
+    for path in sorted(p for d in ("host", "gpu", "game") for p in (ROOT / d).rglob("*") if p.suffix in (".c", ".cpp", ".h")):
         rel = path.relative_to(ROOT).as_posix()
         if "gpu/render" in rel or "third_party" in rel or "/tests/" in rel or "sirit" in rel:
             continue
@@ -133,7 +133,7 @@ def main():
     if old:
         raise SystemExit("FAIL: on/off switches still read as set-means-on (set to 0 they are on): use env_on:\n  " +
                          "\n  ".join("%s (%s)" % (n, ", ".join(presence[n])) for n in old))
-    # (no on/off switch of host/ read as a number: atoi says off for true, yes and on. Seen as atoi(getenv(name)), and as
+    # (no on/off switch of host/ or game/ read as a number: atoi says off for true, yes and on. Seen as atoi(getenv(name)), and as
     # atoi(e) within a few lines of e = getenv(name). A switch that is a number says so here)
     numbers = {"HOS_CORES", "HOS_PROFILE", "HOS_COND_RECORD", "HOS_FPS_TARGET", "HOS_REALTIME_WINDOW", "HOS_FRAME_SLEEP_MS",
                "HOS_MKW_INTERVAL", "RX_NVN_WATCH_AFTER", "HOS_MUTEX_TRACE", "HOS_FPS_MAX", "HOS_AUDIO_CHANNELS",
@@ -144,7 +144,7 @@ def main():
     direct = re.compile(r"atoi\(getenv\(" + switch + r"\)\)")
     taken = re.compile(r"\b(\w+)\s*=\s*getenv\(" + switch + r"\)")
     atoi_read = set()
-    for path in sorted((ROOT / "host").rglob("*.c")):
+    for path in sorted((ROOT / "host").rglob("*.c")) + sorted((ROOT / "game").rglob("*.c")):
         if "win32_posix" in path.name:
             continue
         rel = path.relative_to(ROOT).as_posix()
@@ -158,7 +158,7 @@ def main():
                     found.append(n)
             atoi_read.update("%s (%s:%d)" % (n, rel, number) for n in found if n not in numbers)
     if atoi_read:
-        raise SystemExit("FAIL: switches of host/ read with atoi: an on/off switch reads env_on, env_on_or or env_value_off, a "
+        raise SystemExit("FAIL: switches of host/ and game/ read with atoi: an on/off switch reads env_on, env_on_or or env_value_off, a "
                          "number env_int or a place in this check's list:\n  " + "\n  ".join(sorted(atoi_read)))
     print("PASS: env_on's rule in C and C++ (%d values); no on/off switch read the old way" % len(CASES))
 

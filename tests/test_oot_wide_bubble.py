@@ -4,7 +4,7 @@ The game anchors the bubble at the speaker's place on the screen (-1..1) times t
 y * 1080 in s1 (main+0x20c2b0..0x20c2c8, then stp s0, s1 to the bubble). Its screen draws through the UI projection that
 the hook site wide.hud scales across by hos_ui_qx and up by hos_ui_qy (0: the game's own, a 16:9 picture), so the
 anchor has to be divided by them, or the bubble is pulled toward the middle of a wider screen. This runs those seven
-instructions in C with the hook site wide.bubble's hook after the last (its callback from host/oot_wide_sites.c), as the
+instructions in C with the hook site wide.bubble's hook after the last (its callback from game/oot_wide_sites.c), as the
 lift lowers it (tests/sitehooks.py), and draws the anchor through the scaled projection. No game or image is used.
 
 python -I -B tests/test_oot_wide_bubble.py [--cc clang] [--cargo cargo]

@@ -30,6 +30,9 @@ class RecompLauncherJsonTests(unittest.TestCase):
         # (#1633: the rows the menu's modules describe, gpu/vk/menu/, by their keys)
         for module in (ROOT / "gpu" / "vk" / "menu").glob("*.cpp"):
             rows |= set(re.findall(r'\.key = "([a-z_0-9]+)"', module.read_text(encoding="utf-8")))
+        # (and the game's rows, game/menu/: data the menu adds, by their keys)
+        for table in (ROOT / "game" / "menu").glob("*.c"):
+            rows |= set(re.findall(r'\.key = "([a-z_0-9]+)"', table.read_text(encoding="utf-8")))
         keys = {key for setting in manifest["settings"] for choice in setting["choices"] for key in choice["set"]}
         self.assertTrue(keys)
         # (keys the game reads that are no menu row: Compile shaders, which the preparation reads, vk_draw.cpp compile_all)

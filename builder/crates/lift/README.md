@@ -17,7 +17,7 @@ gen/ the compile builds, with a key that skips an unchanged lift.
 - [`src/whole/edits.rs`](src/whole/edits.rs): the lift's edits, planned by `edits` per function.
 - [`src/whole/files.rs`](src/whole/files.rs): the other gen/ files: the function table, the boot constants, the import
   stubs, the runtime (`builder/rt`, embedded) and `rt/a64_config.h`.
-- [`src/whole/host.rs`](src/whole/host.rs): what the lift reads of `host/`: the HLE functions and the entry hooks.
+- [`src/whole/host.rs`](src/whole/host.rs): what the lift reads of `host/` and `game/`: the HLE functions and the entry hooks.
 - [`src/whole/store.rs`](src/whole/store.rs): the lifts' store, whole lifts hard-linked by key for other work folders,
   kept by last use (two weeks, within 1 GB), never the newest nor one in use.
 - [`build.rs`](build.rs), [`key_crates.rs`](key_crates.rs): the lifter's own key (`LIFTER_SOURCES`) and `EDITS_SOURCES`.
@@ -30,7 +30,7 @@ Used by `build-driver` and `longshot-builder`. Uses `a64`, `build-core`, `cfg`, 
 ## Rules it keeps
 
 - **The cache key covers every input.** `lift.key` holds the lifter's sources, the edits' data, the image, the options,
-  the site tables, what of `host/` the lift reads, `main.npdm` and the profile; each function's key holds exactly what
+  the site tables, what of `host/` and `game/` the lift reads, `main.npdm` and the profile; each function's key holds exactly what
   lifting it reads, and each unit's its functions'. A crate `lift` depends on must be in `key_crates.rs`'s `CRATES`
   (or `FILES`), or in `NOT_IN_KEY` with the reason: a test fails otherwise.
 - **Deterministic**: lifting twice gives the same bytes; a unit lifted again to the same text is not written again.

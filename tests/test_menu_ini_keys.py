@@ -7,8 +7,8 @@ a saved row has no entry (a row added, or renamed without its entry following), 
 rows share a key, when one of FROZEN's keys is gone or changed, when a key is new (add it to FROZEN on purpose), and when one of
 ini_key's own cases by value gives another key than the table. FROZEN holds each key with the value its row saves: a key
 that moves to another row (two rows' keys swapped) fails too, and so does an ini_key that stops giving a module row's own
-key first. A row a module describes (gpu/vk/menu/*.cpp, #1633) gives
-its key itself, .key: those count with the table's. No game, no compiler.
+key first. A row a module describes (gpu/vk/menu/*.cpp, #1633) or the game does (game/menu/*.c) gives
+its key itself, .key: those count with the table's; a row moved to the game keeps its key and its value (MOVED). No game, no compiler.
 
     python -I -B tests/test_menu_ini_keys.py
 """
@@ -169,6 +169,18 @@ FROZEN = {   # (a key: the value its row saves, as players' files hold them)
     "write-backs_line": "&opts.fps_dev_show[10]",
 }
 
+# (the rows that moved to the game, game/menu/: the value FROZEN names is kept now by the game row's option id, the same
+# int under the same key, gpu/vk/menu/game_rows.cpp menu_game_value)
+MOVED = {
+    "&opts.discord": "menu_game_value(HOS_OPT_DISCORD)",
+    "&opts.fov": "menu_game_value(HOS_OPT_FOV)",
+    "&opts.skip_opening": "menu_game_value(HOS_OPT_SKIP_OPENING)",
+    "&opts.skip_title": "menu_game_value(HOS_OPT_SKIP_TITLE)",
+    "&opts.text_size": "menu_game_value(HOS_OPT_TEXT_SIZE)",
+    "&opts.text_speed": "menu_game_value(HOS_OPT_TEXT_SPEED)",
+    "&opts.wide_menus": "menu_game_value(HOS_OPT_WIDE_MENUS)",
+}
+
 
 def fail(message):
     print("FAIL: " + message)
@@ -221,7 +233,8 @@ def main():
     # (#1774's review: a key stays with its row's value, so a swap of two rows' keys moves no player's setting; ini_key
     # gives a module row's own key before anything made from its label; its cases by value agree with the modules)
     for key, value in module_saved():
-        if FROZEN.get(key, value) != value:
+        held = FROZEN.get(key, value)
+        if MOVED.get(held, held) != value:
             fail("%s: its row saves %s, where players' files hold %s under it" % (key, value, FROZEN[key]))
     body = fn[fn.index("{") + 1:].lstrip()
     if not body.startswith("if (r.setting && r.setting->key) return r.setting->key;"):

@@ -1,4 +1,4 @@
-"""The game's flags (host/game/flags.c), the one reader and writer of GameDataMgr in host code, without a game.
+"""The game's flags (game/flags.c), the one reader and writer of GameDataMgr in host code, without a game.
 
 tests/game_flags_test.c builds a GameDataMgr of its own in two bounded windows of guest memory (the singleton slots and a
 heap) and reads it through flags.c as it is, compiled with a hos.h of this check's (hos_guest_range over those windows,
@@ -7,7 +7,8 @@ source gives), every container kind by hash with collisions walked past the tabl
 unsigned, Float finite only, String64 through its pointer and cut to the buffer, a Bool's write marked, Bool64bitKey by
 id with the place kept, a container's header and its slots as the changes scan reads them, and every bound (an entry
 past the count, a size past the cap, a table or text out of the window, no GameDataMgr) reading as no flag, never a fault.
-Then, in the source, that no host file outside host/game/ keeps GameDataMgr's slot or a reader of its own.
+Then, in the source, that no file of host/ or game/ but the flags service (game/flags.c) keeps GameDataMgr's slot or a
+reader of its own.
 
 python -I -B tests/test_game_flags.py [--cc gcc]
 """
@@ -46,18 +47,19 @@ def check(cond, what):
 
 
 def source_checks():
-    """GameDataMgr's slot and its containers' walk live in host/game/ alone"""
-    host = ROOT / "host"
-    for path in sorted(host.rglob("*.c")) + sorted(host.rglob("*.h")):
-        rel = path.relative_to(host).as_posix()
-        if rel.startswith("game/"):
+    """GameDataMgr's slot and its containers' walk live in game/flags.c alone"""
+    paths = [p for d in ("host", "game") for ext in ("*.c", "*.h") for p in sorted((ROOT / d).rglob(ext))]
+    for path in paths:
+        rel = path.relative_to(ROOT).as_posix()
+        if rel in ("game/flags.c", "game/flags.h"):   # (the flags service itself)
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        check("0x84c9e180" not in text, "host/%s keeps GameDataMgr's slot: read flags through host/game/flags.h" % rel)
+        check("0x84c9e180" not in text, "%s keeps GameDataMgr's slot: read flags through game/flags.h" % rel)
         check(not re.search(r"\b0x8022d9c0|0x80cd0ea0\b", text),
-              "host/%s calls the game's flag getters: read flags through host/game/flags.h" % rel)
-    for name in ("oot_state_tap.c", "oot_voice.c", "oot_heart_containers.c", "hos_main.c"):
-        check('#include "game/flags.h"' in (host / name).read_text(encoding="utf-8"), "host/%s does not use the flags service" % name)
+              "%s calls the game's flag getters: read flags through game/flags.h" % rel)
+    for name in ("oot_state_tap.c", "oot_voice.c", "oot_heart_containers.c", "oot_tools.c"):
+        check(re.search(r'#include "(\.\./game/)?flags\.h"', (ROOT / "game" / name).read_text(encoding="utf-8")),
+              "game/%s does not use the flags service" % name)
 
 
 def main():
@@ -65,13 +67,14 @@ def main():
     p.add_argument("--cc", default="gcc")
     a = p.parse_args()
     source_checks()
-    print("PASS: no host file outside host/game/ keeps GameDataMgr's slot or calls the game's flag getters")
+    print("PASS: no host or game file but game/flags.c keeps GameDataMgr's slot or calls the game's flag getters")
     with tempfile.TemporaryDirectory(prefix="game-flags-") as tmp:
         tmp = Path(tmp)
         (tmp / "game").mkdir()
         (tmp / "hos.h").write_text(HOS_H, encoding="utf-8")
-        for name in ("flags.c", "flags.h"):   # (flags.c's "../hos.h" is the one above)
-            (tmp / "game" / name).write_text((ROOT / "host" / "game" / name).read_text(encoding="utf-8"), encoding="utf-8")
+        (tmp / "game_host.h").write_text('#include "hos.h"\n', encoding="utf-8")   # (flags.c's host/game_host.h: the hos.h above)
+        for name in ("flags.c", "flags.h"):   # (flags.c's "game_host.h" is the one above, found through -I)
+            (tmp / "game" / name).write_text((ROOT / "game" / name).read_text(encoding="utf-8"), encoding="utf-8")
         exe = tmp / ("game_flags_test.exe" if os.name == "nt" else "game_flags_test")
         subprocess.run([a.cc, "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-I", str(tmp),
                         str(ROOT / "tests" / "game_flags_test.c"), str(tmp / "game" / "flags.c"), "-lm", "-o", str(exe)], check=True)

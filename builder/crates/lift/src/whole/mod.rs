@@ -66,7 +66,7 @@ pub struct LiftOptions {
     pub gen_dir: PathBuf,
     /// The host's sources (`host/`): the HLE functions it defines and its entry hooks. None: neither.
     pub host: Option<PathBuf>,
-    /// The site tables (`host/game`). None: no sites.
+    /// The site tables (`game`). None: no sites.
     pub tables: Option<PathBuf>,
     /// `main.npdm`, for the boot constants (`image.c`). None: no `image.c`.
     pub npdm: Option<PathBuf>,

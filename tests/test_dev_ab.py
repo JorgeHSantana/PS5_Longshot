@@ -122,12 +122,19 @@ class Scenes(unittest.TestCase):
                 with open(os.path.join(menu, name), encoding="utf-8") as f:
                     for m in re.finditer(r'\.row\(\{\.key = "(\w+)",\s*\.label = "([^"]+)"(.*?)\}', f.read(), re.S):
                         rows[m.group(1)] = (m.group(2), m.group(3), name)
-        for (key, value), label, field in ((ab.SKIP_TITLE, "Skip title screen", "&opts.skip_title"),
-                                           (ab.FRAMEGEN_OFF, "Frame generation", "&opts.framegen"),
-                                           (ab.VSYNC_OFF, "V-Sync", "&opts.vsync")):
+        # (and the game's rows, game/menu/*.c: their value is the one of their option id, gpu/vk/menu/game_rows.cpp)
+        game_menu = os.path.join(ROOT, "game", "menu")
+        for name in sorted(os.listdir(game_menu)):
+            if name.endswith(".c"):
+                with open(os.path.join(game_menu, name), encoding="utf-8") as f:
+                    for m in re.finditer(r'\{\.key = "(\w+)",\s*\.label = "([^"]+)"(.*?)\}', f.read(), re.S):
+                        rows[m.group(1)] = (m.group(2), m.group(3), name)
+        for (key, value), label, field in ((ab.SKIP_TITLE, "Skip title screen", ".option = HOS_OPT_SKIP_TITLE"),
+                                           (ab.FRAMEGEN_OFF, "Frame generation", ".value = &opts.framegen"),
+                                           (ab.VSYNC_OFF, "V-Sync", ".value = &opts.vsync")):
             self.assertIn(key, rows)
             self.assertEqual(rows[key][0], label)
-            self.assertRegex(rows[key][1], r'\.value\s*=\s*' + re.escape(field) + r'\s*,')
+            self.assertRegex(rows[key][1], r'\s*=\s*'.join(map(re.escape, field.split(" = "))) + r'\s*,')
         with open(os.path.join(menu, rows["vsync"][2]), encoding="utf-8") as f:
             source = f.read()
         self.assertRegex(rows["vsync"][1], r'\.text\s*=\s*\[\]\(int v\)\s*\{\s*return std::string\(tx_vsync\(v\)\);\s*$')
@@ -142,10 +149,10 @@ class Scenes(unittest.TestCase):
             self.assertIn('.key = "resolution"', f.read())
 
     def test_title_skipped_by_the_game_waits(self):
-        # (the bench's skip_title_screen=1 is the row's own key, and the row goes through host/oot_autoload.c's one entry,
+        # (the bench's skip_title_screen=1 is the row's own key, and the row goes through game/oot_autoload.c's one entry,
         # which presses as the game waits on the title, its list and its check where the build has the sites)
         self.assertEqual(ab.SKIP_TITLE, ("skip_title_screen", 1))
-        with open(os.path.join(ROOT, "host", "oot_autoload.c"), encoding="utf-8") as f:
+        with open(os.path.join(ROOT, "game", "oot_autoload.c"), encoding="utf-8") as f:
             autoload = f.read()
         self.assertIn("hooked = hos_oot_button_wait_sites();", autoload)
         self.assertIn('"Title_00", "SystemLoadList_00", "SystemSaveLoad_00"', autoload)

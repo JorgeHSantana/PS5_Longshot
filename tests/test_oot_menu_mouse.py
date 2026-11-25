@@ -1,4 +1,4 @@
-"""The mouse in the game's own menus (host/oot_menu.c): where it points, what it asks of the game.
+"""The mouse in the game's own menus (game/oot_menu.c): where it points, what it asks of the game.
 
 The file is compiled on its own against a fake guest memory holding menu screens as the game lays them out: a screen's
 list of entries (+136 the head, +144 the first node, +156 the entry's offset from its node; entry+24 the button), a
@@ -54,8 +54,8 @@ void hos_log(const char *fmt, ...);
 int64_t hos_now_ns(void);
 """
 
-# (host/game/game.h for the stand-in Ctx: the fixture's game_call and game_call_more call through a64_lookup as
-# host/game/game.c does, the context put back, and mark the callee as reached through them)
+# (host/game_call.h for the stand-in Ctx: the fixture's game_call and game_call_more call through a64_lookup as
+# host/game_call.c does, the context put back, and mark the callee as reached through them)
 GAME_H = r"""
 #pragma once
 #include <stdint.h>
@@ -80,7 +80,7 @@ SHORT fake_key_state(int vk);
 
 FIXTURE = r"""
 #include "hos.h"
-#include "game/game.h"
+#include "game_call.h"
 #include "../gpu/vk/vk_api.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -144,7 +144,7 @@ int hos_input_movie_menu_take(uint64_t screen, MovieMenu *out) {
 }
 void hos_input_movie_menu_done(int met) { if (met) movie_met++; else movie_missed++; }
 int hos_input_movie_playing(void) { return movie_playing; }
-/* (host/game/game.c's call, over the stand-in context: x0.. the arguments, LR 0 unless given, the context put back; in_call
+/* (host/game_call.c's call, over the stand-in context: x0.. the arguments, LR 0 unless given, the context put back; in_call
    while the callee runs, so a setter reached any other way is counted in outside) */
 static int in_call, outside;
 int game_has(uint64_t fn) { return fn && a64_lookup(fn) != NULL; }
@@ -447,7 +447,7 @@ int main(void) {
 class OotMenuMouseTests(unittest.TestCase):
     def test_points_and_clicks_the_menus(self):
         if sys.platform != "win32":
-            self.skipTest("the game's menus' mouse is Windows' (host/oot_menu.c: _WIN32)")
+            self.skipTest("the game's menus' mouse is Windows' (game/oot_menu.c: _WIN32)")
         compiler = shutil.which("gcc") or shutil.which("clang")
         if not compiler:
             self.skipTest("no C compiler")
@@ -461,16 +461,16 @@ class OotMenuMouseTests(unittest.TestCase):
             # (and the real "../gpu/vk/compat/longshot_env.h": env_on, the switches' rule)
             (tmp / "gpu" / "vk" / "compat").mkdir()
             shutil.copy(ROOT / "gpu" / "vk" / "compat" / "longshot_env.h", tmp / "gpu" / "vk" / "compat" / "longshot_env.h")
-            (tmp / "host" / "game").mkdir()
-            (tmp / "host" / "game" / "game.h").write_text(GAME_H, encoding="utf-8")
-            shutil.copy(ROOT / "host" / "oot_menu.c", tmp / "host" / "oot_menu.c")
+            (tmp / "host" / "game_call.h").write_text(GAME_H, encoding="utf-8")
+            (tmp / "game").mkdir()   # (game/oot_menu.c finds the stand-in hos.h through -I host, as a build does)
+            shutil.copy(ROOT / "game" / "oot_menu.c", tmp / "game" / "oot_menu.c")
             shutil.copy(ROOT / "host" / "input_movie.h", tmp / "host" / "input_movie.h")
             (tmp / "host" / "keys.h").write_text(KEYS_H, encoding="utf-8")
             (tmp / "host" / "t.c").write_text(FIXTURE, encoding="utf-8")
             binary = tmp / "t.exe"
             build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-O1", "-g", "-D_WIN32_WINNT=0x0601",
-                                    "-include", str(tmp / "host" / "keys.h"),
-                                    str(tmp / "host" / "t.c"), str(tmp / "host" / "oot_menu.c"), "-o", str(binary)],
+                                    "-include", str(tmp / "host" / "keys.h"), "-I", str(tmp / "host"),
+                                    str(tmp / "host" / "t.c"), str(tmp / "game" / "oot_menu.c"), "-o", str(binary)],
                                    text=True, capture_output=True)
             self.assertEqual(build.returncode, 0, build.stderr)
             run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)

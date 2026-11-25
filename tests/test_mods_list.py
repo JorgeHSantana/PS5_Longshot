@@ -1,9 +1,9 @@
-"""mods.json, the one list of which mods in the game folder's mods/ (the emulators' layout, host/mods.c) are on and in
-which order: the game (host/mods.c, host/mods_list.c) reads and writes it. The builder reads no mods.json: it builds in
+"""mods.json, the one list of which mods in the game folder's mods/ (the emulators' layout, game/mods.c) are on and in
+which order: the game (game/mods.c, game/mods_list.c) reads and writes it. The builder reads no mods.json: it builds in
 manifest mods alone (docs/dev/reference/mods.md, "One mod format"). No game: made-up game folders with empty mods and
 authored texts.
 
-host/mods.c, host/mods_list.c and host/options_path.c are built as the game builds them (Windows with its own headers and
+game/mods.c, game/mods_list.c and host/options_path.c are built as the game builds them (Windows with its own headers and
 the game's manifest, so its file names are UTF-8 as the game's are; Linux with the POSIX shim) into a program that stands in
 a made-up game folder, starts the mods as the game does, takes the Mods tab's changes from its command line and prints the
 list before and after. Checked:
@@ -29,7 +29,7 @@ list before and after. Checked:
   the manifest) is never written, the file stays a list, and the mod is on after the named ones;
 - (Windows) another program has mods.json open: the write is tried again for a moment; when it still fails the change is
   kept, the Mods tab's note says so, and the next change writes both; a file that cannot be opened is not moved aside;
-- host/mods_list.c over authored texts for each rule and a few hundred texts made from valid ones by changing bytes: what
+- game/mods_list.c over authored texts for each rule and a few hundred texts made from valid ones by changing bytes: what
   it takes and refuses, and what it writes is a list again, and writing that changes nothing.
 
 python -I -B tests/test_mods_list.py [--cc gcc] --cargo cargo
@@ -51,7 +51,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WINDOWS = sys.platform == "win32"
 EXE = "longshot.exe" if WINDOWS else "longshot"
 
-LIST_MAX = 1 << int(re.search(r"MODS_LIST_MAX = 1 << (\d+)", (ROOT / "host" / "mods_list.h").read_text(encoding="utf-8")).group(1))
+LIST_MAX = 1 << int(re.search(r"MODS_LIST_MAX = 1 << (\d+)", (ROOT / "game" / "mods_list.h").read_text(encoding="utf-8")).group(1))
 
 
 def manifest_res(path):
@@ -63,6 +63,7 @@ def manifest_res(path):
 
 HOS_H = ("#pragma once\n#include <stddef.h>\n#include <stdint.h>\nvoid hos_log(const char *f, ...);\n"
          "int64_t hos_now_ns(void);\n")
+GAME_HOST_H = '#include "hos.h"\n#include "romfs.h"\n#include "hos_paths.h"\n#include "options_path.h"\n#include "restbl.h"\n'
 
 MAIN = r'''
 #include <stdarg.h>
@@ -220,19 +221,22 @@ def need(ok, what):
 
 
 def build(cc, tmp):
-    """The program: host/mods.c (beside a hos.h of the test's), mods_list.c, options_path.c, restbl.c and romfs.c (its
+    """The program: game/mods.c (beside a hos.h and a game_host.h of the test's), mods_list.c, options_path.c, restbl.c and romfs.c (its
     folder backend, with no RomFS: romfs_index.c beside it, never opened) as they are. On
     Windows (the program, the same without the game's manifest: its file names in the system's code page, as on a Windows
     from before the manifest's); elsewhere (the program, None)"""
     src = tmp / "src"
     src.mkdir()
-    (src / "mods.c").write_bytes((ROOT / "host" / "mods.c").read_bytes())
+    (src / "mods.c").write_bytes((ROOT / "game" / "mods.c").read_bytes())
     (src / "hos.h").write_text(HOS_H)
+    # (host/game_host.h's parts mods.c uses, over the hos.h above: the whole of it needs the lift's runtime)
+    (src / "game_host.h").write_text(GAME_HOST_H)
     (tmp / "main.c").write_text(MAIN)
-    host = ROOT / "host"
-    inc = ["-std=gnu11"] + ([] if WINDOWS else ["-D_GNU_SOURCE", "-I", str(host / "posix")]) + ["-I", str(host)]
+    host, game = ROOT / "host", ROOT / "game"
+    inc = (["-std=gnu11"] + ([] if WINDOWS else ["-D_GNU_SOURCE", "-I", str(host / "posix")]) + ["-I", str(host)]
+           + ["-I", str(game)])
     objs = []
-    for name, c, strict in (("mods_list", host / "mods_list.c", True), ("mods", src / "mods.c", False),
+    for name, c, strict in (("mods_list", game / "mods_list.c", True), ("mods", src / "mods.c", False),
                             ("options_path", host / "options_path.c", True), ("restbl", host / "restbl.c", False),
                             ("romfs", host / "romfs.c", False), ("romfs_index", host / "romfs_index.c", False),
                             ("main", tmp / "main.c", True)):

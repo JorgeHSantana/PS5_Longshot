@@ -1,5 +1,5 @@
-"""A jump's takeoff above 60 fps (the hook sites jump.takeoffSpeed and jump.takeoffVelocity, host/oot_sites.c, host/oot_high_fps.h
-oot_takeoff_match and oot_takeoff_rest_speed, host/oot_high_fps.c hos_oot_jump_speed and hos_oot_takeoff_velocity).
+"""A jump's takeoff above 60 fps (the hook sites jump.takeoffSpeed and jump.takeoffVelocity, game/oot_sites.c, game/oot_high_fps.h
+oot_takeoff_match and oot_takeoff_rest_speed, game/oot_high_fps.c hos_oot_jump_speed and hos_oot_takeoff_velocity).
 
 f_80b97d10 computes a jump's takeoff speed (sqrt(2 g h) - g dt / 2 along the character's up). f_804f5030 hands Havok Link's
 body that speed on the takeoff's update (the world's set-velocity call). On a backflip the next update hands no vertical
@@ -8,12 +8,12 @@ met the slope from the lower hop, landed and took off a second time (2.8 m again
 updates hand the takeoff speed less each step's gravity, which the variable step already moves as at 60. The patches have
 f_80b97d10 hand the speed to the host and f_804f5030 hand it each body's velocity before the set-velocity call; a body handed
 the takeoff speed in the takeoff's own update gets, on its next update, the rest of a 60 fps takeoff step's rise when the
-game asks no vertical speed there. The sites (host/game/sites.toml) are where the text patches they
+game asks no vertical speed there. The sites (game/sites/sites.toml) are where the text patches they
 replaced put their calls: after f_80b97d10's last store of the vector, and before f_804f5030's set-velocity call.
 
 An authored f_80b97d10 (its last store of the vector as the lift writes it) and an authored f_804f5030 (the velocity built
 on the stack and the set-velocity call as the lift writes them) get each site's hook as the lift lowers it (tests/sitehooks.py) and are
-compiled with the sites' callbacks (host/oot_sites.c) and the host's part cut from host/oot_high_fps.c; guest memory, the time object, the host clock, the switches and
+compiled with the sites' callbacks (game/oot_sites.c) and the host's part cut from game/oot_high_fps.c; guest memory, the time object, the host clock, the switches and
 Havok's call (it keeps the velocity it is handed) are stand-ins. Each case takes off at a frame rate and plays the takeoff's
 update, 0.2 ms after f_80b97d10 as in the game, and the update after it, a frame later:
 - a backflip above 60 (94, 120, 144, 240 and 1000 fps, a takeoff of 5 m/s, a takeoff speed 1.5% under the jump's, a next
@@ -247,7 +247,7 @@ def build(cc, lifted_text, host, directory, tag):
     text = FIXTURE.replace("@HOST@", host).replace("@LIFTED@", lifted_text)
     source.write_text(text, encoding="utf-8")
     subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-Wno-unused-const-variable",
-                    "-I", str(ROOT / "host"), str(source), *sitehooks.objects(directory, text), "-o", str(binary)]
+                    "-I", str(ROOT / "host"), "-I", str(ROOT / "game"), str(source), *sitehooks.objects(directory, text), "-o", str(binary)]
                    + ([] if os.name == "nt" else ["-lm"]), check=True)   # (Windows: no separate maths library)
     return binary
 
@@ -273,8 +273,8 @@ def main():
     assert (p.kind, p.target, p.start, p.end, p.ordinal, p.of, p.shift) == ("vcall", 0x190, "physics.driveTargetOther", None, 1, 2,
                                                                            0), \
         "jump.takeoffVelocity is not before the set-velocity call: " + p.describe()
-    text = (ROOT / "host" / "oot_high_fps.c").read_text(encoding="utf-8")
-    host = between(text, "/* A jump's takeoff speed (host/oot_high_fps.h oot_takeoff_rest_speed)", "static volatile uint64_t link_body;")
+    text = (ROOT / "game" / "oot_high_fps.c").read_text(encoding="utf-8")
+    host = between(text, "/* A jump's takeoff speed (game/oot_high_fps.h oot_takeoff_rest_speed)", "static volatile uint64_t link_body;")
     callbacks = "\n" + callback("int hos_site_jump_takeoff_speed(") + "\n" + callback("int hos_site_jump_takeoff_velocity(") + "\n"
     on, off = callbacks + slot(speed) + slot(velocity), callbacks + slot(speed, 0) + slot(velocity, 0)
     off_env = dict(os.environ, HOS_FPS_TAKEOFF="0")

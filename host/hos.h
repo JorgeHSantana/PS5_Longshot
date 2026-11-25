@@ -213,7 +213,7 @@ int hos_cores(void);
 int hos_vcores_on(void);
 int hos_vcore_away(void);
 void hos_vcore_back(void);
-int hos_vcore_held(void);   /* 1 unless the calling guest thread gave its core up (host/game/game.c game_call) */
+int hos_vcore_held(void);   /* 1 unless the calling guest thread gave its core up (host/game_call.c game_call) */
 int hos_vcore_kicked(void);   /* 1 while another thread asks the calling one for its core (game_call keeps the ask) */
 void hos_vcore_checkpoint(void);
 /* HOS_CHAIN=<path> (hos_chain.c, diagnostic): blocks, wake-ups, sleeps and presents of the guest threads for

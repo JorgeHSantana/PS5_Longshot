@@ -102,6 +102,9 @@ pub struct Settings {
     pub header_dirs: [Option<PathBuf>; 3],
     /// `LONGSHOT_FFMPEG`: a prefix with FFmpeg's static libraries (Linux; else pkg-config's).
     pub ffmpeg: Option<PathBuf>,
+    /// `LONGSHOT_CARGO`: the cargo that builds the game's Rust when the tree carries no library of its sources (else
+    /// the PATH's; [`crate::rust`]).
+    pub cargo: Option<PathBuf>,
     /// `LONGSHOT_SDL2`: `libSDL2-2.0.so.0` to put beside a Linux game (the file, or the folder that holds it).
     pub sdl2: Option<PathBuf>,
     /// `LONGSHOT_SDL_DIR`: the folder of `SDL2.dll` and `SDL3.dll` for a Windows game (else the tree's third_party/sdl2).
@@ -182,6 +185,7 @@ impl Settings {
                 path(get("LONGSHOT_VMA_HEADERS")),
             ],
             ffmpeg: path(get("LONGSHOT_FFMPEG")),
+            cargo: path(get("LONGSHOT_CARGO")),
             sdl2: path(get("LONGSHOT_SDL2")).map(|p| if p.is_dir() { p.join("libSDL2-2.0.so.0") } else { p }),
             sdl_dir: path(get("LONGSHOT_SDL_DIR")),
             ngx_sdk: path(get("LONGSHOT_NGX_SDK")),

@@ -264,7 +264,7 @@ def main():
     args = p.parse_args()
     for key in ("HOS_WIDE_UI", "HOS_HUD_MAX_RATIO", "HOS_HUD_FULL_RATIO"):
         os.environ.pop(key, None)
-    host = (ROOT / "host/hos_wide_ui.c").read_text(encoding="utf-8")
+    host = (ROOT / "game/hos_wide_ui.c").read_text(encoding="utf-8")
     marker = "/* The area title card's baked frame"
     # Main has no strip helper. Its real patch pipeline still builds the same
     # fixture and fails for one unchanged quarter, not a missing declaration.

@@ -1,6 +1,6 @@
-"""The frame phases (host/game/phases.c) and where they are run, without a game.
+"""The frame phases (game/phases.c) and where they are run, without a game.
 
-tests/game_phases_test.c is built with host/game/phases.c alone and runs: the order callbacks run in (by order, ties by
+tests/game_phases_test.c is built with game/phases.c alone and runs: the order callbacks run in (by order, ties by
 add order) and the frame they are given; removes and adds from inside a callback; a remove from another thread while
 the callback runs, which returns only after it did; an add during a run, which counts from the next run; a full table
 and a stale handle; and three threads adding and removing while a fourth runs the phase, with no callback run after its
@@ -10,7 +10,7 @@ remove returned. Then, in the source:
   empty registry is a provable no-op);
 - the acquire phase is run first in host/nn_vi.c's hos_vi_native_acquire, before the pacing's returns and its sleep.
 
-(That the game compiles host/game/ is build-compile's own test, src/host_sources_tests.rs.)
+(That the game compiles game/ is build-compile's own test, src/host_sources_tests.rs.)
 
 python -I -B tests/test_game_phases.py [--cc gcc]
 """
@@ -34,12 +34,12 @@ def check(cond, what):
 
 
 def source_checks():
-    phases = (ROOT / "host" / "game" / "phases.c").read_text(encoding="utf-8")
+    phases = (ROOT / "game" / "phases.c").read_text(encoding="utf-8")
     run = block(phases, "void game_phase_run(GamePhase phase, uint64_t frame) {")
     body = run[run.index("{") + 1:].lstrip()
     first = body[:body.index(";") + 1]
     check(first == "if ((unsigned)phase >= GAME_PHASE_COUNT || !__atomic_load_n(&live[phase], __ATOMIC_RELAXED)) return;",
-          "host/game/phases.c: game_phase_run does not begin with its one relaxed load and return (%r)" % first)
+          "game/phases.c: game_phase_run does not begin with its one relaxed load and return (%r)" % first)
 
     vi = (ROOT / "host" / "nn_vi.c").read_text(encoding="utf-8")
     acquire = block(vi, "void hos_vi_native_acquire(int active) {")
@@ -47,7 +47,9 @@ def source_checks():
     check(at >= 0, "host/nn_vi.c: hos_vi_native_acquire does not run GAME_PHASE_ACQUIRE")
     for later in ("if (no_pacing || !next_frame_at) return;", "hos_sleep_ns(until - now);"):
         check(0 <= at < acquire.index(later), "host/nn_vi.c: the acquire phase runs after %r" % later)
-    check('#include "game/phases.h"' in vi, "host/nn_vi.c does not include host/game/phases.h")
+    check('#include "../game/game.h"' in vi, "host/nn_vi.c does not include game/game.h")
+    game_h = (ROOT / "game" / "game.h").read_text(encoding="utf-8")
+    check('#include "phases.h"' in game_h, "game/game.h does not include game/phases.h (game_phase_run, for host/nn_vi.c)")
     native = (ROOT / "host" / "nvn_native.c").read_text(encoding="utf-8")
     texture = block(native, "NV(nvnWindowAcquireTexture) {")
     check(texture.index("hos_vcore_away()") < texture.index("hos_vi_native_acquire(") < texture.index("hos_vcore_back()"),
@@ -63,8 +65,8 @@ def main():
     windows = os.name == "nt"
     with tempfile.TemporaryDirectory(prefix="game-phases-") as tmp:
         exe = Path(tmp, "game_phases_test.exe" if windows else "game_phases_test")
-        subprocess.run([a.cc, "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-D_GNU_SOURCE", "-I", str(ROOT / "host"),
-                        str(ROOT / "tests" / "game_phases_test.c"), str(ROOT / "host" / "game" / "phases.c"), "-o", str(exe)] +
+        subprocess.run([a.cc, "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-D_GNU_SOURCE", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"),
+                        "-I", str(ROOT), str(ROOT / "tests" / "game_phases_test.c"), str(ROOT / "game" / "phases.c"), "-o", str(exe)] +
                        ([] if windows else ["-lpthread"]), check=True)
         r = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
     print(r.stdout.strip())

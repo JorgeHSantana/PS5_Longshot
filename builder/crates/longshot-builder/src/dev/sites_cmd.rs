@@ -1,4 +1,4 @@
-//! `longshot-builder dev sites --image <dir> --tables <host/game>`: the build's hook sites read, resolved and placed over the
+//! `longshot-builder dev sites --image <dir> --tables <game>`: the build's hook sites read, resolved and placed over the
 //! image and its discovery (the same as the lift's: `cfg`, from the image alone), a line each. Exits 1 when a site
 //! does not resolve or does not fit, naming it, as the lift would stop.
 
@@ -6,7 +6,7 @@ use image::Image;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: longshot-builder dev sites --image <dir> --tables <host/game>";
+const USAGE: &str = "usage: longshot-builder dev sites --image <dir> --tables <game>";
 
 struct Args {
     image: PathBuf,

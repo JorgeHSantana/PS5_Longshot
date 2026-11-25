@@ -103,10 +103,10 @@ def main():
         hook = ["-include", str(tmp / "step.h")]
         built = tmp / EXE
         if WINDOWS:
-            subprocess.run([cc, "-std=gnu11", "-I", str(ROOT / "host"), "-Wall", "-Wextra", "-Werror", *hook,
+            subprocess.run([cc, "-std=gnu11", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"), "-Wall", "-Wextra", "-Werror", *hook,
                             str(ROOT / "host" / "options_path.c"), str(tmp / "main.c"), "-o", str(built)], check=True)
         else:
-            inc = ["-std=gnu11", "-I", str(ROOT / "host" / "posix"), "-I", str(ROOT / "host"), *hook]
+            inc = ["-std=gnu11", "-I", str(ROOT / "host" / "posix"), "-I", str(ROOT / "host"), "-I", str(ROOT / "game"), *hook]
             obj = tmp / "options_path.o"   # (no warning in it; the shim is built as the game builds it)
             subprocess.run([cc, *inc, "-Wall", "-Wextra", "-Werror", "-c", str(ROOT / "host" / "options_path.c"), "-o", str(obj)],
                            check=True)

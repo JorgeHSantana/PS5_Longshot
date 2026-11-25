@@ -64,7 +64,7 @@ DEFAULT_SCENE = "hyrule-field"
 # the window behind the one in front)
 COMMON_ENV = {"HOS_FPS_MAX": "1000", "RX_VK_FRAME_TRACE": "1", "HOS_AUDIO_MUTE": "1", "HOS_DISCORD": "0",
               "HOS_WINDOW_NOACTIVATE": "1"}
-# (the pinned options file's rows set for every run: the title skipped (host/oot_autoload.c: A as the game waits on the title,
+# (the pinned options file's rows set for every run: the title skipped (game/oot_autoload.c: A as the game waits on the title,
 # its file list and its check, the sites menu.buttonWait; by the clock on a build without them), V-Sync Off, frame
 # generation Off)
 SKIP_TITLE, VSYNC_OFF, FRAMEGEN_OFF = ("skip_title_screen", 1), ("vsync", 2), ("frame_generation", 0)
@@ -121,9 +121,10 @@ def differing(a, b):
 
 
 def wired_switches(root=common.ROOT):
-    """The switches HOS_AB can flip within a run: those whose reader calls hos_ab_value("NAME", ...) (host/hos_ab.c)"""
+    """The switches HOS_AB can flip within a run: those whose reader calls hos_ab_value("NAME", ...) (host/hos_ab.c), in
+    host/, gpu/ or the game's code (game/)"""
     names = set()
-    for top in ("host", "gpu"):
+    for top in ("host", "game", "gpu"):
         for d, _, files in os.walk(os.path.join(root, top)):
             for f in files:
                 if f.endswith((".c", ".cpp", ".h")):

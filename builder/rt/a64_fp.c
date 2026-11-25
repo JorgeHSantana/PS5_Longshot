@@ -1,4 +1,4 @@
-/* Exact single-precision arithmetic for host code that stands in for guest instructions (host/oot_sites.c), under the
+/* Exact single-precision arithmetic for host code that stands in for guest instructions (game/oot_sites.c), under the
    lifter's float model (builder/crates/sem/src/fp.rs): rounding to nearest, FPCR.FZ (subnormal operands and results are
    zeros of their sign) and FPCR.DN (every NaN result the default NaN) read from the context, Arm's NaNs (a signalling
    operand first, in operand order, quieted; else the first quiet one; an invalid operation gives 0x7fc00000), and no

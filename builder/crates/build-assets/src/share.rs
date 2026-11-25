@@ -186,7 +186,7 @@ fn framegen_hdr_text(values: &BTreeMap<String, String>) -> String {
     format!("{} / {}", pick(&FRAMEGEN, int(values, "frame_generation")), pick(&HDR, int(values, "hdr")))
 }
 
-/// The mods the game loads from the game folder's mods folder, by `host/mods.c`'s rule: a folder holding `romfs` or
+/// The mods the game loads from the game folder's mods folder, by `game/mods.c`'s rule: a folder holding `romfs` or
 /// `exefs`, up to four folders deep, those whose names start with `-` or `_` left out (off).
 pub fn find_mods(folder: &Path) -> Vec<String> {
     fn walk(d: &Path, name: &str, depth: usize, found: &mut Vec<String>) {

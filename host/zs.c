@@ -1,8 +1,8 @@
 /* (hookshot) The game's .zs files, for the host's own reads: a zstd frame, made with one of the game's dictionaries or
    with none. The dictionaries are the members of Pack/ZsDic.pack.zs (a SARC archive in a zstd frame of its own, made
    without one), read from the RomFS (romfs.h) once, the first time a frame asks for one (hos_zs_dict, by its id).
-   Every zstd read of the host's own goes through here: the resource size tables (host/mods.c, host/prompts.c), the
-   sound archives (host/audio_source.c), the heart containers' maps (host/oot_heart_containers.c), the prompts' game
+   Every zstd read of the host's own goes through here: the resource size tables (game/mods.c, host/prompts.c), the
+   sound archives (host/audio_source.c), the heart containers' maps (game/oot_heart_containers.c), the prompts' game
    files as they stream (hos_zs_romfs_stream), and romfs.c's zstd-stored files of the .nup (hos_zs_frame,
    hos_zs_frame_head). zstd's decoder is third_party/zstd (BSD), built into the executable (builder/crates/build-compile)
    as into the Vulkan back end. hos_zs_write writes a frame of raw blocks (prompts_base.h's writer): the game's decoder

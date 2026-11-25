@@ -1,5 +1,5 @@
 """Disable camera centering (the Controls row, host/mouse_native.c hos_disable_camera_centering) skips the follow camera's
-movement yaw through the hook site camera.followYaw (host/game/sites.toml), a jump site with host/oot_sites.c's callback,
+movement yaw through the hook site camera.followYaw (game/sites/sites.toml), a jump site with game/oot_sites.c's callback,
 where the text patch it replaced (nx2/oot_patches.py patch_camera_centering, deleted) put
 `if (hos_disable_camera_centering()) { c->x[25] = c->x[26]; goto L_80645ad8; }` on the fall-through of the authored heading
 override's b.ne (L_8064720c).

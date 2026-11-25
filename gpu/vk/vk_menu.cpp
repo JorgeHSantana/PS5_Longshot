@@ -40,7 +40,7 @@
 #include "vk_fps.h"    // (the FPS counter's levels and numbers)
 #include "vk_draw.h"   // (pipeline_cache_save: Restart now keeps what was built)
 #include "vk_texture.h"   // (the FPS counter's Dev level: texture_count, texture_bytes, texture_stats)
-#include "oot_cheat_items.h"
+#include "../../game/game.h"   // (the game's: the Debug tab's inventory items, OOT_CHEAT_ITEMS; its menu rows, GameMenuRow)
 #include "vk_progress.h"   // (StartupView, version_text: the start-up screen)
 #include "vk_imgui.h"   // (the renderer's side of the overlay: begin, fonts, logo, record)
 #include "vk_ui.h"
@@ -228,7 +228,7 @@ bool row_fixed(const int* value) {
         value == &opts.hdr || value == &opts.reflex || value == &opts.dlss || preview_locked(value))) return true;
     return module_locked(value) || (value == &opts.upscale && !filter_needed()) ||
            (value == &opts.framegen_by && framegen_by_fixed()) ||   // (its line says why)
-           (value == &opts.hud_layout && getenv("HOS_WIDE_UI") && *getenv("HOS_WIDE_UI"));   // (host/hos_wide_ui.c's, first)
+           (value == &opts.hud_layout && getenv("HOS_WIDE_UI") && *getenv("HOS_WIDE_UI"));   // (game/hos_wide_ui.c's, first)
 }
 // (longshot) Walk mode: how the Walk key (the Controls page) makes Link walk with the movement keys (host/nn_hid.c walk_held)
 // (longshot) Menu size: how large the overlays are drawn (vk_ui.h unit), Medium unless the player chooses Small or Large. It
@@ -703,7 +703,7 @@ int teleport_step_rows(int i, int rows) {
     }
     return i;
 }
-// the Inventory page (gpu/vk/oot_cheat_items.h): items and their section headings, counts from the game side
+// the Inventory page (game/oot_cheat_items.h): items and their section headings, counts from the game side
 #define OOT_MENU_ITEM_LABEL(label, name, kind) label,
 #define OOT_MENU_ITEM_KIND(label, name, kind) kind,
 #define OOT_MENU_NO_SECTION(name)
@@ -2373,8 +2373,11 @@ std::string changed_rows_text(std::string& pc_options) {
     pc_options.clear();
     for (const Row& r : rows) {
         const char* at = (const char*)r.value;
-        if (!r.value || !r.text || r.heading || at < (const char*)&opts || at >= (const char*)(&opts + 1)) continue;
-        const int was = report_default(r, *(const int*)((const char*)&defaults + (at - (const char*)&opts)));
+        if (!r.value || !r.text || r.heading) continue;
+        const ::GameMenuRow* game = menu_game_row(r.value);   // (a row of the game's, game/menu/: its default is its own)
+        if (!game && (at < (const char*)&opts || at >= (const char*)(&opts + 1))) continue;
+        const int was = report_default(r, game ? game->default_value
+                                               : *(const int*)((const char*)&defaults + (at - (const char*)&opts)));
         const bool depends = report_default_depends_on_pc(r);
         if (!depends && *r.value == was) continue;
         std::string& to = depends ? pc_options : out;
@@ -2467,8 +2470,8 @@ void row_value_cell(ui::Ctx& c, const Row& r, ImVec2 va, ImVec2 vb, bool selecte
     }
 }
 
-// ---- the Mods tab: the mods of the mods folder (host/mods.c), in their order, each on or off, and the cheats of those
-// that were on at the start (host/cheats.c). Shown only when there are mods. Left and Right (or a click on a half) switch the
+// ---- the Mods tab: the mods of the mods folder (game/mods.c), in their order, each on or off, and the cheats of those
+// that were on at the start (game/cheats.c). Shown only when there are mods. Left and Right (or a click on a half) switch the
 // selected one; Enter picks a mod up, Up and Down move it, Enter or Esc puts it down. The order and the mods' switches apply at the
 // next start (the restart question names them); a cheat's switch at once.
 bool can_mods() {
@@ -4363,7 +4366,8 @@ void menu_init() {
             if (r.value == &opts.upscale) env_override(r.value, std::min(std::max(atoi(e), r.lo), r.hi));
     if (const char* e = getenv("HOS_REALTIME_STEP")) env_override(&opts.realtime, !env_value_off(e));
     if (const char* e = getenv("HOS_DYNRES")) env_override(&opts.resolution, env_value_off(e) ? 1 : 0);
-    if (const char* e = getenv("HOS_SKIP_OPENING")) env_override(&opts.skip_opening, !env_value_off(e));
+    if (const char* e = getenv("HOS_SKIP_OPENING"); e && menu_game_value(HOS_OPT_SKIP_OPENING))   // (the game's row)
+        env_override(menu_game_value(HOS_OPT_SKIP_OPENING), !env_value_off(e));
     // (vk_texture.cpp reads RX_VK_ASTC_RGBA8 over the row: the row shows it, fixed (row_fixed), and the ini keeps the player's)
     if (const char* e = getenv("RX_VK_ASTC_RGBA8")) env_override(&opts.astc_rgba8, !env_value_off(e));
     // (vk_main.cpp create_device reads RX_VK_PRESENT_QUEUE over the Present queue row, an empty value not: the same here)

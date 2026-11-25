@@ -192,7 +192,7 @@ int main(int argc, char **argv) {
         free(from_index[i]);
     }
     /* (a folder of the romfs folder listed once a start, for hos_romfs_case: a file put there after is not found by
-       it, though it is there; host/mods.c asks for every file of every mod) */
+       it, though it is there; game/mods.c asks for every file of every mod) */
     char late[2048];
     snprintf(late, sizeof late, "%s/Pack/late.txt", root);
     FILE *lf = fopen(late, "wb");

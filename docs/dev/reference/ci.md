@@ -49,7 +49,7 @@ needs `PACKAGES_TOKEN_SEALED` and the deploy runner). Its release only checks th
 (`longshot-builder dev release recomplauncher`, after `dev release files`): a TODO there says so for the cutover.
 
 `mapping.conf` turns on areas by path (`tests`, `gpu`, `linux`, `windows`, `website`, or `full` for everything: the
-workspace's `Cargo.toml` and `Cargo.lock` among them; `longshot-rs/` turns on `tests`, `third_party/renhdrum/` both
+workspace's `Cargo.toml` and `Cargo.lock` among them; `longshot-rs/` and `game/` turn on `tests`, `third_party/renhdrum/` both
 builder builds);
 `lint`, `third-party`, `guide-screenshots` and `website` (the site's checks) always run, and a docs-only change runs
 nothing else; `website` turns on the site's preview (pull requests) and deploy (`main`). `main`, tags and API

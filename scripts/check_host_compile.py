@@ -1,4 +1,4 @@
-"""Game-free: the host's C (host/, host/game/, host/posix/ or the Windows files) compiled for a system with the exact
+"""Game-free: the host's C (host/, game/, host/posix/ or the Windows files) compiled for a system with the exact
 commands a player's build gives it, so the other system's branches of host code are compiled on every change. CI runs it
 for Windows with llvm-mingw on its Linux runner (.forgejo/workflows/ci.yml, host-windows); nothing is linked and no game
 file is read. Python's standard library only.

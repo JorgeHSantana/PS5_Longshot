@@ -7,7 +7,7 @@ from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-ROOTS = ("host", "gpu", "builder/crates", "builder/rt", "scripts", "docs", ".forgejo", "README.md", "CONTRIBUTING.md",
+ROOTS = ("host", "game", "gpu", "builder/crates", "builder/rt", "scripts", "docs", ".forgejo", "README.md", "CONTRIBUTING.md",
          "AGENTS.md")
 SKIP = {"third_party", "build", "gen", "work", "target", "node_modules", "__pycache__"}
 

@@ -1,6 +1,6 @@
-"""game_call (host/game/game.c), the one way host code calls the game's functions, without a game.
+"""game_call (host/game_call.c), the one way host code calls the game's functions, without a game.
 
-tests/game_call_test.c builds game.c as it is with a hos.h of this check's (a context with the generated runtime's poll,
+tests/game_call_test.c builds game_call.c as it is with a hos.h of this check's (a context with the generated runtime's poll,
 a guest thread or none, the virtual-core calls logging their order, a64_lookup handing out callees that record what they
 saw) and checks: a thread that gave its core up takes it back, calls, and gives it up again, one holding its core does
 neither; the callee sees the stack pointer aligned down to 16, LR 0 and the arguments in x0..x7; *ret is its x0; the
@@ -71,14 +71,13 @@ def main():
                                                       "int hos_vcore_held(void) {"))
     with tempfile.TemporaryDirectory(prefix="game-call-") as tmp:
         tmp = Path(tmp)
-        (tmp / "game").mkdir()
         (tmp / "hos.h").write_text(HOS_H, encoding="utf-8")
         (tmp / "game_call_vcore.h").write_text(VCORE_HEAD + cut.replace("hos_vcore_", "cut_vcore_") + "\n", encoding="utf-8")
-        for name in ("game.c", "game.h"):   # (game.c's "../hos.h" is the one above)
-            (tmp / "game" / name).write_text((ROOT / "host" / "game" / name).read_text(encoding="utf-8"), encoding="utf-8")
+        for name in ("game_call.c", "game_call.h"):   # (game_call.c's "hos.h" is the one above)
+            (tmp / name).write_text((ROOT / "host" / name).read_text(encoding="utf-8"), encoding="utf-8")
         exe = tmp / ("game_call_test.exe" if os.name == "nt" else "game_call_test")
         subprocess.run([a.cc, "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-I", str(tmp),
-                        str(ROOT / "tests" / "game_call_test.c"), str(tmp / "game" / "game.c"), "-o", str(exe)], check=True)
+                        str(ROOT / "tests" / "game_call_test.c"), str(tmp / "game_call.c"), "-o", str(exe)], check=True)
         r = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
     print(r.stdout.strip())
     if r.returncode:

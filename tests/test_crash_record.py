@@ -99,7 +99,8 @@ def source_contract():
         "posix/win32_posix.c": ["_exit((int)code);", "ExitProcess(code);"],  # platform implementations
     }
     observed = {}
-    for path in (ROOT / "host").rglob("*.c"):
+    for path in list((ROOT / "host").rglob("*.c")) + list((ROOT / "game").rglob("*.c")):   # (game/: none expected)
+        rel = (path.relative_to(ROOT / "host") if path.is_relative_to(ROOT / "host") else path.relative_to(ROOT)).as_posix()
         text = path.read_text(encoding="utf-8")
         text = re.sub(r"/\*.*?\*/|//[^\n]*", "", text, flags=re.S)
         calls = []
@@ -108,14 +109,13 @@ def source_contract():
             if re.search(r"\bvoid\s*$", prefix):
                 continue
             calls.append(match.group())
-            rel = path.relative_to(ROOT / "host").as_posix()
             exempt = rel == "hos_thread.c" or rel == "posix/win32_posix.c" or (
                 rel == "windows_stop.c" and match.group() == "TerminateProcess(GetCurrentProcess(), STOP_TIMEOUT_EXIT);")
             if not exempt:
                 clean = "hos_close_finish();" if rel in ("control.c", "hos_relaunch.c", "windows_stop.c") else "hos_crash_clean_end();"
                 assert clean in text[max(0, match.start() - 180):match.start()], rel
         if calls:
-            observed[path.relative_to(ROOT / "host").as_posix()] = calls
+            observed[rel] = calls
     assert observed == expected, (observed, expected)
     assert not (ROOT / "host/hos_update.c").exists(), "the removed in-game updater must not return"
     # no start is refused with a code of its own: the builder makes and tries the profile's folders before it starts the
@@ -128,7 +128,7 @@ def source_contract():
     facts = (ROOT / "builder/crates/crash/src/facts.rs").read_text(encoding="utf-8")
     assert "start refused" not in facts and "REFUSED" not in facts and "REBUILD" not in facts, \
         "the builder's crash crate has no exit code of its own to key on: a normal exit is no crash"
-    print("PASS: every remaining host process exit classified; normal exits mark, fatal exits do not")
+    print("PASS: every remaining host and game process exit classified; normal exits mark, fatal exits do not")
     return glue, threads, main
 
 

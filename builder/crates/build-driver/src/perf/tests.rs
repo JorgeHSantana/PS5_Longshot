@@ -341,7 +341,7 @@ fn one_sender_at_a_time() {
 /// A release's tree (its VERSION) naming `relay` in its addresses.ini.
 fn release_tree(name: &str, relay: &str) -> PathBuf {
     let t = scratch(&format!("{name}-tree"));
-    for d in ["host", "gpu/vk", "third_party"] {
+    for d in ["host", "game", "gpu/vk", "third_party"] {
         std::fs::create_dir_all(t.join(d)).unwrap();
     }
     std::fs::write(t.join("VERSION"), "v3.1.0\n").unwrap();

@@ -1,6 +1,6 @@
-"""Mods that grow files load together: host/mods.c's list, order and switches, and the resource size table it merges.
+"""Mods that grow files load together: game/mods.c's list, order and switches, and the resource size table it merges.
 
-Linux only (built over host/posix/win32_posix.c's file functions). Builds host/mods.c (from its index on), host/restbl.c,
+Linux only (built over host/posix/win32_posix.c's file functions). Builds game/mods.c (from its index on), host/restbl.c,
 host/zs.c's reads and writes and zstd's decoder (third_party/zstd) into one program, makes a synthetic game folder (a
 RomFS with a synthetic RESTBL table and synthetic .zs files: no game data) and mods, and checks:
 
@@ -159,7 +159,7 @@ def main():
         print("SKIP: the posix layer's checks run on Linux")
         return
     posix = (ROOT / "host/posix/win32_posix.c").read_text(encoding="utf-8")
-    mods = (ROOT / "host/mods.c").read_text(encoding="utf-8")
+    mods = (ROOT / "game/mods.c").read_text(encoding="utf-8")
     zs = (ROOT / "host/zs.c").read_text(encoding="utf-8")
     pieces = [
         block(posix, "static DWORD error_of(int e) {"),
@@ -203,9 +203,9 @@ def main():
 #include "prompts_base.h"
 static DWORD last_error;
 static char game_root[1024];
-#define HOS_PATH_CAP MAX_PATH   /* (host/hos_paths.h, as on Linux: host/mods.c's path buffers) */
+#define HOS_PATH_CAP MAX_PATH   /* (host/hos_paths.h, as on Linux: game/mods.c's path buffers) */
 const char *hos_options_file(void) { return ""; }   /* (host/options_path.c: no settings file, so mods.json is the game folder's) */
-void Sleep(DWORD ms) { usleep(ms * 1000); }   /* (host/mods.c waits before it tries a write again) */
+void Sleep(DWORD ms) { usleep(ms * 1000); }   /* (game/mods.c waits before it tries a write again) */
 const char *hos_romfs_dir;
 HosRomfsIndex *hos_romfs_index;   /* (host/romfs.c's folder backend reads the romfs above: no .nup index here) */
 void hos_log(const char *f, ...);
@@ -214,16 +214,16 @@ static int64_t hos_now_ns(void) { return 0; }
 static DWORD hos_game_path_a(char *buf, DWORD size) { return (DWORD)snprintf(buf, size, "%shookshot", game_root); }
 int hos_prompts_romfs(const char *key, const char *mod, char *out, size_t cap) { (void)key; (void)mod; (void)out; (void)cap; return 0; }
 uint32_t hos_prompts_font_entry(uint32_t entry) { (void)entry; return 0; }   /* (prompts.c: no prompts' font) */
-int hos_texts_romfs(const char *key, const char *mod, char *out, size_t cap) { (void)key; (void)mod; (void)out; (void)cap; return 0; }   /* (host/texts.c: no texts of the build's here) */
+int hos_texts_romfs(const char *key, const char *mod, char *out, size_t cap) { (void)key; (void)mod; (void)out; (void)cap; return 0; }   /* (game/texts.c: no texts of the build's here) */
 ''' + "\n".join(pieces) + FIXTURE_MAIN
     with tempfile.TemporaryDirectory(prefix="mods-sizes-") as tmp:
         tmp = Path(tmp)
         src = tmp / "fixture.c"
         src.write_text(fixture, encoding="utf-8")
         exe = tmp / "fixture"
-        subprocess.run([a.cc, "-std=gnu11", "-O1", "-I", str(ROOT / "host/posix"), "-I", str(ROOT / "host"), "-I", str(ZSTD),
+        subprocess.run([a.cc, "-std=gnu11", "-O1", "-I", str(ROOT / "host/posix"), "-I", str(ROOT / "host"), "-I", str(ROOT / "game"), "-I", str(ZSTD),
                         "-DZSTD_DISABLE_ASM", "-DZSTD_LEGACY_SUPPORT=0", "-DZSTD_MULTITHREAD=0", "-Wno-unused-function",
-                        str(src), str(ROOT / "host/restbl.c"), str(ROOT / "host/mods_list.c"), str(ROOT / "host/romfs.c"),
+                        str(src), str(ROOT / "host/restbl.c"), str(ROOT / "game/mods_list.c"), str(ROOT / "host/romfs.c"),
                         str(ROOT / "host/romfs_index.c"), str(ROOT / "host/prompts_base.c")] + [str(ZSTD / f) for f in ZSTD_FILES] +
                        ["-o", str(exe)],
                        check=True)

@@ -344,7 +344,7 @@ WIRED = {
     "HOS_COLLECT_WIDE": "host/rx_backend.c",
     # (read at each barrier sleep and each OR's wake; the game's loop looks at its masks again after a wait or a sleep alike,
     # and a wake skipped while off costs a waiter its 1 ms timeout at most)
-    "HOS_OOT_BARRIER_WAIT": "host/oot_barrier.c",
+    "HOS_OOT_BARRIER_WAIT": "game/oot_barrier.c",
     # (read at each nn::os::YieldThread; nothing is kept between two yields)
     "HOS_OS_YIELD": "host/hos_thread.c",
     # (the renderer's, through MkwVkHost.ab_value: read at each recording's start; each recording converts one way whole, the
@@ -403,7 +403,7 @@ def wiring_checks():
         fail("host/hos_relaunch.c: hos_close_finish does not log the A/B's sums before the log's flush")
     # (the wired switches: each one's safety under a flip is argued at its call and run below; a new one is added here)
     found = {}
-    for path in sorted((ROOT / "host").rglob("*.c")):
+    for path in sorted((ROOT / "host").rglob("*.c")) + sorted((ROOT / "game").rglob("*.c")):
         for m in re.finditer(r'hos_ab_value\("([A-Z0-9_]+)"', path.read_text(encoding="utf-8")):
             found.setdefault(m.group(1), []).append(path.relative_to(ROOT).as_posix())
     for path in sorted((ROOT / "gpu/vk").glob("*.cpp")):   # ((longshot) the renderer's readers: through the host's table)

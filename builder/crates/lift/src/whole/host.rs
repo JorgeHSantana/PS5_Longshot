@@ -1,4 +1,4 @@
-//! What the lift reads from the host's sources (`host/*.c` and `host/game/*.c`, the files every game build compiles):
+//! What the lift reads from the host's sources (`host/*.c` and the game's `game/*.c` beside it, the files every game build compiles):
 //! the HLE functions it defines (`void imp_<symbol>(Ctx` and `HLE(<symbol>)` at the start of a line) and the entry hooks
 //! (`ENTRY_HOOK_SYM(<symbol>)`, `ENTRY_HOOK_SYM_FROM(<symbol>, <least size>)`).
 
@@ -22,10 +22,11 @@ fn ident(s: &str) -> &str {
 }
 
 impl Host {
-    /// The host's sources in `host` (and `host/game`), read.
+    /// The host's sources in `host` (and the game's, in `game` beside it), read.
     pub fn read(host: &Path) -> Result<Host> {
         let mut out = Host::default();
-        for dir in [host.to_path_buf(), host.join("game")] {
+        let game = host.parent().map(|p| p.join("game"));
+        for dir in std::iter::once(host.to_path_buf()).chain(game) {
             if !dir.is_dir() {
                 continue;
             }

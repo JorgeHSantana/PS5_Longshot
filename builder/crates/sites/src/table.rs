@@ -1,5 +1,5 @@
-//! The site tables (docs/dev/reference/hooks.md, the format): each site's definition (`host/game/sites.toml`: what it
-//! is and its callback's contract) joined with where it is in a build (`host/game/sites/<build id>/locations.toml`), and
+//! The site tables (docs/dev/reference/hooks.md, the format): each site's definition (`game/sites/sites.toml`: what it
+//! is and its callback's contract) joined with where it is in a build (`game/sites/<build id>/locations.toml`), and
 //! every rule of the format checked before anything is placed. A fault stops with the file, the site and the rule,
 //! in the words nx2/hooks.py uses.
 
@@ -11,7 +11,7 @@ use toml::{Table, Value};
 /// A table that does not follow the format: the file, the site (when one is at fault) and what is wrong.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TableError {
-    /// The file (a repository path, as `host/game/sites.toml`).
+    /// The file (a repository path, as `game/sites/sites.toml`).
     pub place: String,
     /// The site: its name, or `#<n>` for one with none.
     pub site: Option<String>,
@@ -353,7 +353,7 @@ pub enum Returns {
     Value(ArgType),
 }
 
-/// An inline data rule: the lifter's own code at the site, reading a host value (host/game/sites.def's HOS_VALUE).
+/// An inline data rule: the lifter's own code at the site, reading a host value (game/sites.def's HOS_VALUE).
 #[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rule {
@@ -544,7 +544,7 @@ impl Fingerprint {
 pub struct RuleUse {
     /// The rule.
     pub rule: Rule,
-    /// The host value's name (host/game/sites.def's HOS_VALUE).
+    /// The host value's name (game/sites.def's HOS_VALUE).
     pub value: String,
 }
 
@@ -710,7 +710,7 @@ fn flag(raw: &Table, key: &str, default: bool) -> Result<bool, String> {
 // ---- one site
 
 /// One `[[site]]` table checked (definition and location joined): a [`Site`], or what is wrong. `engine`: the names of
-/// the sites the engine's own features own (host/game/sites.def's HOS_SITE_ENGINE lines), for the rule on who may change
+/// the sites the engine's own features own (game/sites.def's HOS_SITE_ENGINE lines), for the rule on who may change
 /// the outcome on a worker thread; `None` leaves that rule out.
 pub fn check_site(raw: &Table, engine: Option<&BTreeSet<String>>) -> Result<Site, String> {
     let kind = match raw.get("kind") {
@@ -883,8 +883,7 @@ pub fn check_site(raw: &Table, engine: Option<&BTreeSet<String>>) -> Result<Site
                 Some(v) if is_name(v) => v.to_string(),
                 _ => {
                     return Err(
-                        "value: the name of the host value the rule reads (host/game/sites.def's HOS_VALUE lines)"
-                            .into(),
+                        "value: the name of the host value the rule reads (game/sites.def's HOS_VALUE lines)".into()
                     );
                 }
             };
@@ -946,7 +945,7 @@ pub fn check_site(raw: &Table, engine: Option<&BTreeSet<String>>) -> Result<Site
     if changes && thread == Thread::Worker && rule.is_none() && engine.is_some_and(|e| !e.contains(&name)) {
         return Err(format!(
             "{} on a worker thread changes the game's outcome: such a site is an engine feature's (a HOS_SITE_ENGINE \
-             line in host/game/sites.def) or an inline data rule, never a callback set at run time (a HOS_SITE line); \
+             line in game/sites.def) or an inline data rule, never a callback set at run time (a HOS_SITE line); \
              on the serial thread any site may (docs/dev/reference/hooks.md, who may change the outcome)",
             if can_return { "can_return".to_string() } else { format!("at = \"{}\"", form.name()) }
         ));
@@ -1288,7 +1287,7 @@ pub fn parse_locations(text: &str, place: &str, build_id: Option<&str>) -> Resul
             return Err(err(format!(
                 "{} {}",
                 unknown.join(", "),
-                if all_definitions { "is the site's definition: host/game/sites.toml" } else { "unknown" }
+                if all_definitions { "is the site's definition: game/sites/sites.toml" } else { "unknown" }
             )));
         }
         let name = str_of(&t, "name").unwrap_or_default().to_string();

@@ -1,4 +1,4 @@
-//! `exefs_patches.txt`'s exact lines: the game reads them (host/mods.c exefs_status) by the prefix
+//! `exefs_patches.txt`'s exact lines: the game reads them (game/mods.c exefs_status) by the prefix
 //! `<mod>\t<file>\t<8 hex digits of FNV-1a>\t`, then the kind's word (code and data built in, empty built in with no
 //! write, other another version's, anything else unusable with the note after a tab), so a change of their shape here
 //! leaves every mod "waiting for the next build". tests/test_mods_sizes.py gives the game the list made here.
@@ -20,7 +20,7 @@ fn file(mod_name: &str, file: &str, data: &[u8], kind: Kind, note: &str, on: boo
 #[test]
 fn the_lines_the_game_reads() {
     assert_eq!(fnv32(b""), 0x811C_9DC5);
-    assert_eq!(fnv32(b"@nsobid-00\n"), 0xd2bb_95a7, "FNV-1a, 32 bits, as host/mods.c fnv32_file");
+    assert_eq!(fnv32(b"@nsobid-00\n"), 0xd2bb_95a7, "FNV-1a, 32 bits, as game/mods.c fnv32_file");
     let files = [
         file("01-first", "built.pchtxt", b"@nsobid-00\n", Kind::Code, "", true),
         file("01-first", "data.ips", b"PATCH", Kind::Data, "", true),

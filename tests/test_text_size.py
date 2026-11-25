@@ -1,6 +1,6 @@
 """The Insert menu's Text size scales the text of dialogue, Navi and signs, and only when the player asks for it.
 
-The hook site text.letterStep's callback (host/oot_text_step.c) calls hos_oot_text_pane (host/oot_text_size.c) from
+The hook site text.letterStep's callback (game/oot_text_step.c) calls hos_oot_text_pane (game/oot_text_size.c) from
 f_80b1e140, a LetterAnimControl's step, with the control in x19. The host scales the 2D scale of the control's pane wrapper (+0x28 x, +0x38 y) by the menu's choice, from the
 game's own value: never twice, again from the game's value whenever the game writes it, and back to it at Original.
 
@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # (python -I leaves the check's own folder off the path)
-from menu_model_fixture import menu_text  # noqa: E402
+from menu_model_fixture import GAME_OPTION_ANSWER, game_row, menu_text  # noqa: E402
 
 RUN_ALL_ARGS = ["--cc", "gcc"]
 
@@ -117,22 +117,25 @@ def main():
     p.add_argument("--cc", default="gcc")
     a = p.parse_args()
 
-    host = (ROOT / "host" / "oot_text_size.c").read_text(encoding="utf-8")
+    host = (ROOT / "game" / "oot_text_size.c").read_text(encoding="utf-8")
     replay = (ROOT / "gpu" / "vk" / "vk_replay.cpp").read_text(encoding="utf-8")
     menu = menu_text()   # (vk_menu.cpp and its modules' rows, #1633)
-    api = (ROOT / "gpu" / "vk" / "vk_api.h").read_text(encoding="utf-8")
+    api = (ROOT / "game" / "options.h").read_text(encoding="utf-8")   # (the game's option ids)
     option = replay[replay.index("t.option = "):]
     option = option[:option.index("};") + 2]
 
-    check("enum { HOS_OPT_TEXT_SIZE = 10 };" in api, "no option id for Text size")
+    check("enum { HOS_OPT_TEXT_SIZE = 10 };" in api, "game/options.h: no option id for Text size")
     check(re.search(r"id == 10\b", option) is None, "option 10 is answered by another row too")
-    check("if (id == HOS_OPT_TEXT_SIZE) return opts.text_size;" in option, "the host cannot see the Text size row")
-    check('"Text size", &opts.text_size, 0, 4, 1, tx_text_size' in menu, "the Insert menu has no Text size row")
+    check(GAME_OPTION_ANSWER in option, "the host cannot see the Text size row")
+    row = game_row("text_size")   # (the game's row, game/menu/rows.c)
+    check(row is not None and (row["label"], row["option"], row["lo"], row["hi"], row["choices"]) ==
+          ('"Text size"', "HOS_OPT_TEXT_SIZE", "0", "4", "text_sizes"), "the Insert menu has no Text size row")
+    check("Original" in menu and "175%" in menu, "the Text size row's choices are gone")
     check("rx_option(HOS_OPT_TEXT_SIZE, 0)" in host, "the host does not read the menu's row")
     check('getenv("HOS_TEXT_SIZE")' in host, "no HOS_TEXT_SIZE switch")
 
-    # (the hook site text.letterStep's callback: host/oot_text_step.c; host/game/sites.toml, tests/test_text_speed.py)
-    step = (ROOT / "host" / "oot_text_step.c").read_text(encoding="utf-8")
+    # (the hook site text.letterStep's callback: game/oot_text_step.c; game/sites/sites.toml, tests/test_text_speed.py)
+    step = (ROOT / "game" / "oot_text_step.c").read_text(encoding="utf-8")
     check(block(step, "int hos_text_letter_step(").count("hos_oot_text_pane(c, c->x[19]);") == 1,
           "the letters' step does not call the text size hook with x19")
     check("void hos_oot_text_pane(Ctx *c, uint64_t anim);" in step, "the site's callback does not declare the hook")

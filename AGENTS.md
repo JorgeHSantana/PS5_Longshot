@@ -39,8 +39,10 @@ everyone. This page is what an agent does on top.
 - **Settle every checklist box yourself** from the diff, the checks and the runs. Ask the person you work for at once
   about a box you can't settle: name it, what you found, what you need. Until then it stays unticked with the reason
   beside it, and the pull request stays WIP.
-- **A menu row goes in a module, with a key.** A feature's Insert menu rows go in a file of `gpu/vk/menu/` with their
-  code, hooks and place (`MENU_MODULE`, `after`/`before`), never into `vk_menu.cpp`'s table. A saved row's `.key` is its
+- **A menu row goes in a module, with a key.** A row that changes the game, not the picture, and is plain data goes in
+  `game/menu/` as a `GameMenuRow` (`game/game.h`): key, texts, kind, range, option id and place. Any other row goes in a
+  file of `gpu/vk/menu/` with its code, hooks and place (`MENU_MODULE`, `after`/`before`), never into `vk_menu.cpp`'s
+  table. A saved row's `.key` is its
   line in `longshot_options.ini`: a new key goes in `tests/test_menu_ini_keys.py`'s FROZEN, and a row renamed or moved
   keeps its key. Code that needs the renderer goes under `#ifndef MENU_LAYOUT_ONLY`, its hooks as `MENU_HOOK(...)`
   ([the Insert menu](docs/dev/reference/architecture.md#the-insert-menu)).

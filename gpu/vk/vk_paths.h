@@ -6,7 +6,7 @@
 // (log_path: the logs and traces). The shader cache folder is LONGSHOT_SHADER_CACHE when longshot-builder started the game
 // (its play and its preparation: <the builder's cache>/shaders/<translator stamp>/<driver>/, one for every build of that
 // translator on this driver), else the game folder's cache/. The host makes cache/ and logs/ at its start and moves a build's
-// from before into them (host/game_layout.c).
+// from before into them (game/game_layout.c).
 #pragma once
 #ifndef NOMINMAX
 #define NOMINMAX

@@ -1,7 +1,7 @@
 /* (longshot) The button prompts of the controller in use: the game's button-icon font (Font2/Scalable/External.*.bfotf, every
    icon in a text: dialogue, the control hints, menus) made from prompts/External.bfotf in the game folder, which
    builder/crates/build-assets/src/prompts draws with every controller face's icons at build time, and served from the game folder's cache/prompts/
-   (made again whenever the face or the controls change, so a cache: host/game_layout.c), with each Switch button's icon pointed
+   (made again whenever the face or the controls change, so a cache: game/game_layout.c), with each Switch button's icon pointed
    at the face's icon of the pad input bound to it (host/nn_hid.c's controls, the menu's Layout preset and Controls page). So the
    icons say which button to press on this pad, custom controls too.
 
@@ -42,6 +42,7 @@
 #include "hd_rumble.h"   /* (hd_rumble_kind: SDL's types of the Switch's controllers) */
 #include "restbl.h"   /* (the game's size table, its font entry raised: own_sizes) */
 #include "prompts_base.h"   /* (the textures' and the layouts' game bytes: the .base files, the patch as it streams) */
+#include "../game/game.h"   /* (the game's hooks this file calls) */
 
 uint8_t *hos_zs_read_romfs(const char *rel, size_t *n, size_t limit);   /* zs.c */
 uint8_t *hos_zs_decode(const uint8_t *z, size_t zn, size_t *n, size_t limit);
@@ -51,7 +52,6 @@ int hos_zs_write(const char *path, const uint8_t *data, size_t n);
 int hos_binding(int set, int button, int slot);   /* nn_hid.c */
 int hos_sdl_pads(uint64_t *buttons, int32_t stick[4], int *deck_builtin_input);   /* pad_sdl.c */
 void hos_sdl_pad_first(char *out, size_t cap, int *type, int *sdl);
-int hos_mods_file(const char *rel, char *out, size_t cap);   /* mods.c */
 int hos_xinput_pads(void);   /* nn_hid.c */
 int rx_option(int id, int otherwise);   /* rx_backend.c: the Insert menu's rows */
 
@@ -114,7 +114,7 @@ static int made_dir(char *out, size_t cap) {
     char game[MAX_PATH];
     if (!game_dir(game, sizeof game)) return 0;
     if (snprintf(out, cap, "%scache", game) >= (int)cap) return 0;
-    CreateDirectoryA(out, NULL);   /* (made at the start, host/game_layout.c; again here if it was deleted since) */
+    CreateDirectoryA(out, NULL);   /* (made at the start, game/game_layout.c; again here if it was deleted since) */
     if (snprintf(out, cap, "%scache/prompts", game) >= (int)cap) return 0;
     CreateDirectoryA(out, NULL);
     const DWORD a = GetFileAttributesA(out);

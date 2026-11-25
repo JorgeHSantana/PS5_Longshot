@@ -23,11 +23,11 @@ Nothing else reads that layout from a profile:
 
 | Code | What it does |
 |---|---|
-| [`host/mods.c`](../../../host/mods.c) | Finds mods (`find_mods`), reads their order and switches from `mods.json` (`read_state`), indexes their files once at start (`index_romfs`), answers lookups (`hos_mods_romfs`), merges the size tables (`fit_sizes`), and gives the Mods tab its list (`hos_mod_info`, `hos_mod_edit`) |
-| [`host/mods_list.c`](../../../host/mods_list.c) | Reads and writes `mods.json` (its shape: [`host/mods_list.h`](../../../host/mods_list.h)) |
+| [`game/mods.c`](../../../game/mods.c) | Finds mods (`find_mods`), reads their order and switches from `mods.json` (`read_state`), indexes their files once at start (`index_romfs`), answers lookups (`hos_mods_romfs`), merges the size tables (`fit_sizes`), and gives the Mods tab its list (`hos_mod_info`, `hos_mod_edit`) |
+| [`game/mods_list.c`](../../../game/mods_list.c) | Reads and writes `mods.json` (its shape: [`game/mods_list.h`](../../../game/mods_list.h)) |
 | [`host/nn_fs.c`](../../../host/nn_fs.c) | Asks `hos_mods_romfs` for every RomFS open, and lists mod-only entries in a folder (`hos_mods_dir_extras`) |
 | [`host/prompts.c`](../../../host/prompts.c) | Merges the button prompts' entries into the last mod's own size table when no merged table is served |
-| [`host/cheats.c`](../../../host/cheats.c) | Runs the mods' Atmosphere cheats |
+| [`game/cheats.c`](../../../game/cheats.c) | Runs the mods' Atmosphere cheats |
 | [`builder/crates/game-files/src/patches.rs`](../../../builder/crates/game-files/src/patches.rs) | Reads the manifest mods' ExeFS patches at build time (build-driver's `clashes.rs` refuses those that would stop a hook site); the image (`builder/crates/image`'s `build`) writes them into `main` before it is relocated and lifted |
 | [`builder/crates/game-files/src/mod_layout.rs`](../../../builder/crates/game-files/src/mod_layout.rs) | Finds the mods left in an emulator's layout in a profile's `mods/`, for the `mod_needs_import` warning |
 | `gpu/vk/vk_menu.cpp` | The Insert menu's Mods tab (`draw_mods`, `mods_tick`), shown when there are mods |
@@ -80,7 +80,7 @@ type, and no host code runs from a mod.
 
 A path no mod supplies falls back to the game's file; a folder cannot replace a file. `HOS_FS_OVERLAY` (a test switch)
 is looked at after mods and wins over them. Last, a texture an incomplete dump damages (zeros where its zstd frame
-starts) is read as the stand-in the builder would have put there (`host/oot_damaged_files.c`), whether a mod, the
+starts) is read as the stand-in the builder would have put there (`game/oot_damaged_files.c`), whether a mod, the
 overlay or the game's romfs supplied it.
 
 ## Resource size table
@@ -105,7 +105,7 @@ build read, and a table that isn't the game's own makes it drop files it needs a
 table and its own icons. The prompts' copies of the textures and layouts are left out the same way when they are not the
 size of the RomFS's files.
 
-`host/texts.c` rewords one of the game's texts for PC; a mod with its own copy of that file wins.
+`game/texts.c` rewords one of the game's texts for PC; a mod with its own copy of that file wins.
 
 ## Log lines
 
@@ -117,7 +117,7 @@ switches) is <file>`, `mods: <mod>: ExeFS <file>: <state>`, `mods: resource size
 
 ## The checked example
 
-`tests/test_mods_size_table.py` builds the files below in a temporary folder, runs the real `host/mods.c` and
+`tests/test_mods_size_table.py` builds the files below in a temporary folder, runs the real `game/mods.c` and
 `host/prompts.c` against them through a Linux file-system stand-in, and checks the results. It reads this block, so
 keep its markers. The paths are invented; this is test input, not a format Longshot reads. There is no `mods.json`, so
 the order is the paths'.

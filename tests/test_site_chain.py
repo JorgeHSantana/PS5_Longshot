@@ -1,5 +1,5 @@
-"""Several handlers on one hook site (host/game/sites.c hos_site_add, hos_site_remove, hos_site_next; host/game/sites.h,
-docs/dev/reference/hooks.md#several-handlers-on-one-site), game-free: host/game/sites.c compiled with a stand-in site list
+"""Several handlers on one hook site (game/sites.c hos_site_add, hos_site_remove, hos_site_next; game/sites.h,
+docs/dev/reference/hooks.md#several-handlers-on-one-site), game-free: game/sites.c compiled with a stand-in site list
 and run.
 
   - a site with no handler added is as before: its own callback in the slot, called straight from the hook (an engine
@@ -23,7 +23,7 @@ and run.
     still runs), once;
   - a table (hos_table_publish) replaced is freed once its readers have left (hos_table_enter / hos_table_leave), not
     before, and the table already published, published again, is kept, not freed under its readers;
-  - and the real site list (host/game/sites.def) compiles with it, warnings as errors.
+  - and the real site list (game/sites.def) compiles with it, warnings as errors.
 
 python -I -B tests/test_site_chain.py [--cc gcc]
 """
@@ -35,7 +35,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-GAME = ROOT / "host" / "game"
+GAME = ROOT / "game"
 A64_H = """#include <stdint.h>
 #define A64_NOESC
 typedef struct { uint64_t x[32]; } Ctx;
@@ -247,11 +247,11 @@ def main():
         stand.mkdir()
         (stand / "a64.h").write_text(A64_H, encoding="utf-8")
         flags += ["-I", str(stand)]
-        # (the real list: every site of host/game/sites.def, its engine callbacks declared by sites.h)
+        # (the real list: every site of game/sites.def, its engine callbacks declared by sites.h)
         real = subprocess.run([a.cc, *flags, "-fsyntax-only", "-I", str(GAME), str(GAME / "sites.c")], text=True,
                               capture_output=True)
         if real.returncode:
-            raise SystemExit("FAIL: host/game/sites.c does not compile with host/game/sites.def:\n" + real.stderr)
+            raise SystemExit("FAIL: game/sites.c does not compile with game/sites.def:\n" + real.stderr)
         for f in ("sites.c", "sites.h", "phases.h"):
             shutil.copy(GAME / f, tmp / f)
         (tmp / "sites.def").write_text(SITES_DEF, encoding="utf-8")
@@ -264,7 +264,7 @@ def main():
         run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)
         sys.stdout.write(run.stdout)
         if run.returncode or "all passed" not in run.stdout:
-            raise SystemExit("FAIL: host/game/sites.c's handler chains (above)")
+            raise SystemExit("FAIL: game/sites.c's handler chains (above)")
     print("test_site_chain: ok")
 
 

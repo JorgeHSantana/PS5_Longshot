@@ -111,7 +111,7 @@ Keys whose numbers are not obvious from the row:
 | Key | Values |
 |---|---|
 | `grass_distance` | The short decorative blades' reach: 0 Game's (default; radius 22 m, blades thinned from 12 m to about 20 m), 1 2x, 2 3x, 3 4x. The radius and both fades extend by that factor at once. It does not change the large-scale simulated turf, whose separate **Simulated turf** page uses adaptive record lists (`gpu/vk/vk_draw.cpp` `grass_reach`; `RX_VK_GRASS_DISTANCE` overrides the row) |
-| `hud_layout` | HUD layout. 0 Screen's edges (default), 1 Middle 16:9, 2 Custom. Read at each present (`host/hos_wide_ui.c`). `HOS_WIDE_UI` overrides it |
+| `hud_layout` | HUD layout. 0 Screen's edges (default), 1 Middle 16:9, 2 Custom. Read at each present (`game/hos_wide_ui.c`). `HOS_WIDE_UI` overrides it |
 | `hud_health_x/y/scale`, `hud_buttons_x/y/scale`, `hud_minimap_x/y/scale` | Custom HUD placement, with horizontal and vertical offsets in percent of the picture and scale in percent of the usual size |
 | `key_toggle_hud`, `pad_toggle_hud` | Session HUD shortcut, unbound by default. Uses the Controls page's normal binding format |
 | `walk_mode` | 0 Hold, 1 Toggle |
@@ -309,7 +309,7 @@ The memory budget and its `vk: budget:` lines are in [architecture](architecture
 
 | Switch | What it does |
 |---|---|
-| `HOS_SHADOW_STABLE=0` | Fit the sun's nearest shadow cascade as shipped at every Shadow resolution, following the view each frame. `HOS_SHADOW_STABLE=1` uses the steady fit at every resolution. By default the steady fit runs only on Highest (3072 texels); below it the game's fit is kept because the steady square is coarser standing still. The steady fit (`host/oot_shadow_fit.c`, the hook sites `shadow.fitBasis` and `shadow.fitBox`) keeps its basis independent of the camera, following the sun by the smallest turn from a point moving in whole texels, and fits a steady square around the slice's bounding sphere on whole texels. The log says `shadow: the sun's nearest cascade is <n> m a side` when the size changes. |
+| `HOS_SHADOW_STABLE=0` | Fit the sun's nearest shadow cascade as shipped at every Shadow resolution, following the view each frame. `HOS_SHADOW_STABLE=1` uses the steady fit at every resolution. By default the steady fit runs only on Highest (3072 texels); below it the game's fit is kept because the steady square is coarser standing still. The steady fit (`game/oot_shadow_fit.c`, the hook sites `shadow.fitBasis` and `shadow.fitBox`) keeps its basis independent of the camera, following the sun by the smallest turn from a point moving in whole texels, and fits a steady square around the slice's bounding sphere on whole texels. The log says `shadow: the sun's nearest cascade is <n> m a side` when the size changes. |
 
 ### Threads and cores
 

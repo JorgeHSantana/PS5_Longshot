@@ -164,11 +164,11 @@ MAX_NOISY_SAVE_BYTES = 64     # (a save file's bytes that differed between two r
 # ---- gate 5: nothing started (docs/dev/reference/parity-gates.md#gate-5-nothing-started) ----
 
 # With no mods the game loads none and makes nothing for them. What a run shows of it:
-#   - the log says the mods loader looked and found none: host/mods.c hos_mods_init's "mods: none in <HOS_MODS>" (the run's
+#   - the log says the mods loader looked and found none: game/mods.c hos_mods_init's "mods: none in <HOS_MODS>" (the run's
 #     HOS_MODS is an empty folder of its own) is REQUIRED, and its lines for mods found are MODS_LOADED;
 #   - no log line begins with one of RESERVED_LOG's names: "modcache: ", and names nothing in the game uses yet, held for
 #     parts to come, whose pull requests say when they start in these words;
-#   - the mods' folder is modcache in the game folder (CACHE_NAMES: host/mods.c's size table and list note, with mods only):
+#   - the mods' folder is modcache in the game folder (CACHE_NAMES: game/mods.c's size table and list note, with mods only):
 #     none in the game folder, the run's user folder or its working folder;
 #   - no thread named lsmod-<what> (15 characters at most, Linux's limit) and no child process of RESERVED_PROCESSES' names
 #     (both held as above) among the game's threads or children at the run's end, which must both be read.
@@ -357,7 +357,7 @@ def lookup(session, keys, timeout=30):
 
 def scan_presents(log_path, cursor, g, limit_frames=60 * 60):
     """The presents of one full pass of the flags' scan, from its log line (written once the four tables have a baseline:
-    host/oot_state_tap.c state_log_scan), waited for from the log's byte cursor"""
+    game/oot_state_tap.c state_log_scan), waited for from the log's byte cursor"""
     start = g.frame
     while True:
         with open(log_path, "rb") as f:

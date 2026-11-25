@@ -251,7 +251,7 @@ need your dump read your work folder, on your PC only:
 |---|---|
 | `longshot-builder lift --work <dir>` | The whole lift: it stops on any hook site that does not resolve or edit it cannot write; an instruction the semantics do not cover becomes a trap where it is, and the log counts them ("instructions lowering does not do") |
 | `longshot-builder dev discover --image <dir>/image` | Discovery alone: the functions, tables and stubs it finds, and its time |
-| `longshot-builder dev sites --image <dir>/image --tables host/game` | The hook sites placed over the image's discovery, without a lift |
+| `longshot-builder dev sites --image <dir>/image --tables game` | The hook sites placed over the image's discovery, without a lift |
 | `python -I scripts/lower_test.py <folder>` | Shader programs that failed to translate (from `RX_VK_DUMP_FAILED`): a renderer tool, not the build's |
 
 The parity gates 3 to 5 (behaviour, saves, nothing started), which a refactor of how Longshot changes the game's code

@@ -1,4 +1,4 @@
-"""The Discord status's pieces of heart in all (host/oot_heart_containers.c): 4 * (hearts - 3 - boss containers taken) +
+"""The Discord status's pieces of heart in all (game/oot_heart_containers.c): 4 * (hearts - 3 - boss containers taken) +
 pieces held, the containers' ids read from the map files.
 
 No game file: the BYML map files (an Actors list of dictionaries with Gyaml and Hash) are made here, in both byte
@@ -6,7 +6,7 @@ orders, with made-up names and ids. The reader finds the named actors' 64-bit (a
 to cap, and refuses what is not a map; each file cut at every length is refused or read without reading past its end
 (the harness is built with -fsanitize=address where the compiler has it). The total adds up, and is -1 (not shown) when
 a part is not known or the parts do not add up. The map files are read through host/zs.c, whose dictionaries they need.
-host/hos_main.c, host/discord_rpc.c, host/game/flags.c and host/oot_heart_containers.c are checked in their source for using them.
+game/oot_tools.c, game/discord_rpc.c, game/flags.c and game/oot_heart_containers.c are checked in their source for using them.
 
     python -I -B tests/test_heart_containers.py [--cc gcc]
 """
@@ -22,6 +22,7 @@ RUN_ALL_ARGS = ["--cc", "gcc"]
 
 ROOT = Path(__file__).resolve().parents[1]
 HOST = ROOT / "host"
+GAME = ROOT / "game"
 
 
 def u24(v, be):
@@ -140,20 +141,20 @@ int main(void) {
 
 
 def check_source():
-    main = (HOST / "hos_main.c").read_text(encoding="utf-8")
-    if "heart_pieces_total(stats[1], hos_oot_heart_containers_taken(), oot_pouch_count(c, \"Obj_Heart_Piece\"))" not in main:
-        raise SystemExit("host/hos_main.c: the pieces of heart are not the total (heart_pieces_total) any more")
-    rpc = (HOST / "discord_rpc.c").read_text(encoding="utf-8")
+    tools = (GAME / "oot_tools.c").read_text(encoding="utf-8")
+    if "heart_pieces_total(stats[1], hos_oot_heart_containers_taken(), oot_pouch_count(c, \"Obj_Heart_Piece\"))" not in tools:
+        raise SystemExit("game/oot_tools.c: the pieces of heart are not the total (heart_pieces_total) any more")
+    rpc = (GAME / "discord_rpc.c").read_text(encoding="utf-8")
     if "hos_oot_heart_containers_load();" not in rpc:
-        raise SystemExit("host/discord_rpc.c: the boss containers' ids are not loaded on the Discord status's thread")
-    flags = (HOST / "game" / "flags.c").read_text(encoding="utf-8")
+        raise SystemExit("game/discord_rpc.c: the boss containers' ids are not loaded on the Discord status's thread")
+    flags = (GAME / "flags.c").read_text(encoding="utf-8")
     if "int game_flag_bool64(uint64_t mgr, uint64_t id, int *at)" not in flags or "#define FLAG_BOOL64 0xc58u" not in flags:
-        raise SystemExit("host/game/flags.c: the Bool64bitKey flag reader is gone")
-    containers = (HOST / "oot_heart_containers.c").read_text(encoding="utf-8")
+        raise SystemExit("game/flags.c: the Bool64bitKey flag reader is gone")
+    containers = (GAME / "oot_heart_containers.c").read_text(encoding="utf-8")
     if "game_flag_bool64(game_flags_mgr(), heart_ids[i], &at[i])" not in containers:
-        raise SystemExit("host/oot_heart_containers.c: the containers taken are not read through the flags service")
+        raise SystemExit("game/oot_heart_containers.c: the containers taken are not read through the flags service")
     if "hos_zs_read_romfs_named(path, &map_n, 1u << 30, \"bcett.byml.zsdic\")" not in containers:
-        raise SystemExit("host/oot_heart_containers.c: the map files are not read through host/zs.c (its dictionaries)")
+        raise SystemExit("game/oot_heart_containers.c: the map files are not read through host/zs.c (its dictionaries)")
 
 
 def main():
@@ -175,10 +176,13 @@ def main():
         root_dir = Path(tmp).resolve()
         src, exe = root_dir / "heart_test.c", root_dir / "heart_test"
         src.write_text(data + HARNESS, encoding="utf-8")
+        # (host/game_host.h's part the readers use, the RomFS's: the whole of it needs the lift's runtime)
+        (root_dir / "game_host.h").write_text('#include "romfs.h"\n', encoding="utf-8")
         windows = os.name == "nt"
         extra = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS} if windows else {}
-        base = [a.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-DHEART_CONTAINERS_NO_GAME", "-I", str(HOST), str(src),
-                str(HOST / "oot_heart_containers.c"), "-o", str(exe)]
+        base = [a.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-DHEART_CONTAINERS_NO_GAME", "-I", str(root_dir),
+                "-I", str(HOST), "-I", str(GAME),
+                str(src), str(GAME / "oot_heart_containers.c"), "-o", str(exe)]
         build = subprocess.run(base[:1] + ["-fsanitize=address", "-g"] + base[1:], capture_output=True, **extra)
         if build.returncode:   # (no sanitizer on this compiler: the plain build)
             build = subprocess.run(base, **extra)

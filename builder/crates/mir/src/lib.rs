@@ -576,7 +576,7 @@ impl Helper {
 }
 
 /// A global of the host's that the IR reads or writes by its symbol: a hook site's flag byte or callback slot, a data
-/// rule's value, the replaced call's callee (host/game/sites.h).
+/// rule's value, the replaced call's callee (game/sites.h).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Global {
     /// Its C name.
@@ -619,7 +619,7 @@ impl Display for Callee {
 ///
 /// The contract: a host call given [`HostArg::Ctx`] syncs the guest state (it goes to the context before the call and
 /// comes back after); one without it syncs nothing, the state staying in the lifted function's slots, so its callee
-/// must neither read nor write the guest's registers nor run guest code (host/game/game.c's game_call refuses a call
+/// must neither read nor write the guest's registers nor run guest code (host/game_call.c's game_call refuses a call
 /// with no context, and a callee that needs to call the game is declared with the context).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum HostArg {

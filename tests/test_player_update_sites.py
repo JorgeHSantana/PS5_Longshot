@@ -1,5 +1,5 @@
-"""Link's update and the Debug tab's flight reach the host through three hook sites (host/game/sites.toml, with
-host/oot_sites.c's callbacks over host/hos_main.c), where the text patches they replaced (nx2/oot_patches.py patch_movement and
+"""Link's update and the Debug tab's flight reach the host through three hook sites (game/sites/sites.toml, with
+game/oot_sites.c's callbacks over game/oot_tools.c), where the text patches they replaced (nx2/oot_patches.py patch_movement and
 patch_flight_rotation, deleted) put the same calls:
 
 - player.update, before f_82c415e0's test of the actor's flag byte (tbnz w8, #1 at +0x14c): hos_oot_lift_player(c, x19);

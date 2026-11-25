@@ -97,7 +97,7 @@ def build(tmp, specs, cargo=None, clang=None, build_id=BUILD):
     ll, obj = tmp / "site_hooks.ll", tmp / "site_hooks.o"
     cargo = cargo or CARGO or shutil.which("cargo") or "cargo"
     made = subprocess.run([cargo, "run", "-q", "-p", "longshot-builder", "--", "dev", "site-hooks", "--tables",
-                           str(ROOT / "host" / "game"), "--build", build_id, "--out", str(ll), *specs],
+                           str(ROOT / "game"), "--build", build_id, "--out", str(ll), *specs],
                           cwd=ROOT, capture_output=True, text=True)
     if made.returncode:
         raise SystemExit("FAIL: longshot-builder dev site-hooks: " + made.stderr)

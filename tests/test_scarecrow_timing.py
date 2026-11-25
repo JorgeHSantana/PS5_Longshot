@@ -1,7 +1,7 @@
 """The eight-note Scarecrow melody keeps its recorded rhythm across frame-rate caps.
 
 Exercise the real whole-frame hook sites (frame.wholeScarecrowPlay, frame.wholeScarecrowRecord and
-frame.wholeScarecrowLast, replace sites on the cuts, as the lift lowers them (tests/sitehooks.py) with host/oot_sites.c's
+frame.wholeScarecrowLast, replace sites on the cuts, as the lift lowers them (tests/sitehooks.py) with game/oot_sites.c's
 callbacks) on small authored C functions with the two conversion shapes, then compile them with the
 real fraction helper; and the same with the text patch's lines they replaced, side by side. Record note
 holds/gaps at 60, 120 and 240 updates per second and play every recording at each
@@ -162,7 +162,7 @@ def main():
             fixture.write_text(text + FIXTURE, encoding="utf-8")
             binary = tmp / "fixture.exe"
             command = [args.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-O1",
-                       "-I", str(ROOT / "host"), str(fixture), *sitehooks.objects(tmp, text), "-o", str(binary)]
+                       "-I", str(ROOT / "host"), "-I", str(ROOT / "game"), str(fixture), *sitehooks.objects(tmp, text), "-o", str(binary)]
             print("compiler (%s):" % what, " ".join(command), flush=True)
             subprocess.run(command, check=True)
             subprocess.run([str(binary)], check=True, timeout=30)

@@ -77,9 +77,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::fs::create_dir_all(&game)?;
             let t = nup.pick_title(None)?.clone();
             let made = game_files::romfs::index(&nup, &t, &game, &mut |_| {})?;
-            // (the builder's stand-ins against the host's table for a romfs folder, host/oot_damaged_files.c: the same?)
+            // (the builder's stand-ins against the host's table for a romfs folder, game/oot_damaged_files.c: the same?)
             let table =
-                std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../host/oot_damaged_files.c"))?;
+                std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../game/oot_damaged_files.c"))?;
             for st in &made.stand_ins {
                 let pair = format!("{{\"{}\", \"{}\"}}", st.damaged, st.with.as_deref().unwrap_or("-"));
                 println!(

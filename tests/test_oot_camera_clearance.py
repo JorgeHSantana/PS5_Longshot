@@ -1,6 +1,6 @@
 """The camera's two near-plane clearance inputs retain the game's 16:9 shape (issue 1703).
 
-The hook sites wide.clearance and wide.clearanceFollow (host/oot_wide_sites.c), after the two loads main's widescreen C
+The hook sites wide.clearance and wide.clearanceFollow (game/oot_wide_sites.c), after the two loads main's widescreen C
 went after, are compiled as the lift lowers them (tests/sitehooks.py) with authored registers. Matching picture ratios become 16:9;
 other values and every other register stay unchanged. With A64_CAMERA_DIAGNOSTICS=1 in the game's environment the sites
 count and, while camera-clearance.trace is there, log their hits. No game image, lifted code or GPU is used.

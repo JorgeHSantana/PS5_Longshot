@@ -2,7 +2,7 @@
    layer, and the display's vsync event, signaled at 60 Hz by a host thread. HDR and VRR are reported unsupported,
    so the game takes its SDR path. Frames are paced at the native NVN layer's window acquire (the end of this file). */
 #include "hos.h"
-#include "game/phases.h"   /* (GAME_PHASE_ACQUIRE: run at the window acquire, hos_vi_native_acquire) */
+#include "../game/game.h"   /* (the game's hooks: GAME_PHASE_ACQUIRE at the window acquire, hos_vi_native_acquire; the cheats each present) */
 #include "../gpu/vk/vk_api.h"   /* (HOS_OPT_HDR_*, HOS_OPT_CAMERA_SPEED: the Insert menu's HDR and Camera speed, answered by the renderer) */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -237,7 +237,7 @@ int hos_vi_native_interval(Ctx *c, int requested) {
    that behaviour */
 static int64_t shown_at[16];
 static volatile LONG64 shown_count;
-/* (longshot) The frame phase GAME_PHASE_ACQUIRE (host/game/phases.h) runs first, on the game's main thread, once a game frame
+/* (longshot) The frame phase GAME_PHASE_ACQUIRE (game/phases.h) runs first, on the game's main thread, once a game frame
    in every state, with the frame's number (the acquisitions before it). Here because:
    - the main thread acquires a window texture once a frame in play, menus, pause, loading and movies alike, and
      this host code is the first the acquire runs;
@@ -319,17 +319,17 @@ static void scan_dt(long long presents) {
    1/15 s, as TotK Recomp's frame_rate.c (slower frames slow the game down, as on the console), at least 1/60 s (the game's
    own limit holds it at 60). HOS_REALTIME_STEP=0: the shipping whole steps. */
 extern volatile uint64_t hos_gfx_module;
-volatile int hos_fixed_resolution = 0;   /* (the hook sites dynres.* and render.fixedScale* read these: host/oot_sites.c) */
+volatile int hos_fixed_resolution = 0;   /* (the hook sites dynres.* and render.fixedScale* read these: game/oot_sites.c) */
 volatile uint32_t hos_fixed_scale_bits = 0x3f800000;   /* (HOS_RES_SCALE: the fixed path's scale) */
 volatile int hos_dynres_runs = 0;   /* (the dynamic path's frames: it fills fields the 3D reads, +8 +16 +168) */
-volatile float hos_text_scale = 1.0f;   /* (the letters' clock of a text pane, f_80b1e140: host/oot_text_step.c) */
+volatile float hos_text_scale = 1.0f;   /* (the letters' clock of a text pane, f_80b1e140: game/oot_text_step.c) */
 /* The Insert menu's Text speed (0 Normal, 1 2x, 2 4x, 3 Instant), HOS_TEXT_SPEED=<0..3> over it: what the time of a letter
    animation's step is multiplied by. Instant: the page at once, as the game's own skip on A */
 static float text_scale(const char *env, int menu) {
     const int v = env && *env ? atoi(env) : menu;
     return v == 1 ? 2.0f : v == 2 ? 4.0f : v >= 3 ? 1e6f : 1.0f;
 }
-volatile float hos_camera_scale = 1.0f;   /* (the right stick's camera turn speeds, f_80643f10 and three more: the camera.*Speed sites, host/oot_sites.c) */
+volatile float hos_camera_scale = 1.0f;   /* (the right stick's camera turn speeds, f_80643f10 and three more: the camera.*Speed sites, game/oot_sites.c) */
 /* The Insert menu's Camera speed, in percent of the game's own turn speed (50 to 400; anything else, as without the Vulkan
    renderer's menu: the game's): what the turn speeds are multiplied by. Even the fastest of the game's own camera speeds turned
    slowly for players; it still picks the speed this multiplies */
@@ -340,7 +340,7 @@ volatile int hos_scene_rgba16f = 0;   /* (the scene buffer RGBA16F, not R11G11B1
                                          Native with the PsychoV35 tone mapper: the temporal upscalers take only
                                          R11G11B10F, so Vanilla keeps it) */
 volatile uint64_t hos_step_probe = 0;   /* (f_80706be0's object, set by the lifted code when the frame-time hook is in this build; its
-                                            +0xd58 is the game clock in 1/60 s: the site frame.stepProbe, host/game/sites.def) */
+                                            +0xd58 is the game clock in 1/60 s: the site frame.stepProbe, game/sites.def) */
 volatile uint32_t hos_frame_seconds_bits = 0;   /* (the frame's seconds as a float's bits for that hook, 0: the game's own step; the
                                                    value frame.seconds the frame.stepDivide and frame.globalStepDivide sites' inline rules read) */
 /* A movie's frame count while the frames' time is given (a Frame rate cap above 60): how many 60ths of a second this update of
@@ -410,7 +410,7 @@ static int carry_fractions(void) {
     const int rate = __atomic_load_n((const int *)GP(mod + 0x2c8), __ATOMIC_RELAXED);
     return rate >= 15 && rate <= 60 && 60 % rate != 0;
 }
-/* (the hook sites frame.whole*, host/oot_sites.c) the whole frames a game counter at `at` takes for an amount of the frame step (its
+/* (the hook sites frame.whole*, game/oot_sites.c) the whole frames a game counter at `at` takes for an amount of the frame step (its
    float's bits): with the frames' own time as the step, their fractions carried per counter; else cut as the game cuts it */
 #include "frame_whole.h"
 static FrameWhole frame_whole_state;
@@ -449,7 +449,7 @@ uint32_t hos_frame_whole_times(uint64_t at, uint32_t amount_bits, uint32_t times
     ReleaseSRWLockExclusive(&frame_whole_lock);
     return whole;
 }
-/* (the hook sites anim.loop*, host/oot_sites.c) the step of an animation entry's clock, and the time a skeleton is drawn at,
+/* (the hook sites anim.loop*, game/oot_sites.c) the step of an animation entry's clock, and the time a skeleton is drawn at,
    for a loop of one frame or less while the frames' own time is the step: whole frames, and the loop's start (host/loop_step.h,
    the frozen Zoras would twitch above a 60 cap), and at a cap of 60 while the step is not a whole frame (carry_fractions).
    Anything else, and a whole step, as the game has it. */
@@ -695,8 +695,7 @@ void hos_vi_native_presented(const int64_t phases[4]) {
     }
     const int64_t n = InterlockedIncrement64(&presents);
     present_trace(n, now, phases);
-    {   /* (hookshot) the mods' cheats that are on, once a presented frame (host/cheats.c) */
-        void hos_cheats_frame(void);
+    {   /* (hookshot) the mods' cheats that are on, once a presented frame (game/cheats.c) */
         hos_cheats_frame();
     }
     {   /* HOS_MKW_INTERVAL=<0|1|2>: the interval MKW's pacer is held at, through its own override (+0x210, any

@@ -22,7 +22,7 @@ A launcher names the folders and keeps which one is current in its own settings;
 
 | What | Where |
 |---|---|
-| The logs (`longshot_log.txt` and the runs before, the update's log) | The game folder's `logs/` (`builds/<build>/logs/`, `host/game_layout.c`) |
+| The logs (`longshot_log.txt` and the runs before, the update's log) | The game folder's `logs/` (`builds/<build>/logs/`, `game/game_layout.c`) |
 | The shader and pipeline caches | The builder's cache, `<cache>/shaders/<translator stamp>/<driver>/`: made for that shader translator and this PC's drivers, shared by every build and version of that translator, made again by any build ([where things are](build.md#where-things-are)) |
 | The recordings, the mouse's sensitivity, the game's cache storage | The user folder, as for a start without a profile (the per-user place: `%APPDATA%\Longshot`, `~/.local/share/longshot`) |
 | The mods' list (`mods.json`) | Beside the settings file: the profile's folder |

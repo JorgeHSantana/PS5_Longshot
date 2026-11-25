@@ -6,7 +6,7 @@ Synthetic data only, no game:
     nothing else from the game folder (saves, caches, the options file and the log stay out);
   - the report is the issue's template filled in: every field in order, the version, the OS, the GPU and its driver from the
     game's log, the output, the upscaler and the 3D's size, frame generation and HDR from longshot_options.ini, the mods the game
-    loads (host/mods.c's rule), "where you played" left empty, and no path of the player's;
+    loads (game/mods.c's rule), "where you played" left empty, and no path of the player's;
   - a list that is missing, not a list, cut short or empty is refused with the reason, and no zip is written;
   - the C++ and the builder's agree: the same fields and issue; the builder's names for the options are the menu's (share.rs's
     own tests check its report);
@@ -242,7 +242,7 @@ def check_sources():
     assert 'L"WINDIR"' in menu, "explorer.exe is taken from the search path"
     assert "r.setting->hint(0, k)" in menu[menu.find("float measure_help("):][:1400] and \
         "return variant == 0 ? kShareSaidLongest : nullptr;" in menu, "the help box has no room kept for the line after a save"
-    assert "share_finish();" in menu[menu.find("void menu_tick() {"):][:400], "menu_tick never collects the worker's answer"
+    assert "share_finish();" in body_of(menu, "void menu_tick() {"), "menu_tick never collects the worker's answer"
     spawn = menu[menu.find("bool share_spawn("):]
     spawn = spawn[:spawn.index("\n}\n")]
     assert "pipe2(fds, O_CLOEXEC)" in spawn and "addclosefrom_np(&fa, 3)" in spawn, \

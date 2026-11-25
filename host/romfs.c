@@ -228,7 +228,7 @@ int hos_romfs_stat(const char *rel, uint64_t *size) {
 }
 
 /* ---- any case, in a folder: each part the folder's own entry of that name, its letters folded (ASCII). Each folder of
-   the romfs folder is listed once a start and its names kept, sorted folded (host/mods.c asks for every file of every
+   the romfs folder is listed once a start and its names kept, sorted folded (game/mods.c asks for every file of every
    mod: listing a folder each time was its files times the folder's size) */
 static int compare_folded(const char *a, size_t an, const char *b, size_t bn) {
     for (size_t i = 0; i < an && i < bn; i++) {

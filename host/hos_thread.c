@@ -2214,14 +2214,14 @@ void hos_vcore_back(void) {
     if (t->away_at) t->blocked_total += hos_now_ns() - t->away_at, t->away_at = 0;
     if (!t->vc_held) vc_acquire(t);
 }
-/* (host/game/game.c game_call) 1 when the calling thread may run guest code as it stands: virtual cores off, not a guest
+/* (host/game_call.c game_call) 1 when the calling thread may run guest code as it stands: virtual cores off, not a guest
    thread, it holds a core, or it runs without one since an escape (until its next block); 0 when it gave its core up
    (from hos_vcore_away to hos_vcore_back) and is to take one back before any guest code */
 int hos_vcore_held(void) {
     HosThread *t = cur;
     return !hos_vcores_on() || !t || t->vc_held || t->vc_escaped;
 }
-/* (host/game/game.c game_call) 1 while another thread asks the calling one to give its core up (vc_acquire's kick, which
+/* (host/game_call.c game_call) 1 while another thread asks the calling one to give its core up (vc_acquire's kick, which
    also sets the context's poll): a call that puts the context back keeps the poll set while the ask stands */
 int hos_vcore_kicked(void) {
     HosThread *t = cur;

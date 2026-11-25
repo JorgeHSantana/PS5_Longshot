@@ -1,7 +1,7 @@
 """The floor web keeps its 60-Hz simulation above a 60 frame-rate cap (#2667, #2271).
 
 Compile the production hook site frame.wholeFloorWeb (a replace site on the cut, as the lift lowers it (tests/sitehooks.py)
-with host/oot_sites.c's callback) in an authored update with its 0..3 clamp, and the text patch's line it
+with game/oot_sites.c's callback) in an authored update with its 0..3 clamp, and the text patch's line it
 replaced, side by side.
 Without this site the same executable checks fail: quarter-frame updates never
 run a step. Each floor needs its own carry, and the clamp and non-carry path stay
@@ -138,7 +138,7 @@ def main():
         (directory / "a64.h").write_text(CONTEXT, encoding="utf-8")
         source, binary = directory / "fixture.c", directory / "fixture.exe"
         def command(text):
-            return [args.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "host"),
+            return [args.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"),
                     str(source), *sitehooks.objects(directory, text), "-o", str(binary)]
         for update in (patched, old):   # (the hook, and the text patch it replaced)
             text = FIXTURE.replace("@UPDATE@", update)

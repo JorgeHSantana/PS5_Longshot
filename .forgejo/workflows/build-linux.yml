@@ -118,6 +118,15 @@ jobs:
           "$RUNNER_TEMP/host/longshot-builder" compile --work "$RUNNER_TEMP/third-party-work" --root "$PWD"
           --store "$RUNNER_TEMP/third-party-work/store" --jobs "$(nproc)" --third-party-objects "$RUNNER_TEMP/third_party_objects"
 
+      # (the game's Rust, longshot-rs over game/crates: liblongshot_rs.a with the pinned Rust, and beside it the key of the
+      # sources it was built from, which a player's build checks before it links it instead of compiling Rust:
+      # build-compile's rust.rs)
+      - name: liblongshot_rs.a
+        run: |
+          python3 -I scripts/longshot_builder.py game-rust --target linux --cache "$RUNNER_TEMP/rust" \
+            --out "$RUNNER_TEMP/longshot-rs/linux-x64"
+          "$RUNNER_TEMP/host/longshot-builder" dev rust-key --root "$PWD" > "$RUNNER_TEMP/longshot-rs/linux-x64/sources.key"
+
       # (RenHDrum (host/rumble_renhdrum.c): renhdrum.so from third_party/renhdrum with scripts/renhdrum.py's pinned Rust,
       # linked here against glibc 2.35; a player's build puts it beside the game)
       - name: renhdrum.so
@@ -132,6 +141,8 @@ jobs:
         run: |
           "$RUNNER_TEMP/host/longshot-builder" dev release sources --out "$RUNNER_TEMP/sources.pack" --version "$TAG" \
             --third-party-objects "$RUNNER_TEMP/third_party_objects" \
+            --add "longshot-rs/prebuilt/linux-x64/liblongshot_rs.a=$RUNNER_TEMP/longshot-rs/linux-x64/liblongshot_rs.a" \
+            --add "longshot-rs/prebuilt/linux-x64/sources.key=$RUNNER_TEMP/longshot-rs/linux-x64/sources.key" \
             --add "third_party/renhdrum/renhdrum.so=$RUNNER_TEMP/renhdrum/renhdrum.so" --tools "$BUNDLE/tools"
           mkdir -p dist
           python3 -I scripts/longshot_builder.py build --target linux --profile dist --cache "$RUNNER_TEMP/rust" \

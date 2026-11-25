@@ -110,7 +110,7 @@ static void WaitForSingleObject(HANDLE h, unsigned timeout) {
 static void hand_over(int, char**) {}   // (host/hos_main.c: started by itself in a version folder, the builder's to start)
 static void load_longshot_env() {}
 static void profile_start_slot() {}   // (host/hos_main.c: the profile's start_slot handed on)
-static void hos_game_layout() {}   // (host/game_layout.c: the game folder's cache/ and logs/)
+static void hos_game_layout() {}   // (game/game_layout.c: the game folder's cache/ and logs/)
 static void hos_options_choose() {}   // (host/options_path.c: the settings file, the profile's)
 static void driver_cache_room() {}   // (host/hos_main.c: the drivers' shader caches' size, #2033)
 static void driver_cache_folder() {}   // (host/hos_main.c: the folder __GL_SHADER_DISK_CACHE_PATH names, made)

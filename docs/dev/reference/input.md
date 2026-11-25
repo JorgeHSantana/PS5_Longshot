@@ -115,10 +115,10 @@ the switches, the controls and the file). It holds:
 - each motion read (`GetSixAxisSensorStates`): the gyroscope's readings the game is handed;
 - each player camera update (`hos_mouse_camera`, `host/mouse_native.c`): whether the native mouse camera was on, whether
   the camera was free, whether a stick turned it, and the mouse's turn in degrees;
-- the mouse in the game's menus (`host/oot_menu.c`, Windows): the focus changes and Items page choices it makes by
+- the mouse in the game's menus (`game/oot_menu.c`, Windows): the focus changes and Items page choices it makes by
   calling the game (its clicks and scrolls are the controller's). A replay hands a focus only to one of the screen's
   buttons then, and an item only when it is one of Key Items'; any other is counted as not met;
-- the Debug tools' actions where the game takes them (`oot_update_player_cheats`, `host/hos_main.c`): teleports, the age
+- the Debug tools' actions where the game takes them (`oot_update_player_cheats`, `game/oot_tools.c`): teleports, the age
   switch, items, Mark and Return, the hour, from the Insert menu, `HOS_INPUT_LIVE`'s `!cheat` or the control bridge;
 - the Debug tools' rows that change what the game does (heart protection, flight, the free camera, Link's speed, damage
   taken), at the start and at each change;
@@ -180,7 +180,7 @@ HOS_INPUT_PLAY=run.jsonl   HOS_REALTIME_STEP=0 HOS_FIXED_TIME=1767225600 ./longs
   actors and timers stay the replay's own: a corrected replay follows a route, it does not prove the run. The end gives
   the corrections' count, the largest and the mean.
 - **The host's own time-based choices.** A run that records or plays takes the OptimizeChangeBank hold
-  (`host/oot_ocb_hold.c`) and the texture heap's compaction gap (`host/oot_tex_compact.c`) by the game clock's time
+  (`game/oot_ocb_hold.c`) and the texture heap's compaction gap (`game/oot_tex_compact.c`) by the game clock's time
   instead of the wall's (`hos_input_movie_time`), so they land on the same frame of a replay as of its recording. One
   that records or plays from its start has no movie pacing (`host/nn_vi.c`).
 - **An exact replay** needs the same game: the 60 cap with Per frame (`HOS_REALTIME_STEP=0`), `HOS_FIXED_TIME`, the same

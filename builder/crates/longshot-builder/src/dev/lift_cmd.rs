@@ -2,7 +2,7 @@
 //! folder"). The options:
 //!
 //! - `--work <dir>`: the folder holding `image/` (read) and `gen/` (written); or `--image <dir>` and `--gen <dir>`;
-//! - `--repo <dir>`: the repository whose `host/` (HLE functions, entry hooks) and `host/game/` (site tables) the lift
+//! - `--repo <dir>`: the repository whose `host/` and `game/` (HLE functions, entry hooks; `game/`'s site tables) the lift
 //!   reads (`--host <dir>` and `--tables <dir>` name them one by one); `--exefs <dir>` or `--npdm <file>`: the game's
 //!   `main.npdm`, for the boot constants;
 //! - `--entries <file>` (more entries, hex a line), `--devirt <file>` (`<blr> <target>` a line);
@@ -90,7 +90,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
     }
     if let Some(r) = repo {
         o.host.get_or_insert_with(|| r.join("host"));
-        o.tables.get_or_insert_with(|| r.join("host").join("game"));
+        o.tables.get_or_insert_with(|| r.join("game"));
     }
     if let Some(e) = exefs {
         o.npdm.get_or_insert_with(|| e.join("main.npdm"));

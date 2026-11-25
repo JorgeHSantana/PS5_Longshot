@@ -63,7 +63,7 @@ Each run writes <out>/<name>/: states.bin (its list), report.txt and report.json
 added, its frames and wall time), log.txt (the game's log) and steps.txt (what was sent, at which frame).
 
 Linux (the memory guard reads /proc; the bridge is a Unix socket). Standard library only. The actions' numbers come from
-host/hos_main.c, gpu/vk/oot_cheat_items.h and gpu/vk/vk_menu.cpp; the bridge's client is scripts/longshot_bridge.py;
+host/hos_main.c, game/oot_cheat_items.h and gpu/vk/vk_menu.cpp; the bridge's client is scripts/longshot_bridge.py;
 the parts are in scripts/tours/ (route, drive, memory, lists, vkprofile).
 """
 import argparse
@@ -85,7 +85,7 @@ from tours.route import PARTS, SETTLE_MAX, SETTLE_QUIET, actions, item_stops, it
 from tours.vkprofile import PGO_ENV, Profile, merge_profile, profile_end, refuse_uncounted  # noqa: E402
 
 # (in the game folder: the pipeline notes and the lists play adds to are in cache/, the shipped list beside the game
-# (gpu/vk/vk_draw.cpp state_list_path, pipe_notes_path; host/game_layout.c), and a build from before left its loose beside the
+# (gpu/vk/vk_draw.cpp state_list_path, pipe_notes_path; game/game_layout.c), and a build from before left its loose beside the
 # game, which the game's start moves into cache/. longshot_computes.bin: the compute programs earlier play dispatched, which the
 # game writes into the list when it opens it (vk_draw.cpp state_open_locked): aside too, or every run's list starts with them)
 STATE_FILES = ("cache/longshot_pipelines.bin", "cache/longshot_pipeline_states.bin", "cache/longshot_pipeline_states_v1.bin",

@@ -1,9 +1,9 @@
-/* game_call (host/game/game.c) with the host around it made up here: a hos.h of tests/test_game_call.py's (a context
+/* game_call (host/game_call.c) with the host around it made up here: a hos.h of tests/test_game_call.py's (a context
    with the generated runtime's poll, a guest thread or none, the virtual-core calls logging their order) and a callee
    that records what it saw. Then hos_vcore_held, hos_vcore_away and hos_vcore_back as host/hos_thread.c has them, cut
    from it, over a made-up thread (game_call_vcore.h, written by the check). */
 #include "hos.h"
-#include "game/game.h"
+#include "game_call.h"
 
 #include <stdio.h>
 #include <stdlib.h>

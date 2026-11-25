@@ -1,4 +1,4 @@
-"""The fixed path's scale reaches the 3D through two hook sites of f_831f3200 (host/game/sites.toml, host/oot_sites.c),
+"""The fixed path's scale reaches the 3D through two hook sites of f_831f3200 (game/sites/sites.toml, game/oot_sites.c),
 as through the text patch they replaced (nx2/oot_patches.py fixed_scale, deleted).
 
 f_831f3200 recomputes the 3D's scale (+0xe5c = scale * +0xe58 / +0xe50) only while +0xe2c bit 3 is set; on the fixed path

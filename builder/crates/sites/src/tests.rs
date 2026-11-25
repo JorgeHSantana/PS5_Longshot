@@ -765,16 +765,16 @@ fn a_jump_back_is_a_loop_and_a_label_after_a_call_warns() {
 
 // ---- apply: the tables' folder, the host's list
 
-/// A folder of tables, as host/game holds them, under the build's target directory (on disk).
+/// A folder of tables, as game/ holds them, under the build's target directory (on disk).
 struct TempTables(std::path::PathBuf);
 
 impl TempTables {
     fn new(name: &str, defs: &str, locs: &str, host: &str) -> TempTables {
         let root = target_dir().join("sites-tests").join(name);
-        let game = root.join("host").join("game");
+        let game = root.join("game");
         let build = game.join("sites").join(crate::table::tests::BUILD);
         std::fs::create_dir_all(&build).unwrap();
-        std::fs::write(game.join("sites.toml"), defs).unwrap();
+        std::fs::write(game.join("sites").join("sites.toml"), defs).unwrap();
         std::fs::write(build.join("locations.toml"), locs).unwrap();
         std::fs::write(game.join("sites.def"), host).unwrap();
         TempTables(game)
@@ -830,7 +830,7 @@ fn apply_resolves_and_places_and_checks_the_host() {
     assert!(p.log[0].contains("hooks: test.step after f_80001000+0x8"), "{}", p.log[0]);
     let t = TempTables::new("apply-no-slot", &defs, &locs, "");
     let e = apply(&Tables::new(&t.0), &image, &fx.plan).unwrap_err().to_string();
-    assert!(e.contains("host/game/sites.def has no HOS_SITE line for test.step"), "{e}");
+    assert!(e.contains("game/sites.def has no HOS_SITE line for test.step"), "{e}");
     let (defs2, locs2) = split(&table(&[&site(&[("shape", Some("\"filter\""))])]));
     let t = TempTables::new("apply-bad-table", &defs2, &locs2, "");
     let e = apply(&Tables::new(&t.0), &image, &fx.plan).unwrap_err().to_string();
@@ -909,7 +909,7 @@ fn a_vslot_site_is_not_placed_yet() {
 #[test]
 fn no_table_places_nothing() {
     let fx = Fx::new().func(F, &straight(F, 4));
-    let root = target_dir().join("sites-tests").join("none").join("host").join("game");
+    let root = target_dir().join("sites-tests").join("none").join("game");
     std::fs::create_dir_all(&root).unwrap();
     assert!(apply(&Tables::new(&root), &fx.image(), &fx.plan).unwrap().is_none());
 }

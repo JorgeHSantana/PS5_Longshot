@@ -1,5 +1,5 @@
-"""Below 60 fps, Havok cloth (Link's cap, romfs Phive/Cloth) keeps the game's clock (host/oot_high_fps.h oot_cloth_seconds,
-host/oot_high_fps.c hos_oot_cloth_seconds, the hook site cloth.time and host/oot_sites.c's hos_site_cloth_time).
+"""Below 60 fps, Havok cloth (Link's cap, romfs Phive/Cloth) keeps the game's clock (game/oot_high_fps.h oot_cloth_seconds,
+game/oot_high_fps.c hos_oot_cloth_seconds, the hook site cloth.time and game/oot_sites.c's hos_site_cloth_time).
 
 The simulate operator's per-frame setup, f_81b3aa48, takes its time (+8) and a count (+24) from its step context and stores, in
 its frame data, the count (+0), count x subSteps x the operator's own count (+24), the time over the instance's scale (+44) and
@@ -11,7 +11,7 @@ number, infinite or over 8, the game's time stays. HOS_FPS_CLOTH=0 (or off, fals
 
 The setup is lifted as the game has it (the lines of f_81b3aa48 that make the frame data, and a stand-in for the operator's own
 count), with the site's hook after the time's load as the lift lowers it (tests/sitehooks.py), compiled with stand-ins for guest memory, the repository's switch rule (gpu/vk/compat/
-longshot_env.h) and the host's hos_oot_cloth_seconds (cut from host/oot_high_fps.c), and run with the context's 60th at frame
+longshot_env.h) and the host's hos_oot_cloth_seconds (cut from game/oot_high_fps.c), and run with the context's 60th at frame
 steps from 0.06 (1000 fps) to 4.0 (15 fps, the longest the host gives) and the bad ones, with instance scales of 1 and 2, each
 setup twice from the same context, for HOS_FPS_CLOTH unset, 1, yes, 0 and off. Each frame data must cover the frame's time over
 1 (else the game's 60th), over the instance's scale, its substeps adding up to it, with the game's counts (no more solves), the
@@ -170,7 +170,7 @@ SWITCH = ("unset", "1", "yes", "0", "off")
 
 
 def hos_cloth(source):
-    """host/oot_high_fps.c's hos_oot_cloth_seconds, when there (the patched setup calls it)"""
+    """game/oot_high_fps.c's hos_oot_cloth_seconds, when there (the patched setup calls it)"""
     if "uint32_t hos_oot_cloth_seconds(" not in source:
         return ""
     return block(source, "uint32_t hos_oot_cloth_seconds(") + "\n"
@@ -192,14 +192,14 @@ def setup(old=False):
 class ClothTimeTests(unittest.TestCase):
     def frames(self, switch, old=False):
         """[(step, the game's count, subSteps, own count, count, own, total, time, substep)] at HOS_FPS_CLOTH=switch"""
-        host = (ROOT / "host" / "oot_high_fps.c").read_text(encoding="utf-8")
+        host = (ROOT / "game" / "oot_high_fps.c").read_text(encoding="utf-8")
         program = RUNTIME + hos_cloth(host) + setup(old) + FRAMES
         with tempfile.TemporaryDirectory(prefix="longshot-cloth-") as tmp:
             tmp = Path(tmp)
             (tmp / "cloth.c").write_text(program, encoding="utf-8")
             binary = tmp / "cloth.exe"
             build = subprocess.run([compiler(), "-std=gnu11", "-Wall", "-Wno-unused-function", "-O1", "-I",
-                                    str(ROOT / "host"), str(tmp / "cloth.c"), *sitehooks.objects(tmp, program), "-o",
+                                    str(ROOT / "host"), "-I", str(ROOT / "game"), str(tmp / "cloth.c"), *sitehooks.objects(tmp, program), "-o",
                                     str(binary), "-lm"],
                                    text=True, capture_output=True)
             self.assertEqual(build.returncode, 0, build.stderr)

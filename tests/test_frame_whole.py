@@ -1,5 +1,5 @@
 """Game counters that add the frame step, or the step times a whole number, cut to whole frames keep counting above 60 fps
-(host/frame_whole.h, the hook sites frame.whole*: host/game/sites.toml, host/oot_sites.c).
+(host/frame_whole.h, the hook sites frame.whole*: game/sites/sites.toml, game/oot_sites.c).
 
 The pick-up indicator above Link's head (f_80a87e50) moves the count it shows toward the wallet's by (int)(step * per) and fades
 when they meet; the time of day (f_803edf70) adds (int)(2 * step) game seconds a frame. Under a Frame rate cap above 60 the step is
@@ -149,7 +149,7 @@ class FrameWholeTests(unittest.TestCase):
             tmp = Path(tmp)
             (tmp / "t.c").write_text(FIXTURE, encoding="utf-8")
             binary = tmp / "t.exe"
-            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-O1", "-I", str(ROOT / "host"), str(tmp / "t.c"),
+            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-O1", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"), str(tmp / "t.c"),
                                     "-o", str(binary), "-lm"], text=True, capture_output=True)
             self.assertEqual(build.returncode, 0, build.stderr)
             run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)

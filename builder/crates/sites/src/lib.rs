@@ -1,14 +1,14 @@
 //! The game's hook sites (docs/dev/reference/hooks.md), as the lifter reads and places them: the port of nx2/hooks.py's
 //! reader, resolver and placement.
 //!
-//! - [`load`]: the definitions (`host/game/sites.toml`) joined with the build's locations
-//!   (`host/game/sites/<build id>/locations.toml`), every rule of the format checked before anything is placed;
+//! - [`load`]: the definitions (`game/sites/sites.toml`) joined with the build's locations
+//!   (`game/sites/<build id>/locations.toml`), every rule of the format checked before anything is placed;
 //! - [`resolve()`]: each site's signature found exactly once in its module's code, and its guards there;
 //! - [`locate()`]: each site found only with the lift's functions (another site's function, an anchor, a fingerprint);
 //! - [`place()`]: each site checked against the lift and placed, as data: a [`Placed`] per site, the form's point
 //!   and what its hook does, for the mid IR to turn into an edit.
 //!
-//! [`apply`] does all of it for an image and a plan, and checks the host's list (`host/game/sites.def`) for every
+//! [`apply`] does all of it for an image and a plan, and checks the host's list (`game/sites.def`) for every
 //! site's slot, every rule's value, and its `HOS_SITE_OUTCOME` lines against the sites that change the outcome on a
 //! worker thread. Nothing here matches lifted text.
 
@@ -75,21 +75,22 @@ pub enum ResolveError {
     DoNotFit(Vec<String>),
 }
 
-/// The site tables' folder (`host/game`): the definitions, each build's locations, the host's list.
+/// The site tables' folder (`game`): the definitions (`sites/sites.toml`), each build's locations
+/// (`sites/<build id>/locations.toml`), the host's list (`sites.def`, which the game's C includes).
 #[derive(Clone, Debug)]
 pub struct Tables {
     dir: PathBuf,
 }
 
 impl Tables {
-    /// The tables in `dir` (the repository's `host/game`).
+    /// The tables in `dir` (the repository's `game`).
     pub fn new(dir: impl Into<PathBuf>) -> Tables {
         Tables { dir: dir.into() }
     }
 
-    /// The definitions: `sites.toml`.
+    /// The definitions: `sites/sites.toml`.
     pub fn definitions(&self) -> PathBuf {
-        self.dir.join("sites.toml")
+        self.dir.join("sites").join("sites.toml")
     }
 
     /// A build's locations: `sites/<build id>/locations.toml`.
@@ -102,9 +103,9 @@ impl Tables {
         self.dir.join("sites.def")
     }
 
-    /// `path` as messages name it: from the repository's root (`host/game/sites.toml`).
+    /// `path` as messages name it: from the repository's root (`game/sites/sites.toml`).
     fn shown(&self, path: &Path) -> String {
-        let root = self.dir.parent().and_then(Path::parent).unwrap_or(&self.dir);
+        let root = self.dir.parent().unwrap_or(&self.dir);
         let rel = path.strip_prefix(root).unwrap_or(path);
         rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
     }
@@ -162,7 +163,7 @@ pub fn apply(tables: &Tables, image: &Image, plan: &Plan) -> Result<Option<(Vec<
         .collect();
     if !missing.is_empty() {
         return Err(ResolveError::Host(format!(
-            "host/game/sites.def has no HOS_SITE line for {}: the game would not link",
+            "game/sites.def has no HOS_SITE line for {}: the game would not link",
             missing.join(", ")
         )));
     }
@@ -174,7 +175,7 @@ pub fn apply(tables: &Tables, image: &Image, plan: &Plan) -> Result<Option<(Vec<
         .collect();
     if !wrong.is_empty() {
         return Err(ResolveError::Host(format!(
-            "host/game/sites.def has no HOS_VALUE line of the rule's type for {}: the game would not link",
+            "game/sites.def has no HOS_VALUE line of the rule's type for {}: the game would not link",
             wrong.join(", ")
         )));
     }
@@ -189,7 +190,7 @@ pub fn apply(tables: &Tables, image: &Image, plan: &Plan) -> Result<Option<(Vec<
             if n.is_empty() { "none".to_string() } else { n.join(", ") }
         };
         return Err(ResolveError::Host(format!(
-            "host/game/sites.def's HOS_SITE_OUTCOME lines are not the table's sites that change the game's outcome on a \
+            "game/sites.def's HOS_SITE_OUTCOME lines are not the table's sites that change the game's outcome on a \
              worker thread: missing {}; not such a site {}",
             not_in(&decides, &host.outcome),
             not_in(&host.outcome, &decides)

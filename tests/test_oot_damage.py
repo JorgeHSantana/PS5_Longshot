@@ -1,7 +1,7 @@
 """Damage taken: real arithmetic and life-write guards without a game dump.
 
 The guards are the hook sites player.lifeHit and player.lifeWrite (before f_804bd8c0's two compare-and-swaps of an actor's
-life; host/game/sites.toml), with host/oot_sites.c's callbacks: each is compiled as the lift lowers it (tests/sitehooks.py) and, side by
+life; game/sites/sites.toml), with game/oot_sites.c's callbacks: each is compiled as the lift lowers it (tests/sitehooks.py) and, side by
 side, as the text patch it replaced had it on main (OLD_GUARD): every case gives both the same registers.
 
 Transition check: main's text-patch C kept here as the oracle shows the sites do what it did; remove it once a
@@ -34,7 +34,7 @@ def main():
     parser.add_argument("--cargo")
     args = parser.parse_args()
     sitehooks.use(args.cc, args.cargo)
-    api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
+    api = (ROOT / "game/options.h").read_text(encoding="utf-8")   # (the game's option ids)
     menu = menu_text(ROOT)   # (vk_menu.cpp and its modules, their rows as table lines, #1633)
     options = (ROOT / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")
     replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
@@ -51,7 +51,7 @@ def main():
     # (each guard as the lift emits it, and the patch's, cut into functions of their own)
     new = [sitehooks.line(hit), sitehooks.line(write)]
     old = [OLD_GUARD.replace("{hit}", "(uint32_t)c->x[9]"), OLD_GUARD.replace("{hit}", "(uint32_t)c->x[11] - (uint32_t)c->x[12]")]
-    host = (ROOT / 'host/oot_damage.c').read_text(encoding='utf-8')
+    host = (ROOT / 'game/oot_damage.c').read_text(encoding='utf-8')
     host = '\n'.join(line for line in host.splitlines() if not line.startswith('#include'))
     head = r'''
 #include <stdint.h>

@@ -1,5 +1,5 @@
-"""Above a 60 fps cap the sound job runs at 60 Hz and the physics solver keeps whole-frame steps (host/oot_high_fps.h, the hook
-sites sound.*, music.* and physics.solverSteps*: host/game/sites.toml, host/oot_sites.c).
+"""Above a 60 fps cap the sound job runs at 60 Hz and the physics solver keeps whole-frame steps (game/oot_high_fps.h, the hook
+sites sound.*, music.* and physics.solverSteps*: game/sites/sites.toml, game/oot_sites.c).
 
 Sound: under a Frame rate cap above 60 the frame step is the frame's own time (0.5 at 120 fps). The sound manager's job (f_80435300)
 fed steps under 1 left sounds unreleased at area changes until the game's voice budget was full and sounds, then the music,
@@ -207,7 +207,7 @@ void f_83373400(Ctx *__restrict A64_NOESC c) {
 """
 
 # (stand-ins for the lift's runtime: the time object at 0x2000 behind the pointer at 0x84c9e890; then the host's hos_oot_sound_*
-# functions cut from host/oot_high_fps.c, the patched update, and the frames: the clock the update counts against the real one)
+# functions cut from game/oot_high_fps.c, the patched update, and the frames: the clock the update counts against the real one)
 BGM_RUNTIME = r"""
 #include <stdint.h>
 #include <stdio.h>
@@ -309,7 +309,7 @@ static void hos_log(const char *f, ...) { (void)f; }
 static int env_on(const char *name) { (void)name; return 0; }
 static int env_value_off(const char *v) { (void)v; return 0; }
 volatile uint32_t hos_frame_seconds_bits;
-volatile uint64_t hos_step_probe;   /* (host/nn_vi.c's, which host/oot_high_fps.c's cloth solve reads: no time object here) */
+volatile uint64_t hos_step_probe;   /* (host/nn_vi.c's, which game/oot_high_fps.c's cloth solve reads: no time object here) */
 /* (host/hos.h's, for hos_oot_note_link and the takeoff and ledge steps beside the music manager's: their guest memory is
    this mem, and no address here is one of the heap) */
 #define HOS_HEAP_BASE 0x1000000000ULL
@@ -374,13 +374,13 @@ int main(void) {
 
 
 def host_file_for_test(source):
-    """host/oot_high_fps.c without its includes but the logic's header, for FLAGS_RUNTIME's stand-ins"""
+    """game/oot_high_fps.c without its includes but the logic's header, for FLAGS_RUNTIME's stand-ins"""
     keep = ('#include "oot_high_fps.h"',)
     return "\n".join(line for line in source.split("\n") if not line.startswith("#include") or line in keep)
 
 
 def hos_sound_functions(source):
-    """host/oot_high_fps.c's hos_oot_sound_* functions that return the float's bits (the step, and the seconds when there)"""
+    """game/oot_high_fps.c's hos_oot_sound_* functions that return the float's bits (the step, and the seconds when there)"""
     names = sorted(set(m.group(1) for m in re.finditer(r"^uint32_t (hos_oot_sound_\w+)\(", source, re.M)))
     return "\n".join(block(source, "uint32_t %s(" % name) for name in names)
 
@@ -503,7 +503,7 @@ class HighFpsTests(unittest.TestCase):
             tmp = Path(tmp)
             (tmp / "t.c").write_text(FIXTURE, encoding="utf-8")
             binary = tmp / "t.exe"
-            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-O1", "-I", str(ROOT / "host"), str(tmp / "t.c"),
+            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-O1", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"), str(tmp / "t.c"),
                                     "-o", str(binary), "-lm"], text=True, capture_output=True)
             self.assertEqual(build.returncode, 0, build.stderr)
             run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)
@@ -541,14 +541,14 @@ class HighFpsTests(unittest.TestCase):
         compiler = CC
         time = music_sites()[1]
         hooked = after(LIFTED_BGM, BGM_LOADS.split("\n")[1] + "\n", time)
-        host = (ROOT / "host" / "oot_high_fps.c").read_text(encoding="utf-8")
+        host = (ROOT / "game" / "oot_high_fps.c").read_text(encoding="utf-8")
         program = (BGM_RUNTIME + hos_sound_functions(host) + "\n" + callback("int hos_site_music_time(") + "\n" + slot(time)
                    + hooked.replace('#include "a64.h"\n', "") + BGM_FRAMES)
         with tempfile.TemporaryDirectory(prefix="longshot-high-fps-") as tmp:
             tmp = Path(tmp)
             (tmp / "bgm.c").write_text(program, encoding="utf-8")
             binary = tmp / "bgm.exe"
-            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-O1", "-I", str(ROOT / "host"), str(tmp / "bgm.c"),
+            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-O1", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"), str(tmp / "bgm.c"),
                                     *sitehooks.objects(tmp, program), "-o", str(binary), "-lm"], text=True, capture_output=True)
             self.assertEqual(build.returncode, 0, build.stderr)
             run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)
@@ -566,7 +566,7 @@ class HighFpsTests(unittest.TestCase):
         compiler = CC
         update, _, flags = music_sites()
         hooked = sitehooks.splice_entry(after(LIFTED_BGM_FLAGS, FLAGS_READ, *flags), 0x83373400, sitehooks.line(update))
-        host = (ROOT / "host" / "oot_high_fps.c").read_text(encoding="utf-8")
+        host = (ROOT / "game" / "oot_high_fps.c").read_text(encoding="utf-8")
         program = (FLAGS_RUNTIME + host_file_for_test(host) + "\n" + callback("int hos_site_music_update(") + "\n"
                    + callback("int hos_site_music_change_flags(") + "\n" + slot(update) + "".join(slot(x) for x in flags)
                    + hooked.replace('#include "a64.h"\n', "") + FLAGS_FRAMES)
@@ -574,7 +574,7 @@ class HighFpsTests(unittest.TestCase):
             tmp = Path(tmp)
             (tmp / "flags.c").write_text(program, encoding="utf-8")
             binary = tmp / "flags.exe"
-            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-Wno-unused-function", "-O1", "-I", str(ROOT / "host"),
+            build = subprocess.run([compiler, "-std=gnu11", "-Wall", "-Wno-unused-function", "-O1", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"),
                                     str(tmp / "flags.c"), *sitehooks.objects(tmp, program), "-o", str(binary), "-lm"], text=True, capture_output=True)
             self.assertEqual(build.returncode, 0, build.stderr)
             run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)
@@ -594,7 +594,7 @@ class HighFpsTests(unittest.TestCase):
                  site("physics.solverStepsOther", "f_838cfc10", "after", 0x110)]
         compiler = CC
         for x in sites:   # (each site's own flag and slot, holding the one callback)
-            self.assertEqual(engine_fn(x), "hos_site_solver_steps", "%s's host/game/sites.def line calls another callback"
+            self.assertEqual(engine_fn(x), "hos_site_solver_steps", "%s's game/sites.def line calls another callback"
                              % x.name)
             line = sitehooks.line(x)
             code = (SOLVER_SIDE.replace("@CALLBACK@", callback("int hos_site_solver_steps(")).replace("@SLOT@", slot(x))

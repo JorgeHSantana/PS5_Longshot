@@ -11,7 +11,7 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-DIRS = ("host", "gpu", "scripts")
+DIRS = ("host", "game", "gpu", "scripts")
 SKIP = {"eden", "sirit", "third_party", "__pycache__", "node_modules", "bin", "obj"}
 EXTS = {".c", ".cc", ".cpp", ".h", ".hpp", ".py", ".cs", ".sh", ".comp", ".frag", ".vert", ".glsl"}
 ANCHOR = re.compile(r"(?://|#)\s*doc: (\S+?)(?:#([^\s)]+))?(?=[\s)]|$)")

@@ -1,5 +1,5 @@
 // The Insert menu's Sprint row, on the Controls tab (thegrandao's #196, as a module): Link runs, the game's own run after a
-// roll, while Sprint's key or gamepad input is held, without the roll (host/oot_sprint.c: the game's dash input,
+// roll, while Sprint's key or gamepad input is held, without the roll (game/oot_sprint.c: the game's dash input,
 // HOS_OPT_SPRINT). Turning the row on gives Sprint Shift and the left stick's press, where they are still the defaults'; off
 // puts them back. Sprint's own controls are the Controls page's Sprint line (vk_menu.cpp's grid, pad_sprint and key_sprint
 // in the options file). The parts that ask the host are fenced from a layout-only build (MENU_LAYOUT_ONLY, MENU_HOOK).

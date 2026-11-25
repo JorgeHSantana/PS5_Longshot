@@ -1,4 +1,4 @@
-"""A song's playback after the ocarina above 60 fps (the hook sites song.noteCue*, host/oot_high_fps.h oot_song_cue).
+"""A song's playback after the ocarina above 60 fps (the hook sites song.noteCue*, game/oot_high_fps.h oot_song_cue).
 
 After a song is played on the ocarina the game plays its melody and shows its notes one at a time with it. Each update while
 the melody plays, the playback (f_832b2af0; f_832b2dc0 is the ocarina's other melody playback, the same code) asks f_832b7b50
@@ -6,12 +6,12 @@ whether the note flag is set: a word beside the melody's sound handle that the s
 and clears on its next run. When it is set, the playback goes on to the next note. The sound engine runs in the sound job,
 which runs at 60 Hz above 60 fps, so the flag stayed set for two or three game updates at 120 to 165 fps and each one went on a
 note: the notes came two or three at a time, ahead of the music. The sites (before the instruction after each of the two calls,
-which nothing else jumps to; host/game/sites.toml, host/oot_sites.c) pass the flag through the host: read again before the
+which nothing else jumps to; game/sites/sites.toml, game/oot_sites.c) pass the flag through the host: read again before the
 sound job has run again, a set flag is the same note.
 
 An authored update for each playback (the call's lift text, the game's branch on its result, a stand-in for going on a note)
 is built with the sites' hooks after the calls as the lift lowers them (tests/sitehooks.py) and, side by side, with the text patch's lines they
-replaced (OLD, as main had them), each compiled with host/oot_high_fps.c whole (guest memory, its lock and the switches as stand-ins)
+replaced (OLD, as main had them), each compiled with game/oot_high_fps.c whole (guest memory, its lock and the switches as stand-ins)
 and a stand-in sound engine that sets the flag for one run at each note of a six-note melody (Zelda's Lullaby's spacing, as
 the game played it at 60 fps). Frames run as the game runs them: the sound job's phases through the host's gate, then both
 playbacks:
@@ -104,7 +104,7 @@ static int env_on(const char *name) { (void)name; return 1; }
 static void hos_guest_copy(uint64_t a, const void *src, uint64_t n) { memcpy(GP(a), src, (size_t)n); }
 static int64_t hos_now_ns(void) { return 0; }
 volatile uint32_t hos_frame_seconds_bits;
-volatile uint64_t hos_step_probe;   /* (host/nn_vi.c's, which host/oot_high_fps.c's cloth solve reads: no time object here) */
+volatile uint64_t hos_step_probe;   /* (host/nn_vi.c's, which game/oot_high_fps.c's cloth solve reads: no time object here) */
 static int unrelated;
 static void next_note(int playback);
 static uint32_t flag;   /* (the note flag: the sound engine's word) */
@@ -230,17 +230,17 @@ int main(void) {
 
 
 def host_file(source):
-    """host/oot_high_fps.c without its includes but the logic's header, for RUNTIME's stand-ins"""
+    """game/oot_high_fps.c without its includes but the logic's header, for RUNTIME's stand-ins"""
     keep = ('#include "oot_high_fps.h"',)
     return "\n".join(line for line in source.split("\n") if not line.startswith("#include") or line in keep)
 
 
 def build_and_run(cc, update, directory):
-    host = host_file((ROOT / "host" / "oot_high_fps.c").read_text(encoding="utf-8"))
+    host = host_file((ROOT / "game" / "oot_high_fps.c").read_text(encoding="utf-8"))
     source, binary = Path(directory) / "fixture.c", Path(directory) / "fixture.exe"
     text = RUNTIME + host + "\n" + update.replace('#include "a64.h"\n', "") + FRAMES
     source.write_text(text, encoding="utf-8")
-    subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-I", str(ROOT / "host"),
+    subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"),
                     str(source), *sitehooks.objects(directory, text), "-o", str(binary), "-lm"], check=True)
     return subprocess.run([str(binary)], text=True, capture_output=True, timeout=60)
 

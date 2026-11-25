@@ -1,17 +1,17 @@
-"""A moving floor's carry above 60 fps (the hook sites physics.floorCarry*, host/oot_high_fps.h oot_floor_carry_slow).
+"""A moving floor's carry above 60 fps (the hook sites physics.floorCarry*, game/oot_high_fps.h oot_floor_carry_slow).
 
 A character standing on a moving floor (the Shadow Temple's barge, issue 439) is carried by the floor's velocity, which three
 of the characters' update modules (f_80159dc0, f_8015d490, f_838baa40) add to the character's. Each first tests the physics
 time object's 1/dt ([[...]]+0xc0, +0x28) against 100 and, above it (a frame under 10 ms: at 60 fps, time slowed below 0.6),
 scales the floor's velocity by 0.1. Above 100 fps every frame is under 10 ms: Link and the enemies on the barge kept a tenth
-of its velocity and slid to its back. Allow sites on the three branches (host/game/sites.toml, host/oot_sites.c) take the
+of its velocity and slid to its back. Allow sites on the three branches (game/sites/sites.toml, game/oot_sites.c) take the
 branch only when the host agrees too, asked only when the game's own test holds: above a 60 fps cap, on a frame
 under a 60 fps one, the test is 1/dt times the frame's step (the time object's, 0.5 at 120 fps) over 100, the game's test as
 it would be at 60 fps.
 
 An authored update for each module (the game's test and its branch, as the lift writes them, and stand-ins for the two paths)
 is built with the allow site's hook around its branch as the lifted code runs it and, side by side, with the text
-patch's branch it replaced (OLD, as main had it), each compiled with hos_oot_floor_carry_slow cut from host/oot_high_fps.c
+patch's branch it replaced (OLD, as main had it), each compiled with hos_oot_floor_carry_slow cut from game/oot_high_fps.c
 (guest memory, the time objects and the switches as stand-ins):
 - at 101, 120, 144, 240 and 1000 fps the floor's full velocity carries the character (a tenth before the fix);
 - slowed time keeps the game's tenth wherever the game's own test at 60 fps would: at a cap of 60 (time at 0.3), and above
@@ -170,7 +170,7 @@ def build_and_run(cc, update, host, directory):
     text = FIXTURE.replace("@HOST@", host).replace("@UPDATE@", update)
     source.write_text(text, encoding="utf-8")
     subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-Wno-unused-const-variable",
-                    "-I", str(ROOT / "host"), str(source), *sitehooks.objects(directory, text), "-o", str(binary), "-lm"],
+                    "-I", str(ROOT / "host"), "-I", str(ROOT / "game"), str(source), *sitehooks.objects(directory, text), "-o", str(binary), "-lm"],
                    check=True)
     return subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)
 
@@ -181,7 +181,7 @@ def main():
     parser.add_argument("--cargo")
     args = parser.parse_args()
     sitehooks.use(args.cc, args.cargo)
-    text = (ROOT / "host" / "oot_high_fps.c").read_text(encoding="utf-8")
+    text = (ROOT / "game" / "oot_high_fps.c").read_text(encoding="utf-8")
     host = block(text, "int hos_oot_floor_carry_slow(uint32_t inv_dt_bits, uint64_t slot) {")
     old = UPDATES
     for _, label in MODULES:

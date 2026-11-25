@@ -9,8 +9,8 @@ start (guest 0x1030 on sead::MainThread). Deleting prompts/rsizetable.zs and Ext
 Now the table served is the RomFS's own table of the name the game opens, with the font's entry raised, made at the start;
 without a table of that name or a font entry in it, the game gets its own table and its own icons; the prompts' layouts and
 textures, read from the RomFS as they stream, are served only when what the build kept of them (their .base) was made
-from a file of the RomFS's size. host/mods.c, host/prompts.c,
-host/texts.c, host/zs.c and host/restbl.c as they are, over real folders (tests/test_mods_size_table.py's fixture), on
+from a file of the RomFS's size. game/mods.c, host/prompts.c,
+game/texts.c, host/zs.c and host/restbl.c as they are, over real folders (tests/test_mods_size_table.py's fixture), on
 made-up tables, no game data:
 
 - a table the build made from another dump (prompts/rsizetable.zs) is never served: the RomFS's own, its font entry raised,

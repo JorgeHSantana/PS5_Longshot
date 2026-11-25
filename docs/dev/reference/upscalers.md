@@ -183,7 +183,7 @@ chain's images.
 
 ## Camera jitter
 
-The jitter is applied in the game's code (the hook sites `jitter.view*`, host/oot_sites.c): the scene's projection gets a Halton (2, 3)
+The jitter is applied in the game's code (the hook sites `jitter.view*`, game/oot_sites.c): the scene's projection gets a Halton (2, 3)
 sub-pixel offset in its uniform buffers only, so shadows and culling see the unjittered camera.
 
 1. After each evaluation, the chain publishes one `MkwVkJitter` (render width, height, sequence length) in a

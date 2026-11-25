@@ -7,7 +7,7 @@
 //! pixels; a rebuild of the native output deferred at its function's entry (`hos_defer_native_output_rebuild`).
 //!
 //! **The gameplay HUD's placement** (#1855): a menu screen's update runs inside `hos_gameplay_hud_screen`
-//! (host/hos_wide_ui.c), which calls the update's body itself, between code before and after it that shares the body's
+//! (game/hos_wide_ui.c), which calls the update's body itself, between code before and after it that shares the body's
 //! state on the host's stack, every way out of the body included: the function is a wrapper of its body ([`Wrap`]).
 //!
 //! Each patch belongs to the one build whose code it names ([`BUILD`]); for it, each must be found exactly once in its

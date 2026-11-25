@@ -1,8 +1,8 @@
-"""Above a 60 fps cap, Havok cloth is solved at most 60 times a second (host/oot_high_fps.h oot_cloth_gate, host/oot_high_fps.c
-hos_oot_cloth_solve, the hook site cloth.solve and host/oot_sites.c's hos_site_cloth_solve), with HOS_FPS_CLOTH_60=1.
+"""Above a 60 fps cap, Havok cloth is solved at most 60 times a second (game/oot_high_fps.h oot_cloth_gate, game/oot_high_fps.c
+hos_oot_cloth_solve, the hook site cloth.solve and game/oot_sites.c's hos_site_cloth_solve), with HOS_FPS_CLOTH_60=1.
 
 The cloth's solve runs as a job on the game's job workers (f_81b47080, under the job runner f_8016b620), once a frame for each
-cloth near the camera, and each solve steps the cloth a 60th of a second whatever the frame (host/oot_high_fps.h). Above 60 fps
+cloth near the camera, and each solve steps the cloth a 60th of a second whatever the frame (game/oot_high_fps.h). Above 60 fps
 it is solved every frame: at 240 fps four solves where the console makes one, so the cloth runs four times too fast and costs
 four times the CPU. Near King Zora in Zora's Domain that held the frame at about 55 fps under a cap of 240 (issue #1485: the
 solve was 45.7 % of the job workers' game code there, about 10.5 ms of CPU a frame). With the gate, a frame whose step is under
@@ -11,9 +11,9 @@ whole 60th since the frame before: about 60 solves a second, each a 60th, and ev
 frame the gate holds returns from the job at once with the job's own result (0), before the job saves anything.
 
 The job is lifted as the game has it at its head (its first line, the prologue's first store), then a stand-in for its work that
-counts the solves, with the site's entry hook as the lift lowers it (tests/sitehooks.py; and its callback cut from host/oot_sites.c), compiled
+counts the solves, with the site's entry hook as the lift lowers it (tests/sitehooks.py; and its callback cut from game/oot_sites.c), compiled
 with stand-ins for guest memory, the repository's switch rule (gpu/vk/
-compat/longshot_env.h) and the host's hos_oot_cloth_solve (cut from host/oot_high_fps.c, when there), and run for 240 frames of
+compat/longshot_env.h) and the host's hos_oot_cloth_solve (cut from game/oot_high_fps.c, when there), and run for 240 frames of
 3 jobs each at frame steps 0.25 (240 fps), 60/144 (144 fps), 0.5 (120 fps), 1 (60 fps) and 2 (30 fps), at a cap of 60 (no frame
 time given), with a step of 0 and NaN, and with the clock going back (a load), for HOS_FPS_CLOTH_60 unset, 1 and 0. Checked: at
 240 fps 60 frames solve, one in four; at 144 and 120, 60 give or take 1; at 60 fps and slower, at a cap of 60, for a bad step
@@ -142,7 +142,7 @@ CASES = (("240 fps", 0.25, 0, -1), ("144 fps", 60.0 / 144.0, 0, -1), ("120 fps",
 
 
 def hos_solve(source):
-    """host/oot_high_fps.c's hos_oot_cloth_solve and the gate's state before it, when there (the patched job calls it)"""
+    """game/oot_high_fps.c's hos_oot_cloth_solve and the gate's state before it, when there (the patched job calls it)"""
     if "int hos_oot_cloth_solve(" not in source:
         return ""
     return between(source, "static OotClothGate cloth_gate", "int hos_oot_cloth_solve(") + block(source, "int hos_oot_cloth_solve(") + "\n"
@@ -153,7 +153,7 @@ def compiler():
 
 
 def hooked():
-    """the job with the site's entry hook as the lift lowers it (tests/sitehooks.py), its flag on and its slot host/oot_sites.c's callback"""
+    """the job with the site's entry hook as the lift lowers it (tests/sitehooks.py), its flag on and its slot game/oot_sites.c's callback"""
     x = site("cloth.solve", "f_81b47080", can_return=True)
     callback = sitecheck_callback("int hos_site_cloth_solve(")   # (with the build's address names it uses)
     job = sitehooks.splice_entry(LIFTED_SOLVE.replace('#include "a64.h"\n', ""), 0x81b47080, sitehooks.line(x))
@@ -168,14 +168,14 @@ class ClothSolveTests(unittest.TestCase):
         cls.binary = None
         if not compiler():
             return
-        host = (ROOT / "host" / "oot_high_fps.c").read_text(encoding="utf-8")
+        host = (ROOT / "game" / "oot_high_fps.c").read_text(encoding="utf-8")
         tmp = Path(cls.tmp.name)
         cls.binary, cls.old = tmp / "cloth60.exe", tmp / "cloth60-old.exe"
         old = LIFTED_SOLVE.replace('#include "a64.h"\n', "").replace(HEAD, HEAD + OLD, 1)
         for binary, job in ((cls.binary, hooked()), (cls.old, old)):
             text = RUNTIME + hos_solve(host) + job + FRAMES
             (tmp / "cloth60.c").write_text(text, encoding="utf-8")
-            cls.build = subprocess.run([compiler(), "-std=gnu11", "-Wall", "-Wno-unused-function", "-O1", "-I", str(ROOT / "host"),
+            cls.build = subprocess.run([compiler(), "-std=gnu11", "-Wall", "-Wno-unused-function", "-O1", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"),
                                         str(tmp / "cloth60.c"), *sitehooks.objects(tmp, text), "-o", str(binary), "-lm"],
                                        text=True, capture_output=True)
             if cls.build.returncode:

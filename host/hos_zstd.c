@@ -7,7 +7,7 @@
    Lifted, that is 11-17% of a core while the game streams, and during loads it runs for more than 250 ms with no OS call,
    holding a virtual core.
 
-   The hook site zstd.stream (host/game/sites.toml) calls hos_zstd_stream(c) at f_80115c80's entry. Off (HOS_NATIVE_ZSTD=0) it answers 0 and the lifted
+   The hook site zstd.stream (game/sites/sites.toml) calls hos_zstd_stream(c) at f_80115c80's entry. Off (HOS_NATIVE_ZSTD=0) it answers 0 and the lifted
    function runs. On (the default), it does what f_80115c80 does with the same calls into libzstd and answers 1 (x0 the result):
      - the stream object it is given (x0, S) is the game's, and every field the game reads is written as the game writes it:
        state byte (+0: 1 start, 2 decoding, 3 failed, 4 done), output pointer (+8), output room (+16, signed 32-bit), bytes

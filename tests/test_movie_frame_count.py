@@ -2,8 +2,8 @@
 
 The game's movie player counts its updates while a movie plays, and a cutscene that shows a movie places its narration, its
 rumble and its end by that count. The movie's picture and sound follow the clock, so at 120 fps the cues came twice too early:
-narration lines started over each other. The hook site movie.frameCount (host/game/sites.toml, a replace site on the
-count's add) makes the count's step hos_movie_frames(player) (host/oot_sites.c), and host/nn_vi.c answers 1 while the host
+narration lines started over each other. The hook site movie.frameCount (game/sites/sites.toml, a replace site on the
+count's add) makes the count's step hos_movie_frames(player) (game/oot_sites.c), and host/nn_vi.c answers 1 while the host
 gives no frame time (a cap of 60: as shipped) and the frames' time in 60ths, the rest carried to the player's next update,
 while it does (HOS_FPS_MOVIE=0: 1 then too, for comparisons). The update is built with the hook as the lift lowers it (tests/sitehooks.py) and,
 side by side, with the text patch it replaced (OLD, as main had it): both pass the same checks, and the game's own count fails

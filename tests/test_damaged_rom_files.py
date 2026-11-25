@@ -1,10 +1,10 @@
 """An incomplete dump's damaged textures are read as a whole texture of their kind, whoever unpacked the romfs
-(host/nn_fs.c OpenFile, host/oot_damaged_files.c).
+(host/nn_fs.c OpenFile, game/oot_damaged_files.c).
 
 The 23.3 GB dumps hold three .zs textures that start with zeros instead of a zstd frame. The builder points each at a
 stand-in (builder/crates/game-files romfs.rs stand_ins), but only in a .nup's index; a romfs another tool unpacked kept them,
 and the game asked for the model that uses the Great Fairy Fountain's floor about 15 times a second for as long as Link
-stood in Kokiri or the Market. The actual OpenFile is compiled with host/oot_damaged_files.c and a made-up romfs in a
+stood in Kokiri or the Market. The actual OpenFile is compiled with game/oot_damaged_files.c and a made-up romfs in a
 temporary folder (no game bytes), and checked:
 
 - a damaged texture (zeros where the frame starts) opens its stand-in's bytes, and one warning names both, once;
@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 
 ENV_ON_H = str(ROOT / "gpu" / "vk" / "compat" / "longshot_env.h")
-HOST_FILE = ROOT / "host" / "oot_damaged_files.c"
+HOST_FILE = ROOT / "game" / "oot_damaged_files.c"
 
 FAIRY = "Tex/CmnTex_Map_Soil_FairyFountain_Floor_D_Nrm.bntx.zs"
 FAIRY_STAND_IN = "Tex/CmnTex_Map_Sand_FairyFountain_Sand_A_Nrm.bntx.zs"
@@ -239,14 +239,14 @@ def write(path, data):
 
 
 def table():
-    """host/oot_damaged_files.c's (damaged, stand-in) pairs; none before it was written"""
+    """game/oot_damaged_files.c's (damaged, stand-in) pairs; none before it was written"""
     if not HOST_FILE.exists():
         return []
     return re.findall(r'\{\s*"(Tex/[^"]+)",\s*"(Tex/[^"]+)"\s*\}', HOST_FILE.read_text(encoding="utf-8"))
 
 
 def stand_ins_source():
-    """host/oot_damaged_files.c as it is, without its includes (the harness has the declarations); none before it was
+    """game/oot_damaged_files.c as it is, without its includes (the harness has the declarations); none before it was
     written, when OpenFile does not call it"""
     if not HOST_FILE.exists():
         return ""
@@ -265,7 +265,7 @@ def main():
             failures.append(what)
 
     pairs = table()
-    check("host/oot_damaged_files.c names the three damaged textures of the 23.3 GB dumps",
+    check("game/oot_damaged_files.c names the three damaged textures of the 23.3 GB dumps",
           sorted(d for d, _ in pairs) == sorted((FAIRY, GATE, GANON)))
 
     src = (ROOT / "host" / "nn_fs.c").read_text(encoding="utf-8")
@@ -290,10 +290,10 @@ def main():
         objects = []
         for name in ("romfs.c", "romfs_index.c"):
             obj = folder / (name + ".o")
-            subprocess.run([compiler, "-x", "c", "-std=gnu11", "-O1", "-w", "-I", str(ROOT / "host"), "-c",
+            subprocess.run([compiler, "-x", "c", "-std=gnu11", "-O1", "-w", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"), "-c",
                             str(ROOT / "host" / name), "-o", str(obj)], check=True, timeout=120)
             objects.append(str(obj))
-        subprocess.run([compiler, "-std=c++17", "-include", ENV_ON_H, "-O1", "-w", "-I", str(ROOT / "host"),
+        subprocess.run([compiler, "-std=c++17", "-include", ENV_ON_H, "-O1", "-w", "-I", str(ROOT / "host"), "-I", str(ROOT / "game"),
                         str(folder / "fixture.cpp"), *objects, "-o", str(exe)] + ([] if os.name == "nt" else ["-lpthread"]),
                        check=True, timeout=120)
 

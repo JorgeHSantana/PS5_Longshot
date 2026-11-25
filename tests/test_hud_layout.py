@@ -1,4 +1,4 @@
-"""The HUD is laid out for the picture's shape, never stretched (host/hos_wide_ui.c hos_wide_ui_tick, the hook site wide.hud).
+"""The HUD is laid out for the picture's shape, never stretched (game/hos_wide_ui.c hos_wide_ui_tick, the hook site wide.hud).
 
 At its 16:9 size (scaled with the picture's height, as at 16:9) its side panes move out to a wider screen's sides and in to
 a narrower one's; past 12:5 (a 32:9 screen) they stop at 12:5's sides, and at 48:9 (three screens) they stay on the middle
@@ -472,7 +472,7 @@ def main():
     a = p.parse_args()
     sitehooks.use(a.cc, a.cargo)
 
-    host = (ROOT / "host" / "hos_wide_ui.c").read_text(encoding="utf-8")
+    host = (ROOT / "game" / "hos_wide_ui.c").read_text(encoding="utf-8")
     backend = (ROOT / "host" / "rx_backend.c").read_text(encoding="utf-8")
     check("hos_wide_keep_mask &= ~2u;" in backend, "the menus could be kept whole, stretched, on a screen narrower than 16:9")
 
@@ -482,7 +482,7 @@ def main():
     body = body.replace(decl, "", 1)
     build_run(a.cc, FIXTURE_HEAD + body + FIXTURE_MAIN, "plan")
 
-    # (the UI projection's site, wide.hud, as the lift lowers it (tests/sitehooks.py): its callback from host/oot_wide_sites.c, the kept screens'
+    # (the UI projection's site, wide.hud, as the lift lowers it (tests/sitehooks.py): its callback from game/oot_wide_sites.c, the kept screens'
     # vtables its address names)
     defs, line = hook("wide.hud")
     site = (SITE_MAIN.replace("SITE", line).replace("FADES", "WIDE_KEEP_EVENT_FADE").replace("LOADING", "WIDE_KEEP_LOADING_FADE"))

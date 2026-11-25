@@ -5,7 +5,7 @@
 //! runs: the patch files of the mods that are on are read at the build, and the image ([`apply`]) writes them into
 //! main before it relocates it, as emulators and Atmosphere apply a patch file before the dynamic linker runs. The code
 //! is then translated from the patched instructions, and the image holds the patched data. The game lists what was
-//! applied in the Insert menu's Mods tab (host/mods.c reads `exefs_patches.txt`: [`write_list`]).
+//! applied in the Insert menu's Mods tab (game/mods.c reads `exefs_patches.txt`: [`write_list`]).
 //!
 //! The mods are manifest mods, the one mod format (a folder with `mod.json` in a profile's `mods/`): the Mod API's
 //! layer finds them, with their order and switches, and hands [`collect`] their folders; a mod's patch files are its
@@ -502,7 +502,7 @@ pub fn collect(main: &Nso, mods: &[Mod], log: &mut dyn FnMut(String)) -> Result<
     Ok(out)
 }
 
-/// `exefs_patches.txt` in the game folder: what the build applied, a line a file (host/mods.c exefs_status).
+/// `exefs_patches.txt` in the game folder: what the build applied, a line a file (game/mods.c exefs_status).
 pub fn list_text(files: &[PatchFile]) -> String {
     let mut lines = vec![
         "# The mods' ExeFS patch files this game was built with (longshot-builder): mod, file, FNV-1a of its bytes, kind, note"

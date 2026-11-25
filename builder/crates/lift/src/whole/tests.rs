@@ -119,7 +119,7 @@ fn site_tables(dir: &Path, at: &str) -> PathBuf {
     std::fs::create_dir_all(&locs).unwrap();
     let def = "format = 2\n\n[[site]]\nname = \"t.one\"\ndoc = \"f1 is called\"\nat = \"AT\"\nshape = \"event\"\n\
                thread = \"serial\"\n";
-    std::fs::write(t.join("sites.toml"), def.replace("AT", at)).unwrap();
+    std::fs::write(t.join("sites").join("sites.toml"), def.replace("AT", at)).unwrap();
     let loc = format!(
         "format = 2\nbuild = \"{BUILD}\"\n\n[[site]]\nname = \"t.one\"\nfunction = \"f_{F1:08x}\"\nsignature = \"91000400 94000003\"\n"
     );
@@ -190,7 +190,7 @@ fn an_unchanged_lift_is_skipped_and_a_change_rewrites_its_units() {
     let t = o.tables.clone().unwrap();
     assert_eq!(run(&o, &quiet()).unwrap().how, How::Unchanged);
     std::fs::write(t.join("sites.def"), "HOS_SITE(t_one, \"t.one\")\nHOS_SITE(t_two, \"t.two\")\n").unwrap();
-    assert_eq!(run(&o, &quiet()).unwrap().how, How::Lifted, "host/game/sites.def changed, the same key");
+    assert_eq!(run(&o, &quiet()).unwrap().how, How::Lifted, "game/sites.def changed, the same key");
 
     // (a unit file damaged or removed is written again)
     o.tables = None;
@@ -321,7 +321,7 @@ fn a_site_table_with_no_sites_lifts_the_same_files() {
     let mut empty = options(&dir.join("empty"));
     let t = dir.join("tables");
     std::fs::create_dir_all(t.join("sites").join(BUILD)).unwrap();
-    std::fs::write(t.join("sites.toml"), "format = 2\n").unwrap();
+    std::fs::write(t.join("sites").join("sites.toml"), "format = 2\n").unwrap();
     std::fs::write(t.join("sites").join(BUILD).join("locations.toml"), format!("format = 2\nbuild = \"{BUILD}\"\n"))
         .unwrap();
     std::fs::write(t.join("sites.def"), "").unwrap();

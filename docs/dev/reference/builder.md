@@ -209,8 +209,8 @@ store). `longshot-builder dev` with no arguments prints its usage, with the rest
 1. **Discovery** (`cfg`): the entries from the image alone (the modules' symbols, relocations, unwind tables, BL and
    ADR targets, the HLE hooks), the functions walked, the jump tables, PLT stubs and setjmp owners. `--entries` adds
    entries, `--devirt` devirtualised calls. Two seconds on the game.
-2. **The edits** (`edits`): the sites `sites` places from `host/game`'s tables, the supported build's patches,
-   `host/`'s `ENTRY_HOOK_SYM` hooks, planned per function and written in as each function is built
+2. **The edits** (`edits`): the sites `sites` places from `game`'s tables, the supported build's patches,
+   `host/`'s and `game/`'s `ENTRY_HOOK_SYM` hooks, planned per function and written in as each function is built
    (`lift::Program`). Every function is lifted. An instruction that does not decode, that the semantics call
    undefined, or that they do not cover yet (the few FP16 forms left, `sem::Fault::Unsupported`) becomes a trap at its
    address: the guest stops there if it reaches it, and the build goes on. The lift's log counts the forms not
@@ -245,7 +245,7 @@ All of it is in gen/:
 - `lift.key`, written last: a key of everything the lift's files are made of: the lifter's sources (hashed into the
   program by `crates/lift/build.rs`, the edits' lowering among them), the edits' data compiled in (the patches and the
   sites' code, hashed apart, so a change of it is a lift whose functions' keys say what changed), the image's files,
-  the options, the site tables' files for this build, what of `host/`'s sources the lift reads, `main.npdm`, the
+  the options, the site tables' files for this build, what of `host/`'s and `game/`'s sources the lift reads, `main.npdm`, the
   profile. The same key, with every file there at its size: the lift is skipped (0.2 s). The lifts' store
   (`<store>/lifts/<key>/`) keeps whole lifts by key, hard-linked, for other work folders, by their last use within the
   cache's budget ([below](#the-stores-and-the-work-folder)).
@@ -557,7 +557,7 @@ python -I tests/test_lifter_semantics.py --cargo cargo --cxx clang++    #  tools
   and `builder/rt`); the program run and its result checked; then one instruction changed and the build again, which
   must compile only that unit. Linux only.
 - The site tests (`tests/test_*.py` that run a hook site's callback) run each hook as the lift lowers it, not a copy:
-  `longshot-builder dev site-hooks --tables host/game --build <build id> --out <file.ll> <name>=<site>[@<pc>[:<callee>]][/<ident>] ...`
+  `longshot-builder dev site-hooks --tables game --build <build id> --out <file.ll> <name>=<site>[@<pc>[:<callee>]][/<ident>] ...`
   lifts each named site of the real tables in a small function of its own (no game code: its instructions are made up),
   through the passes and the IR writer as the whole lift does, and wraps it in `int <name>(Ctx *c)`, whose answer says
   where control goes after the hook (an entry that can return: 1 returns; a branch, jump or allow: 1 is taken; a

@@ -1,6 +1,6 @@
-"""The game's menus' mouse (host/oot_menu.c) and the button prompts changed while the game runs (host/prompts.c) hook five
-functions of the lifted game at their entries, hook sites of the supported build's table (host/game/sites.toml, with
-host/oot_sites.c's callbacks), as the text patches they replaced put each call first:
+"""The game's menus' mouse (game/oot_menu.c) and the button prompts changed while the game runs (host/prompts.c) hook five
+functions of the lifted game at their entries, hook sites of the supported build's table (game/sites/sites.toml, with
+game/oot_sites.c's callbacks), as the text patches they replaced put each call first:
 
 - menu.focus, a menu screen's handler of a pane getting the focus (f_802ed660): hos_oot_menu_focus with the screen, the pane
   and the caller's return address;
@@ -12,7 +12,7 @@ host/oot_sites.c's callbacks), as the text patches they replaced put each call f
 Each hook goes on into the function (it only looks); menu.update's function is also the gameplay HUD's wrapper
 (builder/crates/edits/src/patches.rs, wrappers). Only the supported build has a table, so another build's lift gets none of them, as the patches were the supported build's only.
 
-The hooks, as the lift lowers them (tests/sitehooks.py), with their callbacks (the ones host/game/sites.def names for
+The hooks, as the lift lowers them (tests/sitehooks.py), with their callbacks (the ones game/sites.def names for
 them) run against stubs of the host's functions, each told which it is (its first value), over known registers: each is
 handed what is listed above and the function goes on.
 
@@ -28,7 +28,7 @@ import sitehooks  # noqa: E402
 
 RUN_ALL_ARGS = ["--cc", "{clang}", "--cargo", "{cargo}"]
 
-# (each site, its function, its callback (host/game/sites.def's), and what the host is handed: which stub (STUBS), then
+# (each site, its function, its callback (game/sites.def's), and what the host is handed: which stub (STUBS), then
 # its arguments)
 SITES = (
     ("menu.focus", "f_802ed660", "hos_site_menu_focus", (1, CTX, reg(0), reg(1), reg(30))),

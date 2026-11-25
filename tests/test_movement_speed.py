@@ -1,9 +1,9 @@
-"""The Debug tab's Movement speed (1x to 3x): four hook sites (host/game/sites.toml, host/oot_sites.c) hand the places a
+"""The Debug tab's Movement speed (1x to 3x): four hook sites (game/sites/sites.toml, game/oot_sites.c) hand the places a
 character controller's forward speed is set to hos_oot_cct_speed with s0's unit, where the text patch they replaced
 (nx2/oot_patches.py patch_cct_speed, deleted) put the same calls: Link's move f_809552f0 after it takes the controller for each
 of its two setter calls (player.speedMove, player.speedMoveOther: a frame's speed), the setter f_80559df0's entry
 (player.speedSet) and f_80964bf0 after its first load (player.speedSetComponent: a second's). Only the supported build has a
-table. host/hos_main.c's hos_oot_cct_speed scales the speed for
+table. game/oot_tools.c's hos_oot_cct_speed scales the speed for
 Link's controller alone, only while the left stick is pushed and only up to 15 m/s (a ledge climb's 55 is left alone); the menu
 sends the row's percent (menu_link_speed), 100 while the debug tools are off. The four hooks, as the lift lowers them
 (tests/sitehooks.py), with their callbacks run against a stub hos_oot_cct_speed: each hands it the context, x0 and its
@@ -54,8 +54,8 @@ def main():
         runs.append((x, "int %s(" % fn, (CTX, reg(0), 0x100 | per_second)))
     hands(a.cc, runs, STUBS)
 
-    host = (ROOT / "host" / "hos_main.c").read_text(encoding="utf-8")
-    fn = host[host.index("void hos_oot_cct_speed("):]
+    tools = (ROOT / "game" / "oot_tools.c").read_text(encoding="utf-8")
+    fn = tools[tools.index("void hos_oot_cct_speed("):]
     fn = fn[:fn.index("\n}\n")]
     check("oot_speed_controller" in fn and "hos_move_stick_held()" in fn, "the host scales only Link's speed while he is steered")
     check(re.search(r"<= 15\.0f", fn) is not None, "the host leaves speeds over 15 m/s alone")
