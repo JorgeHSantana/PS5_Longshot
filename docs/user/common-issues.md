@@ -3,6 +3,11 @@
 Find what you see below and follow its steps: each one names the exact message, file or setting to look for. Nothing
 fits, or the fix didn't work? [Still stuck?](#still-stuck) says where the log is and how to ask.
 
+Not sure where to start? Run Longshot's own check in a terminal, in its folder: `./Longshot.x86_64 doctor` on Linux,
+`Longshot.exe doctor` on Windows (add `--profile <folder>` for a profile of your own). It looks at your graphics driver,
+free space, game files, folders, Windows' long paths and Defender, and whether Longshot is already running, and says a
+fix for anything in the way. It changes nothing.
+
 - [Installing and building](#installing-and-building)
 - [Starting the game](#starting-the-game)
 - [In game: graphics](#in-game-graphics)
@@ -10,11 +15,6 @@ fits, or the fix didn't work? [Still stuck?](#still-stuck) says where the log is
 - [In game: controls, saves and language](#in-game-controls-saves-and-language)
 - [Downloads and antivirus](#downloads-and-antivirus)
 - [Still stuck?](#still-stuck)
-
-Not sure where to start? Run Longshot's own check in a terminal, in its folder: `./Longshot.x86_64 doctor` on Linux,
-`Longshot.exe doctor` on Windows (add `--profile <folder>` for a profile of your own). It looks at your graphics driver,
-free space, game files, folders, Windows' long paths and Defender, and whether Longshot is already running, and says a
-fix for anything in the way. It changes nothing.
 
 ## Installing and building
 

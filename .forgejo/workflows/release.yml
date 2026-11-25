@@ -134,10 +134,13 @@ jobs:
           echo "$tag, from $ref"
       # (only for a version: a nightly with nothing new builds nothing. The builder that reads tools.lock, mise.toml's
       # Rust: scripts/ci_rust.sh)
+      # (its own step: the PATH ci_rust.sh hands on through $GITHUB_PATH reaches the steps after it only)
+      - name: Rust (mise.toml's)
+        if: steps.name.outputs.tag != ''
+        run: scripts/ci_rust.sh
       - name: longshot-builder for the tools
         if: steps.name.outputs.tag != ''
         run: |
-          scripts/ci_rust.sh
           cargo build --locked -q -p longshot-builder
           echo "TOOLS=$PWD/target/debug/longshot-builder dev tools" >> "$GITHUB_ENV"
       - name: The tools

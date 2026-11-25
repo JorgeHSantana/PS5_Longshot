@@ -144,7 +144,8 @@ mod tests {
     fn a_child_talks_to_the_server_over_its_ends_and_the_builders_close_when_it_ends() {
         let (mut server, child) = open().unwrap();
         // (the game: reads a line from its read end, answers on its write end; the descriptors from the variable)
-        let mut game = Command::new("sh");
+        // (bash: dash, CI's sh, takes no fd number above 9 in <&$r, and the channel's ends may be)
+        let mut game = Command::new("bash");
         game.args([
             "-c",
             "r=${LONGSHOT_BUILDER_CHANNEL%,*}; w=${LONGSHOT_BUILDER_CHANNEL#*,}; \

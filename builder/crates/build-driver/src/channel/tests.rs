@@ -302,7 +302,8 @@ fn a_game_process_says_hello_over_the_ends_it_inherits() {
     let (server, child) = build_core::channel::open().unwrap();
     let out = d.join("heard.txt");
     // (the game: hello out of its write end, the answer into a file, then a request that is not allowed)
-    let mut game = Command::new("sh");
+    // (bash: dash, CI's sh, takes no fd number above 9 in >&$w, and the channel's ends may be)
+    let mut game = Command::new("bash");
     game.args([
         "-c",
         &format!(

@@ -91,9 +91,11 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       # (the builder whose `dev tools make` packs every archive, mise.toml's Rust: scripts/ci_rust.sh. It needs none of
       # the tools to be built)
+      # (its own step: the PATH ci_rust.sh hands on through $GITHUB_PATH reaches the steps after it only)
+      - name: Rust (mise.toml's)
+        run: scripts/ci_rust.sh
       - name: longshot-builder for the tools
         run: |
-          scripts/ci_rust.sh
           cargo build --locked -q -p longshot-builder
           echo "LONGSHOT_BUILD=$PWD/target/debug/longshot-builder" >> "$GITHUB_ENV"
       - name: Make them, twice
