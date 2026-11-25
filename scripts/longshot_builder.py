@@ -96,7 +96,7 @@ def elf_interpreter(data):
                for i in range(phnum))
 
 
-def problems(data, target):
+def problems(data, target, this_pc=False):
     """What makes the program unusable on a player's PC of target's system: [] when nothing does"""
     is_elf = data[:4] == b"\x7fELF"
     if target == "windows":
@@ -116,7 +116,7 @@ def problems(data, target):
         out.append("asks for no program interpreter: not a program linked against glibc")
     versions = {tuple(int(x) for x in m.groups()) for m in re.finditer(rb"GLIBC_(\d+)\.(\d+)", data)}
     newer = sorted(v for v in versions if v > GLIBC_MAX)
-    if newer:
+    if newer and not this_pc:
         out.append("needs glibc %s, newer than %s (link with --sysroot: tools.lock's sysroot)"
                    % (".".join(map(str, newer[-1])), ".".join(map(str, GLIBC_MAX))))
     return out
@@ -238,7 +238,7 @@ def cmd_build(a):
         fail("cargo made no %s" % built)
     with open(built, "rb") as f:
         data = f.read()
-    bad = problems(data, target)
+    bad = problems(data, target, this_pc=a.this_pc)
     if bad:
         fail("what was built is not usable: " + "; ".join(bad))
     os.makedirs(os.path.dirname(out), exist_ok=True)
@@ -318,6 +318,9 @@ def main(argv=None):
     b.add_argument("--work", help="where the build is made (default: <cache>-work, never inside the cache)")
     b.add_argument("--out", help="its path (default: build-linux/longshot-builder or build-windows/longshot-builder.exe)")
     b.add_argument("--jobs", type=int, help="cargo's jobs")
+    b.add_argument("--this-pc", action="store_true",
+                   help="linux: a builder for this machine only (a runner's own), never shipped: the glibc floor does not "
+                        "apply, every other check does")
     b.add_argument("--sources", help="the pack it carries (`longshot-builder dev release sources` makes it): a release's")
     b.set_defaults(fn=cmd_build)
     m = s.add_parser("llvm-mingw", help="llvm-mingw unpacked, its folder printed")

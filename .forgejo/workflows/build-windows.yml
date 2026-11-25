@@ -93,7 +93,7 @@ jobs:
       - name: longshot-builder for this runner
         run: >-
           python -I scripts/longshot_builder.py build --target linux --profile release
-          --cache "$RUNNER_TEMP/rust" --out "$RUNNER_TEMP/host/longshot-builder"
+          --cache "$RUNNER_TEMP/rust" --out "$RUNNER_TEMP/host/longshot-builder" --this-pc
 
       # (tools.lock's windows-x64 bundle, at tools/<name>/ of the checkout (`longshot-builder dev tools install`, by the
       # runner's longshot-builder above: the builder needs none of these tools to be built), where longshot-builder --root
@@ -248,7 +248,7 @@ jobs:
         if: env.RELEASE_CHECKED == ''
         run: >-
           python -I scripts/longshot_builder.py build --target linux --profile release
-          --cache "$RUNNER_TEMP/longshot-builder-rust" --out "$RUNNER_TEMP/longshot-builder"
+          --cache "$RUNNER_TEMP/longshot-builder-rust" --out "$RUNNER_TEMP/longshot-builder" --this-pc
       # (tools.lock's windows-x64 CPM cache, what a player's Windows build compiles the back end with: the Vulkan, SPIR-V
       # and VMA headers, at the pins it was made from, checked by its SHA-256 and installed by the builder above)
       - name: tools.lock's cpm
