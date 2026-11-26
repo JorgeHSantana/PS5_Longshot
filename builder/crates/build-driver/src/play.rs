@@ -356,7 +356,30 @@ pub fn stamp(version: &Path, profile: &Path, p: &Profile, builder: &str) -> Stam
         profile: p.key(profile),
         game: p.game_in(profile).map(|g| game_stamp(&g)).unwrap_or_default(),
         mods: mods_stamp(profile, version),
+        patches: patches_stamp(profile),
     }
+}
+
+/// The ExeFS patches the build of profile `profile` takes (crate::read::manifest_mods, the enabled ones, in order):
+/// each mod's name and each patch file's name and SHA-256, hashed; empty for none. A patch added, changed, removed,
+/// switched off or moved in the order changes it, so the next start builds the game again ([`Stale::Mods`]).
+pub fn patches_stamp(profile: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    let mut any = false;
+    for (name, dir, on) in crate::read::manifest_mods(Some(profile)) {
+        if !on {
+            continue;
+        }
+        for file in game_files::patches::patch_files(&dir) {
+            let Ok(bytes) = std::fs::read(dir.join("exefs").join(&file)) else { continue };
+            h.update(format!("{name}\t{file}\t").as_bytes());
+            h.update(Sha256::digest(&bytes));
+            h.update(b"\n");
+            any = true;
+        }
+    }
+    if any { build_core::key::to_hex(&h.finalize()) } else { String::new() }
 }
 
 /// Why a game folder needs an update before the game starts ([`check`]).
@@ -431,7 +454,7 @@ pub fn check(
     if now.game.is_empty() || was.game != now.game {
         return Some(Stale::Game);
     }
-    if now.mods.is_some() && was.mods != now.mods {
+    if (now.mods.is_some() && was.mods != now.mods) || was.patches != now.patches {
         return Some(Stale::Mods);
     }
     let windows = program.extension().is_some_and(|e| e == "exe");
@@ -982,6 +1005,40 @@ mod tests {
         h.fail_update = true;
         let r = play(&d, &prof, &p, "b1", &args, &no_prepare, &mut h, &mut |_, _| {});
         assert_eq!((r, h.starts.len()), (Played::UpdateFailed("stopped".into()), 0));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn patches_stamp_follows_the_enabled_mods_patch_files() {
+        let d = scratch("patches-stamp");
+        assert_eq!(patches_stamp(&d), "", "no mods: empty");
+        let m = |n: &str| {
+            let e = mods(&d).join(n).join("exefs");
+            std::fs::create_dir_all(&e).unwrap();
+            std::fs::write(e.parent().unwrap().join("mod.json"), b"{}").unwrap();
+            e
+        };
+        let (a, b) = (m("a"), m("b"));
+        std::fs::write(a.join("notes.txt"), b"x").unwrap();
+        assert_eq!(patches_stamp(&d), "", "mods without patches: empty");
+        std::fs::write(a.join("p.pchtxt"), b"one").unwrap();
+        std::fs::write(b.join("q.ips"), b"two").unwrap();
+        let s1 = patches_stamp(&d);
+        assert_eq!(s1.len(), 64);
+        std::fs::write(a.join("other.bin"), b"y").unwrap();
+        std::fs::write(a.join("readme.md"), b"y").unwrap();
+        assert_eq!(patches_stamp(&d), s1, "files that aren't .ips or .pchtxt ignored");
+        std::fs::write(a.join("p.pchtxt"), b"One").unwrap();
+        let s2 = patches_stamp(&d);
+        assert_ne!(s2, s1, "a patch's bytes changed");
+        std::fs::write(d.join("mods.json"), r#"{"mods":[{"id":"local/b"},{"id":"local/a"}]}"#).unwrap();
+        let s3 = patches_stamp(&d);
+        assert_ne!(s3, s2, "the order changed");
+        std::fs::write(d.join("mods.json"), r#"{"mods":[{"id":"local/b"},{"id":"local/a","enabled":false}]}"#).unwrap();
+        let s4 = patches_stamp(&d);
+        assert_ne!(s4, s3, "a mod switched off");
+        std::fs::remove_file(b.join("q.ips")).unwrap();
+        assert_eq!(patches_stamp(&d), "", "only a switched-off mod's patches: empty");
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

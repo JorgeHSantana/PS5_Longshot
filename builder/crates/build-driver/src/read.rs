@@ -13,11 +13,63 @@ use std::path::Path;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ReadStage;
 
-/// The manifest mods of `profile` whose ExeFS patches a build takes (name, folder, on), in their order: the Mod API's
-/// layer reads them (their `mod.json`, the profile's `mods` and trust); this builder has none of its own, as
-/// [`crate::play::mods_stamp`] has no stamp. The extension point of the Mod API stack.
-pub fn manifest_mods(_profile: Option<&Path>) -> Vec<patches::Mod> {
-    Vec::new()
+/// The manifest mods of `profile` whose ExeFS patches a build takes (name, folder, on), in their order, as the game
+/// finds and orders them (game/mods.c, docs/dev/reference/mods.md "Discovery and order"): a folder with `mod.json` one
+/// to four levels below the profile's `mods/`, nothing below a mod searched; a folder named `-…` or `_…` off with
+/// everything below it, `.…` skipped; each named by its path under `mods/` (`/`-separated). The order and the switches
+/// are the profile's `mods.json` (`{"mods": [{"id": "local/<path>", "enabled": …}]}`): the mods it names first, in its
+/// order, then the others, on, by path ignoring case. A `mods.json` that isn't such a list leaves every mod on.
+pub fn manifest_mods(profile: Option<&Path>) -> Vec<patches::Mod> {
+    let Some(profile) = profile else { return Vec::new() };
+    let root = crate::play::mods(profile);
+    let mut found: Vec<(String, std::path::PathBuf)> = Vec::new();
+    find_manifest_mods(&root, "", 0, &mut found);
+    let listed: Vec<(String, bool)> = std::fs::read(profile.join("mods.json"))
+        .ok()
+        .filter(|b| b.len() < 1 << 20)
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|v| v.get("mods").and_then(|m| m.as_array()).cloned())
+        .map(|list| {
+            list.iter()
+                .filter_map(|e| {
+                    let id = e.get("id")?.as_str()?.strip_prefix("local/")?.to_string();
+                    Some((id, e.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(true)))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut out: Vec<patches::Mod> = Vec::new();
+    for (id, on) in &listed {
+        if let Some(i) = found.iter().position(|(n, _)| n == id) {
+            let (name, dir) = found.remove(i);
+            out.push((name, dir, *on));
+        }
+    }
+    found.sort_by_key(|(n, _)| n.to_lowercase());
+    out.extend(found.into_iter().map(|(n, d)| (n, d, true)));
+    out
+}
+
+/// The manifest mods below `dir` (`name` its path under the mods folder), `depth` levels below it, into `out`.
+fn find_manifest_mods(dir: &Path, name: &str, depth: usize, out: &mut Vec<(String, std::path::PathBuf)>) {
+    if depth > 0 && dir.join("mod.json").is_file() {
+        out.push((name.to_string(), dir.to_path_buf()));
+        return;
+    }
+    if depth >= 4 {
+        return;
+    }
+    let Ok(listing) = std::fs::read_dir(dir) else { return };
+    let mut subs: Vec<_> = listing.flatten().filter(|e| e.path().is_dir()).collect();
+    subs.sort_by_key(std::fs::DirEntry::file_name);
+    for e in subs {
+        let n = e.file_name().to_string_lossy().into_owned();
+        if n.starts_with(['-', '_', '.']) {
+            continue;
+        }
+        let sub = if name.is_empty() { n } else { format!("{name}/{n}") };
+        find_manifest_mods(&e.path(), &sub, depth + 1, out);
+    }
 }
 
 impl GameFiles for ReadStage {
@@ -267,6 +319,46 @@ mod tests {
         std::fs::create_dir_all(out.join("romfs")).unwrap();
         ReadStage.romfs(&game, &out, &staging, &r).unwrap();
         assert!(crate::folder::romfs_made_here(&out));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// A manifest mod at `path` under `profile`'s mods folder.
+    fn manifest_mod(profile: &Path, path: &str) {
+        let d = crate::play::mods(profile).join(path);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("mod.json"), b"{}").unwrap();
+    }
+
+    fn names(profile: &Path) -> Vec<(String, bool)> {
+        manifest_mods(Some(profile)).into_iter().map(|(n, _, on)| (n, on)).collect()
+    }
+
+    #[test]
+    fn manifest_mods_are_found_and_ordered_as_the_game_does() {
+        assert!(manifest_mods(None).is_empty(), "no profile: none");
+        let d = crate::scratch("manifest-mods");
+        assert!(names(&d).is_empty(), "no mods folder: none");
+        for m in ["b", "A", "c", "x/y", "1/2/3/4", "1/2/3/4b/5", "-off/z", "_off", ".hid", "s/-o", "a/inner"] {
+            manifest_mod(&d, m);
+        }
+        let on = |n: &str| (n.to_string(), true);
+        // (no mods.json: all on, by path ignoring case; four levels down found, five not; -, _ and . folders skipped)
+        assert_eq!(names(&d), [on("1/2/3/4"), on("A"), on("a/inner"), on("b"), on("c"), on("x/y")]);
+        // (nothing below a mod)
+        manifest_mod(&d, "b/below");
+        assert!(!names(&d).iter().any(|(n, _)| n == "b/below"));
+        // (mods.json's order first, its switches kept, unknown or non-local ids ignored; the rest on, after)
+        std::fs::write(
+            d.join("mods.json"),
+            r#"{"mods":[{"id":"local/x/y","enabled":true},{"id":"local/b","enabled":false},{"id":"local/gone"},{"id":"c"},{"id":"local/A"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(names(&d), [on("x/y"), ("b".into(), false), on("A"), on("1/2/3/4"), on("a/inner"), on("c")]);
+        // (a mods.json that isn't such a list: every mod on, in path order)
+        for bad in [&b"{not json"[..], br#"{"mods": 3}"#] {
+            std::fs::write(d.join("mods.json"), bad).unwrap();
+            assert_eq!(names(&d), [on("1/2/3/4"), on("A"), on("a/inner"), on("b"), on("c"), on("x/y")]);
+        }
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

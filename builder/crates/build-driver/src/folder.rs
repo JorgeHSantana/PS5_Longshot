@@ -767,6 +767,9 @@ pub struct Stamp {
     /// The mods that need a build, when the Mod API gives their stamp (crate::play::mods_stamp).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mods: Option<String>,
+    /// The ExeFS patches the profile's enabled manifest mods have (crate::play::patches_stamp): empty for none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub patches: String,
 }
 
 impl Record {

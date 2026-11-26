@@ -69,7 +69,9 @@ type, and no host code runs from a mod.
   writes only what the tab changed, onto the file as it is then; keys it doesn't know and entries of mods that aren't
   there are kept. A file that isn't a list leaves every mod on for that start and is kept as `mods.json.bad` once the
   player changes something; files of 1 MB or more are refused. It is the only list: `longshot_mods.txt`, the list of
-  builds before it, is not read. The builder reads no `mods.json`: it builds in manifest mods alone.
+  builds before it, is not read. The builder reads the profile's `mods.json` the same way for the ExeFS patches it builds
+  in (manifest mods alone: `build_driver::read::manifest_mods`), and a start builds the game again when those patches
+  change (`play::patches_stamp`).
 - **Lookup.** Paths are matched with `/` and lower case. Two files in one mod that differ only by case: which wins is
   not defined.
 - **Links.** Inside a mod, links to folders (including a linked `romfs`) are not followed; links to files are. Finding

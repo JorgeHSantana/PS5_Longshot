@@ -917,8 +917,13 @@ mod tests {
         let rec_key = Record { files: vec![], key: "k".into() };
         rec_key.write(&d);
         assert!(d.join(PREPARED_KEY).is_file());
-        rec.stamp =
-            Some(crate::folder::Stamp { builder: "b".into(), profile: "p".into(), game: "g".into(), mods: None });
+        rec.stamp = Some(crate::folder::Stamp {
+            builder: "b".into(),
+            profile: "p".into(),
+            game: "g".into(),
+            mods: None,
+            patches: String::new(),
+        });
         rec.write(&d).unwrap();
         if let Some(driver) = driver_id(|_| None) {
             let want = cache_dir(&crate::layout::cache_root(crate::env_os), "abc123", &driver);
