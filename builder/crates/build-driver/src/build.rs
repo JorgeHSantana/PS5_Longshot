@@ -324,7 +324,7 @@ pub fn build(o: &BuildOptions, p: &Places, st: &Stages, r: &Reporter) -> Result<
     folder::check_places(
         &p.out,
         &p.work.dir,
-        &[("work folder", &p.work.dir), ("store", &p.stores.root), ("tools folder", &p.root)],
+        &[("work folder", &p.work.dir), ("store", &p.stores.root), (folder::TOOLS, &p.root)],
         &o.game,
     )?;
     std::fs::create_dir_all(&p.work.dir).at(&p.work.dir)?;

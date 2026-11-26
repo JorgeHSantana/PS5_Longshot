@@ -48,6 +48,14 @@ fn overlap(a: &Path, b: &Path) -> bool {
     a.starts_with(&b) || b.starts_with(&a)
 }
 
+/// Whether `inner` is `outer` or inside it.
+fn within(inner: &Path, outer: &Path) -> bool {
+    compared(inner).starts_with(compared(outer))
+}
+
+/// The builder's own folder in [`check_places`]: the only one a game folder may be inside.
+pub const TOOLS: &str = "tools folder";
+
 /// Where a build writes is apart from what it must not touch: the game folder `out` from the builder's own folders
 /// (`builder`: the work folder, the store, the tools: a clean-up of one would take the other), and both `out` and
 /// the work folder from the player's game files (a dump's folders, either way round: linking its romfs into a game
@@ -55,7 +63,10 @@ fn overlap(a: &Path, b: &Path) -> bool {
 /// inside either).
 pub fn check_places(out: &Path, work: &Path, builder: &[(&str, &Path)], game: &GameSource) -> Result<()> {
     for (what, dir) in builder {
-        if overlap(out, dir) {
+        // (the tools folder may hold the game folder: a source tree's build-linux/game; only a game folder holding
+        // the tools would take them in its clean-up)
+        let clash = if *what == TOOLS { within(dir, out) } else { overlap(out, dir) };
+        if clash {
             return Err(Error::player(
                 "game_folder_overlaps",
                 format!(
@@ -1167,6 +1178,9 @@ mod tests {
         assert!(check_places(&game, &work, &[("work folder", &work)], &nup).is_ok());
         assert!(check_places(&work.join("game"), &work, &[("work folder", &work)], &nup).is_err());
         assert!(check_places(&d, &work, &[("store", &d.join("store"))], &nup).is_err());
+        // (a source tree's game folder is inside its tools; a game folder holding the tools is refused)
+        assert!(check_places(&d.join("tree/build-linux/game"), &work, &[(TOOLS, &d.join("tree"))], &nup).is_ok());
+        assert!(check_places(&d, &work, &[(TOOLS, &d.join("tree"))], &nup).is_err());
         // (a .nup beside the game folder is fine; inside the game folder or the work folder it is not)
         assert!(check_places(&d.join("dl/Longshot"), &work, &[], &nup).is_ok());
         assert!(check_places(&d.join("dl"), &work, &[], &nup).is_err());
