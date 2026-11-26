@@ -29,7 +29,7 @@ job takes that program from the Linux job as its tool.
   the Linux runner that built it) and shares scripts/renhdrum.py's readers of ELF and PE headers.
 
 `build` compiles the longshot-builder package with Cargo.toml's profile (dist, the release's: thin LTO, 16 codegen
-units; release, a developer's quicker one):
+units, no debug info but its symbols; release, a developer's quicker one):
 - linux (the default elsewhere): x86_64-unknown-linux-gnu, linked against glibc 2.35, the game's own floor: by
   --linker (default cc) against the system's glibc, or with --sysroot <folder> against tools.lock's `sysroot` (Ubuntu
   22.04's glibc and GCC's runtime pieces), as the game is (then --linker is the bundle's clang, which links with lld).

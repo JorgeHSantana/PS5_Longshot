@@ -26,7 +26,8 @@
 //! a member:    one zstd frame of: MAGIC, then for each file: u16 path length (LE), path (UTF-8, / separated,
 //!              relative), u8 mode (0 plain, 1 executable, 2 a relative symbolic link inside the member, its target
 //!              the bytes; Unix only), u64 size (LE), 32 bytes SHA-256, the bytes; then u16 0,
-//!              u64 the number of files (LE)
+//!              u64 the number of files (LE); in a release's pack, then a zstd skippable frame of 32 bytes: the
+//!              member's key ([`member_key`], [`key_frame`]), which every reader passes over
 //! ```
 //!
 //! The program carries its pack at the end of its file, past everything its headers name (Linux: the ELF's segments,
@@ -47,6 +48,11 @@
 //! This file is the format's one writer ([`write`], [`tree_entries`], [`tool_entries`]) and its one reader ([`unpack`],
 //! [`unpack_into`]). The writer compresses each member with the zstd program at [`MEMBER_ZSTD`] (one thread, the
 //! frame's checksum), so the same files give the same bytes, and a release's members that did not change keep theirs.
+//! A release's members are made several at once ([`write_with`], one zstd process each, put in the pack in their
+//! order), and each ends with its key, the SHA-256 of its raw bytes' and of what compressed them (the zstd program's
+//! version, [`MEMBER_ZSTD`]): a member of the last release's pack (its signature checked: `dev release last-objects`)
+//! with this one's name and key, its frame decompressed to these raw bytes, is taken as it is, the bytes compressing
+//! them again would give, and the rest are compressed.
 
 use build_core::{Error, IoContext, Result, fsx};
 use sha2::{Digest, Sha256};
@@ -962,8 +968,75 @@ pub fn compress_fast(raw: &[u8]) -> std::result::Result<Vec<u8>, String> {
     Ok(out.stdout)
 }
 
-/// A member's compressor: its raw bytes to one zstd frame ([`compress`] for a release).
-pub type Compressor<'a> = &'a dyn Fn(&[u8]) -> std::result::Result<Vec<u8>, String>;
+/// A member's compressor: its raw bytes to one zstd frame ([`compress`] for a release). Called from several threads at
+/// once, one member each.
+pub type Compressor<'a> = &'a (dyn Fn(&[u8]) -> std::result::Result<Vec<u8>, String> + Sync);
+
+/// The magic of the zstd skippable frame a release's member ends with (zstd's 0x184D2A50 to 0x184D2A5F: every zstd
+/// reader passes over one, and this format's reader never reads past a member's last file). Its 32 bytes are the
+/// member's [`member_key`].
+pub const KEY_FRAME_MAGIC: u32 = 0x184D_2A5E;
+/// That frame's length: its magic, its size (32, LE), the key.
+pub const KEY_FRAME_LEN: usize = 40;
+
+/// A member's reuse key: the SHA-256 of what compresses it (`settings`: the zstd program's version and [`MEMBER_ZSTD`],
+/// [`release_settings`]) and of its raw bytes' SHA-256. Two members with the same key are the same bytes compressed the
+/// same way: the same frame.
+pub fn member_key(raw: &[u8], settings: &str) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(b"longshot pack member key 1\0");
+    h.update(settings.as_bytes());
+    h.update(b"\0");
+    h.update(Sha256::digest(raw));
+    h.finalize().into()
+}
+
+/// The skippable frame a release's member ends with: [`KEY_FRAME_MAGIC`], 32, the key.
+pub fn key_frame(key: &[u8; 32]) -> [u8; KEY_FRAME_LEN] {
+    let mut f = [0u8; KEY_FRAME_LEN];
+    f[..4].copy_from_slice(&KEY_FRAME_MAGIC.to_le_bytes());
+    f[4..8].copy_from_slice(&32u32.to_le_bytes());
+    f[8..].copy_from_slice(key);
+    f
+}
+
+/// A member's bytes split into its zstd frame and the key its last frame names; None when it ends with no key frame (a
+/// pack from before them, or one made for this PC alone).
+pub fn split_key(member: &[u8]) -> Option<(&[u8], [u8; 32])> {
+    let at = member.len().checked_sub(KEY_FRAME_LEN)?;
+    let tail = &member[at..];
+    if tail[..4] != KEY_FRAME_MAGIC.to_le_bytes() || tail[4..8] != 32u32.to_le_bytes() {
+        return None;
+    }
+    Some((&member[..at], tail[8..].try_into().ok()?))
+}
+
+/// What compresses a release's members, for [`member_key`]: the zstd program's version (its `-V`) and [`MEMBER_ZSTD`].
+pub fn release_settings() -> std::result::Result<String, String> {
+    let out = build_core::child::command(crate::tools::archive::zstd()?)
+        .arg("-V")
+        .output()
+        .map_err(|e| format!("zstd -V: {e}"))?;
+    let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !out.status.success() || version.is_empty() {
+        return Err("zstd -V said no version".into());
+    }
+    Ok(format!("{version}; {}", MEMBER_ZSTD.join(" ")))
+}
+
+/// How [`write_with`] makes the members.
+pub struct Packing<'a> {
+    /// Each member's compressor.
+    pub zstd: Compressor<'a>,
+    /// What `zstd` is ([`release_settings`] for [`compress`]): each member then ends with its key's frame
+    /// ([`key_frame`]), and the member of `reuse` of the same name and key is taken instead of compressing it again.
+    /// None: no key frames, nothing reused (a pack for this PC alone).
+    pub settings: Option<String>,
+    /// The members of an earlier pack (`(name, bytes)`, [`reusable`]: a signed release's, `dev release last-objects`).
+    pub reuse: &'a [(String, Vec<u8>)],
+    /// How many members are made at once (each by one zstd of one thread); at least 1.
+    pub jobs: usize,
+}
 
 /// What [`write`] made.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -978,32 +1051,112 @@ pub struct Written {
     pub size: u64,
     /// The pack's SHA-256.
     pub sha256: String,
+    /// The members taken from the earlier pack, not compressed again.
+    pub reused: usize,
+    /// Their bytes before compression.
+    pub reused_raw: u64,
+}
+
+/// The members of a pack, each checked by its table's SHA-256 (one that fails is left out): what [`Packing::reuse`]
+/// takes.
+pub fn reusable(pack: &[u8]) -> Result<Vec<(String, Vec<u8>)>> {
+    Ok(members(pack)?
+        .into_iter()
+        .filter(|m| hex(&Sha256::digest(m.bytes)) == m.sha)
+        .map(|m| (m.name, m.bytes.to_vec()))
+        .collect())
+}
+
+/// `old`'s bytes when they are `raw` compressed as `key` says: its key frame's key `key`, and its frame decompressed
+/// `raw`, compared whole (so a key that lied is never taken).
+fn reuse_of(old: &[u8], raw: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
+    let (frame, k) = split_key(old)?;
+    if &k != key {
+        return None;
+    }
+    let mut z = ruzstd::decoding::StreamingDecoder::new(frame).ok()?;
+    let mut back = Vec::with_capacity(raw.len());
+    z.read_to_end(&mut back).ok()?;
+    (back == raw).then(|| old.to_vec())
 }
 
 /// The pack of `tree` (each [`group`] a member, by name) and `tools` (`(name, folder)`, each a member `tools/<name>`,
-/// in that order), compressed by `zstd` ([`compress`] for a release), written to `out` through `out.new`.
+/// in that order), compressed by `zstd`, written to `out` through `out.new`: [`write_with`] with no key frames and
+/// nothing reused, as many members at once as this PC has threads.
 pub fn write(
     out: &Path,
     tree: &[Entry],
     tools: &[(String, PathBuf)],
     zstd: Compressor<'_>,
 ) -> std::result::Result<Written, String> {
+    let jobs = std::thread::available_parallelism().map_or(1, usize::from);
+    write_with(out, tree, tools, &Packing { zstd, settings: None, reuse: &[], jobs })
+}
+
+/// [`write`] as `p` says: the members made by a pool of `p.jobs` threads (each its raw bytes, then the member of
+/// `p.reuse` with its name and key, else compressed), put in the pack in their order whichever ends first, so the bytes
+/// are those of one member after another.
+pub fn write_with(
+    out: &Path,
+    tree: &[Entry],
+    tools: &[(String, PathBuf)],
+    p: &Packing<'_>,
+) -> std::result::Result<Written, String> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    // (a member made: its bytes, its raw size, whether they were reused)
+    type Made = std::result::Result<(Vec<u8>, u64, bool), String>;
     let mut groups: BTreeMap<String, Vec<Entry>> = BTreeMap::new();
     for e in tree {
         groups.entry(group(&e.path)).or_default().push(e.clone());
     }
-    let (mut members, mut raw_size, mut files) = (Vec::new(), 0u64, tree.len());
-    for (name, entries) in &groups {
-        let raw = member_bytes(entries)?;
-        raw_size += raw.len() as u64;
-        members.push((name.clone(), zstd(&raw)?));
-    }
+    let mut todo: Vec<(String, Vec<Entry>)> = groups.into_iter().collect();
     for (name, folder) in tools {
-        let entries = tool_entries(folder)?;
-        let raw = member_bytes(&entries)?;
-        raw_size += raw.len() as u64;
-        files += entries.len();
-        members.push((format!("tools/{name}"), zstd(&raw)?));
+        todo.push((format!("tools/{name}"), tool_entries(folder)?));
+    }
+    let files = todo.iter().map(|(_, e)| e.len()).sum::<usize>();
+    let old: BTreeMap<&str, &[u8]> = p.reuse.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+    let make = |(name, entries): &(String, Vec<Entry>)| -> Made {
+        let raw = member_bytes(entries)?;
+        let Some(settings) = &p.settings else {
+            return Ok(((p.zstd)(&raw)?, raw.len() as u64, false));
+        };
+        let key = member_key(&raw, settings);
+        if let Some(b) = old.get(name.as_str()).and_then(|o| reuse_of(o, &raw, &key)) {
+            return Ok((b, raw.len() as u64, true));
+        }
+        let mut b = (p.zstd)(&raw)?;
+        b.extend(key_frame(&key));
+        Ok((b, raw.len() as u64, false))
+    };
+    let slots: Vec<Mutex<Option<Made>>> = todo.iter().map(|_| Mutex::new(None)).collect();
+    let next = AtomicUsize::new(0);
+    std::thread::scope(|s| {
+        for _ in 0..p.jobs.clamp(1, todo.len().max(1)) {
+            s.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(job) = todo.get(i) else { break };
+                    let made = make(job);
+                    let failed = made.is_err();
+                    *slots[i].lock().unwrap_or_else(|e| e.into_inner()) = Some(made);
+                    if failed {
+                        // (the first failure ends the pool: no member after it is started)
+                        next.store(todo.len(), Ordering::Relaxed);
+                    }
+                }
+            });
+        }
+    });
+    let (mut members, mut raw_size, mut reused, mut reused_raw) = (Vec::new(), 0u64, 0usize, 0u64);
+    for ((name, _), slot) in todo.iter().zip(slots) {
+        let made = slot.into_inner().unwrap_or_else(|e| e.into_inner());
+        let (bytes, raw, again) = made.ok_or_else(|| format!("{name}: not made (a member before it failed)"))??;
+        raw_size += raw;
+        if again {
+            reused += 1;
+            reused_raw += raw;
+        }
+        members.push((name.clone(), bytes));
     }
     let data = pack_bytes(&members);
     if let Some(parent) = std::path::absolute(out).ok().as_deref().and_then(Path::parent) {
@@ -1019,6 +1172,8 @@ pub fn write(
         raw: raw_size,
         size: data.len() as u64,
         sha256: hex(&Sha256::digest(&data)),
+        reused,
+        reused_raw,
     })
 }
 
@@ -1297,6 +1452,98 @@ mod tests {
         // (a tool whose link leads out of it is refused)
         std::os::unix::fs::symlink("../../etc", tool.join("out")).unwrap();
         assert!(tool_entries(&tool).unwrap_err().contains("links outside the tool"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    fn entries(files: &[(&str, &[u8])]) -> Vec<Entry> {
+        files.iter().map(|(p, d)| Entry { path: p.to_string(), mode: 0, body: Body::Bytes(d.to_vec()) }).collect()
+    }
+
+    /// The pack of `tree` as a release's (key frames, `settings`), reusing `reuse`'s members, `jobs` at once: its bytes,
+    /// what was written, and how many members were compressed.
+    fn release_pack(
+        d: &Path,
+        tree: &[Entry],
+        settings: &str,
+        reuse: &[(String, Vec<u8>)],
+        jobs: usize,
+    ) -> (Vec<u8>, Written, usize) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = AtomicUsize::new(0);
+        let zstd = |raw: &[u8]| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            fast_zstd(raw)
+        };
+        let out = d.join("sources.pack");
+        let p = Packing { zstd: &zstd, settings: Some(settings.into()), reuse, jobs };
+        let w = write_with(&out, tree, &[], &p).unwrap();
+        (std::fs::read(&out).unwrap(), w, calls.into_inner())
+    }
+
+    fn a_tree(gpu: &[u8]) -> Vec<Entry> {
+        entries(&[
+            ("VERSION", b"nightly-2\n"),
+            ("host/a.c", &[1; 5000]),
+            ("gpu/vk/a.cpp", gpu),
+            ("third_party/sdl/a.c", &[3; 7000]),
+            ("third_party/zlib/z.c", &[4; 900]),
+        ])
+    }
+
+    #[test]
+    fn a_reused_member_is_the_bytes_compressing_it_again_gives() {
+        let d = scratch("reuse-same");
+        let tree = a_tree(b"gpu");
+        let (fresh, w, calls) = release_pack(&d, &tree, "zstd 1; -19", &[], 2);
+        assert_eq!((w.members, calls, w.reused), (5, 5, 0));
+        let old = reusable(&fresh).unwrap();
+        assert!(old.iter().all(|(_, b)| split_key(b).is_some()), "every member ends with its key");
+        let (again, w2, calls) = release_pack(&d, &tree, "zstd 1; -19", &old, 2);
+        assert_eq!(again, fresh, "the same bytes as compressing them again");
+        assert_eq!((calls, w2.reused, w2.reused_raw), (0, 5, w.raw));
+        let into = d.join("carried");
+        assert_eq!(unpack_into(&again, &into).unwrap(), 5, "and the reader reads it, key frames and all");
+        assert_eq!(std::fs::read(into.join("gpu/vk/a.cpp")).unwrap(), b"gpu");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_changed_member_or_other_settings_are_compressed_again() {
+        let d = scratch("reuse-changed");
+        let (first, _, _) = release_pack(&d, &a_tree(b"gpu"), "zstd 1; -19", &[], 2);
+        let old = reusable(&first).unwrap();
+        let changed = a_tree(b"gpu, changed");
+        let (got, w, calls) = release_pack(&d, &changed, "zstd 1; -19", &old, 2);
+        assert_eq!((calls, w.reused), (1, 4), "the changed member alone");
+        assert_eq!(got, release_pack(&d, &changed, "zstd 1; -19", &[], 2).0, "the bytes of a fresh pack");
+        // (another zstd, or other arguments: nothing taken)
+        let (_, w, calls) = release_pack(&d, &a_tree(b"gpu"), "zstd 2; -19", &old, 2);
+        assert_eq!((calls, w.reused), (5, 0));
+        // (a member whose key frame names this one's raw bytes but whose frame is another's: refused)
+        let mut lying = old.clone();
+        let (frame, key) = split_key(&lying[1].1).unwrap();
+        let mut other = fast_zstd(&member_bytes(&entries(&[("gpu/vk/a.cpp", b"else")])).unwrap()).unwrap();
+        assert_ne!(other, frame);
+        other.extend(key_frame(&key));
+        lying[1].1 = other;
+        let (got, w, calls) = release_pack(&d, &a_tree(b"gpu"), "zstd 1; -19", &lying, 2);
+        assert_eq!((calls, w.reused, got), (1, 4, first));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn members_made_at_once_give_the_bytes_of_one_after_another() {
+        let d = scratch("pool");
+        let tree = a_tree(b"gpu");
+        let (one, ..) = release_pack(&d, &tree, "s", &[], 1);
+        for jobs in [2, 3, 8, 64] {
+            assert_eq!(release_pack(&d, &tree, "s", &[], jobs).0, one, "{jobs} at once");
+        }
+        let out = d.join("plain.pack");
+        let w = write(&out, &tree, &[], &fast_zstd).unwrap();
+        let plain = std::fs::read(&out).unwrap();
+        assert!(reusable(&plain).unwrap().iter().all(|(_, b)| split_key(b).is_none()), "no key frames for this PC's");
+        assert_eq!((w.members, w.reused), (5, 0));
         let _ = std::fs::remove_dir_all(&d);
     }
 

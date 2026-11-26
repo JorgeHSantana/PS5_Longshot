@@ -3,11 +3,15 @@
 //!
 //! ```text
 //! sources --out <pack> --version <name> [--root <checkout>] [--third-party-objects <folder>]
-//!         [--add <path in the tree>=<file> ...] [--tool <name>=<folder> ...] [--tools <folder> ...]
+//!         [--add <path in the tree>=<file> ...] [--tool <name>=<folder> ...] [--tools <folder> ...] [--reuse <pack>]
 //!                      the pack a release's longshot-builder carries (build_driver::sources' writer, its format there):
 //!                      the checkout's tracked tree, VERSION, the third-party objects, the files added (RenHDrum's
 //!                      library), each tool (--tools: each folder of a bundle's tools/), every member compressed
-//!                      apart by the zstd program, so the same files give the same bytes
+//!                      apart by the zstd program, several at once (one zstd each, as many as the PC's threads), so the
+//!                      same files give the same bytes. --reuse: the last release's pack (last-objects keeps it, its
+//!                      signature checked): each member of it whose key is this one's (its raw bytes, the zstd program
+//!                      and its arguments) is taken as it is, not compressed again; a pack that can't be read is said,
+//!                      and everything compressed
 //! unpack <pack> <folder>
 //!                      a pack's files written into a folder, checked, as the program reads them
 //! attach <program> <pack> --out <file>
@@ -50,7 +54,7 @@ use std::process::{Command, ExitCode};
 
 const USAGE: &str = "usage: longshot-builder dev release sources --out <pack> --version <name> [--root <checkout>]
                          [--third-party-objects <folder>] [--add <path>=<file> ...] [--tool <name>=<folder> ...]
-                         [--tools <folder> ...]
+                         [--tools <folder> ...] [--reuse <pack>]
        longshot-builder dev release unpack <pack> <folder>
        longshot-builder dev release attach <program> <pack> --out <file>
        longshot-builder dev release dry-run <program> --work <folder> [--root <tree>] [--cache <folder>] [--clean]
@@ -66,7 +70,12 @@ const USAGE: &str = "usage: longshot-builder dev release sources --out <pack> --
 
 /// Each command: its words after the command, the options it must have, the others it takes (`--clean` a flag).
 const COMMANDS: [(&str, usize, &[&str], &[&str]); 9] = [
-    ("sources", 0, &["--out", "--version"], &["--root", "--third-party-objects", "--add", "--tool", "--tools"]),
+    (
+        "sources",
+        0,
+        &["--out", "--version"],
+        &["--root", "--third-party-objects", "--add", "--tool", "--tools", "--reuse"],
+    ),
     ("unpack", 2, &[], &[]),
     ("attach", 2, &["--out"], &[]),
     ("dry-run", 1, &["--work"], &["--root", "--cache", "--clean"]),
@@ -186,15 +195,44 @@ fn sources_cmd(a: &Args) -> Result<(), String> {
         tools.extend(names.into_iter().map(|n| (n.clone(), Path::new(bundle).join(n))));
     }
     let out = Path::new(a.one("--out").unwrap_or(""));
-    let w = sources::write(out, &tree, &tools, &sources::compress)?;
+    let reuse = match a.one("--reuse") {
+        None => Vec::new(),
+        Some(p) => match std::fs::read(p)
+            .map_err(|e| e.to_string())
+            .and_then(|b| sources::reusable(&b).map_err(|e| e.to_string()))
+        {
+            Ok(m) => m,
+            Err(e) if !Path::new(p).exists() => {
+                say(format!("no last pack at {p} ({e}): every member is compressed"));
+                Vec::new()
+            }
+            Err(e) => {
+                say(format!("::warning::the last pack {p} could not be read ({e}): every member is compressed"));
+                Vec::new()
+            }
+        },
+    };
+    let jobs = std::thread::available_parallelism().map_or(1, usize::from);
+    let p = sources::Packing {
+        zstd: &sources::compress,
+        settings: Some(sources::release_settings()?),
+        reuse: &reuse,
+        jobs,
+    };
+    let started = std::time::Instant::now();
+    let w = sources::write_with(out, &tree, &tools, &p)?;
     say(format!(
-        "{}: {} members, {} files, {} MB, {} MB compressed, sha256 {}",
+        "{}: {} members, {} files, {} MB, {} MB compressed, sha256 {}; {} members ({} MB) taken from the last pack, the \
+         rest compressed {jobs} at once, in {:.1} s",
         out.display(),
         w.members,
         w.files,
         w.raw >> 20,
         w.size >> 20,
-        w.sha256
+        w.sha256,
+        w.reused,
+        w.reused_raw >> 20,
+        started.elapsed().as_secs_f64()
     ));
     Ok(())
 }

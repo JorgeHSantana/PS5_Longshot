@@ -5,7 +5,9 @@
 //! found (appended after the link, or compiled in by a release from before: build_driver::sources::find_pack), and
 //! only its `tree/third_party_objects` member written out, each file checked. `compile --third-party-objects` then
 //! takes each object of that set whose key (the compiler's identity, the flags, the source, every header it read) is
-//! this build's, so the objects that did not change are the last release's bytes and the rest are compiled.
+//! this build's, so the objects that did not change are the last release's bytes and the rest are compiled. The whole
+//! pack is kept beside them ([`PACK`]), for `dev release sources --reuse`: each member whose key (its raw bytes, the
+//! zstd program and its arguments) is this build's is taken from it as it is, not compressed again.
 //!
 //! Nothing here stops a release: whatever is missing or refused is said (`::warning::` when it is refused), and the
 //! objects are all compiled, as before.
@@ -17,6 +19,9 @@ use std::path::{Path, PathBuf};
 
 /// The member of the pack the third-party objects are in (build_driver::sources::group's).
 pub const MEMBER: &str = "tree/third_party_objects";
+/// The file in `--out` the release's whole pack is kept in, for `dev release sources --reuse` (the members that did not
+/// change are taken from it, not compressed again: build_driver::sources::write_with).
+pub const PACK: &str = "sources.pack";
 /// How many of the channel's newest releases are tried, newest first.
 const TRIES: usize = 3;
 
@@ -97,6 +102,7 @@ fn take(
     tag: &str,
     full: &str,
 ) -> Result<(PathBuf, u64), String> {
+    let _ = std::fs::remove_file(l.out.join(PACK));
     let need = |name: &str| asset(rel, name).ok_or_else(|| format!("it has no {name}"));
     let (sums_url, sig_url, (full_url, size)) = (need("SHA256SUMS")?.0, need("SHA256SUMS.sig")?.0, need(full)?);
     let sums = (net.bytes)(&sums_url, trust::MAX_SUMS)?;
@@ -116,6 +122,10 @@ fn take(
     if !dir.join("set.json").is_file() {
         return Err(format!("{tag}'s {MEMBER} holds no set.json"));
     }
+    // (the whole pack too, from the file its signed sums named: `dev release sources --reuse` takes the members that did
+    // not change)
+    let kept = l.out.join(PACK);
+    std::fs::write(&kept, pack).map_err(|e| format!("{}: {e}", kept.display()))?;
     Ok((dir, n))
 }
 
@@ -214,6 +224,8 @@ mod tests {
         assert_eq!(std::fs::read(dir.join("set.json")).unwrap(), b"{}");
         assert_eq!(std::fs::read(dir.join("ab/cd.o")).unwrap(), b"o");
         assert!(!out.join("objects/VERSION").exists(), "that member alone");
+        let kept = std::fs::read(out.join(PACK)).unwrap();
+        assert_eq!(sources::reusable(&kept).unwrap().len(), 2, "and the whole pack kept, for sources --reuse");
         let _ = std::fs::remove_dir_all(&out);
     }
 
@@ -230,6 +242,7 @@ mod tests {
         assert!(got.is_none());
         assert!(said.iter().any(|s| s.contains("other bytes")), "{said:?}");
         assert!(!out.join("objects").exists());
+        assert!(!out.join(PACK).exists(), "no pack of a release refused");
         let _ = std::fs::remove_dir_all(&out);
     }
 }

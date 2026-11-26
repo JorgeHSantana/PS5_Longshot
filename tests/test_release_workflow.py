@@ -175,6 +175,26 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 self.assertNotIn("GITHUB_ENV", step)
                 self.assertEqual(wf.count("LONGSHOT_THIRD_PARTY_OBJECTS"), 1)
 
+    def test_the_pack_reuses_the_last_signed_release_s_members_and_uploads_are_stored(self):
+        # (the pack's members that did not change come from the pack last-objects kept, the one its signed SHA256SUMS
+        # named; the downloads are saved once the last is made, before the steps that can still fail; what dist/ holds is
+        # compressed already, so it is zipped stored)
+        for name in ("build-linux.yml", "build-windows.yml"):
+            wf = text(name)
+            with self.subTest(name):
+                sources = wf.index("dev release sources --out")
+                self.assertLess(wf.index("dev release last-objects"), sources)
+                step = wf[sources:wf.index("\n      - ", sources)]
+                self.assertIn('--reuse "$RUNNER_TEMP/last-objects/sources.pack"', step)
+                self.assertLess(wf.index("- name: Save the release's downloads"), sources)
+                self.assertLess(wf.index("longshot_builder.py build --target"), wf.index("- name: Save the release's downloads"))
+                self.assertLess(wf.index("scripts/renhdrum.py build"), wf.index("- name: Save the release's downloads"))
+                uploads = re.findall(r"uses: https://data\.forgejo\.org/forgejo/upload-artifact@.*\n        with:\n((?:          .*\n)+)", wf)
+                self.assertTrue(uploads)
+                for w in uploads:
+                    level = "1" if "/host/longshot-builder\n" in w else "0"
+                    self.assertIn("compression-level: %s\n" % level, w)
+
     def test_the_version_builds_nothing(self):
         version = jobs(text("release.yml"))["version"]
         for gone in ("cargo", "ci_rust.sh", "longshot-builder dev", "actions/cache"):

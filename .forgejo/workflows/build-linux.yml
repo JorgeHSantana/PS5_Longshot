@@ -110,7 +110,7 @@ jobs:
             ${{ runner.temp }}/rust/crates
             ${{ runner.temp }}/tools-cache
             ${{ runner.temp }}/link-tools/.cache
-          key: release-downloads-linux-${{ hashFiles('Cargo.lock', 'scripts/renhdrum.py', 'tools.lock') }}
+          key: release-downloads-linux-${{ hashFiles('Cargo.lock', 'third_party/renhdrum/Cargo.lock', 'scripts/renhdrum.py', 'tools.lock') }}
           restore-keys: release-downloads-linux-
       # (the pinned Rust (scripts/renhdrum.py's RUST) and Cargo.lock's crates, each checked by its SHA-256, into
       # $RUNNER_TEMP/rust, which RenHDrum's build below takes too)
@@ -205,9 +205,24 @@ jobs:
           python3 -I scripts/renhdrum.py build --target linux --linker gcc --cache "$RUNNER_TEMP/rust"
           --out "$RUNNER_TEMP/renhdrum/renhdrum.so"
 
+      # (saved as soon as the last download is made (RenHDrum's Rust and crates, above), not at the job's end: a later
+      # step that fails then leaves the next run its downloads all the same)
+      - name: Save the release's downloads (each checked by its SHA-256 when used)
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.release-cache.outputs.cache-hit != 'true'
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/rust/*.tar.xz
+            ${{ runner.temp }}/rust/crates
+            ${{ runner.temp }}/tools-cache
+            ${{ runner.temp }}/link-tools/.cache
+          key: release-downloads-linux-${{ hashFiles('Cargo.lock', 'third_party/renhdrum/Cargo.lock', 'scripts/renhdrum.py', 'tools.lock') }}
+
       # (what the program carries: the sources, the objects, RenHDrum's library, the tools, each part a zstd member of its
-      # own (`longshot-builder dev release sources`); then a copy of the program with it appended and read back (`dev
-      # release attach`), and that copy's headers checked: x86-64, glibc 2.35 at most, glibc's libraries only (its windows
+      # own (`longshot-builder dev release sources`), several compressed at once; each member whose raw bytes and zstd
+      # are the last release's is taken from that release's pack, kept by `dev release last-objects` above after its
+      # signed SHA256SUMS were checked (--reuse), the bytes compressing it again would give; then a copy of the program
+      # with it appended and read back (`dev release attach`), and that copy's headers checked: x86-64, glibc 2.35 at most, glibc's libraries only (its windows
       # load X11 or Wayland at run time))
       - name: longshot-builder-<version>-linux-x64
         run: |
@@ -215,7 +230,8 @@ jobs:
             --third-party-objects "$RUNNER_TEMP/third_party_objects" \
             --add "longshot-rs/prebuilt/linux-x64/liblongshot_rs.a=$RUNNER_TEMP/longshot-rs/linux-x64/liblongshot_rs.a" \
             --add "longshot-rs/prebuilt/linux-x64/sources.key=$RUNNER_TEMP/longshot-rs/linux-x64/sources.key" \
-            --add "third_party/renhdrum/renhdrum.so=$RUNNER_TEMP/renhdrum/renhdrum.so" --tools "$BUNDLE/tools"
+            --add "third_party/renhdrum/renhdrum.so=$RUNNER_TEMP/renhdrum/renhdrum.so" --tools "$BUNDLE/tools" \
+            --reuse "$RUNNER_TEMP/last-objects/sources.pack"
           "$RUNNER_TEMP/host/longshot-builder" dev release attach "$RUNNER_TEMP/host/longshot-builder" \
             "$RUNNER_TEMP/sources.pack" --out "dist/longshot-builder-$TAG-linux-x64"
           python3 -I scripts/longshot_builder.py check "dist/longshot-builder-$TAG-linux-x64"
@@ -249,20 +265,14 @@ jobs:
       # (an artifact goes to Forgejo by its public address, ROOT_URL, behind Cloudflare, whatever address the runner has: a
       # request there can fail once, and the action does not send a block again (2026-11-13, the launcher's nightly: one
       # 8 MB block, "SSL alert bad record mac"). Sent once more when it failed: Forgejo takes the same name again)
-      - name: Save the release's downloads (each checked by its SHA-256 when used)
-        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.release-cache.outputs.cache-hit != 'true'
-        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ${{ runner.temp }}/rust/*.tar.xz
-            ${{ runner.temp }}/rust/crates
-            ${{ runner.temp }}/tools-cache
-            ${{ runner.temp }}/link-tools/.cache
-          key: release-downloads-linux-${{ hashFiles('Cargo.lock', 'scripts/renhdrum.py', 'tools.lock') }}
       # (the uploads through the server's own address, RELEASE_UPLOAD_API's host on this runner's network, not git.magicbean.dev
       # behind Cloudflare, which cut a 306 MB upload with "tls alert bad record mac" (release run 54507): upload-artifact
       # talks to ACTIONS_RESULTS_URL, given here per step. When that fails, or the variable is unset, the upload goes the
       # usual way, then once more)
+      # (zipped stored, compression-level 0: dist/ is compressed already (the program is mostly its zstd pack, the deltas
+      # are zstd, RecompLauncher's zip holds the program), and zipping its 300 MB again at the default level took minutes
+      # of the runner's 2 cores for almost nothing. The tool, the program before its pack, is a plain program that zips to about half:
+      # level 1, the fastest)
       - name: The server's own address, for the uploads
         id: direct
         env:
@@ -285,6 +295,7 @@ jobs:
           name: longshot-builder-linux
           path: dist/
           if-no-files-found: error
+          compression-level: 0
       - name: Upload longshot-builder-linux
         id: upload_1
         if: steps.direct.outputs.url == '' || steps.upload_1_direct.outcome == 'failure'
@@ -294,6 +305,7 @@ jobs:
           name: longshot-builder-linux
           path: dist/
           if-no-files-found: error
+          compression-level: 0
       - name: Upload longshot-builder-linux (again, the first try having failed)
         if: steps.upload_1.outcome == 'failure'
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
@@ -301,6 +313,7 @@ jobs:
           name: longshot-builder-linux
           path: dist/
           if-no-files-found: error
+          compression-level: 0
       # (the program before its pack: build-windows.yml's tool, not a release file (publish takes the artifact above only))
       - name: Upload longshot-builder-linux-tool, through the server's own address
         id: upload_tool_1_direct
@@ -313,6 +326,7 @@ jobs:
           name: longshot-builder-linux-tool
           path: ${{ runner.temp }}/host/longshot-builder
           if-no-files-found: error
+          compression-level: 1
       - name: Upload longshot-builder-linux-tool
         id: upload_tool_1
         if: steps.direct.outputs.url == '' || steps.upload_tool_1_direct.outcome == 'failure'
@@ -322,6 +336,7 @@ jobs:
           name: longshot-builder-linux-tool
           path: ${{ runner.temp }}/host/longshot-builder
           if-no-files-found: error
+          compression-level: 1
       - name: Upload longshot-builder-linux-tool (again, the first try having failed)
         if: steps.upload_tool_1.outcome == 'failure'
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
@@ -329,3 +344,4 @@ jobs:
           name: longshot-builder-linux-tool
           path: ${{ runner.temp }}/host/longshot-builder
           if-no-files-found: error
+          compression-level: 1

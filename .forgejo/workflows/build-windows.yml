@@ -91,7 +91,7 @@ jobs:
             ${{ runner.temp }}/rust/crates
             ${{ runner.temp }}/tools-cache
             ${{ runner.temp }}/llvm/.cache
-          key: release-downloads-windows-${{ hashFiles('Cargo.lock', 'scripts/renhdrum.py', 'tools.lock') }}
+          key: release-downloads-windows-${{ hashFiles('Cargo.lock', 'third_party/renhdrum/Cargo.lock', 'scripts/renhdrum.py', 'builder/tools/pins.sh', 'tools.lock') }}
           restore-keys: release-downloads-windows-
       - name: llvm-mingw
         run: echo "LLVM_MINGW=$(python -I scripts/longshot_builder.py llvm-mingw "$RUNNER_TEMP/llvm" --host linux)" >> "$GITHUB_ENV"
@@ -191,7 +191,24 @@ jobs:
         with:
           path: ${{ runner.temp }}/rust-work/target
           key: release-rust-target-windows-dist-x86_64-pc-windows-gnullvm-${{ hashFiles('scripts/renhdrum.py') }}-${{ hashFiles('Cargo.lock') }}
-      # (what the program carries, each part a zstd member of its own (`longshot-builder dev release sources`), then the
+      # (saved as soon as the last download is made (the game's Rust, RenHDrum's and the program's: the pinned Rust with
+      # Windows' standard library, Cargo.lock's crates, RenHDrum's), not at the job's end: a later step that fails (the
+      # Wine checks, the deltas) then leaves the next run its downloads, where it saved none and the next run fetched the
+      # Rust and every crate again, one at a time. Its key names every pin of what it holds: the Rust (renhdrum.py), both
+      # Cargo.locks, llvm-mingw (builder/tools/pins.sh) and tools.lock)
+      - name: Save the release's downloads (each checked by its SHA-256 when used)
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.release-cache.outputs.cache-hit != 'true'
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/rust/*.tar.xz
+            ${{ runner.temp }}/rust/crates
+            ${{ runner.temp }}/tools-cache
+            ${{ runner.temp }}/llvm/.cache
+          key: release-downloads-windows-${{ hashFiles('Cargo.lock', 'third_party/renhdrum/Cargo.lock', 'scripts/renhdrum.py', 'builder/tools/pins.sh', 'tools.lock') }}
+      # (what the program carries, each part a zstd member of its own (`longshot-builder dev release sources`), several
+      # compressed at once, each whose raw bytes and zstd are the last release's taken from that release's pack, its
+      # signed SHA256SUMS checked by `dev release last-objects` above (--reuse); then the
       # program, the dist profile, compiled once, the pack appended to it and read back (`dev release attach`); checked:
       # x86-64, Windows' own DLLs only)
       - name: longshot-builder-<version>-windows-x64.exe
@@ -201,7 +218,8 @@ jobs:
             --third-party-objects "$RUNNER_TEMP/third_party_objects" \
             --add "longshot-rs/prebuilt/windows-x64/liblongshot_rs.a=$RUNNER_TEMP/longshot-rs/windows-x64/liblongshot_rs.a" \
             --add "longshot-rs/prebuilt/windows-x64/sources.key=$RUNNER_TEMP/longshot-rs/windows-x64/sources.key" \
-            --add "third_party/renhdrum/renhdrum.dll=$RUNNER_TEMP/renhdrum/renhdrum.dll" --tools "$BUNDLE/tools"
+            --add "third_party/renhdrum/renhdrum.dll=$RUNNER_TEMP/renhdrum/renhdrum.dll" --tools "$BUNDLE/tools" \
+            --reuse "$RUNNER_TEMP/last-objects/sources.pack"
           mkdir -p dist
           "$RUNNER_TEMP/host/longshot-builder" dev release attach "$RUNNER_TEMP/longshot-builder.exe" \
             "$RUNNER_TEMP/sources.pack" --out "dist/longshot-builder-$TAG-windows-x64.exe"
@@ -274,20 +292,13 @@ jobs:
 
       # (an artifact goes to Forgejo by its public address, ROOT_URL, behind Cloudflare: a request there can fail once, and
       # the action does not send a block again. Sent once more when it failed: Forgejo takes the same name again)
-      - name: Save the release's downloads (each checked by its SHA-256 when used)
-        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.release-cache.outputs.cache-hit != 'true'
-        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ${{ runner.temp }}/rust/*.tar.xz
-            ${{ runner.temp }}/rust/crates
-            ${{ runner.temp }}/tools-cache
-            ${{ runner.temp }}/llvm/.cache
-          key: release-downloads-windows-${{ hashFiles('Cargo.lock', 'scripts/renhdrum.py', 'tools.lock') }}
       # (the uploads through the server's own address, RELEASE_UPLOAD_API's host on this runner's network, not git.magicbean.dev
       # behind Cloudflare, which cut a 306 MB upload with "tls alert bad record mac" (release run 54507): upload-artifact
       # talks to ACTIONS_RESULTS_URL, given here per step. When that fails, or the variable is unset, the upload goes the
       # usual way, then once more)
+      # (zipped stored, compression-level 0: dist/ is compressed already (the program is mostly its zstd pack, the deltas
+      # are zstd, RecompLauncher's zip holds the program), and zipping its 300 MB again at the default level took minutes
+      # of the runner's 2 cores for almost nothing.)
       - name: The server's own address, for the uploads
         id: direct
         env:
@@ -310,6 +321,7 @@ jobs:
           name: longshot-builder-windows
           path: dist/
           if-no-files-found: error
+          compression-level: 0
       - name: Upload longshot-builder-windows
         id: upload_1
         if: steps.direct.outputs.url == '' || steps.upload_1_direct.outcome == 'failure'
@@ -319,6 +331,7 @@ jobs:
           name: longshot-builder-windows
           path: dist/
           if-no-files-found: error
+          compression-level: 0
       - name: Upload longshot-builder-windows (again, the first try having failed)
         if: steps.upload_1.outcome == 'failure'
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
@@ -326,3 +339,4 @@ jobs:
           name: longshot-builder-windows
           path: dist/
           if-no-files-found: error
+          compression-level: 0

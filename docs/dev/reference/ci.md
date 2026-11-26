@@ -104,11 +104,16 @@ pinned rustup for Rust. gitleaks is mise.toml's prebuilt release, run by pre-com
 
 ### The release's cache
 
-`build-linux.yml` and `build-windows.yml` keep `release-downloads-<platform>-<Cargo.lock, renhdrum.py, tools.lock>`: the
-downloads only, never anything unpacked or compiled. That is the pinned Rust's archives (`$RUNNER_TEMP/rust/*.tar.xz`),
-Cargo.lock's `.crate` files (`rust/crates`), tools.lock's archives (`tools-cache`; on Linux also `link-tools/.cache`, the llvm and sysroot that link the builder) and, on Windows, llvm-mingw's archive
-(`llvm/.cache`). It is restored and saved only by a run of `main` or a `v*` tag, on the server's release runner. A key
-change restores the newest entry for the platform.
+`build-linux.yml` and `build-windows.yml` keep `release-downloads-<platform>-<what pins them>`: the downloads only,
+never anything unpacked or compiled. That is the pinned Rust's archives (`$RUNNER_TEMP/rust/*.tar.xz`: the Linux host's
+rustc and cargo, and each target's standard library, Windows' too on Windows), the `.crate` files of `Cargo.lock` and
+`third_party/renhdrum/Cargo.lock` (`rust/crates`), tools.lock's archives (`tools-cache`; on Linux also
+`link-tools/.cache`, the llvm and sysroot that link the builder) and, on Windows, llvm-mingw's archive (`llvm/.cache`).
+The key hashes every file that pins them: both `Cargo.lock`s, `scripts/renhdrum.py` (the Rust), `tools.lock`, and on
+Windows `builder/tools/pins.sh` (llvm-mingw). It is restored and saved only by a run of `main` or a `v*` tag, on the
+server's release runner, and saved right after the job's last download (the Rust builds), not at its end, so a later
+step that fails still leaves the next run its downloads: otherwise that run fetches the Rust and every crate again, one
+at a time (about 4 minutes). A key change restores the newest entry for the platform.
 
 They keep one more, `release-rust-target-<platform>-dist-<target>-<renhdrum.py>-<Cargo.lock>`: cargo's target folder
 of the shipped builder's one compile (`$RUNNER_TEMP/rust-work/target`), restored right before it and saved right after
