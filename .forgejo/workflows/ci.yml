@@ -76,7 +76,7 @@ jobs:
       - name: The CI images
         id: image
         # (the public address, not github.server_url: a job's server_url is the forge inside the server, magicbean-git:3000,
-        # a name the Docker that starts the jobs' containers does not resolve, and the image is pulled by the host it names)
+        # a name the runner's container engine does not resolve, and the image is pulled by the host it names)
         run: scripts/linux/ci_image.sh image https://git.magicbean.dev
       - name: Check out the base's scripts (in base/)
         if: github.event_name == 'pull_request'
