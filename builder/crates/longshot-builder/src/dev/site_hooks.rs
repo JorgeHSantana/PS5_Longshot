@@ -177,7 +177,8 @@ fn wrapper(name: &str, a: u64, answer: Answer) -> String {
     // its caller's mark)
     w += "  %outer = load i32, ptr @site_hooks_mark\n";
     let _ = write!(w, "  store i32 0, ptr @site_hooks_mark\n  call void @f_{a:08x}(ptr %c)\n");
-    w += "  %m = load i32, ptr @site_hooks_mark\n  store i32 %outer, ptr @site_hooks_mark\n  %ran = icmp eq i32 %m, 1\n";
+    w +=
+        "  %m = load i32, ptr @site_hooks_mark\n  store i32 %outer, ptr @site_hooks_mark\n  %ran = icmp eq i32 %m, 1\n";
     match answer {
         Answer::None => w += "  ret i32 0\n",
         Answer::Returned => w += "  %r = xor i1 %ran, true\n  %a = zext i1 %r to i32\n  ret i32 %a\n",

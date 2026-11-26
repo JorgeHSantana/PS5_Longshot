@@ -88,7 +88,7 @@ class WindowsOnLinuxTests(unittest.TestCase):
         self.assertNotRegex(job, r"runs-on: *(release|deploy)")
         self.assertIn("system: linux-x64", job)
         self.assertIn("system: windows-x64", job)
-        self.assertEqual(job.count("compile --only renderer"), 2)
+        self.assertEqual(job.count("\"$BUILDER\" compile --only renderer"), 2)
         self.assertEqual(job.count("--upscaler fsr4"), 1)
         self.assertIn('grep -q "with AMD FSR 4"', job)
         # (a base whose ci_changes.py says no renderer= falls back to code=, then to everything)
