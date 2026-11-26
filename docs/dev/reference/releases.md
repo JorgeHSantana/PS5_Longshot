@@ -132,7 +132,8 @@ python -I ../Tooling/scripts/release.py channels   # what each channel offers no
 ### A nightly
 
 Nothing to do. A merge to `main` makes one, about 5 minutes after the last of several merges in a row (at least once
-an hour while merges keep coming). A push whose commits since the last nightly are only `ci:` or `chore:` makes none
+an hour while merges keep coming). When the newest nightly is an hour old or more, a merge's nightly starts at once,
+with no wait. A push whose commits since the last nightly are only `ci:` or `chore:` makes none
 (`release.py nightly-news`). If a nightly fails, read the failed step on the run (*Actions* > *Release*): fix code in a
 pull request, or *Re-run* for a runner or network failure. Players keep the last good nightly meanwhile.
 
