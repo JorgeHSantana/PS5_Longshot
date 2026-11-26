@@ -1,10 +1,11 @@
 # The checks of every pull request to main and every push to it (docs/dev/reference/ci.md): lint (pre-commit,
 # ShellCheck, actionlint); the third-party parts and the guide screenshots; the Rust workspace's checks (rustfmt, clippy,
 # cargo test, then the builder end to end on a synthetic game, from the same build); the host's C compiled for Windows
-# (scripts/check_host_compile.py, with llvm-mingw); tests/run_all.py's game-free checks, in 2 parts (the shader
-# recompiler's SPIR-V fixtures among them); the website's build and checks, whose dist/ is the pull request's preview
-# (website.yml). The title and the description are pr-description.yml's. No game data is involved. There is no Windows
-# runner: what only Windows can check is in docs/dev/reference/releases.md, "Windows tester".
+# (scripts/check_host_compile.py, with llvm-mingw); the renderer built alone for Linux and Windows, without and with AMD
+# FSR 4, when the change touches it (longshot-builder compile --only renderer); tests/run_all.py's game-free checks, in
+# 2 parts (the shader recompiler's SPIR-V fixtures among them); the website's build and checks, whose dist/ is the pull
+# request's preview (website.yml). The title and the description are pr-description.yml's. No game data is involved.
+# There is no Windows runner: what only Windows can check is in docs/dev/reference/releases.md, "Windows tester".
 #
 # The jobs that need tools run in a CI image (scripts/linux/checks.Dockerfile, its tools installed by
 # scripts/linux/ci_setup.sh): git.magicbean.dev/magicbeandev/longshot-ci-checks:<tag> (the compilers and Rust: rust,
@@ -51,6 +52,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       code: ${{ steps.files.outputs.code || 'true' }}
+      # (a base whose ci_changes.py says no renderer= takes code=)
+      renderer: ${{ steps.files.outputs.renderer || steps.files.outputs.code || 'true' }}
       checks: ${{ steps.image.outputs.checks }}
       checks_ready: ${{ steps.image.outputs.checks_ready }}
       lite: ${{ steps.image.outputs.lite }}
@@ -404,6 +407,157 @@ jobs:
         with:
           path: ${{ runner.temp }}/tools-cache
           key: windows-tools-downloads-${{ hashFiles('tools.lock') }}
+
+  # (the renderer alone, as a player's build compiles it (compile --only renderer: no lift, no game), for Linux and for
+  # Windows, without and with AMD FSR 4: a build check, which ships nothing (it was the release's, after its uploads).
+  # Only when the change touches what that compile reads (scripts/ci_changes.py's RENDERER); a push to main runs it. The
+  # builder is a developer's, cargo's dev build over the rust job's cache (read only); the compilers are tools.lock's,
+  # installed by it into the checkout (tools/<name>, where compile --root takes them): linux-x64's llvm, sysroot and CPM
+  # cache, or windows-x64's CPM cache with llvm-mingw's Linux build. The compiled objects are kept in a store per platform
+  # (an object's key is its compiler, flags, source and headers: build-compile's store.rs), read by every run and written
+  # by a push to main whose renderer files have no entry yet, from an empty store: an entry holds one tree's objects)
+  renderer:
+    needs: changes
+    if: needs.changes.outputs.renderer == 'true'
+    name: Renderer build check (${{ matrix.name }}, compile --only renderer, without and with FSR 4)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            system: linux-x64
+            tools: llvm sysroot cpm
+            module: longshot_vk.so
+          - name: Windows
+            system: windows-x64
+            tools: cpm
+            module: longshot_vk.dll
+    runs-on: ubuntu-24.04
+    container:
+      image: ${{ needs.changes.outputs.checks }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash   # (PIPESTATUS)
+    env:
+      RX_RELEASE: '1'
+      RX_MARCH: x86-64-v3
+      SYSTEM: ${{ matrix.system }}
+      MODULE: ${{ matrix.module }}
+    steps:
+      # (main's tree from this runner's cache, so that checkout fetches only what the commit adds; anything amiss, and it
+      # fetches all as before: scripts/ci_git_base.sh)
+      - uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/git-base
+          key: git-base
+      - name: Seed the checkout
+        env:
+          BASE: ${{ runner.temp }}/git-base
+          ORIGIN: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          tip=$(git --git-dir="$BASE" rev-parse -q --verify 'refs/heads/base^{commit}' 2> /dev/null) || exit 0
+          if git init -q . && git remote add origin "$ORIGIN" && cp "$BASE/shallow" .git/shallow &&
+            echo "$BASE/objects" > .git/objects/info/alternates && git update-ref --no-deref HEAD "$tip"; then
+            echo "main's ${tip:0:12} as the checkout's base"
+          else
+            rm -rf .git
+          fi
+      - name: Check out source
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The checkout's own objects
+        run: scripts/ci_git_base.sh dissociate
+      - name: The tools (no CI image for this commit yet)
+        if: needs.changes.outputs.checks_ready != 'true'
+        run: scripts/linux/ci_setup.sh --github-env --image checks
+      - name: The Rust version and llvm-mingw's
+        id: versions
+        run: |
+          echo "rust=$(sed -n 's/^rust = { version = "\([0-9.]*\)".*/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+          echo "llvm=$(python3 -I scripts/longshot_builder.py llvm-mingw --name --host linux)" >> "$GITHUB_OUTPUT"
+      # (the rust job's cache, read only: the builder below is cargo's dev build of the same registry crates)
+      - uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            /opt/cargo/registry/index
+            /opt/cargo/registry/cache
+            target
+          key: rust-deps-${{ steps.versions.outputs.rust }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: rust-deps-${{ steps.versions.outputs.rust }}-
+      - name: longshot-builder (a developer's build)
+        run: |
+          cargo build --locked -q -p longshot-builder
+          echo "BUILDER=$PWD/target/debug/longshot-builder" >> "$GITHUB_ENV"
+      # (the downloads only, tools.lock's archives and llvm-mingw's, each checked by its size and SHA-256 when taken: read
+      # by every run, written only by a push to main, when missing)
+      - id: tools-cache
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/tools-cache
+          key: renderer-tools-downloads-${{ matrix.system }}-${{ hashFiles('tools.lock') }}
+      - name: The build tools (tools.lock, ${{ matrix.system }})
+        env:
+          TOOLS: ${{ matrix.tools }}
+        run: |
+          # shellcheck disable=SC2086   # (the tools' names, one word each)
+          "$BUILDER" dev tools install "$PWD" --system "$SYSTEM" --cache "$RUNNER_TEMP/tools-cache" --only $TOOLS
+      - id: llvm-cache
+        if: matrix.system == 'windows-x64'
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/llvm/.cache
+          key: ${{ steps.versions.outputs.llvm }}-archive
+      - name: llvm-mingw
+        if: matrix.system == 'windows-x64'
+        run: |
+          echo "LONGSHOT_MINGW=$(python3 -I scripts/longshot_builder.py llvm-mingw "$RUNNER_TEMP/llvm" --host linux)" >> "$GITHUB_ENV"
+          echo "RX_TARGET=windows" >> "$GITHUB_ENV"
+      # (main's objects for these renderer files, else the newest main left; a push to main reads only its own entry)
+      - name: The object store's key
+        id: store
+        env:
+          FILES: ${{ hashFiles('gpu/**', 'host/**', 'game/**/*.h', 'third_party/**', 'assets/longshot.png', 'assets/profiles/**', 'builder/**', 'Cargo.lock', 'tools.lock') }}
+        run: |
+          echo "prefix=renderer-store-$SYSTEM-" >> "$GITHUB_OUTPUT"
+          echo "key=renderer-store-$SYSTEM-$FILES" >> "$GITHUB_OUTPUT"
+      - id: store-restore
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vk-store
+          key: ${{ steps.store.outputs.key }}
+          restore-keys: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && steps.store.outputs.prefix || '' }}
+      - name: ${{ matrix.module }}
+        run: |
+          "$BUILDER" compile --only renderer --work "$RUNNER_TEMP/vk-work" --root "$PWD" --store "$RUNNER_TEMP/vk-store" \
+            --jobs "$(nproc)" | tee "$RUNNER_TEMP/vk.log"
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -q "with AMD FSR 4" "$RUNNER_TEMP/vk.log"; then echo "::error::built with AMD FSR 4 unasked"; exit 1; fi
+          ls -l "$RUNNER_TEMP/vk-work/build/$MODULE"
+      - name: ${{ matrix.module }} with AMD FSR 4
+        if: ${{ !cancelled() }}
+        run: |
+          "$BUILDER" compile --only renderer --work "$RUNNER_TEMP/vk-fsr" --root "$PWD" --store "$RUNNER_TEMP/vk-store" \
+            --jobs "$(nproc)" --upscaler fsr4 | tee "$RUNNER_TEMP/vk-fsr.log"
+          test "${PIPESTATUS[0]}" -eq 0
+          grep -q "with AMD FSR 4" "$RUNNER_TEMP/vk-fsr.log"
+          ls -l "$RUNNER_TEMP/vk-fsr/build/$MODULE"
+      - if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.store-restore.outputs.cache-hit != 'true' }}
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vk-store
+          key: ${{ steps.store.outputs.key }}
+      - if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.tools-cache.outputs.cache-hit != 'true' }}
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/tools-cache
+          key: renderer-tools-downloads-${{ matrix.system }}-${{ hashFiles('tools.lock') }}
+      - if: ${{ !cancelled() && matrix.system == 'windows-x64' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.llvm-cache.outputs.cache-hit != 'true' }}
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/llvm/.cache
+          key: ${{ steps.versions.outputs.llvm }}-archive
 
   # (every game-free check, tests/run_all.py --strict, in 2 parts at once (--shard, split by tests/run_all_times.json):
   # each check is in exactly one part; the shader recompiler's SPIR-V fixtures are three of them. Not skipped by

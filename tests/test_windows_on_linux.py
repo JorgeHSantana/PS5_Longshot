@@ -1,7 +1,8 @@
 """Game-free checks that Longshot's Windows files are made on the Linux runner (docs/dev/reference/ci.md: there is no Windows
 one): no workflow asks for a Windows runner, which would queue forever and hold a release; the Linux llvm-mingw that compiles
 them is tools.lock's release; the Windows longshot-builder's job checks what it made and the bundle's dav1d (no dav1d is
-built in CI); and a tag whose commit CI released already skips only the checks that ship no file.
+built in CI); and the Vulkan back end's build check, which ships nothing, is ci.yml's (Linux and Windows, without and
+with AMD FSR 4, when a change touches the renderer), not a release's.
 
 Run with: python -I tests/test_windows_on_linux.py
 """
@@ -60,29 +61,46 @@ class WindowsOnLinuxTests(unittest.TestCase):
         wf = (WORKFLOWS / "build-windows.yml").read_text(encoding="utf-8")
         self.assertNotIn("dav1d.sh", wf)
         self.assertNotIn("meson", wf)
-        package = wf[wf.index("\n  package:"):]   # (its only job: the Vulkan build check is a step of it)
+        package = wf[wf.index("\n  package:"):]   # (its only job)
         self.assertIn('dev tools install "$PWD" --system windows-x64', package)
         self.assertRegex(package, r"tests/test_dav1d_av1\.py --cross \"\$LLVM_MINGW/bin/x86_64-w64-mingw32-clang\" \\\n\s+--run ")
         self.assertLess(package.index("Wine, installed"), package.index("test_dav1d_av1.py"))
         self.assertTrue((ROOT / "builder" / "tools" / "windows-x64" / "dav1d.sh").is_file())
 
-    def test_a_released_commit_skips_only_the_checks(self):
-        # (release.yml's checked: a tag's commit CI released already skips the build checks that ship no file; the files,
-        # which carry the version, are always built)
+    def test_the_back_end_is_checked_in_ci_not_in_a_release(self):
+        # (the Vulkan back end alone, which ships nothing, is built by ci.yml's renderer job on the pull request runners,
+        # for Linux and for Windows, without and with AMD FSR 4; a release builds only what it ships, so nothing of a
+        # release's skips it)
         release = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
-        self.assertIn('"$RELEASE_PY" released-as "$ref" --not "$tag"', release)
-        self.assertEqual(release.count("checked: ${{ needs.version.outputs.checked }}"), 2)
-        windows = (WORKFLOWS / "build-windows.yml").read_text(encoding="utf-8")
-        # (the Windows Vulkan build check, once a job of its own, is the package job's last step: the only one gated, the
-        # files' steps all run)
-        package = windows[windows.index("\n  package:"):]
-        gated = re.findall(r"- name: (.*)\n\s+if: env\.RELEASE_CHECKED == ''", package)
-        self.assertEqual(gated, ["longshot_vk.dll (build check)"])
-        self.assertEqual(package.count("RELEASE_CHECKED"), 1)
-        self.assertNotIn("RELEASE_CHECKED", package[:package.index("- name: longshot_vk.dll (build check)")])
-        linux = (WORKFLOWS / "build-linux.yml").read_text(encoding="utf-8")
-        gated = re.findall(r"- name: (.*)\n\s+if: env\.RELEASE_CHECKED == ''", linux)
-        self.assertEqual(gated, ["longshot_vk.so (build check)", "longshot_vk.so with AMD FSR 4 (build check)"])
+        self.assertNotIn("released-as", release)
+        self.assertNotIn("outputs.checked", release)
+        for name in ("build-linux.yml", "build-windows.yml"):
+            text = (WORKFLOWS / name).read_text(encoding="utf-8")
+            with self.subTest(name):
+                self.assertNotIn("compile --only renderer", text)
+                self.assertNotIn("RELEASE_CHECKED", text)
+                self.assertNotIn("inputs.checked", text)
+        ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+        job = ci[ci.index("\n  renderer:\n"):]
+        job = job[:job.index("\n\n  # ")]
+        self.assertIn("if: needs.changes.outputs.renderer == 'true'", job)
+        self.assertIn("runs-on: ubuntu-24.04", job)
+        self.assertNotRegex(job, r"runs-on: *(release|deploy)")
+        self.assertIn("system: linux-x64", job)
+        self.assertIn("system: windows-x64", job)
+        self.assertEqual(job.count("compile --only renderer"), 2)
+        self.assertEqual(job.count("--upscaler fsr4"), 1)
+        self.assertIn('grep -q "with AMD FSR 4"', job)
+        # (a base whose ci_changes.py says no renderer= falls back to code=, then to everything)
+        self.assertIn("renderer: ${{ steps.files.outputs.renderer || steps.files.outputs.code || 'true' }}", ci)
+        changes = module("ci_changes_under_test", ROOT / "scripts" / "ci_changes.py")
+        for f in ("gpu/vk/vk_draw.cpp", "host/hos_tracy.h", "host/posix/win32_posix.c", "tools.lock", "builder/Cargo.toml",
+                  "third_party/imgui/imgui.cpp", ".forgejo/workflows/ci.yml"):
+            self.assertTrue(changes.needs_renderer([f]), f)
+        for f in ("docs/dev/reference/ci.md", "host/hos_main.c", "game/phases.c", "website/index.html",
+                  ".forgejo/workflows/release.yml"):
+            self.assertFalse(changes.needs_renderer([f]), f)
+        self.assertTrue(changes.needs_renderer([]))   # (no file: unsure, it runs)
 
 
 if __name__ == "__main__":

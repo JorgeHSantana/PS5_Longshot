@@ -13,19 +13,16 @@
 #    store with its size and SHA-256), before it uploads anything; publish needs both builds, so a refusal ships nothing.
 #    A release only downloads the pinned tools: the Make tools workflow (tools.yml, started by hand) makes and uploads
 #    them, never a release.
-#    A tag whose commit CI has released already (for a stable, the nightly of its commit) names that release in
-#    `checked` (Tooling's scripts/release.py released-as: published, its SHA256SUMS signed by a key the launcher trusts and naming its
-#    every file; one that is not stops the run). Its run passed every check of the commit, so the build checks that ship
-#    no file are not run again. Its files are not reused: each carries its version (the VERSION in what longshot-builder
-#    carries), and a release never ships a file that names another version.
+#    A tag on a commit CI has released already (for a stable, the nightly of its commit) reuses none of its files: each
+#    carries its version (the VERSION in what longshot-builder carries), and a release never ships a file that names
+#    another version. The back end's build checks, which ship no file, are CI's (ci.yml's renderer job), not a release's.
 #    The builds take every tool from the store (`longshot-builder dev tools install`) into what longshot-builder carries.
 # 2. linux, windows (build-linux.yml, build-windows.yml), per platform p (linux-x64, windows-x64):
 #    longshot-builder-<v>-<p> (.exe on Windows), the deltas to it from the channel's last 5 releases,
 #    longshot-builder-<from>-to-<v>-<p>.zst-patch, its manifest, longshot-builder-<v>-<p>.json, and RecompLauncher's
 #    longshot-builder-<v>-<p>-recomplauncher.zip (the program as Longshot.exe or Longshot.x86_64, and recomplauncher.json)
 #    (`longshot-builder dev release files` and `recomplauncher`, run by the Linux job's longshot-builder before its pack
-#    is attached; windows runs after linux and takes that program as its tool), uploaded
-#    before any build check runs. They run only on the server's release runner (scripts/ci_release_runner.sh) and restore
+#    is attached; windows runs after linux and takes that program as its tool), uploaded. They run only on the server's release runner (scripts/ci_release_runner.sh) and restore
 #    only the release's own cache, of downloads each checked by its SHA-256 when used (docs/dev/reference/ci.md).
 # 3. publish: SHA256SUMS over the builds' files and tools.lock, SHA256SUMS.sig (the release key), the notes (git-cliff,
 #    cliff.toml), then a draft release with every file, published last: until then no launcher sees it. A nightly also
@@ -65,7 +62,6 @@ jobs:
     outputs:
       tag: ${{ steps.name.outputs.tag }}
       ref: ${{ steps.name.outputs.ref }}
-      checked: ${{ steps.name.outputs.checked }}
     steps:
       - name: Check out the commit, with its history
         uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -89,11 +85,6 @@ jobs:
           if [[ $GITHUB_REF == refs/tags/* ]]; then
             tag=${GITHUB_REF#refs/tags/}
             python3 -I "$RELEASE_PY" check-tag "$tag" --main origin/main
-            # (the release CI made of this commit already, checked: its build checks are not run again; it stops here when
-            # a release of this commit is not signed or not whole)
-            checked=$(python3 -I "$RELEASE_PY" released-as "$ref" --not "$tag")
-            echo "checked=$checked" >> "$GITHUB_OUTPUT"
-            [[ -z $checked ]] || echo "::notice::$checked is this commit's release: its build checks are not run again"
           else
             # (merges in a row build one nightly: the release runs queue one at a time, and a nightly whose commit is still
             # main's waits 5 minutes for more. One whose commit is no longer main's, then or before, skips: the newer one
@@ -148,7 +139,6 @@ jobs:
     with:
       tag: ${{ needs.version.outputs.tag }}
       ref: ${{ needs.version.outputs.ref }}
-      checked: ${{ needs.version.outputs.checked }}
 
   windows:
     name: longshot-builder (Windows)
@@ -160,7 +150,6 @@ jobs:
     with:
       tag: ${{ needs.version.outputs.tag }}
       ref: ${{ needs.version.outputs.ref }}
-      checked: ${{ needs.version.outputs.checked }}
 
   publish:
     name: Sign and publish

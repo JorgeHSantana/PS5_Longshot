@@ -3,15 +3,14 @@
 # player's PC builds the game with: the sources, the release's third-party objects, RenHDrum's DLL and the build tools
 # (tools.lock's windows-x64 bundle), unpacked into its cache at the first use (build-driver's sources.rs). No game data is
 # involved. Called by release.yml with the version's name, it also makes the deltas from the channel's last releases, the
-# release's manifest and RecompLauncher's zip for this platform, all uploaded before any build check runs. It restores
-# only the release's own caches (docs/dev/reference/ci.md, The release's cache). The Windows Vulkan back end is compiled too: players build it on their PC,
-# this only checks that it still builds; a tag whose commit CI released already (release.yml's `checked`) skips that
-# check, which ships nothing.
+# release's manifest and RecompLauncher's zip for this platform, all uploaded. It restores only the release's own caches
+# (docs/dev/reference/ci.md, The release's cache). Players build the Windows Vulkan back end on their PC; that it still
+# builds is CI's check (ci.yml's renderer job), not a release's.
 # Every job runs on a Linux runner (label release): there is no Windows one (docs/dev/reference/ci.md). Everything is
 # cross-compiled with llvm-mingw's Linux build of tools.lock's release (scripts/longshot_builder.py llvm-mingw, pinned in builder/tools/pins.sh);
 # the Linux job's longshot-builder (build-linux.yml's program before its pack, an artifact: release.yml runs this job
-# after that one) is this job's tool, so no builder is compiled for it: it makes the third-party objects, the pack and
-# the back end, and appends the pack to the Windows program, which is compiled once; that is started under Wine.
+# after that one) is this job's tool, so no builder is compiled for it: it makes the third-party objects and the pack,
+# and appends the pack to the Windows program, which is compiled once; that is started under Wine.
 name: longshot-builder (Windows)
 
 on:
@@ -26,11 +25,6 @@ on:
         description: the commit to build
         type: string
         required: true
-      checked:
-        description: a published release of the same commit (scripts/release.py released-as), whose run passed the build check below that ships no file; it is not run again
-        type: string
-        required: false
-        default: ''
 
 permissions:
   contents: read
@@ -38,8 +32,6 @@ permissions:
 env:
   # (the version this run is for, from the Release workflow)
   RELEASE_TAG: ${{ inputs.tag }}
-  # (a published release of the same commit, when there is one: the Vulkan back end, checked in its run, is not built again)
-  RELEASE_CHECKED: ${{ inputs.checked }}
 
 concurrency:
   # (a fixed name: when called, github.workflow is the caller's)
@@ -334,17 +326,3 @@ jobs:
           name: longshot-builder-windows
           path: dist/
           if-no-files-found: error
-
-      # (a build check, which ships nothing, after the upload as build-linux.yml's: the Windows Vulkan back end alone
-      # (compile --only renderer: no lift, no game), as a player's Windows build compiles it, with tools.lock's
-      # windows-x64 CPM cache (installed above) and the Linux longshot-builder, into an object store of
-      # this run's own. It was a job of its own, which built that builder a second time)
-      - name: longshot_vk.dll (build check)
-        if: env.RELEASE_CHECKED == ''
-        env:
-          RX_RELEASE: '1'
-          RX_TARGET: windows
-        run: |
-          LONGSHOT_MINGW="$LLVM_MINGW" RX_CPM="$BUNDLE/tools/cpm" "$RUNNER_TEMP/host/longshot-builder" compile --only renderer \
-            --work "$RUNNER_TEMP/vk-work" --store "$RUNNER_TEMP/vk-store" --root "$PWD" --jobs "$(nproc)"
-          ls -l "$RUNNER_TEMP/vk-work/build/longshot_vk.dll"

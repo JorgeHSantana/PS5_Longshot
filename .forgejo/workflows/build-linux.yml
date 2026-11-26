@@ -5,13 +5,13 @@
 # it builds is for (glibc 2.35: RenHDrum's library is linked here). No game data is involved.
 # Called by release.yml with the version's name, it also makes the deltas from the channel's last releases and the
 # release's manifest for this platform (`longshot-builder dev release files`) and RecompLauncher's zip (`dev release
-# recomplauncher`), and uploads them before the build checks. The program is compiled once: before its pack is attached
+# recomplauncher`), and uploads them. The program is compiled once: before its pack is attached
 # (`dev release attach`) it is this job's tool for all of it, and build-windows.yml's (an artifact). It runs only on the server's
 # release runner (scripts/ci_release_runner.sh), checks tools.lock with that builder before anything is uploaded, and
 # restores only the release's own caches: downloads, each checked by its SHA-256 when used, and for a run of main or a
 # v* tag the builder's compiled Rust (docs/dev/reference/ci.md, The release's cache). It carries the version, so a tag
-# always builds it again; a tag whose commit CI released already (release.yml's `checked`) skips only the build checks
-# that ship nothing (the back end, without and with AMD FSR 4).
+# always builds it again. The back end's build checks, which ship nothing, are CI's (ci.yml's renderer job), not a
+# release's.
 name: longshot-builder (Linux)
 on:
   # (called by the Release workflow only, with the version's name)
@@ -25,18 +25,11 @@ on:
         description: the commit to build
         type: string
         required: true
-      checked:
-        description: a published release of the same commit (scripts/release.py released-as), whose run passed the build check that ships no file (AMD FSR 4); it is not run again
-        type: string
-        required: false
-        default: ''
 permissions:
   contents: read
 env:
   # (the version this run is for, from the Release workflow)
   RELEASE_TAG: ${{ inputs.tag }}
-  # (a published release of the same commit, when there is one: the back end's build checks, passed in its run, are not run again)
-  RELEASE_CHECKED: ${{ inputs.checked }}
 concurrency:
   group: longshot-builder-linux-${{ inputs.tag }}
 
@@ -140,8 +133,8 @@ jobs:
       # (the program this release ships, the dist profile, compiled once, before it carries anything: linked by tools.lock's
       # clang (lld) against tools.lock's sysroot, glibc 2.35, the game's floor, which the build checks. Until its pack is attached
       # it is this job's tool: it installs the tools, makes the third-party objects from the checkout (--root), packs what
-      # the release carries, runs the dry run, makes the deltas and the manifest (`dev release`) and builds the back
-      # end's checks; build-windows.yml takes it too, uploaded below)
+      # the release carries, runs the dry run, makes the deltas and the manifest (`dev release`); build-windows.yml takes
+      # it too, uploaded below)
       - name: longshot-builder-<version>-linux-x64, before its pack
         run: >-
           python3 -I scripts/longshot_builder.py build --target linux --profile dist --cache "$RUNNER_TEMP/rust"
@@ -255,8 +248,7 @@ jobs:
 
       # (an artifact goes to Forgejo by its public address, ROOT_URL, behind Cloudflare, whatever address the runner has: a
       # request there can fail once, and the action does not send a block again (2026-11-13, the launcher's nightly: one
-      # 8 MB block, "SSL alert bad record mac"). Sent once more when it failed: Forgejo takes the same name again. Sent
-      # before the build checks below, which ship nothing)
+      # 8 MB block, "SSL alert bad record mac"). Sent once more when it failed: Forgejo takes the same name again)
       - name: Save the release's downloads (each checked by its SHA-256 when used)
         if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.release-cache.outputs.cache-hit != 'true'
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -337,23 +329,3 @@ jobs:
           name: longshot-builder-linux-tool
           path: ${{ runner.temp }}/host/longshot-builder
           if-no-files-found: error
-
-      # (the back end alone (compile --only renderer: no lift, no game), as a player's build compiles it, without and with
-      # AMD FSR 4, into an object store of this run's own: no cache here either, in the job that makes the release's
-      # files (a cache's key is anyone's to save first). RX_MARCH=x86-64-v3, as a player's release build)
-      - name: longshot_vk.so (build check)
-        if: env.RELEASE_CHECKED == ''
-        run: |
-          RX_MARCH=x86-64-v3 RX_RELEASE=1 "$RUNNER_TEMP/host/longshot-builder" compile --only renderer \
-            --work build-linux/vk-work --root "$PWD" --store build-linux/vk-store --jobs "$(nproc)"
-          test -f build-linux/vk-work/build/longshot_vk.so
-      - name: longshot_vk.so with AMD FSR 4 (build check)
-        if: env.RELEASE_CHECKED == ''
-        shell: bash   # (this container's default is sh, which has no PIPESTATUS)
-        run: |
-          RX_MARCH=x86-64-v3 RX_RELEASE=1 "$RUNNER_TEMP/host/longshot-builder" compile --only renderer \
-            --work "$RUNNER_TEMP/vk-fsr" --root "$PWD" --store build-linux/vk-store --jobs "$(nproc)" --upscaler fsr4 |
-            tee "$RUNNER_TEMP/vk-fsr.log"
-          test "${PIPESTATUS[0]}" -eq 0
-          grep -q "with AMD FSR 4" "$RUNNER_TEMP/vk-fsr.log"
-          test -f "$RUNNER_TEMP/vk-fsr/build/longshot_vk.so"

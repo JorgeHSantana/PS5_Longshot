@@ -1,8 +1,8 @@
 """Game-free checks of the release's workflows (.forgejo/workflows/release.yml, build-linux.yml, build-windows.yml;
 docs/dev/reference/releases.md) and of the Make tools workflow (tools.yml): the jobs on the deploy runner, which opens the
 sealed secrets, compile no Rust and run no program the checkout builds, and give each secret to the steps that use it
-only; the jobs that make the release's files run only on the server's release runner, restore only their own caches (downloads, and the builder's compiled Rust for trusted runs) and upload
-the release's files before any build check runs; each build checks tools.lock before it uploads anything; a release uploads no tool and stops on a line whose archive is not in the store;
+only; the jobs that make the release's files run only on the server's release runner, restore only their own caches (downloads, and the builder's compiled Rust for trusted runs) and build
+nothing they don't ship (the back end's build check is ci.yml's); each build checks tools.lock before it uploads anything; a release uploads no tool and stops on a line whose archive is not in the store;
 tools.yml uploads only on main, what its make job made twice; and scripts/ci_tools_publish.py refuses an archive whose
 version tools.lock names with other bytes before it uploads anything. Reads the files, runs nothing over the network.
 
@@ -96,7 +96,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("secrets.PACKAGES_TOKEN_SEALED", publish)
         self.assertIn("enable-openid-connect: true", publish)
 
-    def test_the_builds_restore_only_their_downloads_and_upload_before_the_checks(self):
+    def test_the_builds_restore_only_their_downloads_and_check_nothing_they_dont_ship(self):
         for name, artifact in (("build-linux.yml", "longshot-builder-linux"), ("build-windows.yml", "longshot-builder-windows")):
             workflow = text(name)
             with self.subTest(name):
@@ -129,9 +129,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 upload = workflow.index("name: " + artifact)
                 for made in ("dev release files", "dev release recomplauncher"):
                     self.assertLess(workflow.index(made), upload)
-                # (every build check after the upload: what it runs can't change what ships)
-                for check in re.finditer(r"compile --only renderer", workflow):
-                    self.assertGreater(check.start(), upload)
+                # (no build check that ships nothing: the back end's is ci.yml's renderer job)
+                self.assertNotIn("compile --only renderer", workflow)
         self.assertEqual(sorted(jobs(text("build-windows.yml"))), ["package"])
 
     def test_the_builder_is_compiled_once_per_platform(self):
@@ -164,7 +163,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
     def test_the_third_party_objects_seed_from_the_last_signed_release(self):
         # (dev release last-objects checks the release's signed SHA256SUMS first; the set it writes reaches the one
-        # compile that makes the release's set, never a later step (the build checks compile everything themselves))
+        # compile that makes the release's set, never a later step)
         for name, platform in (("build-linux.yml", "linux-x64"), ("build-windows.yml", "windows-x64")):
             wf = text(name)
             with self.subTest(name):
