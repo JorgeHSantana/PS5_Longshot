@@ -128,8 +128,8 @@ jobs:
         uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/rust-work/target
-          key: release-rust-target-linux-dist-x86_64-unknown-linux-gnu-${{ hashFiles('scripts/renhdrum.py') }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: release-rust-target-linux-dist-x86_64-unknown-linux-gnu-${{ hashFiles('scripts/renhdrum.py') }}-
+          key: release-rust-target-linux-dist-x86_64-unknown-linux-gnu-${{ hashFiles('scripts/renhdrum.py', 'Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: release-rust-target-linux-dist-x86_64-unknown-linux-gnu-${{ hashFiles('scripts/renhdrum.py', 'Cargo.toml') }}-
       # (the program this release ships, the dist profile, compiled once, before it carries anything: linked by tools.lock's
       # clang (lld) against tools.lock's sysroot, glibc 2.35, the game's floor, which the build checks. Until its pack is attached
       # it is this job's tool: it installs the tools, makes the third-party objects from the checkout (--root), packs what
@@ -145,7 +145,7 @@ jobs:
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/rust-work/target
-          key: release-rust-target-linux-dist-x86_64-unknown-linux-gnu-${{ hashFiles('scripts/renhdrum.py') }}-${{ hashFiles('Cargo.lock') }}
+          key: release-rust-target-linux-dist-x86_64-unknown-linux-gnu-${{ hashFiles('scripts/renhdrum.py', 'Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}
 
       # (every tool the Windows and the Linux builder carry is in tools.lock, every line's first URLs Longshot's store's,
       # and every line's archive there with its size and SHA-256: checked here, with the builder above, before anything

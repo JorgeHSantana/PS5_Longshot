@@ -113,7 +113,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                     if "key: release-rust-target-" in step:
                         kinds.add("rust-target")
                         self.assertIn("path: ${{ runner.temp }}/rust-work/target\n", step)
-                        self.assertRegex(step, r"key: release-rust-target-(linux|windows)-dist-[a-z0-9_-]+-\$\{\{ hashFiles\('scripts/renhdrum\.py'\) \}\}-\$\{\{ hashFiles\('Cargo\.lock'\) \}\}\n")
+                        self.assertRegex(step, r"key: release-rust-target-(linux|windows)-dist-[a-z0-9_-]+-\$\{\{ hashFiles\('scripts/renhdrum\.py', 'Cargo\.toml'\) \}\}-\$\{\{ hashFiles\('Cargo\.lock'\) \}\}\n")
                         continue
                     self.assertRegex(step, r"key: release-downloads-")
                     kinds.add("downloads")

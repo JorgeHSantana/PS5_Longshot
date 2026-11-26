@@ -115,7 +115,7 @@ server's release runner, and saved right after the job's last download (the Rust
 step that fails still leaves the next run its downloads: otherwise that run fetches the Rust and every crate again, one
 at a time (about 4 minutes). A key change restores the newest entry for the platform.
 
-They keep one more, `release-rust-target-<platform>-dist-<target>-<renhdrum.py>-<Cargo.lock>`: cargo's target folder
+They keep one more, `release-rust-target-<platform>-dist-<target>-<renhdrum.py and Cargo.toml>-<Cargo.lock>` (Cargo.toml for its profiles: an entry compiled with another `[profile.dist]` is never restored, and the new one is saved): cargo's target folder
 of the shipped builder's one compile (`$RUNNER_TEMP/rust-work/target`), restored right before it and saved right after
 it, by the same runs only. Another Cargo.lock restores the newest entry for the same platform, profile, target and
 pinned Rust (`scripts/renhdrum.py` pins it); another Rust starts cold. Cargo compiles again whatever its fingerprints

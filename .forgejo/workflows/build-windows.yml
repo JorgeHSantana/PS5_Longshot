@@ -178,8 +178,8 @@ jobs:
         uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/rust-work/target
-          key: release-rust-target-windows-dist-x86_64-pc-windows-gnullvm-${{ hashFiles('scripts/renhdrum.py') }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: release-rust-target-windows-dist-x86_64-pc-windows-gnullvm-${{ hashFiles('scripts/renhdrum.py') }}-
+          key: release-rust-target-windows-dist-x86_64-pc-windows-gnullvm-${{ hashFiles('scripts/renhdrum.py', 'Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: release-rust-target-windows-dist-x86_64-pc-windows-gnullvm-${{ hashFiles('scripts/renhdrum.py', 'Cargo.toml') }}-
       # (the program this release ships, the dist profile, compiled once, before it carries anything)
       - name: longshot-builder-<version>-windows-x64.exe, before its pack
         run: >-
@@ -190,7 +190,7 @@ jobs:
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/rust-work/target
-          key: release-rust-target-windows-dist-x86_64-pc-windows-gnullvm-${{ hashFiles('scripts/renhdrum.py') }}-${{ hashFiles('Cargo.lock') }}
+          key: release-rust-target-windows-dist-x86_64-pc-windows-gnullvm-${{ hashFiles('scripts/renhdrum.py', 'Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}
       # (saved as soon as the last download is made (the game's Rust, RenHDrum's and the program's: the pinned Rust with
       # Windows' standard library, Cargo.lock's crates, RenHDrum's), not at the job's end: a later step that fails (the
       # Wine checks, the deltas) then leaves the next run its downloads, where it saved none and the next run fetched the
