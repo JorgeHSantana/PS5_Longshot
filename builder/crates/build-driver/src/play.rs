@@ -236,7 +236,37 @@ pub fn game_folder(version: &Path, mods: Option<&str>) -> PathBuf {
 
 /// The default profile of the version folder at `version`.
 pub fn default_profile(version: &Path) -> PathBuf {
-    version.join(PROFILE)
+    default_profile_with(version, crate::env_os)
+}
+
+fn default_profile_with(version: &Path, get: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
+    default_profile_for(version, cfg!(windows), get)
+}
+
+fn default_profile_for(version: &Path, windows: bool, get: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
+    if let Some((data, _)) = crate::layout::portable_launcher_folders(version) {
+        return data.join("profiles/default");
+    }
+    let local = version.join(PROFILE);
+    if crate::layout::populated(&local) {
+        return local;
+    }
+    let absolute = |key| get(key).map(PathBuf::from).filter(|p| p.is_absolute());
+    let (old, shared) = if windows {
+        let Some(base) = absolute("LOCALAPPDATA").or_else(|| absolute("USERPROFILE").map(|p| p.join("AppData/Local")))
+        else {
+            return local;
+        };
+        (base.join("LongshotLauncher/profiles/default"), base.join("Longshot/data/profiles/default"))
+    } else if cfg!(target_os = "linux") {
+        let Some(base) = absolute("XDG_DATA_HOME").or_else(|| absolute("HOME").map(|p| p.join(".local/share"))) else {
+            return local;
+        };
+        (base.join("longshot/launcher/profiles/default"), base.join("longshot/profiles/default"))
+    } else {
+        return local;
+    };
+    if crate::layout::populated(&old) { old } else { shared }
 }
 
 /// The saves folder of profile `profile`: its `saves/`.
@@ -632,6 +662,50 @@ mod tests {
     use crate::scratch;
 
     #[test]
+    fn fresh_windows_versions_and_the_launcher_share_a_profile() {
+        let local = crate::scratch("windows-default-profile");
+        let version = local.join("version");
+        let get = |key: &str| (key == "LOCALAPPDATA").then(|| local.as_os_str().to_owned());
+        assert_eq!(default_profile_for(&version, true, get), local.join("Longshot/data/profiles/default"));
+        for existing in [local.join("LongshotLauncher/profiles/default"), version.join("profile")] {
+            std::fs::create_dir_all(&existing).unwrap();
+            std::fs::write(existing.join("profile.json"), "{}").unwrap();
+            assert_eq!(default_profile_for(&version, true, get), existing);
+        }
+        std::fs::remove_dir_all(local).unwrap();
+    }
+
+    #[test]
+    fn a_portable_launchers_version_reuses_its_sibling_profile() {
+        let dir = crate::scratch("marked-portable-profile");
+        let container = dir.join("Longshot");
+        let version = container.join("data/versions/nightly");
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::write(container.join(".portable"), "").unwrap();
+        assert_eq!(default_profile_with(&version, |_| None), container.join("data/profiles/default"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn uses_the_shared_default_profile_and_preserves_an_existing_portable_profile() {
+        let d = crate::scratch("xdg-profile");
+        let version = d.join("version");
+        let get = |key: &str| (key == "XDG_DATA_HOME").then(|| d.as_os_str().to_owned());
+        assert_eq!(default_profile_with(&version, get), d.join("longshot/profiles/default"));
+        let relative = |k: &str| match k {
+            "XDG_DATA_HOME" => Some("relative".into()),
+            "HOME" => Some(d.as_os_str().to_owned()),
+            _ => None,
+        };
+        assert_eq!(default_profile_with(&version, relative), d.join(".local/share/longshot/profiles/default"));
+        let earlier = version.join("profile/saves/save");
+        std::fs::create_dir_all(&earlier).unwrap();
+        assert_eq!(default_profile_with(&version, get), version.join("profile"));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
     fn profile_json_round_trips_and_keeps_what_it_does_not_know() {
         let d = scratch("play-profile");
         assert_eq!(Profile::read(&d).unwrap(), None, "no profile.json: none");
@@ -711,16 +785,20 @@ mod tests {
         let v = Path::new("/v");
         assert_eq!(game_folder(v, None), Path::new("/v/builds/default"));
         assert_eq!(game_folder(v, Some("ab12")), Path::new("/v/builds/ab12"));
-        assert_eq!(default_profile(v), Path::new("/v/profile"));
-        assert_eq!(saves(&default_profile(v)), Path::new("/v/profile/saves"));
-        assert_eq!(settings(&default_profile(v)), Path::new("/v/profile/settings.ini"));
-        assert_eq!(mods_stamp(&default_profile(v), v), None, "none in this builder: the Mod API's to make");
+        assert_eq!(default_profile_with(v, |_| None), Path::new("/v/profile"));
+        assert_eq!(saves(&default_profile_with(v, |_| None)), Path::new("/v/profile/saves"));
+        assert_eq!(settings(&default_profile_with(v, |_| None)), Path::new("/v/profile/settings.ini"));
+        assert_eq!(
+            mods_stamp(&default_profile_with(v, |_| None), v),
+            None,
+            "none in this builder: the Mod API's to make"
+        );
     }
 
     /// A version folder at `d` with its default profile of a stand-in .nup, its default game folder made by hand as a
     /// build leaves it, its record stamped for builder `b`.
     fn built(d: &Path, b: &str) -> (PathBuf, Profile) {
-        let prof = default_profile(d);
+        let prof = d.join(PROFILE);
         std::fs::create_dir_all(&prof).unwrap();
         std::fs::write(d.join("g.nup"), b"nup").unwrap();
         let p = Profile::new(d.join("g.nup"));
@@ -944,7 +1022,7 @@ mod tests {
     #[test]
     fn play_updates_only_when_needed_and_builds_again_when_the_game_asks() {
         let d = scratch("play-loop");
-        let prof = default_profile(&d);
+        let prof = d.join(PROFILE);
         std::fs::create_dir_all(&prof).unwrap();
         std::fs::write(d.join("g.nup"), b"nup").unwrap();
         let p = Profile::new(d.join("g.nup"));

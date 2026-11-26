@@ -4,7 +4,7 @@
 //! start, which builds the game when it must and then runs it (RecompLauncher's DEVELOPERS.md, "Recomp Standards").
 //! RecompLauncher's release zip carries it so.
 //!
-//! - The profile (`--profile <dir>`, else `profile/` beside this program): its profile.json names the copy and the
+//! - The profile (`--profile <dir>`, else the launcher's shared default or an existing version-local profile): its profile.json names the copy and the
 //!   upscalers; the game's saves are its `saves/`.
 //! - The fast check (build_driver::play::check): up to date, the game at once; else an update first, quietly when it is
 //!   short, with a box while it goes on when it is not (a new build, the shaders).
@@ -99,7 +99,7 @@ struct PlayArgs {
     game: Option<PathBuf>,
     /// `--upscaler <list>`: the profile's upscalers, written.
     upscalers: Option<String>,
-    /// `--profile <dir>`: that profile, not `profile/` beside this program.
+    /// `--profile <dir>` overrides the default player profile.
     profile: Option<PathBuf>,
     /// `--cache <dir>`: the builder's cache (a launcher's), as every command takes it.
     cache: Option<PathBuf>,
@@ -137,7 +137,7 @@ fn split_args(args: &[String]) -> PlayArgs {
 }
 
 /// The version folder of the program at `exe` (its own folder) and the profile it plays: `--profile`'s (absolute),
-/// else `profile/` beside it.
+/// else the default selected by the version layout.
 pub(crate) fn places(exe: &Path, asked: Option<&Path>) -> (PathBuf, PathBuf) {
     let version = exe.parent().unwrap_or(Path::new(".")).to_path_buf();
     let profile = match asked {
@@ -340,6 +340,7 @@ impl Host for Player<'_> {
 
     fn start(&mut self, program: &Path, args: &[String], profile: &Path) -> std::io::Result<play::Started> {
         let mut c = std::process::Command::new(program);
+        build_driver::shaders::configure_store(&mut c);
         c.args(args)
             .current_dir(program.parent().unwrap_or(Path::new(".")))
             .env(play::PROFILE_VAR, profile)
@@ -558,6 +559,15 @@ pub fn run_with(
     if crate::after::take_flag_before_dashes(&mut args, "--safe-start") {
         env.push((play::SAFE_START_VAR.into(), "1".into()));
     }
+    // A directly launched portable version reads the same NFC tags as its launcher.
+    if let Some((data, _)) = exe.parent().and_then(build_driver::layout::portable_launcher_folders)
+        && !env.iter().any(|(k, _)| k == "LONGSHOT_NFC_DIR")
+        && build_driver::env_os("LONGSHOT_NFC_DIR").is_none_or(|v| v.is_empty())
+    {
+        let old = data.join(".local/share/longshot/nfc");
+        let tags = if cfg!(unix) && old.is_dir() { old } else { data.join("nfc") };
+        env.push(("LONGSHOT_NFC_DIR".into(), tags.into_os_string()));
+    }
     let env = env.as_slice();
     // (a portable copy's daily update check, in the background; none with --no-self-update: a launcher's version)
     crate::self_update::in_background(exe, release, &mut args);
@@ -694,7 +704,7 @@ mod tests {
             play(None, None, None, "--fullscreen --game x --profile y --")
         );
         let exe = Path::new("/v/Longshot.exe");
-        assert_eq!(places(exe, None), (PathBuf::from("/v"), PathBuf::from("/v/profile")));
+        assert_eq!(places(exe, None), (PathBuf::from("/v"), play::default_profile(Path::new("/v"))));
         assert!(places(exe, Some(Path::new("rel"))).1.is_absolute());
     }
 

@@ -217,6 +217,7 @@ mod tests {
     fn a_context_resolves_the_profile_and_its_game() {
         let d = scratch("resolve");
         let version = d.join("v");
+        std::fs::create_dir_all(version.join("profile/saves")).unwrap();
         let none = BuilderCx::resolve(&version, None, d.join("cache"), Output::Text, &no_play, &no_confirm);
         assert_eq!(none.profile_dir, version.join("profile"), "beside the program");
         assert_eq!((none.game_input, none.version_dir.as_path()), (None, version.as_path()));

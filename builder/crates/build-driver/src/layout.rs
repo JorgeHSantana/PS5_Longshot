@@ -1,8 +1,10 @@
 //! Where a build reads and writes: the builder's tree, the work folder, the stores.
 //!
 //! ```text
-//! <cache>/                         the per-user cache (LONGSHOT_CACHE; else %LOCALAPPDATA%\Longshot\Builder on
-//!                                  Windows, $XDG_CACHE_HOME/longshot-builder or ~/.cache/longshot-builder elsewhere)
+//! <cache>/                         LONGSHOT_CACHE, else the per-user builder cache:
+//!                                  Linux: ${XDG_CACHE_HOME:-~/.cache}/longshot/longshot-builder
+//!                                  Windows: %LOCALAPPDATA%\Longshot\cache\longshot-builder
+//!                                  Populated legacy caches are preserved.
 //!   work/<game folder's id>/       a game folder's work folder (--work names another)
 //!     longshot-builder.lock          one build at a time (build_core::lock)
 //!     exefs/                       the game's code modules as read (made again by every build)
@@ -28,9 +30,13 @@
 use build_core::{Error, Result};
 use std::path::{Path, PathBuf};
 
-/// The per-user cache: `LONGSHOT_CACHE`, else the system's cache folder's `longshot-builder`. `get` gives each
+/// The per-user cache: `LONGSHOT_CACHE`, else the installed launcher's builder cache. `get` gives each
 /// variable as the system has it ([`crate::env_os`]: a home folder whose name is not Unicode is still one).
 pub fn cache_root<S: Into<std::ffi::OsString>>(get: impl Fn(&str) -> Option<S>) -> PathBuf {
+    cache_root_for(cfg!(windows), get)
+}
+
+pub(crate) fn cache_root_for<S: Into<std::ffi::OsString>>(windows: bool, get: impl Fn(&str) -> Option<S>) -> PathBuf {
     let set = |k: &str| {
         let v: std::ffi::OsString = get(k)?.into();
         let v = match v.to_str() {
@@ -42,14 +48,62 @@ pub fn cache_root<S: Into<std::ffi::OsString>>(get: impl Fn(&str) -> Option<S>) 
     if let Some(p) = set("LONGSHOT_CACHE") {
         return p;
     }
-    if cfg!(windows) {
-        let base = set("LOCALAPPDATA").or_else(|| set("USERPROFILE").map(|h| h.join("AppData").join("Local")));
-        return base.unwrap_or_else(|| PathBuf::from(".")).join("Longshot").join("Builder");
+    if windows {
+        let base = set("LOCALAPPDATA")
+            .filter(|p| p.is_absolute())
+            .or_else(|| set("USERPROFILE").filter(|p| p.is_absolute()).map(|h| h.join("AppData/Local")))
+            .unwrap_or_else(|| PathBuf::from("."));
+        return existing_or(
+            [base.join("LongshotLauncher/work/longshot-builder"), base.join("Longshot/Builder")],
+            base.join("Longshot/cache/longshot-builder"),
+        );
     }
-    set("XDG_CACHE_HOME")
-        .or_else(|| set("HOME").map(|h| h.join(".cache")))
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("longshot-builder")
+    let base = set("XDG_CACHE_HOME")
+        .filter(|p| p.is_absolute())
+        .or_else(|| set("HOME").filter(|p| p.is_absolute()).map(|h| h.join(".cache")))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let previous = base.join("longshot-builder");
+    if cfg!(target_os = "linux") {
+        existing_or(
+            [base.join("longshot/launcher/work/longshot-builder"), previous],
+            base.join("longshot/longshot-builder"),
+        )
+    } else {
+        previous
+    }
+}
+
+fn existing_or<const N: usize>(older: [PathBuf; N], fresh: PathBuf) -> PathBuf {
+    older.into_iter().find(|p| populated(p)).unwrap_or(fresh)
+}
+
+/// A builder started directly from a portable launcher's versions/<id> directory must use
+/// the same profile and cache as one started by that launcher. Require its on-disk marker.
+pub fn portable_launcher_folders(version: &Path) -> Option<(&Path, PathBuf)> {
+    let versions = version.parent().filter(|p| p.file_name().is_some_and(|name| name == "versions"))?;
+    let data = versions.parent()?;
+    let regular = |p: PathBuf| p.symlink_metadata().is_ok_and(|m| m.is_file());
+    if data.file_name().is_some_and(|name| name == "data") {
+        let container = data.parent()?;
+        if container.file_name().is_some_and(|name| name == "Longshot") && regular(container.join(".portable")) {
+            return Some((data, container.join("cache/longshot-builder")));
+        }
+    }
+    let name = data.file_name()?;
+    let marked = (name == "Longshot" && regular(data.join(".portable")))
+        || (cfg!(windows) && name == "LongshotLauncher-data" && regular(data.parent()?.join("portable")))
+        || (cfg!(target_os = "linux")
+            && data.extension().is_some_and(|ext| ext == "home")
+            && regular(data.with_extension("")));
+    marked.then(|| (data, data.join("work/longshot-builder")))
+}
+
+/// A folder holding existing user state, including one we lack permission to inspect.
+pub fn populated(path: &Path) -> bool {
+    match std::fs::read_dir(path) {
+        Ok(mut entries) => entries.next().is_some(),
+        Err(e) => e.kind() == std::io::ErrorKind::PermissionDenied,
+    }
 }
 
 /// A game folder's place as every command takes it: absolute, and on Linux with its links resolved (as far as it
@@ -288,6 +342,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn windows_installed_cache_preserves_populated_previous_locations() {
+        let dir = crate::scratch("windows-cache-folders");
+        let get = |key: &str| (key == "LOCALAPPDATA").then(|| dir.as_os_str().to_owned());
+        assert_eq!(cache_root_for(true, get), dir.join("Longshot/cache/longshot-builder"));
+        for old in [dir.join("Longshot/Builder"), dir.join("LongshotLauncher/work/longshot-builder")] {
+            std::fs::create_dir_all(&old).unwrap();
+            std::fs::write(old.join("existing"), b"keep").unwrap();
+            assert_eq!(cache_root_for(true, get), old);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_fresh_linux_cache_is_shared_with_the_launcher_and_old_files_stay_in_place() {
+        let dir = crate::scratch("xdg-cache");
+        let get = |key: &str| (key == "XDG_CACHE_HOME").then(|| dir.as_os_str().to_owned());
+        let relative = |k: &str| match k {
+            "XDG_CACHE_HOME" => Some("relative".into()),
+            "HOME" => Some(dir.as_os_str().to_owned()),
+            _ => None,
+        };
+        assert_eq!(cache_root(relative), dir.join(".cache/longshot/longshot-builder"));
+        let old = dir.join("longshot-builder");
+        std::fs::create_dir_all(&old).unwrap();
+        assert_eq!(cache_root(get), dir.join("longshot/longshot-builder"));
+        std::fs::write(old.join("existing"), b"keep").unwrap();
+        assert_eq!(cache_root(get), old);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_work_folder_goes_whole_unless_a_build_holds_it() {
         let d = crate::scratch("remove-work");
         let works = d.join("work");
@@ -351,7 +437,14 @@ mod tests {
         let env = |k: &str| (k == "HOME").then(|| "/home/p".to_string());
         let cache = cache_root(env);
         if !cfg!(windows) {
-            assert_eq!(cache, Path::new("/home/p/.cache/longshot-builder"));
+            assert_eq!(
+                cache,
+                Path::new(if cfg!(target_os = "linux") {
+                    "/home/p/.cache/longshot/longshot-builder"
+                } else {
+                    "/home/p/.cache/longshot-builder"
+                })
+            );
         }
         let a = default_work(&cache, Path::new("/games/Longshot"));
         let b = default_work(&cache, Path::new("/games/Longshot2"));
@@ -373,7 +466,14 @@ mod tests {
             // (a home folder whose name is not UTF-8: still the cache's place)
             let home = std::ffi::OsString::from_vec(b"/home/\xffp".to_vec());
             let cache = cache_root(|k| (k == "HOME").then(|| home.clone()));
-            assert_eq!(cache, Path::new(&home).join(".cache/longshot-builder"));
+            assert_eq!(
+                cache,
+                Path::new(&home).join(if cfg!(target_os = "linux") {
+                    ".cache/longshot/longshot-builder"
+                } else {
+                    ".cache/longshot-builder"
+                })
+            );
         }
     }
 }

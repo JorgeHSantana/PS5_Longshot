@@ -438,7 +438,7 @@ own builder, compiled, its pack attached (a commit from before the pack was appe
 ## The stores and the work folder
 
 ```
-<cache>/                       --cache (LONGSHOT_CACHE), else %LOCALAPPDATA%\Longshot\Builder, else $XDG_CACHE_HOME/longshot-builder or ~/.cache/longshot-builder
+<cache>/                       --cache (LONGSHOT_CACHE), else %LOCALAPPDATA%\Longshot\cache\longshot-builder, else $XDG_CACHE_HOME/longshot/longshot-builder on fresh Linux installs (see build.md for existing caches)
   sources/<hash>/              the tree a release's longshot-builder carries, unpacked (above)
   tools/<name>-<hash>/         its build tools, unpacked; each folder here and in sources/ marked used (.used) by each
                                build

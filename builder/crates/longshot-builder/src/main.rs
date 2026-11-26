@@ -923,12 +923,8 @@ fn builder_stamp(exe: &Path, pack: &[u8]) -> String {
     }
 }
 
-/// The cache of a release's program run with no cache named (no `--cache`, no `LONGSHOT_CACHE`): `cache/` beside the
-/// program, its version folder's own, so a version folder is whole by itself (portable: the unpacked tools and
-/// sources, the work folders, the stores, the runtimes; the licences' note stays this PC's, build_driver::layout's
-/// data folder). None for a developer's build (`carries`: a pack at its end; without one the per-user cache, shared with
-/// every other developer's build), for `dev`, `--version` and the usage, and when that folder can't be made there (a
-/// program in a folder the player can't write: the per-user cache). `get`: the environment.
+/// Use a marked launcher's cache for its versions. Standalone releases keep older populated
+/// sibling caches; fresh Windows and Linux releases use the installed launcher's cache.
 fn portable_cache(
     exe: &Path,
     args: &[String],
@@ -941,7 +937,14 @@ fn portable_cache(
     if !carries || named || own {
         return None;
     }
-    let dir = exe.parent()?.join("cache");
+    let version = exe.parent()?;
+    if let Some((_, cache)) = build_driver::layout::portable_launcher_folders(version) {
+        return Some(cache);
+    }
+    let dir = version.join("cache");
+    if cfg!(any(target_os = "linux", windows)) {
+        return build_driver::layout::populated(&dir).then_some(dir);
+    }
     (dir.is_dir() || std::fs::create_dir(&dir).is_ok()).then_some(dir)
 }
 
@@ -1304,7 +1307,13 @@ mod tests {
         let exe = d.join("Longshot.x86_64");
         let none = |_: &str| None;
         let w = |s: &str| s.split_whitespace().map(String::from).collect::<Vec<_>>();
-        assert_eq!(portable_cache(&exe, &[], true, none), Some(d.join("cache")), "play: beside it");
+        if cfg!(any(target_os = "linux", windows)) {
+            assert!(portable_cache(&exe, &[], true, none).is_none(), "a first release uses the shared launcher cache");
+            std::fs::create_dir(d.join("cache")).unwrap();
+            assert!(portable_cache(&exe, &[], true, none).is_none(), "an empty folder carries no cache");
+            std::fs::write(d.join("cache/existing"), b"keep").unwrap();
+        }
+        assert_eq!(portable_cache(&exe, &[], true, none), Some(d.join("cache")), "existing portable cache");
         assert!(d.join("cache").is_dir());
         assert_eq!(portable_cache(&exe, &w("build --game g --profile p"), true, none), Some(d.join("cache")));
         assert_eq!(portable_cache(&exe, &w("-- --cache x"), true, none), Some(d.join("cache")), "the game's argument");
@@ -1313,6 +1322,13 @@ mod tests {
         assert_eq!(portable_cache(&exe, &w("--cache=/c"), true, none), None);
         let set = |k: &str| (k == "LONGSHOT_CACHE").then(|| "/dev-cache".into());
         assert_eq!(portable_cache(&exe, &[], true, set), None, "dev.py's LONGSHOT_CACHE");
+        let portable = d.join("Longshot");
+        let version = portable.join("data/versions/nightly");
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::write(portable.join(".portable"), "").unwrap();
+        let carried = version.join("Longshot");
+        assert_eq!(portable_cache(&carried, &[], true, none), Some(portable.join("cache/longshot-builder")));
+        assert_eq!(portable_cache(&carried, &w("--cache /explicit"), true, none), None);
         for own in ["dev release sources", "--version", "help"] {
             assert_eq!(portable_cache(&exe, &w(own), true, none), None, "{own}");
         }

@@ -416,7 +416,7 @@ fn the_synthetic_game_builds_runs_and_builds_again_one_unit() {
     // ---- played as a player starts it: a version folder, its default profile naming the .nup
     use build_driver::play::{self as bp, Profile, Stale};
     let version = d.join("version");
-    let profile = bp::default_profile(&version);
+    let profile = version.join("profile");
     std::fs::create_dir_all(&profile).unwrap();
     Profile::new(d.join("synthetic.nup")).write(&profile).unwrap();
     let p = Profile::read(&profile).unwrap().unwrap();

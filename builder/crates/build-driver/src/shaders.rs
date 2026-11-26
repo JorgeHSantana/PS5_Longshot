@@ -76,6 +76,40 @@ pub fn skipped(asked: bool, windows_game: bool, get: impl Fn(&str) -> Option<Str
     None
 }
 
+/// Preparation and play share one SPIR-V store, including when a release is started directly.
+pub fn configure_store(cmd: &mut Command) {
+    #[cfg(any(target_os = "linux", windows))]
+    {
+        let selected = shader_store(cfg!(windows), crate::env_os);
+        let path =
+            if selected == Path::new("0") { selected } else { std::path::absolute(&selected).unwrap_or(selected) };
+        cmd.env("LONGSHOT_SHADER_STORE", path);
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    let _ = cmd;
+}
+
+#[cfg(any(target_os = "linux", windows))]
+fn shader_store(windows: bool, get: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
+    if let Some(selected) = get("LONGSHOT_SHADER_STORE").filter(|s| !s.is_empty()) {
+        return PathBuf::from(selected);
+    }
+    let absolute = |key| get(key).map(PathBuf::from).filter(|p| p.is_absolute());
+    if get("LONGSHOT_CACHE").is_none_or(|s| s.is_empty()) {
+        let old = if windows {
+            absolute("LOCALAPPDATA").map(|p| p.join("Longshot/shaders"))
+        } else {
+            absolute("XDG_CACHE_HOME")
+                .or_else(|| absolute("HOME").map(|p| p.join(".cache")))
+                .map(|p| p.join("longshot/shaders"))
+        };
+        if let Some(previous) = old.filter(|p| p.join("spirv.pack").is_file() || p.join("spirv.idx").is_file()) {
+            return previous;
+        }
+    }
+    crate::layout::cache_root_for(windows, get).join("shader-store")
+}
+
 /// The environment the game runs in when the builder starts it: without what the launcher (an AppImage's own
 /// variables) and the tools put there (their libraries first on the search path, Python's settings, the build's
 /// switches), so it loads its own SDL and the system's Vulkan, as when the player starts it. The shader store's
@@ -88,6 +122,7 @@ pub fn game_env(cmd: &mut Command) {
             cmd.env_remove(&k);
         }
     }
+    configure_store(cmd);
 }
 
 /// A line of the game's own: its `@@progress <0..1>` the stage's progress, its other lines the log.
@@ -746,9 +781,14 @@ fn linux_drivers(get: &impl Fn(&str) -> Option<String>) -> String {
             id.push_str(&format!("{var}={v}\n"));
         }
     }
-    let data_home = get("XDG_DATA_HOME").or_else(|| get("HOME").map(|h| format!("{h}/.local/share")));
-    let data_dirs = get("XDG_DATA_DIRS").unwrap_or_else(|| "/usr/local/share:/usr/share".into());
-    let dirs = ["/etc".to_string()].into_iter().chain(data_dirs.split(':').map(str::to_string)).chain(data_home);
+    let absolute = |k| get(k).map(PathBuf::from).filter(|p| p.is_absolute());
+    let data_home = absolute("XDG_DATA_HOME").or_else(|| absolute("HOME").map(|p| p.join(".local/share")));
+    let data_dirs =
+        get("XDG_DATA_DIRS").filter(|v| !v.is_empty()).unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+    let dirs = [PathBuf::from("/etc")]
+        .into_iter()
+        .chain(data_dirs.split(':').map(PathBuf::from).filter(|p| p.is_absolute()))
+        .chain(data_home);
     let search: Vec<PathBuf> =
         ["/usr/lib", "/usr/lib64", "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/local/lib"]
             .iter()
@@ -895,6 +935,41 @@ pub fn not_prepared(r: &Reporter, why: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn vulkan_manifest_search_ignores_relative_xdg_data_locations() {
+        let d = crate::scratch("icd-xdg-home");
+        let manifest_dir = d.join(".local/share/vulkan/icd.d");
+        std::fs::create_dir_all(&manifest_dir).unwrap();
+        let manifest = manifest_dir.join("synthetic-driver.json");
+        let get = |key: &str| match key {
+            "HOME" => Some(d.display().to_string()),
+            "XDG_DATA_HOME" | "XDG_DATA_DIRS" => Some("relative".into()),
+            _ => None,
+        };
+        let before = linux_drivers(&get);
+        std::fs::write(&manifest, r#"{"ICD":{"library_path":"test-library"}}"#).unwrap();
+        assert_ne!(linux_drivers(&get), before, "the driver in the default user data folder is included");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_shader_store_reuses_existing_indices_and_respects_explicit_choices() {
+        let d = crate::scratch("xdg-shader-store");
+        let get = |key: &str| (key == "XDG_CACHE_HOME").then(|| d.as_os_str().to_owned());
+        assert_eq!(shader_store(false, get), d.join("longshot/longshot-builder/shader-store"));
+        let earlier = d.join("longshot/shaders");
+        std::fs::create_dir_all(&earlier).unwrap();
+        std::fs::write(earlier.join("spirv.idx"), b"fixture").unwrap();
+        assert_eq!(shader_store(false, get), earlier);
+        let isolated = d.join("my portable cache");
+        let paths = |k: &str| if k == "LONGSHOT_CACHE" { Some(isolated.as_os_str().to_owned()) } else { get(k) };
+        assert_eq!(shader_store(false, paths), isolated.join("shader-store"), "portable cache owns its shader store");
+        assert_eq!(shader_store(false, |k| (k == "LONGSHOT_SHADER_STORE").then(|| "0".into())), Path::new("0"));
+        std::fs::remove_dir_all(d).unwrap();
+    }
 
     #[test]
     fn a_profile_s_game_folder_keeps_its_shaders_in_the_shared_folder_of_its_translator_and_drivers() {

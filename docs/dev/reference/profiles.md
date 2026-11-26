@@ -18,7 +18,7 @@ game's paths are [`host/longshot_profile.h`](../../../host/longshot_profile.h).
 ```
 
 A launcher names the folders and keeps which one is current in its own settings; the builder's default profile is
-`profile/` beside it. Nothing else of the game's goes in the profile:
+`$XDG_DATA_HOME/longshot/profiles/default` on a fresh Linux installation (usually under `~/.local/share`). Fresh Windows installs use `%LOCALAPPDATA%\Longshot\data\profiles\default`. A marked portable launcher shares `Longshot/data/profiles/default` with its version executables. Standalone versions keep previously populated `profile/` directories. Nothing else of the game's goes in the profile:
 
 | What | Where |
 |---|---|

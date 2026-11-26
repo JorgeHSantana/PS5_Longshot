@@ -154,7 +154,7 @@ later their mods: [profiles](profiles.md)).
 <version>/Longshot.exe | Longshot.x86_64   the builder (a release's longshot-builder): the program players start
 <version>/builds/default/                  the game folder it builds (its record, longshot_build.json, inside)
 <version>/builds/<stamp>/                  (the Mod API) the game folder of a profile's code mods, by their stamp
-<version>/profile/                         the default profile (--profile <dir> names another, anywhere)
+<version>/profile/                         the existing portable profile, or the default on Windows
 <profile>/profile.json                     the profile (below)
 <profile>/settings.ini                     the game's settings (longshot_options.ini's lines)
 <profile>/saves/                           the saves alone: save/, save-work/
@@ -186,7 +186,7 @@ Started with no arguments in a version folder (a `builds/` or `profile/` beside 
 `longshot-builder play`, with `--profile <dir>` first, or as `Longshot.exe` or `Longshot.x86_64` with no builder
 command first, the builder plays:
 
-1. The profile's `profile.json` is read (`--profile <dir>`, else `profile/` beside the program).
+1. The builder reads `profile.json` from `--profile <dir>` when supplied. On fresh Linux installations the default is `$XDG_DATA_HOME/longshot/profiles/default` (usually `~/.local/share/longshot/profiles/default`). Fresh Windows versions use `%LOCALAPPDATA%\Longshot\data\profiles\default`. A portable launcher's versions share the profile under its data directory. Previously populated per-version profiles stay in place when starting the standalone builder.
 2. **The fast check** (`build_driver::play::check`): the game folder's record keeps a stamp that each build or update
    for a profile writes (`stamp`: the builder's release and sources' hash, or a developer's build's version, size and
    time; the key of the profile's copy and upscalers; the copy's size, time and, on Linux, device and inode; the code
@@ -303,7 +303,7 @@ be allowed to read the version folder.
 ### Doctor
 
 `longshot-builder doctor [--profile <dir>] [--output text|json|user]` checks what on this PC could stop Longshot
-building or running, for the version folder it is in and the profile (`--profile`, else `profile/` beside it), and
+building or running, for the version folder it is in and the profile (`--profile`, else the default profile above), and
 says a plain fix for each (`longshot-builder/src/doctor.rs`). It changes no setting; the folders' check makes one empty
 file in each folder and removes it. With `--output json` it is one `doctor` event ([events](build-events.md#the-events));
 with `text` or `user` its lines (`user`: the same text; doctor has no window). Exit status 0 when no check
@@ -406,7 +406,7 @@ The builder reads its own flags first, before the subcommand: `--profile <dir>`,
 (`mod --output json check ./x`). From the first other word on, everything is the hook's, untouched.
 
 `BuilderCx` holds what the builder already knows, resolved as play resolves it: the `profile` folder (`--profile`, else
-`profile/` beside the program), the `game` input its profile.json names (none when it names none or does not read), the
+the default profile above), the `game` input its profile.json names (none when it names none or does not read), the
 `version` folder, the `cache` folder, the output (`format`, `windows`), and `play`, a function that plays a profile with
 extras: `PlayRequest { profile, extra_mod_dirs, game_args, env }`. It is the normal play path (the fast check, the update
 when it says so, the game, the crash and restart handling; one copy per profile), for `mod run`'s "play this profile
@@ -651,7 +651,7 @@ test's override: the launcher sets none of them.
 | Switch | What it does |
 |---|---|
 | `LONGSHOT_CACHE_MB=<n>` | The [cache's budget](#the-caches-budget), in MB (12288; `0`: only what is held, used in the last hour or the newest of its kind). The least recently used of the whole cache goes first while it is over |
-| `--cache <dir>` (`LONGSHOT_CACHE`, for one release) | The per-user cache: the work folders and, by default, the stores. Default: `%LOCALAPPDATA%\Longshot\Builder` on Windows, `$XDG_CACHE_HOME/longshot-builder` (else `~/.cache/longshot-builder`) elsewhere |
+| `--cache <dir>` (`LONGSHOT_CACHE`, for one release) | The per-user cache: the work folders and, by default, the stores. Default: `%LOCALAPPDATA%\Longshot\cache\longshot-builder` on fresh Windows installations, `$XDG_CACHE_HOME/longshot/longshot-builder` (else `~/.cache/longshot/longshot-builder`) on fresh Linux installations |
 | `LONGSHOT_STORE=<dir>` | The stores' folder (`--store` wins) |
 | `LONGSHOT_ROOT=<dir>` | The tree to build from (`--root` wins) |
 | `LONGSHOT_JOBS=<n>` | Workers (`--jobs` wins); `0` or empty: one per CPU thread but one. Not a whole number: `bad_jobs` |
@@ -749,11 +749,17 @@ instead, so the CPUs stay busy while a big one waits for room.
 ## Where things are
 
 The work folders, the stores, the runtimes and the unpacked sources and tools are in the builder's cache, apart from the
-game folder. `<cache>` is, in order: `--cache`, `LONGSHOT_CACHE`, then for a release's program (one carrying its pack)
-`cache/` beside the program, so a version folder is whole by itself (portable: copy or delete the folder and its cache
-goes with it); for a developer's build, or a release's program in a folder it can't write, the per-user cache
-(`%LOCALAPPDATA%\Longshot\Builder` on Windows, `$XDG_CACHE_HOME/longshot-builder` or `~/.cache/longshot-builder`
-elsewhere). `dev.py` sets `LONGSHOT_CACHE` (its `builder-cache`), so developers' builds are unchanged.
+game folder. An explicit `--cache` or `LONGSHOT_CACHE` selects the builder cache. On Linux a fresh installation uses
+`$XDG_CACHE_HOME/longshot/longshot-builder` (usually `~/.cache/longshot/longshot-builder`). Fresh Windows installs use
+`%LOCALAPPDATA%\Longshot\cache\longshot-builder`. A standalone release with an existing populated `cache/` beside its
+program keeps using it. Older per-user caches with files are reused. A version under a marked portable launcher's
+`Longshot/data/versions` uses the sibling `Longshot/cache/longshot-builder`. Developer builds use the per-user cache
+unless overridden by `dev.py`.
+
+Preparation and play use `shader-store/` inside the builder cache. An existing per-user shader pack in
+`$XDG_CACHE_HOME/longshot/shaders` or `%LOCALAPPDATA%\Longshot\shaders` remains available to standalone builders
+using system defaults. Selecting a cache explicitly also selects its shader store. `LONGSHOT_SHADER_STORE` overrides
+either choice, including `0` to disable the store.
 
 ```
 <cache>/work/<game folder's name>-<hash>/    exefs/, image/, gen/, build/, finish/, prepare/, build_times.json, build.log, longshot-builder.lock

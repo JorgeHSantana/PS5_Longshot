@@ -223,6 +223,10 @@ fn steam_is_found_in_its_folders_and_the_signed_in_account_chosen() {
         "HOME" => Some(home.to_string_lossy().into_owned()),
         _ => None,
     };
+    let relative = |k: &str| if k == "XDG_DATA_HOME" { Some("relative".into()) } else { env(k) };
+    assert_eq!(homes(&relative, false, None), homes(&env, false, None));
+    let data_only = |k: &str| (k == "XDG_DATA_HOME").then(|| d.display().to_string());
+    assert_eq!(homes(&data_only, false, None), [d.join("Steam")]);
     let h = homes(&env, false, None);
     assert_eq!(h[0], home.join(".local/share/Steam"));
     assert!(h.contains(&home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam")), "Flatpak's");

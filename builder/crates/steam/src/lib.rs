@@ -125,14 +125,18 @@ pub fn homes(get: &dyn Fn(&str) -> Option<String>, windows: bool, steam_path: Op
     if windows {
         all.extend(steam_path.map(PathBuf::from));
         all.extend(set("ProgramFiles(x86)").map(|p| Path::new(&p).join("Steam")));
-    } else if let Some(home) = set("HOME").map(PathBuf::from) {
-        let data = set("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".local/share"));
-        all.push(data.join("Steam"));
-        all.push(home.join(".steam/steam"));
-        let flatpak = home.join(".var/app/com.valvesoftware.Steam");
-        all.push(flatpak.join(".local/share/Steam"));
-        all.push(flatpak.join("data/Steam"));
-        all.push(home.join("snap/steam/common/.local/share/Steam"));
+    } else {
+        let absolute = |k| set(k).map(PathBuf::from).filter(|p| p.is_absolute());
+        let home = absolute("HOME");
+        let data = absolute("XDG_DATA_HOME").or_else(|| home.as_ref().map(|p| p.join(".local/share")));
+        all.extend(data.map(|p| p.join("Steam")));
+        if let Some(home) = home {
+            all.push(home.join(".steam/steam"));
+            let flatpak = home.join(".var/app/com.valvesoftware.Steam");
+            all.push(flatpak.join(".local/share/Steam"));
+            all.push(flatpak.join("data/Steam"));
+            all.push(home.join("snap/steam/common/.local/share/Steam"));
+        }
     }
     let mut seen = Vec::new();
     all.into_iter()
