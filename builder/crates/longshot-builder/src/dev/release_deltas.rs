@@ -420,14 +420,18 @@ pub fn deltas(d: &Deltas<'_>, say: &mut dyn FnMut(String)) -> Result<PathBuf, St
         None => Vec::new(),
     };
     names.sort();
-    let mut list = Vec::new();
     let long = format!("--long={LONG}");
-    for base in names {
-        let Some(from) = base.strip_prefix("longshot-builder-").and_then(|r| r.strip_suffix(&suffix)) else { continue };
-        if from.is_empty() || from == d.version {
-            continue;
-        }
-        let path = d.bases.unwrap_or(Path::new("")).join(&base);
+    let bases: Vec<(String, String)> = names
+        .into_iter()
+        .filter_map(|base| {
+            let from = base.strip_prefix("longshot-builder-").and_then(|r| r.strip_suffix(&suffix))?.to_string();
+            (!from.is_empty() && from != d.version).then_some((base, from))
+        })
+        .collect();
+    // (each base's delta made and checked at once beside the others: zstd at -19 with --long is one core's work, and the
+    // release runner has two; the manifest lists them in their `from`'s order whatever order they end in)
+    let one = |base: &str, from: &str| -> Result<(Value, u64), String> {
+        let path = d.bases.unwrap_or(Path::new("")).join(base);
         let delta = d.out.join(delta_name(from, d.version, d.platform));
         let patch_from = format!("--patch-from={}", path.display());
         let os = |s: &str| std::ffi::OsString::from(s);
@@ -462,15 +466,27 @@ pub fn deltas(d: &Deltas<'_>, say: &mut dyn FnMut(String)) -> Result<PathBuf, St
         }
         let _ = std::fs::remove_file(&back);
         let (delta_sha, delta_size) = sha(&delta)?;
-        list.push(json!({
-            "from": from,
-            "from_sha256": sha(&path)?.0,
-            "name": delta.file_name().map(|n| n.to_string_lossy().into_owned()),
-            "size": delta_size,
-            "sha256": delta_sha,
-            "long": LONG,
-        }));
-        say(format!("delta from {from}: {} KB", delta_size >> 10));
+        Ok((
+            json!({
+                "from": from,
+                "from_sha256": sha(&path)?.0,
+                "name": delta.file_name().map(|n| n.to_string_lossy().into_owned()),
+                "size": delta_size,
+                "sha256": delta_sha,
+                "long": LONG,
+            }),
+            delta_size,
+        ))
+    };
+    let made: Vec<Result<(Value, u64), String>> = std::thread::scope(|scope| {
+        let running: Vec<_> = bases.iter().map(|(base, from)| scope.spawn(|| one(base, from))).collect();
+        running.into_iter().map(|t| t.join().unwrap_or_else(|_| Err("a delta's thread panicked".into()))).collect()
+    });
+    let mut list = Vec::new();
+    for ((_, from), result) in bases.iter().zip(made) {
+        let (entry, size) = result?;
+        say(format!("delta from {from}: {} KB", size >> 10));
+        list.push(entry);
     }
     list.sort_by(|a, b| a["from"].as_str().cmp(&b["from"].as_str()));
     let stamps = match d.stamps {
