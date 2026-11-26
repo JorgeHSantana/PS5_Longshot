@@ -203,6 +203,73 @@ mod prepare_tests {
         assert!(!in_prepare(&unit("vk_draw.cpp", Module::Renderer, Tree, "gpu/vk/vk_draw.cpp")));
     }
 
+    /// The early shader preparation's driver is linked with the game's Rust, as the game is: a link without it made
+    /// every Rust function the host calls a stand-in (data), and the driver's first call into one a SIGSEGV ("The
+    /// shaders were not prepared now (the game was stopped by signal 11)", a Linux player's first build). A tree with
+    /// Rust, a cargo that writes its library and a compiler that writes down what it is asked to link.
+    #[cfg(unix)]
+    #[test]
+    fn the_preparation_s_driver_links_the_game_s_rust() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = testdir("prepare-rust");
+        let (root, work) = (d.join("tree"), d.join("work"));
+        for dir in [root.join("longshot-rs"), root.join("builder"), work.clone()] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(root.join("longshot-rs/Cargo.toml"), "[package]\nname = \"longshot-rs\"\n").unwrap();
+        let script = |name: &str, body: &str| {
+            let f = d.join(name);
+            std::fs::write(&f, format!("#!/bin/sh\n{body}")).unwrap();
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+            f
+        };
+        let lib = work.join("rust-target/x86_64-unknown-linux-gnu/game").join(rust::LIBRARY);
+        let cargo =
+            script("cargo", &format!("mkdir -p '{}' && : > '{}'\n", lib.parent().unwrap().display(), lib.display()));
+        let asked = d.join("asked.txt");
+        // (-dumpmachine, the link's probe, says nothing; a link writes its command, one argument a line, and its output)
+        let cc = script(
+            "cc",
+            &format!(
+                "for a; do [ \"$a\" = -dumpmachine ] && exit 1; done\nprintf '%s\\n' \"$@\" >> '{}'\n\
+                 while [ $# -gt 0 ]; do [ \"$1\" = -o ] && : > \"$2\"; shift; done\n",
+                asked.display()
+            ),
+        );
+        let mut o = Options::new(&root, &work);
+        let cargo_path = cargo.display().to_string();
+        o.settings = Settings::from_lookup(|n| (n == "LONGSHOT_CARGO").then(|| cargo_path.clone()));
+        let tc = toolchain::Toolchain {
+            windows: false,
+            mingw: None,
+            cc,
+            cxx: "clang++".into(),
+            cxx_mode: vec![],
+            target: vec![],
+            native_target: vec![],
+            native_link: vec![],
+            cpu: vec![],
+            third_party_cpu: vec![],
+            native_cpu: None,
+            nm: None,
+        };
+        let l = Layout::of(&o);
+        std::fs::create_dir_all(&l.out).unwrap();
+        let mut host = unit("hos_main.c", Module::Game, plan::Kind::Tree, "host/hos_main.c");
+        host.object = d.join("hos_main.o");
+        std::fs::write(&host.object, "").unwrap();
+        let p = plan::Plan { units: vec![host], link_game: true, ..Default::default() };
+        let r = build_core::report::Reporter::to(build_core::report::Format::Text, Box::new(std::io::sink()));
+        let driver = link_prepare(&o, &r, &tc, &l, &p, "cc", 2).unwrap();
+        assert!(driver.is_some(), "the driver is linked");
+        let asked = std::fs::read_to_string(&asked).unwrap();
+        assert!(
+            asked.lines().any(|a| Path::new(a) == lib),
+            "the driver's link has the game's Rust, {}: {asked}",
+            lib.display()
+        );
+    }
+
     #[test]
     fn the_names_a_link_left_undefined_become_stand_ins() {
         let said = "ld.lld: error: undefined symbol: a64_fn_count\n>>> referenced by hos_main.c\n\
@@ -910,14 +977,7 @@ fn links(
         let exe = l.out.join(game_exe_name(linux));
         let rsp = l.out.join("objs.rsp");
         link::response_file(&rsp, &objs(Module::Game))?;
-        // (the game's Rust, longshot-rs: the tree's prebuilt library of its sources, else cargo's build: rust.rs)
-        let rust_target = rust::Target::of(tc);
-        let rust_lib = rust::library(&l.root, &l.work, rust_target, s.cargo.as_deref(), r)?;
-        let rust_link: Vec<String> = rust_lib
-            .iter()
-            .map(|p| p.display().to_string())
-            .chain(rust_lib.iter().flat_map(|_| rust_target.system_libs().iter().map(|l| l.to_string())))
-            .collect();
+        let rust_link = rust_link(o, r, tc, l)?;
         let mut cmd: Vec<String>;
         if linux {
             // (Tracy's client is C++: the C++ driver links, its runtime inside, its C API exported for the renderer)
@@ -1182,6 +1242,18 @@ pub fn in_prepare(u: &Unit) -> bool {
         }
 }
 
+/// The game's Rust on a link's command (longshot-rs: the tree's prebuilt library of its sources, else cargo's build,
+/// rust.rs) and the system libraries its standard library needs; nothing for a tree without Rust.
+fn rust_link(o: &Options, r: &Reporter, tc: &toolchain::Toolchain, l: &Layout) -> Result<Vec<String>> {
+    let target = rust::Target::of(tc);
+    let lib = rust::library(&l.root, &l.work, target, o.settings.cargo.as_deref(), r)?;
+    Ok(lib
+        .iter()
+        .map(|p| p.display().to_string())
+        .chain(lib.iter().flat_map(|_| target.system_libs().iter().map(|l| l.to_string())))
+        .collect())
+}
+
 /// The names a link said were undefined (`undefined symbol: <name>`, lld's words), each once.
 fn undefined_names(said: &str) -> Vec<String> {
     let mut v: Vec<String> = said
@@ -1212,8 +1284,9 @@ fn stand_ins_c(names: &[String]) -> String {
 /// `--prepare-shaders` runs the game's own code for it (it returns before the image and the OS layer) while the
 /// game's units still compile. Named as the game is, in a folder of its own (`prepare/longshot`): NVIDIA's driver files
 /// its shader cache by the program's file name (host/hos_main.c driver_cache_folder), so play finds what it made. The
-/// lifted game's symbols the host still names (its table, its boot) are stand-ins ([`stand_ins_c`]). Linux only for
-/// now (`None` elsewhere, and when it does not link, said in the log: the preparation then runs after the finish).
+/// game's Rust is linked in as the game's link has it ([`rust_link`]); the lifted game's symbols the host still names
+/// (its table, its boot) are stand-ins ([`stand_ins_c`]). Linux only for now (`None` elsewhere, and when it does not
+/// link, said in the log: the preparation then runs after the finish).
 pub fn link_prepare(
     o: &Options,
     r: &Reporter,
@@ -1233,6 +1306,9 @@ pub fn link_prepare(
     let rsp = dir.join("objs.rsp");
     let objs: Vec<PathBuf> = p.units.iter().filter(|u| in_prepare(u)).map(|u| u.object.clone()).collect();
     let (stand_c, stand_o) = (dir.join("lifted_stand_ins.c"), dir.join("lifted_stand_ins.o"));
+    // (the game's Rust as the game's link has it: without it every function of it the host calls would be a stand-in,
+    // data, and the driver's first call into it, before its first line of log, a SIGSEGV)
+    let rust = rust_link(o, r, tc, l)?;
     let cmd = |with_stand_ins: bool| -> Result<Vec<String>> {
         let mut all = objs.clone();
         if with_stand_ins {
@@ -1249,6 +1325,7 @@ pub fn link_prepare(
             format!("@{}", rsp.display()),
         ]);
         cmd.extend(p.ffmpeg_linux_libs.iter().cloned());
+        cmd.extend(rust.iter().cloned());
         cmd.extend(["-lpthread", "-ldl", "-lm"].map(String::from));
         cmd.extend(tc.linker(&[format!("--threads={jobs}")]));
         Ok(cmd)
@@ -1285,7 +1362,11 @@ pub fn link_prepare(
             r.log(format!("the shader preparation's driver did not link: {}", compile::short(&res.said, 600)));
             return Ok(None);
         }
-        r.log(format!("the shader preparation's driver: {} of the lifted game's symbols stood in for", names.len()));
+        r.log(format!(
+            "the shader preparation's driver: {} of the lifted game's symbols stood in for: {}",
+            names.len(),
+            names.iter().take(12).cloned().collect::<Vec<_>>().join(", ")
+        ));
     }
     if !res.skipped {
         r.log(format!("linked {} ({:.1}s)", exe.display(), compile::since(t)));

@@ -121,7 +121,7 @@ flowchart TD
    runs in `<work>/prepare/` (the assets, the renderer and the fetched files linked in) once the build's memory gate,
    the compile's own, has room for it (9.5 GB, at most `LONGSHOT_MEM_LIMIT_GB`) beside the compilers running, or no
    compiler is in it: one limit holds both, and the compile keeps its floor while the preparation runs. The driver is the game's executable without the lifted game (`build_compile::link_prepare`: the
-   host and the lift's runtime, the lifted game's few symbols the host names stood in for), named `longshot` as the
+   host, the game's Rust and the lift's runtime, the lifted game's few symbols the host names stood in for), named `longshot` as the
    game is, since NVIDIA's driver files its shader cache by the program's name; `--prepare-shaders` returns before the
    image and the OS layer, so it runs the game's own code for this. Its lines wait until this step, so its progress
    never shows as the compile's; from the step on they are said as they come while the build waits for its end
