@@ -98,6 +98,29 @@ checkout they build (`LONGSHOT_CARGO` names another cargo; `LONGSHOT_BUILD`, a r
 `cargo build --release -p longshot-builder`. CI and the release use rustup's 1.99.1 or `scripts/longshot_builder.py build` (the parts
 `scripts/renhdrum.py` pins).
 
+### The compile cache
+
+Recommended for anyone who builds in more than one checkout or jj workspace: [sccache](https://github.com/mozilla/sccache)
+as cargo's wrapper, one compile cache for every tree on the PC. A new workspace then takes its crates.io dependencies,
+most of a cold build, from the cache; the repository's own crates compile per workspace, since their paths differ.
+Install it once for your user and turn it on in your shell's profile (it is not in `mise.toml`, so CI and checkouts
+without it are unchanged):
+
+```sh
+mise use -g aqua:mozilla/sccache@0.19.0     # or your package manager's sccache
+export RUSTC_WRAPPER=sccache                # in ~/.bashrc, ~/.config/fish/config.fish (set -gx ...), or Windows' user env
+export SCCACHE_CACHE_SIZE=40G               # its default is 10 GB
+```
+
+`sccache --show-stats` shows the hits; `RUSTC_WRAPPER=` (empty) turns it off for one shell. Agents sharing a PC set the
+same in their jobs, so they share one cache.
+
+- Give each checkout or workspace **its own target dir**. Never point two at one `CARGO_TARGET_DIR`: cargo names a
+  path crate relative to its workspace, so one tree's build would pass for another's, and a check could pass on code it
+  never read.
+- Incremental builds (the `dev` profile) are compiled as usual: sccache leaves them alone and caches the rest.
+- The game's C and C++ are not cargo's: the builder's content-addressed compile cache keeps them.
+
 **The quickest way to get exactly a player's tools** is to install `tools.lock`'s build tools into the checkout:
 `mise run tools` (`cargo run --release -p longshot-builder -- dev tools install . --system linux-x64`, or `windows-x64`) unpacks each at `tools/<name>`
 (git-ignored), where a release's `longshot-builder` unpacks its own, and `longshot-builder --root .` then compiles with them as a player's
