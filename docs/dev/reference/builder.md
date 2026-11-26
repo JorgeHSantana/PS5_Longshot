@@ -420,10 +420,12 @@ read whole): past its image (the ELF's segments and sections; on Windows the PE'
 map). The pack ends at the same place relative to the file's end in every release, so deltas stay as small as they
 were.
 
-A program with no trailer and nothing past its image carries no pack (a developer's build). One with bytes past its
-image and no whole trailer (a download cut short), a trailer naming bytes the file has not, or a pack whose SHA-256 is
-not its trailer's (hashed when it is first unpacked, about 0.2 s) is damaged: it does nothing but say so
-(`tools_incomplete`, "Download longshot-builder again"), but for `dev`, `self-update` and its usage.
+A program with no trailer and nothing past its image carries no pack (a developer's build; on Windows, a program that
+keeps its COFF symbols ends its image with the zeros its linker pads the file with after them, up to the PE's
+FileAlignment). One with bytes past its image and no whole trailer (a download cut short), a trailer naming bytes the
+file has not, or a pack whose SHA-256 is not its trailer's (hashed when it is first unpacked, about 0.2 s) is damaged:
+it does nothing but say so (`tools_incomplete`, "Download longshot-builder again"), but for `dev`, `self-update` and its
+usage.
 
 The tree a build uses is, in order: `--root`, `LONGSHOT_ROOT`, the pack the program carries, else the checkout the
 program is in (a developer's build, under `target/`, carries no pack). A program with none of them stops with

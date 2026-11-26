@@ -239,8 +239,8 @@ fn at_u64(b: &[u8], at: usize) -> Option<usize> {
 }
 
 /// Where a program's image ends in its file: past every byte its headers name (a 64-bit ELF's segments, sections and
-/// section headers; a PE's headers, sections and COFF symbols). What lies after is carried data (a PE's overlay). None
-/// for a file that is neither, or whose headers can't be read.
+/// section headers; a PE's headers, sections and COFF symbols, and the zeros after them up to its FileAlignment). What
+/// lies after is carried data (a PE's overlay). None for a file that is neither, or whose headers can't be read.
 pub fn image_end(file: &[u8]) -> Option<usize> {
     if file.starts_with(b"\x7fELF") {
         // (64-bit little-endian only: what the builder is)
@@ -289,6 +289,16 @@ pub fn image_end(file: &[u8]) -> Option<usize> {
         if symbols > 0 {
             let strings = symbols.checked_add(count.checked_mul(18)?)?;
             end = end.max(strings.checked_add(at_u32(file, strings)?)?);
+        }
+        // (the zeros a linker pads the file with after them, up to FileAlignment: llvm-mingw's lld does in a program
+        // that keeps its COFF symbols, as a developer's build and the dist profile's do. Zeros only, and only bytes the
+        // file has: anything else is past the image)
+        let align = at_u32(file, coff + 20 + 36)?;
+        if align.is_power_of_two() {
+            let padded = end.checked_add(align - 1)? & !(align - 1);
+            if file.get(end..padded).is_some_and(|pad| pad.iter().all(|&b| b == 0)) {
+                end = padded;
+            }
         }
         return Some(end);
     }
@@ -1422,22 +1432,72 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    #[test]
-    fn a_pe_program_s_overlay_is_past_its_image() {
-        // (a PE with one section of 0x200 bytes at 0x200, no symbols)
-        let mut f = vec![0u8; 0x400];
+    /// A PE `len` bytes long with one section of 0x200 bytes at 0x200, no symbols, its FileAlignment 0x200.
+    fn tiny_pe(len: usize) -> Vec<u8> {
+        let mut f = vec![0u8; len];
         f[..2].copy_from_slice(b"MZ");
         f[0x3C..0x40].copy_from_slice(&0x80u32.to_le_bytes());
         f[0x80..0x84].copy_from_slice(b"PE\0\0");
         f[0x86..0x88].copy_from_slice(&1u16.to_le_bytes()); // (sections)
         f[0x94..0x96].copy_from_slice(&0xF0u16.to_le_bytes()); // (the optional header's size)
+        f[0x98 + 36..0x98 + 40].copy_from_slice(&0x200u32.to_le_bytes()); // (FileAlignment)
         f[0x98 + 60..0x98 + 64].copy_from_slice(&0x200u32.to_le_bytes()); // (SizeOfHeaders)
         let s = 0x98 + 0xF0;
         f[s + 16..s + 20].copy_from_slice(&0x200u32.to_le_bytes());
         f[s + 20..s + 24].copy_from_slice(&0x200u32.to_le_bytes());
+        f
+    }
+
+    /// [`tiny_pe`] as llvm-mingw's lld links a program that keeps its COFF symbols (a developer's build): the symbols
+    /// and their string table after the section (to 0x431), then zeros up to the FileAlignment (0x600).
+    fn padded_pe() -> Vec<u8> {
+        let mut f = tiny_pe(0x600);
+        f[0x8C..0x90].copy_from_slice(&0x400u32.to_le_bytes()); // (PointerToSymbolTable)
+        f[0x90..0x94].copy_from_slice(&2u32.to_le_bytes()); // (NumberOfSymbols: 36 bytes)
+        f[0x424..0x428].copy_from_slice(&13u32.to_le_bytes()); // (the string table's size, with these 4 bytes)
+        f[0x428..0x431].copy_from_slice(b"longshot\0");
+        f
+    }
+
+    #[test]
+    fn a_pe_program_s_overlay_is_past_its_image() {
+        let f = tiny_pe(0x400);
         assert_eq!(image_end(&f), Some(0x400));
         let file = attach(&f, &a_pack()).unwrap();
         assert_eq!(carried_in(&file).unwrap().unwrap().0.start, 0x400);
         assert!(carried_in(&file[..file.len() - 3]).is_err());
+    }
+
+    #[test]
+    fn a_pe_program_s_zero_padding_to_its_file_alignment_carries_nothing() {
+        // (a developer's build on Windows: not a download cut short)
+        let f = padded_pe();
+        assert_eq!(image_end(&f), Some(0x600), "the zeros after the string table are the image's");
+        assert_eq!(carried_in(&f).unwrap(), None);
+        assert!(carried_in(&f[..0x500]).is_err(), "padding the file has not whole: cut short");
+    }
+
+    #[test]
+    fn a_pe_program_s_padding_with_a_byte_that_is_not_zero_is_refused() {
+        for at in [0x431, 0x5FF] {
+            let mut f = padded_pe();
+            f[at] = 1;
+            assert_eq!(image_end(&f), Some(0x431), "a byte at {at:#x}: past the image");
+            assert!(carried_in(&f).is_err(), "a byte at {at:#x}: bytes past the image but no trailer");
+            assert!(attach(&f, &a_pack()).is_err(), "a byte at {at:#x}");
+        }
+    }
+
+    #[test]
+    fn a_pack_is_attached_to_a_padded_pe_program() {
+        let p = a_pack();
+        let file = attach(&padded_pe(), &p).unwrap();
+        assert_eq!(carried_in(&file).unwrap().unwrap().0, 0x600..0x600 + p.len(), "the pack right after the padding");
+        assert_eq!(verify(&file).unwrap(), &p[..]);
+        assert!(attach(&file, &p).is_err(), "a program that carries a pack already is refused");
+        // (a program whose string table ends the file: the pack's first bytes are not taken for padding)
+        let file = attach(&padded_pe()[..0x431], &p).unwrap();
+        assert_eq!(carried_in(&file).unwrap().unwrap().0, 0x431..0x431 + p.len());
+        assert_eq!(verify(&file).unwrap(), &p[..]);
     }
 }
