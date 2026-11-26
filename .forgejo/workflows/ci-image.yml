@@ -94,7 +94,34 @@ jobs:
               -cf - "${paths[@]}" | gzip -n -6 > "$out/$(printf %02d "$i")-$part.tar.gz"
           done
           ls -l "$out"
-      - uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+      # (through the server's own address, RELEASE_UPLOAD_API's host, not Cloudflare, which cut this upload with a 524
+      # (run 54505); when that fails or the variable is unset, the usual way)
+      - name: The server's own address, for the upload
+        id: direct
+        env:
+          UPLOAD_API: ${{ vars.RELEASE_UPLOAD_API }}
+        run: |
+          if [[ $UPLOAD_API == http*://*/api/v1* ]]; then
+            echo "url=${UPLOAD_API%%/api/v1*}/" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::no RELEASE_UPLOAD_API: the upload goes through the public address"
+          fi
+      - name: Upload ci-image-${{ matrix.image }}, through the server's own address
+        id: upload_direct
+        if: steps.direct.outputs.url != ''
+        continue-on-error: true
+        env:
+          ACTIONS_RESULTS_URL: ${{ steps.direct.outputs.url }}
+        uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+        with:
+          name: ci-image-${{ matrix.image }}
+          path: ${{ runner.temp }}/layers
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Upload ci-image-${{ matrix.image }}
+        if: steps.direct.outputs.url == '' || steps.upload_direct.outcome == 'failure'
+        uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: ci-image-${{ matrix.image }}
           path: ${{ runner.temp }}/layers
@@ -121,10 +148,12 @@ jobs:
       CRANE_URL: https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_x86_64.tar.gz
       CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
     steps:
-      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out the commit
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
+      - name: Download ci-image-${{ matrix.image }}
+        uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
           name: ci-image-${{ matrix.image }}
           path: ${{ runner.temp }}/layers

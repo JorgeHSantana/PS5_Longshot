@@ -368,7 +368,9 @@ class RealQueue(unittest.TestCase):
             self.assertEqual((a.wait(30), b.wait(30)), (0, 0))
             with open(marks) as f:
                 t = {line.split()[0]: float(line.split()[1]) for line in f}
-            return t["b+"] < t["a-"]   # (b started while a still ran)
+            # (the two ran at once: their spans overlap. On a loaded machine b can reach the queue before a, so which one
+            # started first is not asked)
+            return max(t["a+"], t["b+"]) < min(t["a-"], t["b-"])
 
     def test_exclusive_one_at_a_time_shared_together(self):
         self.assertFalse(self.run_two("gpu"))

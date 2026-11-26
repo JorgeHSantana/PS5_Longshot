@@ -56,7 +56,8 @@ jobs:
       lite: ${{ steps.image.outputs.lite }}
       lite_ready: ${{ steps.image.outputs.lite_ready }}
     steps:
-      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out the CI images' inputs
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: |
@@ -74,14 +75,16 @@ jobs:
         # (the public address, not github.server_url: a job's server_url is the forge inside the server, magicbean-git:3000,
         # a name the Docker that starts the jobs' containers does not resolve, and the image is pulled by the host it names)
         run: scripts/linux/ci_image.sh image https://git.magicbean.dev
-      - if: github.event_name == 'pull_request'
+      - name: Check out the base's scripts (in base/)
+        if: github.event_name == 'pull_request'
         uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
           persist-credentials: false
           sparse-checkout: scripts
-      - id: files
+      - name: Whether the compiling jobs are needed (the pull request's files, by the base's script)
+        id: files
         if: github.event_name == 'pull_request'
         env:
           FORGEJO_TOKEN: ${{ github.token }}
@@ -148,7 +151,8 @@ jobs:
     runs-on: quick  # (a quick job: the runner kept free for these takes it, or any runner with room)
     timeout-minutes: 10
     steps:
-      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out the commit, with its history
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           filter: blob:none   # (history without file contents: the server sends commits and trees only; files come when read)
@@ -189,7 +193,8 @@ jobs:
     steps:
       # (main's tree from this runner's cache, so that checkout fetches only what the commit adds; anything amiss, and it
       # fetches all as before: scripts/ci_git_base.sh)
-      - uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore main's tree (git-base)
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/git-base
           key: git-base
@@ -214,7 +219,8 @@ jobs:
       - name: main's tree for later runs
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: scripts/ci_git_base.sh save
-      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Save main's tree (git-base)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/git-base
@@ -231,7 +237,8 @@ jobs:
       # build the workspace's own crates again whatever a cache holds, so only the dependencies are kept
       # (scripts/ci_cargo_prune.py), one entry per lock. Read by every run, written only by a push to main; host-windows
       # reads it too. $CARGO_HOME is the image's /opt/cargo)
-      - id: cache-restore
+      - name: Restore the registry crates' builds
+        id: cache-restore
         uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -258,7 +265,8 @@ jobs:
       - name: The dependencies alone, for the cache
         if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache-restore.outputs.cache-hit != 'true' }}
         run: python3 -I scripts/ci_cargo_prune.py
-      - if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache-restore.outputs.cache-hit != 'true' }}
+      - name: Save the registry crates' builds
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache-restore.outputs.cache-hit != 'true' }}
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -281,7 +289,8 @@ jobs:
     steps:
       # (main's tree from this runner's cache, so that checkout fetches only what the commit adds; anything amiss, and it
       # fetches all as before: scripts/ci_git_base.sh)
-      - uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore main's tree (git-base)
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/git-base
           key: git-base
@@ -313,18 +322,21 @@ jobs:
           echo "llvm=$(python3 -I scripts/longshot_builder.py llvm-mingw --name --host linux)" >> "$GITHUB_OUTPUT"
       # (the downloads only, llvm-mingw's archive and tools.lock's, each checked by its size and SHA-256 when taken: read by
       # every run, written only by a push to main, when missing)
-      - id: llvm-cache
+      - name: Restore llvm-mingw's archive
+        id: llvm-cache
         uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/llvm/.cache
           key: ${{ steps.versions.outputs.llvm }}-archive
-      - id: tools-cache
+      - name: Restore tools.lock's Windows downloads
+        id: tools-cache
         uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/tools-cache
           key: windows-tools-downloads-${{ hashFiles('tools.lock') }}
       # (the rust job's cache, read only: the builder below is built with most of the same registry crates)
-      - uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore the registry crates' builds
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             /opt/cargo/registry/index
@@ -358,7 +370,8 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "prefix=ccache-host-windows-$LLVM-" >> "$GITHUB_OUTPUT"
           echo "key=ccache-host-windows-$LLVM-${{ hashFiles('host/**', 'game/**', 'tools.lock') }}" >> "$GITHUB_OUTPUT"
-      - id: ccache-restore
+      - name: Restore the compiler cache
+        id: ccache-restore
         uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
@@ -373,17 +386,20 @@ jobs:
           RX_CPM="$RUNNER_TEMP/win-tools/tools/cpm" python3 -I scripts/check_host_compile.py \
             --work "$GITHUB_WORKSPACE/.host-windows" --jobs "$(nproc)" --launcher ccache
           ccache --show-stats
-      - if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - name: Save the compiler cache
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
           key: ${{ steps.ccache.outputs.key }}
-      - if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.llvm-cache.outputs.cache-hit != 'true' }}
+      - name: Save llvm-mingw's archive
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.llvm-cache.outputs.cache-hit != 'true' }}
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/llvm/.cache
           key: ${{ steps.versions.outputs.llvm }}-archive
-      - if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.tools-cache.outputs.cache-hit != 'true' }}
+      - name: Save tools.lock's Windows downloads
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.tools-cache.outputs.cache-hit != 'true' }}
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/tools-cache
@@ -408,7 +424,8 @@ jobs:
     steps:
       # (main's tree from this runner's cache, so that checkout fetches only what the commit adds; anything amiss, and it
       # fetches all as before: scripts/ci_git_base.sh)
-      - uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore main's tree (git-base)
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/git-base
           key: git-base
@@ -451,7 +468,8 @@ jobs:
           prefix="ccache-tests-part${SHARD%/*}of${SHARD#*/}-$compilers-"
           echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
           echo "key=$prefix$RECOMPILER" >> "$GITHUB_OUTPUT"
-      - id: ccache-restore
+      - name: Restore the compiler cache
+        id: ccache-restore
         uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
@@ -466,6 +484,11 @@ jobs:
         run: |
           set -euo pipefail
           checks=$(python3 -I -B tests/run_all.py --list --shard "$SHARD")
+          # (the developer longshot-builder: the 50 checks that make their site hooks run it (tests/sitehooks.py), each
+          # with cargo, which built it cold under the part's other checks, one at a time behind cargo's lock, 400 s and
+          # more each, past the limit for some)
+          echo "the developer longshot-builder, for the site-hook checks"
+          cargo build --locked -q -p longshot-builder
           if grep -qx 'tests/test_lifter_semantics.py' <<< "$checks"; then
             cargo build --locked --release -q -p longshot-builder
           fi
@@ -478,15 +501,16 @@ jobs:
             (cd builder && cargo build -q --release -p build-driver --example redact)
           fi
       # (--strict: a check whose compiler, headers or package is missing here fails instead of being skipped. --timeout
-      # 900: tests/test_recorder_sync.py took 445 s on CircleCI and more than 600 s here, beside 9 others)
+      # 1200: tests/test_recorder_sync.py took 445 s on CircleCI and more than 900 s on a 10-core runner beside 9 others)
       - name: Every check of this part
         env:
           SHARD: ${{ matrix.shard }}
-        run: python3 -I -B tests/run_all.py --strict --timeout 900 --shard "$SHARD"
+        run: python3 -I -B tests/run_all.py --strict --timeout 1200 --shard "$SHARD"
       - name: Compiler cache statistics
         if: ${{ !cancelled() }}
         run: ccache --show-stats
-      - if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.ccache-restore.outputs.cache-hit != 'true' }}
+      - name: Save the compiler cache
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.ccache-restore.outputs.cache-hit != 'true' }}
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
@@ -505,7 +529,8 @@ jobs:
     steps:
       # (main's tree from this runner's cache, so that checkout fetches only what the commit adds; anything amiss, and it
       # fetches all as before: scripts/ci_git_base.sh)
-      - uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore main's tree (git-base)
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/git-base
           key: git-base
@@ -532,7 +557,8 @@ jobs:
         run: scripts/linux/ci_setup.sh --github-env --image lite
       - name: Build and check
         run: scripts/website_check.sh
-      - if: github.event_name == 'pull_request' && hashFiles('website/dist/index.html') != ''
+      - name: Upload website-dist-${{ github.event.pull_request.head.sha }}
+        if: github.event_name == 'pull_request' && hashFiles('website/dist/index.html') != ''
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: website-dist-${{ github.event.pull_request.head.sha }}

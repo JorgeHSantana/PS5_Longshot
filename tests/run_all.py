@@ -18,13 +18,15 @@ writes the results as JUnit XML. Standard library only: no package is installed 
 The shader recompiler's SPIR-V fixtures (tests/global_load_16, tests/native_suatom, tests/f2i_immediate) are three checks:
 each built with cmake (CC, CXX), its program run to emit the modules, and every module checked by spirv-val (Linux).
 
-A test says what it needs in its own file, with up to three top-level assignments of plain literals (after its
+A test says what it needs in its own file, with up to four top-level assignments of plain literals (after its
 docstring and imports). The runner reads them with ast and never imports the test; a test that declares none runs with
 no arguments and its own defaults.
 
     RUN_ALL_ARGS = ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"]   # its command-line arguments
     RUN_ALL_MODULES = ["zstandard"]                                       # Python packages it imports
     RUN_ALL_SKIP = {"windows": "needs spirv-val: checked on Linux"}       # OS ("linux", "windows") -> why it is skipped
+    RUN_ALL_ALONE = True                                                  # it measures time or CPU: run alone, after
+                                                                          # the others, one at a time
 
 {name} in an argument is a tool or folder find_tools looks for (cc, cxx, clang, vulkan_headers, spirv_headers, spirv_val,
 glslang, dav1d, cargo, llvm_mc, cmake; clang is a C compiler that is clang on every OS, $CLANG else PATH's, for the checks
@@ -68,7 +70,7 @@ OS = "windows" if WINDOWS else "linux"
 
 # What a check needs is declared in the test file itself, as top-level literals the runner reads with ast (the test is
 # never imported): see the docstring above and read_declarations below.
-DECLARATIONS = ("RUN_ALL_ARGS", "RUN_ALL_MODULES", "RUN_ALL_SKIP")
+DECLARATIONS = ("RUN_ALL_ARGS", "RUN_ALL_MODULES", "RUN_ALL_SKIP", "RUN_ALL_ALONE")
 # (a list's or a dict's methods that change it in place: a declaration changed that way is not what the runner reads)
 MUTATORS = {"append", "extend", "insert", "remove", "pop", "clear", "update", "setdefault", "popitem", "sort",
             "reverse", "__setitem__", "__delitem__", "__iadd__", "__ior__"}
@@ -155,6 +157,7 @@ class Check:
     def __init__(self, name, run, why_skip=None):
         self.name, self.run, self.why_skip = name, run, why_skip
         self.status, self.secs, self.output = "skip", 0.0, ""
+        self.alone = False
 
 
 class DeclarationError(Exception):
@@ -167,7 +170,7 @@ def read_declarations(path, rel, tools):
     why}}, empty where the test declares nothing. A file that does not parse declares nothing and says why in
     "unparsed" (its check fails with that, on every OS, without running); a bad declaration raises DeclarationError naming
     the file and line."""
-    found = {"args": [], "modules": [], "skip": {}, "unparsed": None}
+    found = {"args": [], "modules": [], "skip": {}, "alone": False, "unparsed": None}
     with open(path, "rb") as f:
         source = f.read()
     try:
@@ -237,6 +240,11 @@ def read_declarations(path, rel, tools):
                 raise bad(node, "RUN_ALL_SKIP names an unknown OS %s (known: %s)" % (", ".join(map(repr, unknown)),
                                                                                     ", ".join(OSES)))
             found["skip"] = dict(v)
+            continue
+        if name == "RUN_ALL_ALONE":
+            if v is not True:
+                raise bad(node, "RUN_ALL_ALONE must be True (or not set)")
+            found["alone"] = True
             continue
         if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
             raise bad(node, "%s must be a list of strings" % name)
@@ -727,6 +735,7 @@ def main():
         reason = decls[rel]["skip"].get(OS)
         run, missing = python_check(rel, decls[rel], tools, a.timeout)
         c = Check(rel, run)
+        c.alone = decls[rel]["alone"]
         if decls[rel]["unparsed"]:   # (no skip to read: the same failure on every OS, not run)
             c.run = lambda why=decls[rel]["unparsed"]: Result(1, (why + "\n").encode())
         elif reason and not a.no_skip and not picked(rel):
@@ -800,10 +809,17 @@ def main():
     t0 = time.time()
     print("%d checks, %d skipped, %d at once (%s%s)" % (len(to_run), len(checks) - len(to_run), a.jobs, OS, part),
           flush=True)
+    # (RUN_ALL_ALONE: a check that measures time or CPU, run one at a time after the others, on an idle machine)
     with concurrent.futures.ThreadPoolExecutor(max(1, a.jobs)) as ex:
-        for c in concurrent.futures.as_completed([ex.submit(one, c) for c in to_run]):
+        for c in concurrent.futures.as_completed([ex.submit(one, c) for c in to_run if not c.alone]):
             c = c.result()
             print("%-7s %6.1fs  %s" % (c.status, c.secs, c.name), flush=True)
+    alone = [c for c in to_run if c.alone]
+    if alone:
+        print("%d checks alone, one at a time: %s" % (len(alone), ", ".join(c.name for c in alone)), flush=True)
+    for c in alone:
+        one(c)
+        print("%-7s %6.1fs  %s  (alone)" % (c.status, c.secs, c.name), flush=True)
     wall = time.time() - t0
 
     failed = [c for c in to_run if c.status != "pass"]

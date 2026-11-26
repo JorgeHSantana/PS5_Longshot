@@ -89,7 +89,8 @@ jobs:
       # archives, llvm-mingw. Each is checked by its SHA-256 every time it is used, against the pins in this checkout, so
       # whoever saved the cache can't change what is built; nothing unpacked or compiled is kept. Read and written only by a
       # run of main or a v* tag (docs/dev/reference/ci.md, The release's cache))
-      - id: release-cache
+      - name: Restore the release's downloads (each checked by its SHA-256 when used)
+        id: release-cache
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -179,7 +180,8 @@ jobs:
       # main or a v* tag, on the server's release runner), by platform, profile, target and the pinned Rust
       # (scripts/renhdrum.py), then Cargo.lock; another Cargo.lock restores the newest entry of the same toolchain.
       # Unlike the downloads above, what it holds is not checked again: docs/dev/reference/ci.md, The release's cache)
-      - id: rust-target
+      - name: Restore the shipped builder's compiled Rust (main's and tags' runs only)
+        id: rust-target
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -191,7 +193,8 @@ jobs:
         run: >-
           python -I scripts/longshot_builder.py build --target windows --profile dist --llvm-mingw "$LLVM_MINGW"
           --cache "$RUNNER_TEMP/rust" --out "$RUNNER_TEMP/longshot-builder.exe"
-      - if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.rust-target.outputs.cache-hit != 'true'
+      - name: Save the shipped builder's compiled Rust (main's and tags' runs only)
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.rust-target.outputs.cache-hit != 'true'
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/rust-work/target
@@ -225,7 +228,14 @@ jobs:
       # (the background install the Wine step started: its log, then its status; one that never ends stops here in 10 minutes)
       - name: Wine, installed
         run: |
-          for _ in $(seq 600); do [ -f "$RUNNER_TEMP/wine-apt.status" ] && break; sleep 1; done
+          if [ ! -f "$RUNNER_TEMP/wine-apt.status" ]; then
+            echo "::notice::waiting for the background install of Wine to end (up to 10 minutes)"
+          fi
+          for s in $(seq 600); do
+            [ -f "$RUNNER_TEMP/wine-apt.status" ] && break
+            [ $((s % 60)) = 0 ] && echo "still waiting for Wine's install: $((s / 60)) of 10 minutes"
+            sleep 1
+          done
           cat "$RUNNER_TEMP/wine-apt.log"
           [ -f "$RUNNER_TEMP/wine-apt.status" ] || { echo "::error::Wine's install did not end in 10 minutes"; exit 1; }
           status=$(cat "$RUNNER_TEMP/wine-apt.status")
@@ -272,7 +282,8 @@ jobs:
 
       # (an artifact goes to Forgejo by its public address, ROOT_URL, behind Cloudflare: a request there can fail once, and
       # the action does not send a block again. Sent once more when it failed: Forgejo takes the same name again)
-      - if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.release-cache.outputs.cache-hit != 'true'
+      - name: Save the release's downloads (each checked by its SHA-256 when used)
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.release-cache.outputs.cache-hit != 'true'
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -281,14 +292,43 @@ jobs:
             ${{ runner.temp }}/tools-cache
             ${{ runner.temp }}/llvm/.cache
           key: release-downloads-windows-${{ hashFiles('Cargo.lock', 'scripts/renhdrum.py', 'tools.lock') }}
-      - id: upload_1
+      # (the uploads through the server's own address, RELEASE_UPLOAD_API's host on this runner's network, not git.magicbean.dev
+      # behind Cloudflare, which cut a 306 MB upload with "tls alert bad record mac" (release run 54507): upload-artifact
+      # talks to ACTIONS_RESULTS_URL, given here per step. When that fails, or the variable is unset, the upload goes the
+      # usual way, then once more)
+      - name: The server's own address, for the uploads
+        id: direct
+        env:
+          UPLOAD_API: ${{ vars.RELEASE_UPLOAD_API }}
+        run: |
+          if [[ $UPLOAD_API == http*://*/api/v1* ]]; then
+            echo "url=${UPLOAD_API%%/api/v1*}/" >> "$GITHUB_OUTPUT"
+            echo "uploads through ${UPLOAD_API%%/api/v1*}"
+          else
+            echo "::notice::no RELEASE_UPLOAD_API: the uploads go through the public address"
+          fi
+      - name: Upload longshot-builder-windows, through the server's own address
+        id: upload_1_direct
+        if: steps.direct.outputs.url != ''
+        continue-on-error: true
+        env:
+          ACTIONS_RESULTS_URL: ${{ steps.direct.outputs.url }}
+        uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+        with:
+          name: longshot-builder-windows
+          path: dist/
+          if-no-files-found: error
+      - name: Upload longshot-builder-windows
+        id: upload_1
+        if: steps.direct.outputs.url == '' || steps.upload_1_direct.outcome == 'failure'
         continue-on-error: true
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: longshot-builder-windows
           path: dist/
           if-no-files-found: error
-      - if: steps.upload_1.outcome == 'failure'
+      - name: Upload longshot-builder-windows (again, the first try having failed)
+        if: steps.upload_1.outcome == 'failure'
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: longshot-builder-windows

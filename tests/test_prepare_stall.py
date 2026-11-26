@@ -35,6 +35,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
+RUN_ALL_ALONE = True   # (it measures time or CPU, or races threads: beside other checks on a loaded runner it failed or timed out)
 
 
 def block(text, marker):
@@ -275,16 +276,19 @@ int main(int argc, char** argv) {
     if (c == "busy-compile" || c == "busy-compile-intel") {
         // (a compile with a CPU at work: three times the limit before a stop on most drivers, past it and twelve times the limit
         // on Mesa's Intel driver)
-        // (two threads at work: the watchdog's busy is half a CPU in its window, and one thread alone fell below that when the
-        // checks run 24 at once on a loaded PC, which stopped the compile at 4 s)
+        // (four threads at work: the watchdog's busy is half a CPU in its window, and one thread alone fell below that when
+        // the checks run 24 at once on a loaded PC, two on a 10-core CI runner beside 9 other checks, which stopped the
+        // compile at 4 s)
         std::atomic<bool> done{false};
         auto spin = [&] { volatile uint64_t x = 0; while (!done.load(std::memory_order_relaxed)) x = x + 1; };
-        std::thread burn(spin), burn2(spin);
+        std::thread burn(spin), burn2(spin), burn3(spin), burn4(spin);
         prepare_moved(0, 5, 100);
         Sleep(c == "busy-compile" ? 25000 : 15000);   // (busy-compile: the watchdog ends the process before this does)
         done = true;
         burn.join();
         burn2.join();
+        burn3.join();
+        burn4.join();
         return c == "busy-compile" ? 8 : 0;
     }
     if (c == "save") {   // (a long save, nothing left in the driver: reported, then silent, never stopped)

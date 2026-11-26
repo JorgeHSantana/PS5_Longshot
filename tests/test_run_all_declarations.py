@@ -45,7 +45,7 @@ class Reader(unittest.TestCase):
 
     def test_nothing_declared(self):
         self.assertEqual(self.read('"""RUN_ALL_ARGS in the docstring is not a declaration"""\nimport os\n'),
-                         {"args": [], "modules": [], "skip": {}, "unparsed": None})
+                         {"args": [], "modules": [], "skip": {}, "alone": False, "unparsed": None})
 
     def test_all_three(self):
         d = self.read('''
@@ -88,6 +88,8 @@ class Reader(unittest.TestCase):
         self.bad('RUN_ALL_ARGS = ("--cxx", "{cxx}")\n', "list of strings")
         self.bad('RUN_ALL_MODULES = ["zstandard", 1]\n', "list of strings")
         self.bad('RUN_ALL_SKIP = ["windows"]\n', "dict of OS -> reason")
+        self.bad('RUN_ALL_ALONE = 1\n', "RUN_ALL_ALONE must be True")
+        self.assertTrue(self.read('RUN_ALL_ALONE = True\n')["alone"])
         self.bad('RUN_ALL_SKIP = ({"windows"}, "why")\n', "dict of OS -> reason")
         self.bad('RUN_ALL_SKIP = {"windows": ""}\n', "dict of OS -> reason")
 

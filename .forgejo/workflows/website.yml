@@ -56,7 +56,8 @@ jobs:
     env:
       SEAL_BROKER_PIN: ${{ vars.SEAL_BROKER_PIN }}
     steps:
-      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out the commit
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -99,7 +100,8 @@ jobs:
     outputs:
       found: ${{ steps.dist.outputs.found }}
     steps:
-      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out main's code (never the pull request's)
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ github.sha }}   # (main, never the PR)
@@ -130,7 +132,8 @@ jobs:
       SEAL_BROKER_PIN: ${{ vars.SEAL_BROKER_PIN }}
       BUILT: ${{ needs.preview-wait.result == 'success' && needs.preview-wait.outputs.found == 'true' }}
     steps:
-      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out main's code (never the pull request's)
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ github.sha }}   # (main, never the PR)

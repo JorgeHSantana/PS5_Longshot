@@ -111,15 +111,27 @@ mod tests {
 
     #[test]
     fn a_second_build_is_refused_until_the_first_lets_go() {
+        // (once let go, the lock is taken again; a test of this process that starts a program at that moment holds a
+        // copy of the file between its fork and its exec, which closes it, so a few tries are allowed: that window, not
+        // a lock kept, under a loaded machine)
+        fn again<T>(take: impl Fn() -> Result<T>) -> T {
+            for _ in 0..50 {
+                if let Ok(lock) = take() {
+                    return lock;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            take().unwrap()
+        }
         let d = std::env::temp_dir().join(format!("build-core-lock-{}", std::process::id()));
         let first = WorkLock::take(&d).unwrap();
         assert!(matches!(WorkLock::take(&d), Err(Error::Player { code: "work_folder_busy", .. })));
         drop(first);
-        drop(WorkLock::take(&d).unwrap());
-        let game = GameLock::take(&d).unwrap();
+        drop(again(|| WorkLock::take(&d)));
+        let game = again(|| GameLock::take(&d));
         assert!(matches!(GameLock::take(&d), Err(Error::Player { code: "game_folder_busy", .. })));
         drop(game);
-        drop(GameLock::take(&d).unwrap());
+        drop(again(|| GameLock::take(&d)));
         let _ = std::fs::remove_dir_all(&d);
     }
 

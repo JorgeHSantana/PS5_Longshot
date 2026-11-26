@@ -62,6 +62,7 @@ jobs:
             apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl xz-utils zstd python3 \
               build-essential && break
             [ "$try" = 3 ] && exit 1
+            echo "::notice::the package install failed: trying again in 20 s ($try of 3)"
             sleep 20
           done
 
@@ -82,7 +83,8 @@ jobs:
           rm -f "$node_tar"
           node --version
 
-      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out the commit, with its history
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # (the release's commit; with its history, git describe names a build that is no release)
           ref: ${{ inputs.ref }}
@@ -105,7 +107,8 @@ jobs:
       # archives. Each is checked by its SHA-256 every time it is used, against the pins in this checkout, so
       # whoever saved the cache can't change what is built; nothing unpacked or compiled is kept. Read and written only by a
       # run of main or a v* tag (docs/dev/reference/ci.md, The release's cache))
-      - id: release-cache
+      - name: Restore the release's downloads (each checked by its SHA-256 when used)
+        id: release-cache
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -126,7 +129,8 @@ jobs:
       # Longshot's store, each archive checked by its size and SHA-256, unpacked into $RUNNER_TEMP/link-tools)
       - name: The linker and sysroot (tools.lock, linux-x64)
         run: python3 -I scripts/longshot_builder.py link-tools "$RUNNER_TEMP/link-tools"
-      - id: rust-target
+      - name: Restore the shipped builder's compiled Rust (main's and tags' runs only)
+        id: rust-target
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -143,7 +147,8 @@ jobs:
           python3 -I scripts/longshot_builder.py build --target linux --profile dist --cache "$RUNNER_TEMP/rust"
           --out "$RUNNER_TEMP/host/longshot-builder" --jobs "$(nproc)"
           --linker "$RUNNER_TEMP/link-tools/llvm/bin/clang" --sysroot "$RUNNER_TEMP/link-tools/sysroot"
-      - if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.rust-target.outputs.cache-hit != 'true'
+      - name: Save the shipped builder's compiled Rust (main's and tags' runs only)
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.rust-target.outputs.cache-hit != 'true'
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/rust-work/target
@@ -252,7 +257,8 @@ jobs:
       # request there can fail once, and the action does not send a block again (2026-11-13, the launcher's nightly: one
       # 8 MB block, "SSL alert bad record mac"). Sent once more when it failed: Forgejo takes the same name again. Sent
       # before the build checks below, which ship nothing)
-      - if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.release-cache.outputs.cache-hit != 'true'
+      - name: Save the release's downloads (each checked by its SHA-256 when used)
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.release-cache.outputs.cache-hit != 'true'
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -261,28 +267,71 @@ jobs:
             ${{ runner.temp }}/tools-cache
             ${{ runner.temp }}/link-tools/.cache
           key: release-downloads-linux-${{ hashFiles('Cargo.lock', 'scripts/renhdrum.py', 'tools.lock') }}
-      - id: upload_1
+      # (the uploads through the server's own address, RELEASE_UPLOAD_API's host on this runner's network, not git.magicbean.dev
+      # behind Cloudflare, which cut a 306 MB upload with "tls alert bad record mac" (release run 54507): upload-artifact
+      # talks to ACTIONS_RESULTS_URL, given here per step. When that fails, or the variable is unset, the upload goes the
+      # usual way, then once more)
+      - name: The server's own address, for the uploads
+        id: direct
+        env:
+          UPLOAD_API: ${{ vars.RELEASE_UPLOAD_API }}
+        run: |
+          if [[ $UPLOAD_API == http*://*/api/v1* ]]; then
+            echo "url=${UPLOAD_API%%/api/v1*}/" >> "$GITHUB_OUTPUT"
+            echo "uploads through ${UPLOAD_API%%/api/v1*}"
+          else
+            echo "::notice::no RELEASE_UPLOAD_API: the uploads go through the public address"
+          fi
+      - name: Upload longshot-builder-linux, through the server's own address
+        id: upload_1_direct
+        if: steps.direct.outputs.url != ''
+        continue-on-error: true
+        env:
+          ACTIONS_RESULTS_URL: ${{ steps.direct.outputs.url }}
+        uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+        with:
+          name: longshot-builder-linux
+          path: dist/
+          if-no-files-found: error
+      - name: Upload longshot-builder-linux
+        id: upload_1
+        if: steps.direct.outputs.url == '' || steps.upload_1_direct.outcome == 'failure'
         continue-on-error: true
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: longshot-builder-linux
           path: dist/
           if-no-files-found: error
-      - if: steps.upload_1.outcome == 'failure'
+      - name: Upload longshot-builder-linux (again, the first try having failed)
+        if: steps.upload_1.outcome == 'failure'
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: longshot-builder-linux
           path: dist/
           if-no-files-found: error
       # (the program before its pack: build-windows.yml's tool, not a release file (publish takes the artifact above only))
-      - id: upload_tool_1
+      - name: Upload longshot-builder-linux-tool, through the server's own address
+        id: upload_tool_1_direct
+        if: steps.direct.outputs.url != ''
+        continue-on-error: true
+        env:
+          ACTIONS_RESULTS_URL: ${{ steps.direct.outputs.url }}
+        uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+        with:
+          name: longshot-builder-linux-tool
+          path: ${{ runner.temp }}/host/longshot-builder
+          if-no-files-found: error
+      - name: Upload longshot-builder-linux-tool
+        id: upload_tool_1
+        if: steps.direct.outputs.url == '' || steps.upload_tool_1_direct.outcome == 'failure'
         continue-on-error: true
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: longshot-builder-linux-tool
           path: ${{ runner.temp }}/host/longshot-builder
           if-no-files-found: error
-      - if: steps.upload_tool_1.outcome == 'failure'
+      - name: Upload longshot-builder-linux-tool (again, the first try having failed)
+        if: steps.upload_tool_1.outcome == 'failure'
         uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: longshot-builder-linux-tool

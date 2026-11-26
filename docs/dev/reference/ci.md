@@ -13,7 +13,7 @@ image itself ([below](#the-ci-images)).
 
 | Workflow | When | What it does |
 |---|---|---|
-| `ci.yml` | Pull request, push to `main` | `changes`: what the rest needs (the [CI images](#the-ci-images), and whether the compiling jobs run); `lint`: pre-commit on the changed files, ShellCheck on `scripts/` and actionlint; `third-party`: `scripts/check_third_party.py` and the guide screenshots' source review; `rust`: rustfmt, clippy, `cargo test` (with clang, lld and llvm-mc), then the synthetic game end to end from the same build; `host-windows`: the host's C for Windows with llvm-mingw; `tests`: `tests/run_all.py --strict` in 2 parts (900 s a check; the part whose checks run the release `longshot-builder` or `tests/test_lifter.py` builds those first; the shader recompiler's SPIR-V fixtures are three of its checks); `website`: the website's checks (`scripts/website_check.sh`), its `dist/` kept for the preview. On a pull request, `changes` skips `rust` and `host-windows` when [only docs change](#what-a-pull-request-runs) |
+| `ci.yml` | Pull request, push to `main` | `changes`: what the rest needs (the [CI images](#the-ci-images), and whether the compiling jobs run); `lint`: pre-commit on the changed files, ShellCheck on `scripts/` and actionlint; `third-party`: `scripts/check_third_party.py` and the guide screenshots' source review; `rust`: rustfmt, clippy, `cargo test` (with clang, lld and llvm-mc), then the synthetic game end to end from the same build; `host-windows`: the host's C for Windows with llvm-mingw; `tests`: `tests/run_all.py --strict` in 2 parts (1200 s a check; every part builds the developer `longshot-builder` first, for the site-hook checks, and runs the checks that declare `RUN_ALL_ALONE` (they measure time or CPU) one at a time after the others; the part whose checks run the release `longshot-builder` or `tests/test_lifter.py` builds those first; the shader recompiler's SPIR-V fixtures are three of its checks); `website`: the website's checks (`scripts/website_check.sh`), its `dist/` kept for the preview. On a pull request, `changes` skips `rust` and `host-windows` when [only docs change](#what-a-pull-request-runs) |
 | `pr-description.yml` | Pull request (opened, edited, pushed) | The title (a Conventional Commit) and the description against the template (`scripts/check_pr_description.py`), with main's script: no code of the pull request's runs. The title is here, not in `ci.yml`, because a title edit runs this file, and an edit's run of `ci.yml` would cancel the code's checks |
 | `third-party.yml` | Nightly, by hand | The third-party parts compared with their upstream archives (`check_third_party.py --upstream`); the per-change check is `ci.yml`'s `third-party` |
 | `release.yml` | Push to `main`, tag `v*` | The nightly or the stable release: names the version, calls `build-linux.yml` and `build-windows.yml` (each checks every tools.lock line's archive is in the store before it uploads anything; a release uploads no tool), signs and publishes ([releases](releases.md)) |
@@ -159,6 +159,22 @@ the website's checks run on every pull request (the checks and the site read fil
 A skipped job is not a failed one: `main` requires no status checks, and Tooling's `forge.py pr status` counts
 `skipped` as passed. A pull request's newer push cancels its older runs of `ci.yml` and `pr-description.yml` (one run per pull request at a time, the newest); `release.yml` is never
 cancelled, and runs of `main` aren't either.
+
+### The website's preview
+
+A pull request that changes the site's sources (`website/`, `docs/`, `CONTRIBUTING.md`, `website.yml`) gets a preview
+of the built site, a version of the Worker with the alias `pr-<number>`. The site is built once, by `ci.yml`'s
+`website` job (`pull_request`, no secrets), which keeps `dist/` as the artifact `website-dist-<head commit>`.
+`website.yml` runs from `main` (`pull_request_target`), for a pull request from a branch of Longshot on every push, or
+for a fork's when a maintainer adds the label `preview` after reading it, in two jobs:
+
+- `preview-wait` (`quick`, no secrets): main's [scripts/ci_website_dist.py](../../../scripts/ci_website_dist.py)
+  waits, up to 30 minutes and saying so each minute, for that artifact. Only one of `ci.yml`'s `pull_request` run at
+  the pull request's head commit counts. If the website job failed or was cancelled, there is no preview.
+- `preview-upload` (`deploy`, `enable-openid-connect`): checks out main, takes the artifact as files only (a link, an
+  absolute path or `..` is refused), and uploads it with main's wrangler and `wrangler.jsonc` and the sealed Cloudflare
+  token; then it posts the link on the pull request and takes the label off. It never runs the pull request's code:
+  nothing of the pull request is checked out or executed there, so the token is opened only beside main's code.
 
 ### Secrets only our runners can open
 

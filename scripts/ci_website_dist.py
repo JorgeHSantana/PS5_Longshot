@@ -87,7 +87,11 @@ def main(argv: list[str]) -> int:
     if len(a.sha) != 40 or any(c not in "0123456789abcdef" for c in a.sha):
         ap.error("--sha: a full commit id")
     if a.what == "wait":
-        end = time.time() + a.timeout
+        start = time.time()
+        end = start + a.timeout
+        print(f"::notice::waiting for ci.yml's website job to keep website-dist-{a.sha} (the pull request's built site), "
+              f"up to {a.timeout // 60} minutes", flush=True)
+        last = 0
         while True:
             try:
                 if find(a.sha):
@@ -95,6 +99,10 @@ def main(argv: list[str]) -> int:
                     return 0
             except OSError as e:   # (the API busy: asked again)
                 print(f"ci_website_dist: {e}", file=sys.stderr)
+            waited = int(time.time() - start) // 60
+            if waited > last:
+                last = waited
+                print(f"still waiting for website-dist-{a.sha[:12]}: {waited} of {a.timeout // 60} minutes", flush=True)
             if time.time() > end:
                 print(f"::warning::no website-dist-{a.sha} from ci.yml after {a.timeout} s: its website job failed or "
                       "was cancelled, so there is no preview", file=sys.stderr)

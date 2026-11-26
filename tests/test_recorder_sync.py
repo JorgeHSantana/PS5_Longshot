@@ -52,6 +52,7 @@ import tempfile
 ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "longshot_env.h")
 
 RUN_ALL_ARGS = ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"]
+RUN_ALL_ALONE = True   # (it measures time or CPU, or races threads: beside other checks on a loaded runner it failed or timed out)
 
 ROOT = Path(__file__).resolve().parents[1]
 VK = ROOT / "gpu" / "vk"

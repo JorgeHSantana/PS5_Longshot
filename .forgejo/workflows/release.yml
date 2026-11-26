@@ -67,7 +67,8 @@ jobs:
       ref: ${{ steps.name.outputs.ref }}
       checked: ${{ steps.name.outputs.checked }}
     steps:
-      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out the commit, with its history
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           filter: blob:none   # (history without file contents: the server sends commits and trees only; files come when read)
@@ -77,7 +78,8 @@ jobs:
           git clone -q https://git.magicbean.dev/MagicBeanDev/Tooling.git "$RUNNER_TEMP/tooling"
           git -C "$RUNNER_TEMP/tooling" checkout -q --detach "$(cat .tooling-rev)"
           echo "RELEASE_PY=$RUNNER_TEMP/tooling/scripts/release.py" >> "$GITHUB_ENV"
-      - id: name
+      - name: The version's name (on a push to main, a wait of 5 minutes for more merges first)
+        id: name
         env:
           RELEASE_TOKEN: ${{ forgejo.token }}
           FORGEJO_UPLOAD_API: ${{ vars.RELEASE_UPLOAD_API }}
@@ -99,7 +101,11 @@ jobs:
             # The wait is on the quick runner, which has room for it (MagicBeanDev/Infra, runner/quick/config.yml))
             if [[ $GITHUB_EVENT_NAME == push ]]; then
               if [[ $(git rev-parse origin/main) == "$ref" ]]; then
-                sleep 300
+                echo "::notice::waiting 5 minutes for more merges before naming the nightly (main is still at ${ref:0:12})"
+                for minute in 1 2 3 4 5; do
+                  sleep 60
+                  echo "waited ${minute} of 5 minutes for more merges"
+                done
                 git fetch -q origin main
               fi
               head=$(git rev-parse origin/main)
@@ -171,7 +177,8 @@ jobs:
       REF: ${{ needs.version.outputs.ref }}
       FORGEJO_UPLOAD_API: ${{ vars.RELEASE_UPLOAD_API }}
     steps:
-      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out the commit, with its history
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.version.outputs.ref }}
           fetch-depth: 0
@@ -193,27 +200,31 @@ jobs:
           RELEASE_TOKEN: ${{ forgejo.token }}
         run: python3 -I "$RELEASE_PY" artifacts files --run "$GITHUB_RUN_ID" longshot-builder-linux longshot-builder-windows
       # (from Forgejo's public address behind Cloudflare, as the build jobs' upload: fetched once more when it failed)
-      - id: download_1
+      - name: Download longshot-builder-linux (when Forgejo's own address gave nothing)
+        id: download_1
         if: steps.artifacts.outcome == 'failure'
         continue-on-error: true
         uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
           name: longshot-builder-linux
           path: files
-      - if: steps.artifacts.outcome == 'failure' && steps.download_1.outcome == 'failure'
+      - name: Download longshot-builder-linux (again, the first try having failed)
+        if: steps.artifacts.outcome == 'failure' && steps.download_1.outcome == 'failure'
         uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
           name: longshot-builder-linux
           path: files
       # (from Forgejo's public address behind Cloudflare, as the build jobs' upload: fetched once more when it failed)
-      - id: download_2
+      - name: Download longshot-builder-windows (when Forgejo's own address gave nothing)
+        id: download_2
         if: steps.artifacts.outcome == 'failure'
         continue-on-error: true
         uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
           name: longshot-builder-windows
           path: files
-      - if: steps.artifacts.outcome == 'failure' && steps.download_2.outcome == 'failure'
+      - name: Download longshot-builder-windows (again, the first try having failed)
+        if: steps.artifacts.outcome == 'failure' && steps.download_2.outcome == 'failure'
         uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
           name: longshot-builder-windows

@@ -231,7 +231,10 @@ release key and the packages token ([CI](ci.md#secrets-only-our-runners-can-open
 access, until the deploy runner takes only `main`'s and the tags' jobs.
 
 Uploads go through `RELEASE_UPLOAD_API` (an organization variable, passed to `release.py` as `FORGEJO_UPLOAD_API`): the
-API without Cloudflare in front, which cuts uploads at 100 MB. Releases are made with the job's own token; no other
+API without Cloudflare in front, which cuts uploads at 100 MB. The build jobs' artifacts (`longshot-builder-<platform>`, the Linux
+tool) and the CI images' layers are uploaded the same way first: `upload-artifact` with `ACTIONS_RESULTS_URL` set to
+that host; when that fails, or the variable is unset, through the public address, then once more. (If Forgejo answers
+with upload addresses under its `ROOT_URL`, the bytes still go through Cloudflare: the run's log shows which.) Releases are made with the job's own token; no other
 secret is needed.
 
 ### Rotating the key

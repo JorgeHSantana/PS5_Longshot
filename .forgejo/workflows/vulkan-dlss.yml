@@ -42,7 +42,8 @@ jobs:
       - name: llvm-mingw version
         id: llvm
         run: echo "name=$(python -I scripts/longshot_builder.py llvm-mingw --name --host linux)" >> "$GITHUB_OUTPUT"
-      - uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore (and save) llvm-mingw's archive
+        uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/llvm/.cache
           key: ${{ steps.llvm.outputs.name }}-archive
@@ -50,7 +51,8 @@ jobs:
         run: |
           echo "LONGSHOT_MINGW=$(python -I scripts/longshot_builder.py llvm-mingw "$RUNNER_TEMP/llvm" --host linux)" >> "$GITHUB_ENV"
           echo "RX_TARGET=windows" >> "$GITHUB_ENV"
-      - uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore (and save) the builder's Rust downloads
+        uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ runner.temp }}/longshot-builder-rust/*.tar.xz

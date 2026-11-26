@@ -89,6 +89,7 @@ apt_install() {
   for try in 1 2 3 4; do
     apt-get update -q && break
     [[ $try == 4 ]] && return 1
+    echo "ci_setup: apt-get update failed (a mirror mid-sync?): trying again in 30 s ($try of 4)"
     sleep 30
   done
   apt-get install -y -q --no-install-recommends "$@"
