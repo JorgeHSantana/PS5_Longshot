@@ -120,6 +120,17 @@ void hos_wide_ui_bg_draw(Ctx *c) { note(5, c->x[1], c); }
 void hos_wide_ui_built(Ctx *c, uint64_t layout) { note(6, layout, c); }
 int hos_camera_trace_enabled(void) { return 0; }
 void hos_log(const char *fmt, ...) { (void)fmt; note(7, 0, NULL); }
+/* (the title card's sites, game/oot_wide_sites.c's too, are tests/test_title_card_sites.py's: here only what they link to) */
+typedef void (*A64Fn)(Ctx *);
+_Thread_local uint64_t hos_site_callee;
+static A64Fn a64_lookup(uint64_t addr) { (void)addr; return NULL; }
+void hos_wide_title_prepare(Ctx *c, uint64_t picture, uint64_t pane, uint64_t params, uint64_t alloc, uint64_t align,
+                            uint64_t out, void (*allocate)(Ctx *)) {
+    (void)picture, (void)pane, (void)params, (void)alloc, (void)align, (void)out;
+    allocate(c);
+}
+int hos_wide_title_draw(Ctx *c, void (*draw)(Ctx *)) { (void)c, (void)draw; return 0; }
+void hos_wide_title_reset(uint64_t allocator) { (void)allocator; }
 @CALLBACKS@
 @SLOTS@
 @OLD@

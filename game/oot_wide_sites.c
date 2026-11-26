@@ -35,6 +35,7 @@
 #define WIDE_KEEP_EVENT_FADE 0x84c061c8ULL
 #define WIDE_KEEP_LOADING_FADE 0x84c07b30ULL
 #define WIDE_KEEP_SYSTEM_OVERLAY 0x84c0f4a0ULL
+#define WIDE_PICTURE_DRAW 0x81550720ULL   /* (a picture's draw, f_81550720: ui.titleDraw's function, drawn again per strip) */
 /* ---- end of the build's addresses */
 
 #define SIXTEEN_NINE (16.0f / 9.0f)
@@ -52,6 +53,10 @@ void hos_wide_ui_size(Ctx *c, uint64_t pane);
 void hos_wide_ui_bg(Ctx *c);
 void hos_wide_ui_bg_draw(Ctx *c);
 void hos_wide_ui_built(Ctx *c, uint64_t layout);
+void hos_wide_title_prepare(Ctx *c, uint64_t picture, uint64_t pane, uint64_t params, uint64_t alloc, uint64_t align,
+                            uint64_t out, void (*allocate)(Ctx *));
+int hos_wide_title_draw(Ctx *c, void (*draw)(Ctx *));
+void hos_wide_title_reset(uint64_t allocator);
 int hos_camera_trace_enabled(void);   /* (host/hos_main.c: camera-clearance.trace is there) */
 typedef struct { unsigned long long hits, changed, traced; } ClearanceCounts;   /* (the clearance's diagnostics, a site's) */
 
@@ -342,6 +347,31 @@ int hos_site_ui_picture_constants(Ctx *A64_NOESC c) {
 }
 int hos_site_ui_picture_draw(Ctx *A64_NOESC c) {
     hos_wide_ui_bg_draw(c);
+    return 0;
+}
+
+/* ui.titlePrepare (replace bl f_8154f1c0, x30 set: a picture's record packed; x0 the record, x1 the arena, x2 the
+   alignment, x8 where the constants go, x19 the drawer, x20 its pane), ui.titleDraw (the entry of f_81550720: x0 the
+   drawer, x1 what it draws with; non-zero: drawn) and ui.titleReset (the entry of f_8156abc0: x0 the arena reset): the
+   area title card's frame in three strips (game/hos_wide_ui.c). The draw draws the picture once per strip through the
+   function itself, whose own entry hook then lets the game draw it (title_drawing: that picture, on this thread) */
+int hos_site_ui_title_prepare(Ctx *A64_NOESC c) {
+    hos_wide_title_prepare(c, c->x[19], c->x[20], c->x[0], c->x[1], c->x[2], c->x[8], a64_lookup(hos_site_callee));
+    return 0;
+}
+static _Thread_local uint64_t title_drawing;
+static void title_draw_game(Ctx *A64_NOESC c) {
+    const uint64_t outer = title_drawing;
+    title_drawing = c->x[0];
+    a64_lookup(WIDE_PICTURE_DRAW)(c);
+    title_drawing = outer;
+}
+int hos_site_ui_title_draw(Ctx *A64_NOESC c) {
+    if (title_drawing && title_drawing == c->x[0]) return 0;
+    return hos_wide_title_draw(c, title_draw_game);
+}
+int hos_site_ui_title_reset(Ctx *A64_NOESC c) {
+    hos_wide_title_reset(c->x[0]);
     return 0;
 }
 

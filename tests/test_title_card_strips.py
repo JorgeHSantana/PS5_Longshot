@@ -2,8 +2,8 @@
 
 Run the real host helpers with synthetic constants and allocator/draw stand-ins. No game
 file is read. Also covers mirrored quarters, immutable prepared choices, guards, full-picture
-reaches and the full host planner. (Their lifted half, the hooks that call them, is not
-checked: #2286 left it without a counterpart; see main().)
+reaches and the full host planner. (Their lifted half, the hook sites that call them, is
+tests/test_title_card_sites.py's.)
 
 python -I -B tests/test_title_card_strips.py [--cc gcc]
 """
@@ -163,11 +163,8 @@ def main():
     for key in ("HOS_WIDE_UI", "HOS_HUD_MAX_RATIO", "HOS_HUD_FULL_RATIO"):
         os.environ.pop(key, None)
     host = (ROOT / "game/hos_wide_ui.c").read_text(encoding="utf-8")
-    # (the strip helpers, the host's half. Their lifted half, the calls of hos_wide_title_prepare, _draw and _reset
-    # at f_815505b0's call of f_8154f1c0, f_81550720's start and f_8156abc0, was nx2/oot_patches.py's text patch,
-    # checked here through it with its anchors' pairing across lifted files. #2286 removed that pipeline with no
-    # counterpart: no hook site calls the three, so the wide title card is not drawn in the game (a bug to fix with
-    # sites; its check of the hooks belongs with them, as tests/test_camera_speed.py's))
+    # (the strip helpers, the host's half. Their lifted half, the sites ui.titlePrepare, ui.titleDraw and ui.titleReset
+    # at f_815505b0's call of f_8154f1c0, f_81550720's entry and f_8156abc0's, is tests/test_title_card_sites.py's)
     block = between(host, "/* The area title card's baked frame", "void hos_wide_ui_tick(void)")
     run(args.cc, FIXTURE.replace("@HOST@", block))
 

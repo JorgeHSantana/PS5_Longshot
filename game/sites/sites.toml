@@ -1147,6 +1147,32 @@ shape = "data"
 thread = "worker"
 args = ["x0:ptr:pane", "s0:f32:width", "s1:f32:height"]
 
+# The area title card's frame in strips (game/hos_wide_ui.c hos_wide_title_*): its record packed three more times, the strips
+# drawn in place of the whole, and what was packed forgotten when its arena resets.
+[[site]]
+name = "ui.titlePrepare"
+doc = "A picture's record is about to be packed into the frame's constants (bl f_8154f1c0: x0 the record, x1 the arena, x2 the alignment, x8 where the constants go; x19 the drawer, x20 its pane): the callback makes the call"
+at = "replace"
+shape = "data"
+thread = "worker"
+args = ["x19:ptr:drawer", "x20:ptr:pane", "x0:ptr:record", "x1:u64:arena", "x2:u64:align", "x8:ptr:out"]
+
+[[site]]
+name = "ui.titleDraw"
+doc = "A picture is about to be drawn (x0 the drawer, x1 what it draws with); a callback that answers non-zero has drawn it"
+at = "entry"
+can_return = true
+shape = "data"
+thread = "worker"
+args = ["x0:ptr:drawer", "x1:ptr:what"]
+
+[[site]]
+name = "ui.titleReset"
+doc = "The frame's constants arena is about to reset (x0 the arena): what was packed into it before goes"
+shape = "event"
+thread = "worker"
+args = ["x0:u64:arena"]
+
 [[site]]
 name = "ui.pictureConstants"
 doc = "A picture's record has been packed into the frame's constants and loaded (ldp x8, x9, [sp, #8]), before the drawer keeps them"

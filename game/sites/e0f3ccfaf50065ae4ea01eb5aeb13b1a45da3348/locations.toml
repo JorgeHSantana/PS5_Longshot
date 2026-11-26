@@ -1225,6 +1225,22 @@ signature_offset = 0xc
 signature = "910003fd 2d4b0400"   # (mov x29, sp; ldp s0, s1, [x0, #0x58])
 
 [[site]]
+name = "ui.titlePrepare"
+function = "f_815505b0"
+in = "ui.pictureConstants"   # (its function; the bl at +0x140 is the second in that site's signature)
+offset = 0x140
+
+[[site]]
+name = "ui.titleDraw"
+function = "f_81550720"
+in = "ui.pictureDraw"   # (its function, at its entry)
+
+[[site]]
+name = "ui.titleReset"
+function = "f_8156abc0"
+signature = "9100a008 c89ffd1f d65f03c0"   # (add x8, x0, #0x28; stlr x8, [x8]; ret)
+
+[[site]]
 name = "ui.pictureConstants"
 function = "f_815505b0"
 offset = 0x144
