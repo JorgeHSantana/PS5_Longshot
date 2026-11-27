@@ -192,20 +192,34 @@ static int oot_item_count(Ctx *c, const char *name);
 static const char *oot_gamedata_queue_bool(Ctx *c, uint32_t hash, int value);
 static int oot_event_playing(Ctx *c);
 
-/* The first adult night's time lock (Longshot #1064): f_8347c020 holds the clock at 20:00 while the saved Bool
-   HrlField_isFirstNightTime_Adult (0x8592aa82) is 1 and quest 0x4dbca27f is not Ready. The flag belongs to Hyrule
-   Field's first night only. A save in any other map that still holds it cannot leave night: clear it there with the
-   game's own Bool, once, and say so, never while an event (the escape's cutscene) is running. HOS_OOT_FIRST_NIGHT_FIX=0
-   turns the repair off for a run. Returns 1 when it cleared the flag. */
+/* The first adult night's time lock (Longshot #1064, #2636): f_8347c020 holds the clock (at 20:00 on the reports) while
+   quest Meet_DekuTree (0x4dbca27f) is not Ready and the saved Bool HrlField_HasEnteredFirstTime_Adult (0x8592aa82) is 1.
+   The Temple of Time sets it when Link becomes adult; only the arrival from the Market's main gate onto the field
+   (Dm_SY_BancChangeArrive_HyruleField_02) clears it. So the lock belongs to the Temple (inside the Market's maps) and
+   the ruined Market, and the Chamber of Sages on the way: a save anywhere else that still holds it (reached by a warp,
+   a teleport, or saved in the field with it set) cannot leave night. Clear it there with the game's own Bool setter,
+   which queues the save's copy too (a write of the live byte alone lasts until the next load: the save keeps the lock),
+   and say so; never while an event is running (the field's arrival clears it itself). HOS_OOT_FIRST_NIGHT_FIX=0 turns
+   the repair off for a run. Returns 1 when it cleared the flag. */
 static int oot_first_night_fix(Ctx *c, const char *map) {
     static int on = -1;
     if (on < 0) on = env_on_or("HOS_OOT_FIRST_NIGHT_FIX", 1);
-    if (!on || !map[0] || !strncmp(map, "HyruleField", 11) || oot_event_playing(c)) return 0;
+    if (!on || !map[0] || oot_event_playing(c)) return 0;
     const uint64_t mgr = game_flags_mgr();
+    if (!strncmp(map, "Market", 6) || !strncmp(map, "SageRoom", 8)) {   /* (the lock's own maps, Link adult or age unknown) */
+        int child = 0;   /* (Sequence_IsChildhood) */
+        if (!game_flag_bool(mgr, 0xcea220d3u, &child) || !child) return 0;
+    }
     int set = 0;
     if (!game_flag_bool(mgr, 0x8592aa82u, &set) || !set) return 0;
-    if (!game_flag_set_bool(mgr, 0x8592aa82u, 0)) return 0;
-    hos_log("oot: cleared the first adult night's time lock (the save was in %s, outside Hyrule Field)", map);
+    const char *missing = oot_gamedata_queue_bool(c, 0x8592aa82u, 0);
+    if (missing) {   /* (another game build: say so once, a report's log then shows why the night stayed) */
+        static int said;
+        if (!said) said = 1, hos_log("oot: the first adult night's time lock is set in %s, but %s was not found: left", map, missing);
+        return 0;
+    }
+    hos_log("oot: cleared the first adult night's time lock (the save was in %s, away from the Temple and the ruined Market)",
+            map);
     return 1;
 }
 
