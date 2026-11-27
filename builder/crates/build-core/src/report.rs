@@ -33,6 +33,10 @@ use std::time::Instant;
 
 mod forecast;
 
+fn serialize_build_eta<S: serde::Serializer>(seconds: &Option<u64>, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_u64(seconds.unwrap_or_default())
+}
+
 /// The events' format version: the `"v"` of every JSON line. A change that a reader of an older version would
 /// misread raises it.
 pub const VERSION: u32 = 1;
@@ -133,13 +137,18 @@ pub enum Event {
     BuildPlan {
         /// The stages the builder expects to perform.
         stages: Vec<Stage>,
+        /// The builder suppresses the ETA while it is still collecting evidence.
+        eta_deferred: bool,
+        /// The existing shader preparation looks reusable, pending a check of the new build.
+        shaders_cached: bool,
     },
     /// The builder's estimate across the current operation, including work still to come.
     BuildProgress {
         /// Estimated fraction done, from 0 to 1.
         fraction: f64,
-        /// Estimated seconds until completion.
-        seconds: u64,
+        /// Estimated seconds until completion. Zero on the wire until an estimate is available.
+        #[serde(serialize_with = "serialize_build_eta")]
+        seconds: Option<u64>,
     },
     /// The result of checking whether a play or reload requires a rebuild.
     PlayPlan {
@@ -528,9 +537,13 @@ impl Reporter {
     }
 
     /// Announce the stages and their initial time estimates, then use their live progress to refine them.
-    pub fn plan(&self, estimates: Vec<(Stage, f64)>) {
-        let plan = Event::BuildPlan { stages: estimates.iter().map(|&(stage, _)| stage).collect() };
-        let (forecast, progress) = forecast::Forecast::new(estimates);
+    pub fn plan(&self, estimates: Vec<(Stage, f64)>, shaders_cached: bool) {
+        let plan = Event::BuildPlan {
+            stages: estimates.iter().map(|&(stage, _)| stage).collect(),
+            eta_deferred: true,
+            shaders_cached,
+        };
+        let (forecast, progress) = forecast::Forecast::new(estimates, Instant::now(), shaders_cached);
         let mut st = self.state.lock().unwrap_or_else(|p| p.into_inner());
         if self.format == Format::Json {
             json_line(&mut st.out, &plan);
@@ -547,6 +560,14 @@ impl Reporter {
         let mut st = self.state.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(forecast) = &mut st.forecast {
             forecast.parallel_shaders(Box::new(progress));
+        }
+    }
+
+    /// Revise the shader estimate once the new build's preparation can be checked.
+    pub fn shaders_cached(&self, cached: bool) {
+        let mut st = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(forecast) = &mut st.forecast {
+            forecast.shaders_cached(cached);
         }
     }
 
@@ -833,7 +854,7 @@ mod tests {
     #[test]
     fn json_announces_the_plan_and_reaches_one_before_the_build_done_event() {
         let output: Vec<serde_json::Value> = lines(Format::Json, |r| {
-            r.plan(vec![(Stage::Read, 10.0), (Stage::Shaders, 90.0)]);
+            r.plan(vec![(Stage::Read, 10.0), (Stage::Shaders, 90.0)], false);
             r.stage(Stage::Read, "Read");
             r.stage(Stage::Shaders, "Prepare the shaders");
             r.progress(0.5);
@@ -842,10 +863,11 @@ mod tests {
         .iter()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-        assert_eq!(output[0], serde_json::json!({"v":1,"type":"build_plan","stages":["read","shaders"]}));
-        assert_eq!(output[1], serde_json::json!({"v":1,"type":"build_progress","fraction":0.0,"seconds":100}));
-        assert_eq!(output[output.len() - 3]["fraction"], 0.55);
-        assert_eq!(output[output.len() - 3]["seconds"], 45);
+        assert_eq!(
+            output[0],
+            serde_json::json!({"v":1,"type":"build_plan","stages":["read","shaders"],"eta_deferred":true,"shaders_cached":false})
+        );
+        assert_eq!(output[1], serde_json::json!({"v":1,"type":"build_progress","fraction":0.0,"seconds":0}));
         assert_eq!(
             output[output.len() - 2],
             serde_json::json!({"v":1,"type":"build_progress","fraction":1.0,"seconds":0})

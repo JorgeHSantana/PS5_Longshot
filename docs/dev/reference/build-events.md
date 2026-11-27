@@ -59,8 +59,8 @@ builds use their usual startup.
 |---|---|---|
 | `stage` | `stage`, `text` | A step begins. `text` is the builder's sentence for it. |
 | `progress` | `stage`, `fraction` (0 to 1, the step's own), `overall` (0 to 1, the whole build's) | As a step goes. |
-| `build_plan` | `stages` (ordered array of stage IDs) | The builder's plan before work starts. It lists tool unpacking and shader preparation when expected, and `start` for a build triggered by Play or Reload. Cache checks during the build can shorten stages. |
-| `build_progress` | `fraction` (0 to 1), `seconds` (estimated seconds left) | The estimate across the whole plan. It starts at zero, updates when the builder learns the work or sees its progress, and includes the estimated shader wait. A standalone build reports 1 before `done`. A play-triggered build still has a handoff after `done`. |
+| `build_plan` | `stages` (ordered array of stage IDs), `eta_deferred` (bool), `shaders_cached` (bool) | The builder's plan before work starts. `eta_deferred` indicates the builder controls when timing is available. `shaders_cached` records the initial cache check, which the builder verifies after installing the rebuilt files. |
+| `build_progress` | `fraction` (0 to 1), `seconds` (estimated seconds left) | The estimate across the whole plan. A zero `seconds` value before completion means the ETA is still unavailable. The ETA appears after at least ten seconds and once the active stage has enough timing evidence. A standalone build reports 1 before `done`. A play-triggered build still has a handoff after `done`. |
 | `play_plan` | `rebuild` (reason, or `null`) | The fast check found whether Play or a game-requested reload needs a build. A rebuild is followed by `build_plan` if build setup succeeds. |
 | `game_starting` | — | The builder negotiated launcher-managed startup and is about to spawn the game. |
 | `startup_progress` | `stage` (`shaders` or `pipelines`), `permille` (0 to 1000), optional `seconds` | The game reports renderer startup on the inherited builder stdout. The percentage and estimate cover the remaining game startup work reported by the renderer. |

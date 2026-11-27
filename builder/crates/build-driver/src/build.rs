@@ -332,6 +332,10 @@ pub fn report_plan(o: &BuildOptions, work: &Work, jobs: usize, launching: bool, 
         && crate::sources::unpacks_now(carried, &layout::cache_root(crate::env_os));
     let windows = cfg!(windows) || env("RX_TARGET").is_some_and(|target| target.eq_ignore_ascii_case("windows"));
     let shaders = shaders::skipped(o.prepare_shaders, windows, env).is_none();
+    let out = layout::game_folder(&o.out);
+    let program = crate::play::game_program(&out);
+    let level = o.compile_shaders.or_else(|| folder::folder_compile_shaders(&out)).unwrap_or(CompileShaders::Most);
+    let shaders_cached = shaders && !shaders::would_prepare(program.parent().unwrap_or(&out), windows, level, env);
     let cpu = (24.0 / jobs.max(1) as f64).powf(0.85);
     let prior = times::last(&work.times(), if o.update { "update" } else { "build" });
     let time = |stage, default| {
@@ -339,7 +343,7 @@ pub fn report_plan(o: &BuildOptions, work: &Work, jobs: usize, launching: bool, 
             .as_ref()
             .and_then(|build| build.stages.get(stage))
             .copied()
-            .filter(|time| time.is_finite() && *time >= 1.0)
+            .filter(|time| time.is_finite() && *time > 0.0)
             .unwrap_or(default)
     };
     let compile = prior
@@ -361,17 +365,19 @@ pub fn report_plan(o: &BuildOptions, work: &Work, jobs: usize, launching: bool, 
         (Stage::Lift, time("lift", 57.0 * cpu)),
         // Use a full compile baseline until the compiler knows how many objects it needs.
         (Stage::Compile, compile),
-        (Stage::Finish, time("finish", 66.0)),
+        (Stage::Finish, time("finish", if program.is_file() { 5.0 } else { 66.0 })),
     ]);
     if shaders {
-        plan.push((Stage::Shaders, time("shaders", 311.0)));
+        // The saved shader time can be only the tail of work done during compile, or a cached read.
+        // Use the cold baseline until this run can measure its own preparation rate.
+        plan.push((Stage::Shaders, 311.0));
     }
     if launching {
         // A managed launch also loads cached pipelines before presenting its first frame.
         let start = if env("LONGSHOT_LAUNCHER_STARTUP").as_deref() == Some("1") { 15.0 } else { 2.0 };
         plan.push((Stage::Start, start));
     }
-    r.plan(plan);
+    r.plan(plan, shaders_cached);
     unpack
 }
 
@@ -478,6 +484,9 @@ pub fn build(o: &BuildOptions, p: &Places, st: &Stages, r: &Reporter) -> Result<
         .filter(|_| windows == cfg!(windows))
         .and_then(|_| crate::tools::stamps(&p.root).ok())
         .and_then(|(_, translator)| shaders::cache_for(&layout::cache_root(crate::env_os), &translator, env));
+    if shared.as_deref().is_some_and(|cache| !shaders::has_prepared_outputs(cache)) {
+        r.shaders_cached(false);
+    }
     let early = shaders::Early::new(
         o.prepare_shaders,
         windows,

@@ -79,7 +79,7 @@ mod tests {
         let stage = Event::Stage { stage: Stage::Compile, text: "Compiling the game".into() };
         assert!(shown(&stage, &mut step, &mut f));
         assert_eq!(step, "Compiling the game");
-        assert!(shown(&Event::BuildProgress { fraction: 0.565, seconds: 20 }, &mut step, &mut f));
+        assert!(shown(&Event::BuildProgress { fraction: 0.565, seconds: Some(20) }, &mut step, &mut f));
         assert_eq!(f, 0.565);
         // (the shaders: their own fraction, the build's overall held at 1)
         assert!(!shown(&Event::Progress { stage: Stage::Shaders, fraction: 0.25, overall: 1.0 }, &mut step, &mut f));

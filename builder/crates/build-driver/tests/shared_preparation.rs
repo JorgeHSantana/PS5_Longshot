@@ -1,6 +1,15 @@
 //! A second installation can reuse completed preparation only while its inputs and shader cache match.
-use build_driver::{CompileShaders, GameSource, folder, shaders};
-use std::{fs, path::Path, process::Command};
+use build_core::report::{Event, Format, Reporter};
+use build_driver::{BuildOptions, CompileShaders, GameSource, build, folder, layout::Work, shaders};
+use std::{
+    fs,
+    path::Path,
+    process::Command,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 fn instance(dir: &Path) {
     fs::create_dir_all(dir).unwrap();
@@ -98,9 +107,24 @@ fn a_second_instance_reuses_only_matching_successful_shader_preparation() {
         "a fresh folder with identical inputs and completed shared caches should skip preparation"
     );
     assert!(shaders::would_prepare(&second, cfg!(windows), CompileShaders::All, get));
+    let plan_reuses_shaders = || {
+        let cached = Arc::new(AtomicBool::new(false));
+        let observed = cached.clone();
+        let report = Reporter::to(Format::Text, Box::new(std::io::sink())).observed(Some(Arc::new(move |event| {
+            if let Event::BuildPlan { shaders_cached, .. } = event {
+                observed.store(*shaders_cached, Ordering::Relaxed);
+            }
+        })));
+        let mut options = BuildOptions::new(GameSource::Nup(root.join("example.nup")), &second);
+        options.root = Some(root.clone());
+        build::report_plan(&options, &Work::at(root.join("work")), 24, true, &report);
+        cached.load(Ordering::Relaxed)
+    };
+    assert!(plan_reuses_shaders(), "the build plan should account for the matching cache");
     let renderer = second.join(shaders::key_files(cfg!(windows))[0]);
     fs::write(&renderer, b"a different renderer").unwrap();
     assert!(stale(&second));
+    assert!(!plan_reuses_shaders(), "a renderer change should restore the cold shader budget");
     fs::copy(first.join(shaders::key_files(cfg!(windows))[0]), &renderer).unwrap();
     assert!(!stale(&second), "restoring a previously prepared renderer reuses its receipt");
     fs::write(root.join("store/spirv.idx"), b"incomplete index").unwrap();

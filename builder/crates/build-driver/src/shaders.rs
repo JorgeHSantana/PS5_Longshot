@@ -706,6 +706,7 @@ pub fn prepare_unless_kept(
         None
     };
     let checked = Preparation::check(folder, &cache, windows, level, &get);
+    r.shaders_cached(checked.as_ref().is_some_and(|p| p.reuse.is_some()));
     if let Some(p) = &checked
         && let Some(reuse) = p.reuse
     {
@@ -820,6 +821,10 @@ pub fn key_files(windows: bool) -> [&'static str; 3] {
 /// the pipeline cache): with one of them gone, the record says nothing.
 const LEFT: [&str; 3] = ["longshot_prepared.bin", "longshot_programs.bin", "longshot_vk_pipelines.bin"];
 
+pub(super) fn has_prepared_outputs(cache: &Path) -> bool {
+    LEFT.iter().all(|file| cache.join(file).is_file())
+}
+
 /// A preparation's record: each key file's name, size, write time (ns) and SHA-1, and the key.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Record {
@@ -856,7 +861,7 @@ impl Record {
     /// The record of the folder's last preparation (an empty one when there is none, or its caches, in `cache`, the
     /// shader cache folder ([`cache_of`]), are gone).
     pub fn read(folder: &Path, cache: &Path) -> Record {
-        if LEFT.iter().any(|f| !cache.join(f).is_file()) {
+        if !has_prepared_outputs(cache) {
             return Record::default();
         }
         let text = std::fs::read_to_string(folder.join(PREPARED_KEY)).unwrap_or_default();
