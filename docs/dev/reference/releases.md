@@ -406,6 +406,31 @@ launcher: `/download/launcher/<os>` for the best channel there is (stable, else 
 `<channel>` is `stable` or `nightly` (an old `rc` link goes to `stable`); `<os>` is `windows`, `windows-portable` or
 `linux`. There are no links to `longshot-builder`'s files: only the launcher downloads them.
 
+### Installing the launcher
+
+The Rust launcher ships one program per platform. Download `LongshotLauncher-<v>-windows-x64.exe` on Windows or
+`LongshotLauncher-<v>-linux-x64.AppImage` on Linux. On first launch, choose where the program and its data should live.
+
+| Choice | Where files go |
+| --- | --- |
+| Install on Windows | The program goes in `%LOCALAPPDATA%\Programs\LongshotLauncher`, with a Start menu shortcut and an Apps & features entry. |
+| Install on Linux | The AppImage goes in `$XDG_DATA_HOME/longshot`, normally `~/.local/share/longshot/LongshotLauncher.AppImage`. The installer adds an applications menu entry. |
+| Use the download portably | A `Longshot` folder beside the program contains `.portable`, `data/` for profiles, saves, mods and versions, and `cache/` for generated build files. Move the program and this folder together. |
+
+Existing portable installations keep their data location. Windows recognizes the `portable` file beside the executable
+and its `LongshotLauncher-data` folder. Linux recognizes an existing `<AppImage>.home` folder. Package-managed copies
+receive launcher updates through their package manager.
+
+**Compatibility downloads.** Releases also publish the Windows executable under its old `-windows-x64-setup.exe`
+name, a `-windows-x64-portable.zip` containing that same executable, and the AppImage under its old `-x86_64.AppImage`
+name. Older launchers and permanent download links can continue using these assets. Extracting the ZIP into a fresh
+folder opens the same install choice.
+
+**Switching tracks.** Choose Stable or Nightly in Settings → Launcher to check that channel. When a compatible version
+is available, choose **Install and restart**. An installed copy or a legacy portable copy can switch to an older release
+using its original asset name. A new portable copy checks whether the target release understands its data layout. When a
+stable release predates that layout, Settings explains the limitation and directs the player to an installed copy.
+
 ## Pull requests' and main's builds
 
 A pull request's head, or main's newest commit, has no release. The launcher builds one on the player's PC with the
