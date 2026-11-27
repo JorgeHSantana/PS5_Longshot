@@ -207,6 +207,8 @@ int hos_sdl_pad_audio_endpoint(void *pad) { (void)pad; return -1; }
 int hos_sdl_pad_headphones(void *pad) { (void)pad; return -1; }
 uint16_t hos_sdl_pad_product(void *pad) { (void)pad; return 0; }
 int hos_sdl_pad_wireless(void *pad) { (void)pad; return -1; }
+/* (a virtual pad is another program's on a PC: the console's pad is the DualSense itself) */
+int hos_sdl_pad_virtual(int32_t id, int open_index) { (void)id; (void)open_index; return 0; }
 int hos_sdl_pad_rumble_triggers(void *pad, uint16_t left, uint16_t right, uint32_t ms) {
     (void)pad, (void)left, (void)right, (void)ms;
     return 0;
