@@ -2,7 +2,7 @@
 # linux-x64/sysroot (builder/tools/make.sh): this system's C library (headers, start files, the libraries to link
 # against) and the newest GCC's runtime pieces: the game is compiled and linked against it, so it runs on the system's
 # glibc and newer (Ubuntu 22.04: 2.35). Its files are the system's packages of the day: its version carries the date,
-# and the Make tools workflow makes it twice in one job to check the two are the same.
+# and the Longshot tools workflow makes it twice in one job to check the two are the same.
 S=$DEPS/sysroot
 rm -rf "$S"
 mkdir -p "$S/usr/lib/x86_64-linux-gnu" "$S/usr/lib/gcc/x86_64-linux-gnu" "$S/lib64"

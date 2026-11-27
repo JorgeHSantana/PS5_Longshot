@@ -251,8 +251,7 @@ Who can sign: whoever can push to [MagicBeanAdmin/Release](https://git.magicbean
 whoever can push to `main` or a `v*` tag here, since that is what gets built and signed.
 
 Releases are uploaded over Release's runners' own network, past Cloudflare, which cuts uploads at 100 MB (its
-README). The CI images' and the tools' uploads here go through `RELEASE_UPLOAD_API` (an organization variable, the API
-without Cloudflare in front).
+README), as are the [CI images](ci.md#the-ci-images) and the [tools' archives](#bumping-a-tool).
 
 ## tools.lock
 
@@ -283,14 +282,14 @@ each with `longshot-builder dev tools make`: sorted, every time and owner fixed,
 builds that zstd and the nasm FFmpeg and dav1d are assembled with (2.16.03) from their pins, so a PC's own changes
 nothing. `docker.sh` runs `make.sh` in `builder/tools/Dockerfile`'s Ubuntu 22.04 on any distribution.
 The sysroot is the build system's files of the day: its version carries the date, and it comes out the same twice only
-within a day on one system, which is what the Make tools workflow checks.
+within a day on one system, which is what making each archive twice checks.
 
 **The compiler is LLVM's own release, trimmed.** Linux's `llvm` is 96.3 MB compressed and 407 MB unpacked: its
 `clang-23` is LLVM's static build, which carries every LLVM target. A clang and lld of our own, built from the pinned
 LLVM source with only the targets the build needs (X86, plus AArch64 for the synthetic-game test) as LLVM's single
 multi-call driver, would be about half that: an estimated 40-50 MB compressed and 170-190 MB unpacked. It is planned
 as a recipe of `builder/tools/` that builds it the same
-every time, made and uploaded by the Make tools workflow like the other tools, `tools.lock` then naming
+every time, made and uploaded like the other tools, `tools.lock` then naming
 it. Its cost: an LLVM build of 1.5 to 3 hours in CI on each LLVM bump. Not done yet.
 
 The release puts every tool in its `longshot-builder` (`longshot-builder dev tools install <bundle> --system <s>` unpacks each at its dest,
@@ -316,25 +315,28 @@ and developers run. Making them is for whoever bumps a pin. A bump is two pull r
    `LLVM_MINGW_LINUX_SHA256` there, the same release's Linux build CI cross-builds with (`scripts/longshot_builder.py
    llvm-mingw` reads both; `tests/test_windows_on_linux.py` checks tools.lock's line is that release). Try it locally
    with `builder/tools/docker.sh --check <system>/<name>` (Ubuntu 22.04 in a container; `builder/tools/make.sh` on an
-   Ubuntu 22.04 PC), and on the pull request's branch with the Make tools workflow, which makes it twice and uploads
-   nothing off `main`. Check nothing made from the game is in it, and build the game with it: `make.sh` writes the
+   Ubuntu 22.04 PC), and on the pull request's branch with the Check tools workflow (`tools-check.yml`), which makes it
+   twice and uploads nothing. Check nothing made from the game is in it, and build the game with it: `make.sh` writes the
    `longshot-builder dev tools add ... --no-upload` lines that put it in a checkout's `tools.lock` to `add.sh` beside
    the archives (`build-linux/tools-made/`), then `mise run tools` and a build.
-2. **The archive.** Once the pin is on `main`, start the Make tools workflow there (*Actions* > *Make tools* > *Run
-   workflow*, its input `<system>/<name> ...` or `all`). Its make job makes each archive with its recipe in Ubuntu
-   22.04, makes it again from nothing but the downloads and stops unless the two are the same bytes; its publish job,
-   on the deploy runner and on `main` only, uploads them as BeanTools with the sealed `PACKAGES_TOKEN_SEALED`
-   (`scripts/ci_tools_publish.py`, Python's standard library: it compiles and runs nothing of the checkout's), checks
-   each is in the store, and gives `tools.lock` with their lines in the run's summary and as the artifact `tools-lock`.
+2. **The archive.** Once the pin is on `main`, someone with access to
+   [MagicBeanAdmin/Release](https://git.magicbean.dev/MagicBeanAdmin/Release) starts its *Longshot tools* workflow
+   ([`longshot-tools.yml`](https://git.magicbean.dev/MagicBeanAdmin/Release/src/branch/main/.forgejo/workflows/longshot-tools.yml):
+   *Actions* > *Longshot tools* > *Run workflow*, **tools** `<system>/<name> ...` or `all`, **publish** on; off is a dry
+   run that uploads nothing). Its make job makes each archive of `main` with its recipe in Ubuntu 22.04, makes it again from
+   nothing but the downloads and stops unless the two are the same bytes; its publish job, which runs nothing of this
+   repository's, refuses a version `tools.lock` names with other bytes, uploads the archives as BeanTools with Release's
+   `PACKAGES_TOKEN` (its `scripts/longshot-tools-publish.py`, Python's standard library), checks each is in the store,
+   and gives `tools.lock` with their lines in the run's summary and as the artifact `tools-lock`.
 3. **The line.** Commit that `tools.lock` in a pull request (`build(windows): llvm-mingw 20261201`). The next release
    carries the new tool.
 
 A package version's files never change, and are never pruned: an archive whose version `tools.lock` names already must
-be that line's bytes (`make.sh` and `ci_tools_publish.py` refuse another), so a recipe that keeps other files takes a
+be that line's bytes (`make.sh` and Release's upload refuse another), so a recipe that keeps other files takes a
 new version (its `*_TRIM`). Every line's first two URLs must be the store's (`dev tools check` refuses any other), and
 before any build the release checks every line's archive is there with its size and SHA-256 (`dev tools check
 --require`, in the version job): a release only downloads tools. A line whose archive is not there stops it with "a
-tools.lock line's archive is not in Longshot's store": run the Make tools workflow for it. Every one of these is the
+tools.lock line's archive is not in Longshot's store": run Release's *Longshot tools* workflow for it. Every one of these is the
 builder's (`longshot-builder dev tools`, the one reader of `tools.lock`: build-driver's `tools/`); each job that runs
 one builds a `longshot-builder` first, which needs none of the tools to be built. In an emergency an archive can be
 uploaded by hand: `dev tools add` without `--no-upload`, with `RELEASE_TOKEN` (`write:package`) and, past 100 MB,
@@ -511,17 +513,15 @@ What a repository needs before its first release (the organization's secret is s
    `PUBLISH_TOKEN`, a token that writes this repository. Don't protect `nightly-*` tags here, or the prune can't delete
    them. `longshot-builder dev tools` and `release.py` run by hand (`add`, `publish`, `prune`) take your own token as
    `RELEASE_TOKEN`.
-   `PACKAGES_TOKEN_SEALED`: the token of BeanTools (an account in a team with *Packages: Write* alone, `write:package`),
-   sealed the same way; the Make tools workflow's publish job opens it on the deploy runner only.
-3. **The upload address** (the Make tools workflow and the CI images; a release's uploads are Release's own). Set the
-   organization variable `RELEASE_UPLOAD_API` (passed on as `FORGEJO_UPLOAD_API`, since Forgejo refuses variable names
-   that start with `FORGEJO_`) to the API without Cloudflare, as the runners reach it.
+   `PACKAGES_TOKEN`, for the CI images and the tools: the token of BeanTools (an account in a team with
+   *Packages: Write* alone, `write:package`).
+3. **The release runners' LAN address** for uploads past Cloudflare's 100 MB limit: Release's README.
 4. **The attachment limits** in Forgejo's `app.ini`: `[attachment] MAX_SIZE` at least the largest file, and
    `[repository.release] ALLOWED_TYPES` empty, so `.exe`, `.zst-patch`, `.json`, files without an extension and
    `SHA256SUMS` are accepted.
 5. **Actions and runners:** Actions enabled on the repository, and Linux runners registered (the Windows files are
    cross-built on Linux; the runners are in [CI](ci.md#runners)).
-6. **The tools' packages:** every line's archive in the store (the Make tools workflow uploads them), so that
+6. **The tools' packages:** every line's archive in the store (Release's *Longshot tools* workflow uploads them), so that
    `longshot-builder dev tools check --require` passes.
 7. **Try it** on a fork, or with a throwaway key: `LONGSHOT_LAUNCHER_TRUST=<test .pub.pem>` makes a launcher accept a
    release signed with it.
@@ -538,8 +538,8 @@ What a repository needs before its first release (the organization's secret is s
 | *Publish*: HTTP 401/403 | the run isn't a push to this repository: release from a tag or push here only |
 | "is already published" | a re-run of a released version: nothing to do |
 | *The version*: "tools.lock is missing" | [bump the tool](#bumping-a-tool) |
-| *The version*: "a tools.lock line's archive is not in Longshot's store" | run the Make tools workflow on `main` for that tool, or fix the line ([bumping a tool](#bumping-a-tool)) |
-| *Make tools*: "is not made the same twice" or "A package version's files never change" | the recipe's output depends on something unpinned (a time stamp, a path, the system's own tool), or its files changed under a version already in the store: fix the recipe, or give it a new version (its `*_TRIM`) |
+| *The version*: "a tools.lock line's archive is not in Longshot's store" | run Release's *Longshot tools* workflow for that tool, or fix the line ([bumping a tool](#bumping-a-tool)) |
+| *Longshot tools*: "is not made the same twice" or "A package version's files never change" | the recipe's output depends on something unpinned (a time stamp, a path, the system's own tool), or its files changed under a version already in the store: fix the recipe, or give it a new version (its `*_TRIM`) |
 | Too many nightlies | the prune failed on a protected `nightly-*` tag: unprotect it, or `RELEASE_TOKEN=<token> release.py prune` |
 | `next` or `notes`: "git-cliff is needed" | `export GIT_CLIFF=$(python -I ../Tooling/scripts/release.py git-cliff <folder>)` |
 | A launcher offers nothing on a channel | `release.py channels`, then check that release's files and signature |

@@ -11,17 +11,18 @@ image itself ([below](#the-ci-images)).
 
 ## Forgejo Actions
 
-Releases are not made here: [MagicBeanAdmin/Release](https://git.magicbean.dev/MagicBeanAdmin/Release)'s [`longshot.yml`](https://git.magicbean.dev/MagicBeanAdmin/Release/src/branch/main/.forgejo/workflows/longshot.yml) builds, signs and publishes them
-([releases](releases.md#the-release-workflow)), on runners registered to that repository alone.
+Nothing that publishes a file or a package is made here: [MagicBeanAdmin/Release](https://git.magicbean.dev/MagicBeanAdmin/Release), on runners registered to
+that repository alone, builds, signs and publishes the releases ([`longshot.yml`](https://git.magicbean.dev/MagicBeanAdmin/Release/src/branch/main/.forgejo/workflows/longshot.yml),
+[releases](releases.md#the-release-workflow)), pushes [the CI images](#the-ci-images) ([`longshot-ci-image.yml`](https://git.magicbean.dev/MagicBeanAdmin/Release/src/branch/main/.forgejo/workflows/longshot-ci-image.yml)) and uploads the build
+tools ([`longshot-tools.yml`](https://git.magicbean.dev/MagicBeanAdmin/Release/src/branch/main/.forgejo/workflows/longshot-tools.yml), [bumping a tool](releases.md#bumping-a-tool)).
 
 | Workflow | When | What it does |
 |---|---|---|
 | `ci.yml` | Pull request, push to `main` | `changes`: what the rest needs (the [CI images](#the-ci-images), and whether the compiling jobs run); `lint`: pre-commit on the changed files, ShellCheck on `scripts/` and actionlint; `third-party`: `scripts/check_third_party.py` and the guide screenshots' source review; `rust`: rustfmt, clippy, `cargo test` (with clang, lld and llvm-mc), then the synthetic game end to end from the same build; `host-windows`: the host's C for Windows with llvm-mingw; `renderer`: the renderer built alone (`longshot-builder compile --only renderer`, a developer's builder from cargo, tools.lock's compilers), for Linux and for Windows, each without and with AMD FSR 4; `tests`: `tests/run_all.py --strict` in 2 parts (1200 s a check; every part builds the developer `longshot-builder` first, for the site-hook checks, and runs the checks that declare `RUN_ALL_ALONE` (they measure time or CPU) one at a time after the others; the part whose checks run the release `longshot-builder` or `tests/test_lifter.py` builds those first; the shader recompiler's SPIR-V fixtures are three of its checks); `website`: the website's checks (`scripts/website_check.sh`), its `dist/` kept for the preview. On a pull request, `changes` skips `rust` and `host-windows` when [only docs change](#what-a-pull-request-runs), and `renderer` when no renderer file does |
 | `pr-description.yml` | Pull request (opened, edited, pushed) | The title (a Conventional Commit) and the description against the template (`scripts/check_pr_description.py`), with main's script: no code of the pull request's runs. The title is here, not in `ci.yml`, because a title edit runs this file, and an edit's run of `ci.yml` would cancel the code's checks |
 | `third-party.yml` | Nightly, by hand | The third-party parts compared with their upstream archives (`check_third_party.py --upstream`); the per-change check is `ci.yml`'s `third-party` |
-| `tools.yml` | By hand (any branch; uploads on `main` only) | Make tools: the build tools named made twice from their pins (`builder/tools/make.sh --check`), uploaded to the store and given as `tools.lock` lines ([bumping a tool](releases.md#bumping-a-tool)) |
+| `tools-check.yml` | By hand (any branch) | Check tools: the build tools named made twice from their pins (`builder/tools/make.sh --check`) on a check runner, nothing uploaded ([bumping a tool](releases.md#bumping-a-tool)) |
 | `website.yml` | Push to `main` that changes the site's sources, hourly, pull request | Deploys longshot.magicbean.dev (hourly too, for the progress data the build collects); a pull request that changes the site's sources gets a preview: `ci.yml`'s `website` job builds it once and keeps `dist/` as `website-dist-<head commit>`, and main's code uploads those files ([scripts/ci_website_dist.py](../../../scripts/ci_website_dist.py)) |
-| `ci-image.yml` | Push to `main` that changes the CI images' inputs, by hand on `main` | Builds [the CI images](#the-ci-images) and pushes them to the forge's registry |
 | `vulkan-dlss.yml` | By hand | The Windows Vulkan back end built with NVIDIA's DLSS SDK and AMD FSR 4 |
 | `vulkan-fixtures.yml` | By hand | The authored Vulkan fixtures on Mesa's software driver |
 
@@ -34,16 +35,13 @@ started under Wine. The labels the workflows ask for, all on the image `docker:/
 |---|---|
 | `ubuntu-latest`, `ubuntu-24.04` | the checks. No secrets: a runner anyone in the team lends can carry these |
 | `quick` | jobs of a few minutes (`changes`, `lint`, `third-party`, the title and description, the website preview's wait), on a runner kept for them so they never wait behind a build |
-| `release` | the CI images' build, and the Make tools workflow's build of `main`'s tools (another branch's runs on `ubuntu-24.04`). **Only the server's release runner, `unraid-linux-1`**, which carries no other label, so CI never takes it; never anyone else's runner. Each such job starts with [scripts/ci_release_runner.sh](../../../scripts/ci_release_runner.sh), which fails unless the job reaches the seal broker with its pinned key, so a runner given the label anywhere else builds nothing. A pull request's own code never runs on it. It needs about 50 GB of disk |
-| `deploy` | the jobs that sign, publish or deploy: the Make tools workflow's upload, the website's deploy and preview upload, the CI images' push. Only the server's quick runner, on the seal broker's network ([below](#secrets-only-our-runners-can-open)). A pull request's own code never runs on it |
+| `deploy` | the website's deploy and preview upload. Only the server's quick runner, on the seal broker's network ([below](#secrets-only-our-runners-can-open)). A pull request's own code never runs on it |
 
 The server's runners share 2 cores (MagicBeanDev/Infra, `runner-dind`).
 
 Register a runner with `forgejo-runner register --instance https://git.magicbean.dev --token <token> --labels ...` from
 MagicBeanDev's *Settings > Actions > Runners*, and run `forgejo-runner daemon`. A runner lent by someone else gets
-`ubuntu-latest` and `ubuntu-24.04` only. git.magicbean.dev is behind Cloudflare, which cuts uploads at 100 MB: the
-organization variable `RELEASE_UPLOAD_API` gives a release runner the server's direct address ([one-time
-setup](releases.md#one-time-setup)).
+`ubuntu-latest` and `ubuntu-24.04` only.
 
 ### Caches
 
@@ -92,16 +90,17 @@ pinned rustup for Rust. gitleaks is mise.toml's prebuilt release, run by pre-com
   the runners' own image (`ghcr.io/catthehacker/ubuntu:act-24.04`, Ubuntu 24.04 with Node) and run their image's
   parts first (`ci_setup.sh --github-env --image <name>`): the pull request's own tools, a few minutes more a job. A
   push to `main` of such a change does the same until the images are pushed.
-- **Only main pushes** (`ci-image.yml`, on a push to `main` that changes the inputs, or by hand on `main`). The
-  runners give a job no Docker, so it is not `docker build`: `build` runs the image's parts in a job container of the
-  Dockerfile's base (the same digest) on the server's release runner and keeps each part's folders as a layer of its
-  own, made the same way every time (sorted, no times, no owners), so a part whose files didn't change is the same
-  layer and a runner pulls only the ones that did; `push`, on `deploy`, stacks them on that base with crane
-  (go-containerregistry, pinned by SHA-256), sets the images' environment (`ci_setup.sh env`), and pushes with
-  `PACKAGES_TOKEN_SEALED` (`write:package`), which only main's runs can open
-  ([below](#secrets-only-our-runners-can-open)), through `RELEASE_UPLOAD_API`'s host (Cloudflare cuts uploads at
-  100 MB). A pull request never runs `ci-image.yml` and gets no such token, and a tag in the registry is never pushed
-  again: a pull request can't replace the images main's runs use.
+- **Only main's images are pushed**, by MagicBeanAdmin/Release's [`longshot-ci-image.yml`](https://git.magicbean.dev/MagicBeanAdmin/Release/src/branch/main/.forgejo/workflows/longshot-ci-image.yml): after a push to `main` (and hourly) it builds the
+  images whose tags the registry lacks, from `main`, and by hand it does the same or, with **publish** off, builds them
+  all and pushes nothing. The runners give a job no Docker, so it is not `docker build`: `build` runs the image's parts
+  in a job container of the Dockerfile's base and keeps each part's folders as a layer of its own, made the same way
+  every time (sorted, no times, no owners), so a part whose files didn't change is the same layer and a runner pulls
+  only the ones that did; `push`, which runs nothing of this repository's, stacks them on that base with crane
+  (go-containerregistry, pinned by SHA-256), sets the images' environment (`ci_setup.sh env`), and pushes with Release's
+  `PACKAGES_TOKEN` (`write:package`) over the LAN (Cloudflare cuts uploads at 100 MB). A pull request's code never runs
+  there and gets no such token, and a tag in the registry is never pushed again: a pull request can't replace the
+  images main's runs use. What it reads here: `ci_setup.sh` (`--image`, `parts`, `paths`, `env`), `ci_image.sh`
+  (`tag`, `image`) and the Dockerfile's `FROM ubuntu:24.04@sha256:... AS base` line.
 
 ### The release's cache
 
@@ -146,8 +145,8 @@ for a fork's when a maintainer adds the label `preview` after reading it, in two
 
 ### Secrets only our runners can open
 
-A label only routes a job: a runner says its own labels each time it starts, so anyone's runner can ask for `deploy`
-or `release`, and Forgejo hands it the job and the job's secrets. So the secrets that sign or deploy are kept in
+A label only routes a job: a runner says its own labels each time it starts, so anyone's runner can ask for `deploy`,
+and Forgejo hands it the job and the job's secrets. So the secrets that sign or deploy are kept in
 Forgejo **sealed** ([scripts/ci_secret.sh](../../../scripts/ci_secret.sh), AES-256 with PBKDF2), and the key that
 opens them, `seal.key`, is on the server only, in the **seal broker** (MagicBeanDev/Infra's README, *The seal
 broker*). The broker hands it to a job of **main or a `v*` tag** and to no other, and it knows which run a job is from
@@ -171,7 +170,6 @@ rests on main and the `v*` tags being protected: whoever may push to main or pus
 
 | Secret (organization) | Sealed | Used by |
 |---|---|---|
-| `PACKAGES_TOKEN_SEALED` | a Forgejo token with `write:package` alone | `tools.yml` publish: the build tools' archives uploaded as BeanTools ([releases](releases.md#one-time-setup)); `ci-image.yml` push: [the CI images](#the-ci-images) |
 | `CLOUDFLARE_API_TOKEN_SEALED` | the Cloudflare token | `website.yml`, deploy and preview |
 | `PREVIEW_COMMENT_TOKEN_SEALED` | optional, a Forgejo token with `write:issue` | `website.yml`, the preview's comment on a fork's PR |
 
@@ -189,9 +187,6 @@ What sealing doesn't cover:
 
 What the `deploy` jobs run is kept to what they need, since every step of such a job can read what it mounts:
 
-- `tools.yml`'s `publish` compiles no Rust and runs no program the checkout builds (a build script or a proc macro would
-  run where `seal.key` is). It uploads with `scripts/ci_tools_publish.py`, Python's standard library, the archives its
-  make job made twice on a `release` runner, refusing one whose version `tools.lock` names with other bytes.
 - A secret, sealed or the job's token, is given in the `env:` of the steps that use it, never the job's.
 
 Lend runners only to people you'd trust that far.

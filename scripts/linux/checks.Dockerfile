@@ -1,7 +1,7 @@
 # The CI images (docs/dev/reference/ci.md, The CI images): `checks` (the compilers and Rust: ci.yml's tests, rust and
 # host-windows) and `lite` (lint and the website), each a list of scripts/linux/ci_setup.sh's parts, one RUN a part so
 # a change rebuilds only its part and those after it. CI's copies are in the forge's registry,
-# git.magicbean.dev/magicbeandev/longshot-ci-<image>:<tag> (.forgejo/workflows/ci-image.yml). Locally,
+# git.magicbean.dev/magicbeandev/longshot-ci-<image>:<tag> (MagicBeanAdmin/Release's longshot-ci-image.yml). Locally,
 # scripts/linux/checks.sh builds `checks` and runs tests/run_all.py in it (tests/run_all.py --container), on any
 # distribution.
 #

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Ubuntu 22.04's build environment in a container (builder/tools/Dockerfile: the oldest system the game is for), on any
-# distribution, where builder/tools/make.sh makes the build tools' archives as the Make tools workflow does:
+# distribution, where builder/tools/make.sh makes the build tools' archives as the Longshot tools workflow does:
 #
 #   builder/tools/docker.sh [<make.sh's arguments>]   make.sh in the container (default: all)
 #   builder/tools/docker.sh shell                     a shell in the build environment

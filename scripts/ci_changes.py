@@ -37,7 +37,6 @@ DOCS_ONLY = (
     ".forgejo/workflows/website.yml",
     ".forgejo/workflows/pr-description.yml",
     ".forgejo/workflows/third-party.yml",
-    ".forgejo/workflows/ci-image.yml",
     "AGENTS.md",
     "CONTRIBUTING.md",
     "README.md",

@@ -10,8 +10,8 @@
 # every time (builder/tools/make.sh: builder/tools/pins.sh's pins, a recipe per tool, packed by `longshot-builder dev
 # tools make`): a file of the MagicBeanDev organization's generic package <name>-<system>, version <version> (its
 # Packages tab), from Cloudflare's edge (https://git-cdn.magicbean.dev), then from git.magicbean.dev (the same path). A
-# package version's files never change. The Make tools workflow (.forgejo/workflows/tools.yml, started by hand on main)
-# makes an archive twice, uploads it and gives its line; a release only checks every line's archive is there.
+# package version's files never change. MagicBeanAdmin/Release's longshot-tools.yml (started by hand) makes an archive
+# twice, uploads it and gives its line; a release only checks every line's archive is there.
 #
 #   llvm (linux-x64)          LLVM 23.1.5's release trimmed to what the compile uses: clang, lld (as ld.lld), clang's
 #                             headers, the builtins and profile runtimes for x86-64 Linux (builder/tools/linux-x64/llvm.sh)

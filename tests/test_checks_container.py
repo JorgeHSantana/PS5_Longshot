@@ -24,7 +24,6 @@ SETUP = (ROOT / "scripts/linux/ci_setup.sh").read_text(encoding="utf-8")
 IMAGE_SH = (ROOT / "scripts/linux/ci_image.sh").read_text(encoding="utf-8")
 WORKFLOWS = ROOT / ".forgejo/workflows"
 CI = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
-CI_IMAGE = (WORKFLOWS / "ci-image.yml").read_text(encoding="utf-8")
 MISE = (ROOT / "mise.toml").read_text(encoding="utf-8").split("\n[tasks.test-deps]\n")[1].split("\n[")[0]
 ENGINE = """#!%s
 import json, os, sys
@@ -74,8 +73,8 @@ class VersionTests(unittest.TestCase):
         self.assertIn("id: gitleaks-system", (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
 
     def test_one_base(self):
-        base = re.search(r"^FROM (ubuntu:24\.04@sha256:[0-9a-f]{64}) AS base$", DOCKERFILE, re.M).group(1)
-        self.assertIn("container: " + base + "\n", CI_IMAGE)
+        # (pinned, in the line MagicBeanAdmin/Release's longshot-ci-image.yml reads: the images are built in it)
+        self.assertEqual(len(re.findall(r"^FROM ubuntu:24\.04@sha256:[0-9a-f]{64} AS base$", DOCKERFILE, re.M)), 1)
 
     def test_the_environment_is_ci_setups(self):
         env = subprocess.run(["bash", str(ROOT / "scripts/linux/ci_setup.sh"), "env"], capture_output=True, text=True,
@@ -89,8 +88,6 @@ class VersionTests(unittest.TestCase):
                                 check=True).stdout.split()
         for f in inputs:
             self.assertTrue((ROOT / f).is_file(), f)
-        paths = re.search(r"\n    paths:\n((?:      - .*\n)+)", CI_IMAGE).group(1).split()[1::2]
-        self.assertEqual(sorted(paths), sorted(inputs + [".forgejo/workflows/ci-image.yml"]))
         for f in ("scripts/ci_rust.sh", "scripts/fetch_commit.sh", "mise.lock", ".pre-commit-config.yaml"):
             self.assertIn(f, inputs)
 
@@ -106,16 +103,8 @@ class VersionTests(unittest.TestCase):
                 self.assertIn("if: needs.changes.outputs.%s_ready != 'true'\n        run: scripts/linux/ci_setup.sh "
                               "--github-env --image %s" % (image, image), job, name)
 
-    def test_the_push_is_mains_alone(self):
-        on = CI_IMAGE.split("\non:\n")[1].split("\nconcurrency:")[0]
-        self.assertEqual(re.findall(r"^  ([a-z_]+):", on, re.M), ["push", "workflow_dispatch"])
-        self.assertIn("branches: [main]", on)
-        build, push = CI_IMAGE.split("\njobs:\n")[1].split("\n  push:\n")
-        self.assertIn("if: github.ref == 'refs/heads/main'", push)
-        self.assertIn("runs-on: deploy", push)
-        self.assertIn("secrets.PACKAGES_TOKEN_SEALED", push)
-        self.assertIn("scripts/ci_secret.sh unseal", push)
-        self.assertNotIn("secrets.", build)
+    def test_ci_pushes_no_image(self):
+        # (main's images are pushed by MagicBeanAdmin/Release; a pull request's run has no secret and no Docker)
         self.assertNotIn("secrets.", CI)
         self.assertNotIn("docker", CI.lower().replace("checks.dockerfile", ""))
 

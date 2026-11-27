@@ -1,7 +1,8 @@
 # Ubuntu 22.04's build environment, on any distribution: what the build tools' archives are made in (builder/tools/make.sh;
-# the Make tools workflow, .forgejo/workflows/tools.yml, installs the same packages) and what CI builds the Linux
-# longshot-builder in (MagicBeanAdmin/Release's longshot.yml). Ubuntu 22.04 is not a preference: the sysroot tools.lock gives
-# a player's build is this system's C library, so the game it builds runs on glibc 2.35 and newer.
+# .forgejo/workflows/tools-check.yml and MagicBeanAdmin/Release's longshot-tools.yml install the same packages) and
+# what CI builds the Linux longshot-builder in (MagicBeanAdmin/Release's longshot.yml). Ubuntu 22.04 is not a
+# preference: the sysroot tools.lock gives a player's build is this system's C library, so the game it builds runs on
+# glibc 2.35 and newer.
 #
 # The image holds the system packages only. The checkout is mounted at /src when it runs, so the downloads and the pinned
 # zstd and nasm are kept between runs. builder/tools/docker.sh builds the image and runs it.
@@ -9,7 +10,8 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 # (libstdc++ 13, from the toolchain PPA: C++20 <format>; linked in statically. The PPA from ppa.launchpad.net, as in
-# tools.yml's make job: ppa.launchpadcontent.net answered 503 for hours on 2026-11-23; apt checks the archive's signature)
+# tools-check.yml's make job: ppa.launchpadcontent.net answered 503 for hours on 2026-11-23; apt checks the archive's
+# signature)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends software-properties-common gpg-agent \
  && add-apt-repository -y --no-update ppa:ubuntu-toolchain-r/test \

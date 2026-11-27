@@ -1,9 +1,10 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2034   # (read by the recipes that source this)
 # Every upstream pin the build tools' archives are made from (builder/tools/make.sh): each version with the SHA-256 of
-# its download, the one copy of each. A bump changes the pin here, then the Make tools workflow (.forgejo/workflows/
-# tools.yml) makes and uploads the new archive and gives its tools.lock line (docs/dev/reference/releases.md, "Bumping a
-# tool"). Read by scripts/longshot_builder.py too (LLVM_MINGW_VER, LLVM_MINGW_LINUX_SHA256: the Windows builder's linker).
+# its download, the one copy of each. A bump changes the pin here, then the Longshot tools workflow (MagicBeanAdmin/
+# Release's longshot-tools.yml) makes and uploads the new archive and gives its tools.lock line
+# (docs/dev/reference/releases.md, "Bumping a tool"). Read by scripts/longshot_builder.py too (LLVM_MINGW_VER,
+# LLVM_MINGW_LINUX_SHA256: the Windows builder's linker).
 
 # ---- what packs and assembles: built from source, so a PC's own zstd and nasm change nothing ----
 ZSTD_VER=1.5.7

@@ -1,10 +1,10 @@
 """builder/tools/Dockerfile is the Linux build environment for any distribution: what the build tools are made in
 (builder/tools/make.sh, their sysroot among them). Reads the files; nothing is built.
 
-The Make tools workflow and the image are kept by hand and must match, or CI's build fails in the container. The
+The Check tools workflow and the image are kept by hand and must match, or CI's build fails in the container. The
 sysroot's recipe copies the newest GCC's runtime into it, and the game needs libstdc++ 13 (C++20 <format>): the
-toolchain PPA's. (That a release's Linux build installs nothing the image lacks is checked where that build is,
-MagicBeanAdmin/Release's tests/test_longshot.py.)
+toolchain PPA's. (That the job that makes the uploaded archives and a release's Linux build match the image is checked
+where they are, MagicBeanAdmin/Release's tests/test_longshot_ci.py and test_longshot.py.)
 
     python -I -B tests/test_linux_docker_packages.py
 """
@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCKERFILE = ROOT / "builder/tools/Dockerfile"
-TOOLS_WORKFLOW = ROOT / ".forgejo/workflows/tools.yml"
+TOOLS_WORKFLOW = ROOT / ".forgejo/workflows/tools-check.yml"
 
 
 def installs(text):
@@ -39,8 +39,8 @@ class LinuxDockerPackages(unittest.TestCase):
     def test_packages(self):
         self.assertLessEqual({"g++-13", "libstdc++-13-dev"}, installs(self.docker), "the Dockerfile has no GCC 13 for the sysroot")
 
-    def test_the_make_tools_workflow_is_the_image(self):
-        """The Make tools workflow makes the archives a developer makes in the image (builder/tools/docker.sh): the same
+    def test_the_check_tools_workflow_is_the_image(self):
+        """The Check tools workflow makes the archives a developer makes in the image (builder/tools/docker.sh): the same
         system, packages and PPA"""
         wf = TOOLS_WORKFLOW.read_text(encoding="utf-8")
         self.assertEqual(re.search(r"^\s*container:\s*(\S+)", wf, re.M).group(1), "ubuntu:22.04")
@@ -72,7 +72,7 @@ class LinuxDockerPackages(unittest.TestCase):
                     after = text[m.end():]
                     self.assertIn(rewrite, after, "the PPA's source is not rewritten")
                     self.assertLess(after.index(rewrite), after.index("apt-get update"), "rewritten after the update")
-        self.assertGreaterEqual(adders, 2, "the Dockerfile's and the Make tools workflow's PPA were not found")
+        self.assertGreaterEqual(adders, 2, "the Dockerfile's and the Check tools workflow's PPA were not found")
 
 
 if __name__ == "__main__":

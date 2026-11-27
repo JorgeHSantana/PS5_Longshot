@@ -157,7 +157,7 @@ headers) in the checkout's `tools/`, as longshot-builder carries them. Without t
 The release's Linux `longshot-builder` is linked against glibc 2.35 (tools.lock's sysroot; its windows load X11 or
 Wayland at run time) and carries the same tools, so it and a game built with it run on glibc 2.35 and newer with a Vulkan 1.3 driver (mesh shaders recommended). Nobody makes the tools themselves to
 build: CI makes each archive from its pins and uploads it, and `tools.lock` names it. Only someone bumping a pin makes one
-(`builder/tools/make.sh`, or the Make tools workflow: [bumping a tool](reference/releases.md#bumping-a-tool)).
+(`builder/tools/make.sh`, or the Check tools workflow: [bumping a tool](reference/releases.md#bumping-a-tool)).
 
 `RX_TARGET=windows` builds the Windows game on Linux, with llvm-mingw's Linux build in `LONGSHOT_MINGW` (the checkout's
 Windows `cpm` and `sdl` from `cargo run --release -p longshot-builder -- dev tools install . --system windows-x64`: its llvm-mingw, a Windows program, is not taken).

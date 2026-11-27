@@ -1,10 +1,10 @@
 #!/bin/bash
 # The build tools' archives (tools.lock's lines), each made from its pins (pins.sh) by its recipe, <system>/<name>.sh
 # beside this, and packed by `longshot-builder dev tools make` (sorted, every time and owner fixed, the pinned zstd at
-# -19 --long=27): the same pins give the same bytes. Only someone bumping a pin needs this, and the Make tools workflow
-# (.forgejo/workflows/tools.yml) runs it for them; CI and developers install the archives (`mise run tools`). Run on
-# Ubuntu 22.04 (builder/tools/docker.sh): the linux-x64 tools are compiled against its glibc 2.35, and the sysroot is
-# its files.
+# -19 --long=27): the same pins give the same bytes. Only someone bumping a pin needs this, and the workflows that make
+# the archives run it (MagicBeanAdmin/Release's longshot-tools.yml; here, tools-check.yml); CI and developers install
+# the archives (`mise run tools`). Run on Ubuntu 22.04 (builder/tools/docker.sh): the linux-x64 tools are compiled
+# against its glibc 2.35, and the sysroot is its files.
 #
 #   builder/tools/make.sh [--out <folder>] [--check] <system>/<name> ...    e.g. linux-x64/sdl2 windows-x64/sdl
 #   builder/tools/make.sh [--out <folder>] [--check] all                    every tool
@@ -107,7 +107,7 @@ if [ -n "$CHECK" ]; then
 fi
 
 # (each archive against tools.lock, and the line that writes it there)
-echo "# builder/tools/make.sh: each archive's line into tools.lock (the Make tools workflow uploads them)" > "$OUT/add.sh"
+echo "# builder/tools/make.sh: each archive's line into tools.lock (MagicBeanAdmin/Release's longshot-tools.yml uploads them)" > "$OUT/add.sh"
 status=0
 for t in "${wanted[@]}"; do
     system=${t%/*} name=${t#*/} version=$(cat "$OUT/$t.version")

@@ -10,10 +10,10 @@
 # The jobs that need tools run in a CI image (scripts/linux/checks.Dockerfile, its tools installed by
 # scripts/linux/ci_setup.sh): git.magicbean.dev/magicbeandev/longshot-ci-checks:<tag> (the compilers and Rust: rust,
 # host-windows, tests) or longshot-ci-lite:<tag> (lint, website), each tag a hash of the images' inputs, which
-# ci-image.yml pushes from main only. A pull request that changes those inputs has no image yet: its jobs run ci_setup.sh first, on
-# the runners' own Ubuntu 24.04, so it is checked with its own tools and pushes nothing (job changes,
-# scripts/linux/ci_image.sh). Caches are read by every run and written only by a push to main, so a pull request never
-# writes what another reads (docs/dev/reference/ci.md, Caches): main's tree (scripts/ci_git_base.sh), the registry crates'
+# MagicBeanAdmin/Release's longshot-ci-image.yml pushes from main only. A pull request that changes those inputs has
+# no image yet: its jobs run ci_setup.sh first, on the runners' own Ubuntu 24.04, so it is checked with its own tools
+# and pushes nothing (job changes, scripts/linux/ci_image.sh). Caches are read by every run and written only by a push
+# to main, so a pull request never writes what another reads (docs/dev/reference/ci.md, Caches): main's tree (scripts/ci_git_base.sh), the registry crates'
 # builds (scripts/ci_cargo_prune.py), ccache's objects, llvm-mingw's and tools.lock's downloads. A pull request that
 # changes only the site, the docs or the other workflows' files skips the compiling jobs (job changes,
 # scripts/ci_changes.py); a push to main runs every job. A pull request's newer push cancels its older run.

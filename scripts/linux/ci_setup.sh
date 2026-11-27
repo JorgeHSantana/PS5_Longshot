@@ -6,15 +6,15 @@
 #            host-windows), and a local `tests/run_all.py --container`
 #   lite     lint and the website (ci.yml's lint, website): Python, pre-commit and its hooks, Node, the linters
 #
-# One list, three users: the Dockerfile runs it, a stage a part; ci-image.yml runs it in ubuntu:24.04 and pushes each
-# part as a layer, from main only; a ci.yml job whose image is not in the registry yet (a pull request that changes
+# One list, three users: the Dockerfile runs it, a stage a part; MagicBeanAdmin/Release's longshot-ci-image.yml runs it
+# in the Dockerfile's base and pushes each part as a layer, from main only; a ci.yml job whose image is not in the registry yet (a pull request that changes
 # scripts/linux/ci_image.sh's inputs) runs its image's parts first, with --github-env, which also hands the image's
 # environment to the job's later steps.
 #
 #   scripts/linux/ci_setup.sh [--github-env] PART...        PARTs: system system-lite python headers node tools rust hooks
 #   scripts/linux/ci_setup.sh --image NAME [--github-env]   NAME's parts, in order
 #   scripts/linux/ci_setup.sh parts NAME                    NAME's parts, one a line
-#   scripts/linux/ci_setup.sh paths PART                    the folders PART installs into (ci-image.yml's layers)
+#   scripts/linux/ci_setup.sh paths PART                    the folders PART installs into (the pushed images' layers)
 #   scripts/linux/ci_setup.sh env                           the images' environment, KEY=VALUE a line (the Dockerfile's ENV)
 #
 # Every download is pinned: the apt packages come from the distribution's signed lists, the rest is checked by its
