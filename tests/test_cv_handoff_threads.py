@@ -224,6 +224,9 @@ static Obj *obj(uint64_t key, int kind) {
     CHECK(o->kind == kind);
     return o;
 }
+/* (LockMutex's and UnlockMutex's lookup, here obj's own; HOS_MUTEX_GUEST_ID's guest word, on by default, and the HLE
+   bodies' use of obj_mutex are test_obj_guest_id.py's) */
+static Obj *obj_mutex(uint64_t key, int kind) { return obj(key, kind); }
 static void spin_until_free(Obj *o) { (void)o; }
 @TOMB@
 static void poke_multiwait(Obj *o) { (void)o; }
