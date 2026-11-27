@@ -415,7 +415,7 @@ impl Kind for Lifts {
 }
 
 /// The shader cache folders (crate::shaders::cache_dir), each `<translator stamp>/<driver>/` an entry: held while a
-/// game keeps its program cache's lock there (gpu/vk/vk_progcache.cpp: `longshot_programs.bin.lock`).
+/// game holds its program cache lock or a builder is preparing the shaders.
 struct Shaders;
 
 impl Kind for Shaders {
@@ -439,17 +439,24 @@ impl Kind for Shaders {
     }
 
     fn remove(&self, _: &Places, e: &Entry) -> std::io::Result<bool> {
-        remove_any(&e.path)?;
-        // (its translator's folder too, once empty)
-        if let Some(t) = e.path.parent() {
-            let _ = std::fs::remove_dir(t);
+        let _lease = match crate::shaders::preparation_lease(&e.path, false) {
+            Ok(lease) => lease,
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+            Err(err) => return Err(err),
+        };
+        if program_cache_held(&e.path) || used_lately(used_of(&e.path, &[crate::sources::USED])) {
+            return Ok(false);
         }
+        remove_any(&e.path)?;
         Ok(true)
     }
 }
 
-/// Whether a game holds the shader folder `d`'s program cache lock (gpu/vk/vk_progcache.cpp).
 fn shaders_held(d: &Path) -> bool {
+    locked(&crate::shaders::preparation_lock_path(d)) || program_cache_held(d)
+}
+
+fn program_cache_held(d: &Path) -> bool {
     ["longshot_programs.bin.lock", "longshot_programs.zst.bin.lock"].iter().any(|l| locked(&d.join(l)))
 }
 
@@ -704,6 +711,29 @@ mod tests {
         assert_eq!(budget(|_| None), 12 << 30);
         assert_eq!(budget(|k| (k == BUDGET_VAR).then(|| "100".into())), 100 << 20);
         assert_eq!(budget(|k| (k == BUDGET_VAR).then(|| "lots".into())), 12 << 30);
+    }
+
+    #[test]
+    fn eviction_keeps_an_active_shader_preparation() {
+        let root = crate::scratch("storage-active-preparation");
+        let places = Places { cache: root.join("cache"), store: root.join("store") };
+        let path = places.cache.join(crate::shaders::SHADERS).join("translator/driver");
+        std::fs::create_dir_all(&path).unwrap();
+        let used = std::fs::File::create(path.join(crate::sources::USED)).unwrap();
+        used.set_modified(SystemTime::UNIX_EPOCH).unwrap();
+        drop(used);
+        let e = Shaders.entries(&places).pop().unwrap();
+        assert!(!e.held);
+        let lease = crate::shaders::preparation_lease(&path, false).unwrap();
+        assert!(Shaders.entries(&places)[0].held);
+        assert!(Shaders.in_use_now(&places, &e));
+        assert!(!Shaders.remove(&places, &e).unwrap());
+        assert!(path.is_dir());
+        drop(lease);
+        assert!(Shaders.remove(&places, &e).unwrap());
+        assert!(!path.exists());
+        assert!(crate::shaders::preparation_lock_path(&path).is_file());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

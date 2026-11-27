@@ -104,17 +104,15 @@ flowchart TD
    environment. It never fails a build: a PC whose Vulkan can't, a run silent for 15 minutes, `--no-prepare-shaders`,
    `LONGSHOT_NO_PREPARE`, or a Windows game built on Linux leave the work to the game's first start
    (`shaders_not_prepared`). The build's times are taken before this step, so they stay comparable.
-   It runs only when its key changed (`cache/longshot_prepared_key.txt`, written when a preparation gets to its end): the
-   SHA-1s of the renderer (`longshot_vk.so`, a Windows game's `longshot_vk.dll`), `longshot_shaders.bin` and
-   `longshot_pipeline_states_shipped.bin` (taken again only for
-   a file whose size or write time moved), the Compile shaders level, and the drivers, read with no Vulkan call. On
-   Linux: each Vulkan driver manifest and its library's size and time, NVIDIA's version, the GPUs' vendor and device,
-   the shader store's switch (`LONGSHOT_SHADER_STORE`; not where the drivers keep their caches: a key of what made
-   them, not of their place). On Windows, from the registry: the loader's driver list and each display
-   adapter's driver (name, device, `DriverVersion`, the manifests its `VulkanDriverName` names), each manifest with its
-   library's size and time, whether NVIDIA's and AMD's shader cache folders are there, `LONGSHOT_SHADER_STORE`. A
-   change to the game's code alone keeps it; so does a driver cache emptied by hand, which the game's first start
-   finds and builds again itself.
+   The preparation key covers the renderer binary, shader list, shipped pipeline list, shader compilation level and GPU driver.
+   The builder reads the driver manifests and GPU identifiers without starting Vulkan. Each game folder records a successful
+   preparation in `cache/longshot_prepared_key.txt`. Instances using the same pipeline cache can reuse a completed preparation
+   for the same key. The builder checks the cached artifacts and, for programs backed by a shared SPIR-V pack, checks its
+   generation against the pack and index. Moving that pack preserves its generation. Older compatible cache folders can
+   be reused in place. If a custom store was moved before upgrading, set `LONGSHOT_PREVIOUS_SHADER_STORE` to its original
+   path for the first preparation and `LONGSHOT_SHADER_STORE` to its current path. The old path need no longer exist.
+   Once preparation succeeds, the builder remembers it. A completion record from an older builder applies only to its original game folder. The first
+   matching preparation completed by this builder can then serve other instances. A new renderer binary or driver can require another pipeline pass even when translated shaders are available.
    When the game folder's caches are made from nothing (a first build, or its caches deleted; Linux), the
    preparation starts beside the compile instead (`shaders::Early`): the renderer's units and the preparation's
    driver's go first, both are linked as soon as they are compiled, and once the finish's assets are made the driver

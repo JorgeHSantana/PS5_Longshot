@@ -418,10 +418,7 @@ pub fn build(o: &BuildOptions, p: &Places, st: &Stages, r: &Reporter) -> Result<
         .as_ref()
         .filter(|_| windows == cfg!(windows))
         .and_then(|_| crate::tools::stamps(&p.root).ok())
-        .zip(shaders::driver_id(env))
-        .and_then(|((_, translator), driver)| {
-            shaders::cache_dir(&layout::cache_root(crate::env_os), &translator, &driver)
-        });
+        .and_then(|(_, translator)| shaders::cache_for(&layout::cache_root(crate::env_os), &translator, env));
     let early = shaders::Early::new(
         o.prepare_shaders,
         windows,
@@ -684,8 +681,7 @@ pub fn build(o: &BuildOptions, p: &Places, st: &Stages, r: &Reporter) -> Result<
             shaders::not_prepared(r, why);
         }
         None => match early.as_ref().and_then(|e| e.finish(r)) {
-            Some(true) => shaders::remember(&p.out, windows, level, env),
-            Some(false) => {}
+            Some(_) => {}
             None => {
                 shaders::prepare_unless_kept(&exe, exe.parent().unwrap_or(&p.out), windows, level, p.jobs, env, r);
             }

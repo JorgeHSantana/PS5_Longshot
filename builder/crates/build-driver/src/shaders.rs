@@ -18,6 +18,13 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
+#[path = "shader_cache.rs"]
+mod shader_cache;
+pub use shader_cache::cache_for;
+#[path = "shader_receipt.rs"]
+mod shader_receipt;
+pub(crate) use shader_receipt::{preparation_lease, preparation_lock_path};
+
 /// How long the game may print nothing before it is stopped. Not its whole length: that is 25 minutes on some AMD
 /// GPUs, and the driver's own step near the end can sit at 99 % for minutes.
 pub const SILENCE: Duration = Duration::from_secs(15 * 60);
@@ -53,7 +60,7 @@ pub fn shared_dir(dir: &Path, get: impl Fn(&str) -> Option<String>) -> Option<Pa
     let folder = if dir.join(crate::folder::RECORD_FILE).is_file() { dir } else { dir.parent()? };
     crate::folder::Record::read(folder).ok()?.stamp?;
     let translator = translator_of(folder)?;
-    cache_dir(&crate::layout::cache_root(crate::env_os), &translator, &driver_id(get)?)
+    cache_for(&crate::layout::cache_root(crate::env_os), &translator, get)
 }
 
 /// Where the game run in `dir` keeps its shader caches: [`shared_dir`], else `dir`'s `cache/`.
@@ -141,9 +148,21 @@ fn said(r: &Reporter, line: &str) {
 /// inside the driver's compiler is started again without that shader, which a crash also puts in the game's list of
 /// programs that driver is not asked for (`cache/longshot_driver_faults.txt`). Whether the shaders were prepared.
 pub fn prepare(exe: &Path, folder: &Path, level: CompileShaders, jobs: usize, r: &Reporter) -> bool {
-    r.stage(Stage::Shaders, "Preparing the shaders");
     let cache = cache_of(folder, crate::env);
-    match supervised(exe, folder, &cache, level, jobs, &|line| said(r, line), &|_| {}, &|| false) {
+    let _lock = if cache != folder.join("cache") {
+        match shader_receipt::lock(&cache, true) {
+            Ok(file) => Some(file),
+            Err(e) => return not_prepared(r, &format!("the shared shader cache is unavailable: {e}")),
+        }
+    } else {
+        None
+    };
+    prepare_in(exe, folder, &cache, level, jobs, r)
+}
+
+fn prepare_in(exe: &Path, folder: &Path, cache: &Path, level: CompileShaders, jobs: usize, r: &Reporter) -> bool {
+    r.stage(Stage::Shaders, "Preparing the shaders");
+    match supervised(exe, folder, cache, level, jobs, &|line| said(r, line), &|_| {}, &|| false) {
         Ok(()) => {
             r.progress(1.0);
             true
@@ -174,10 +193,26 @@ fn supervised(
         crate::storage::mark_used(dir); // (its last use, for the cache's budget)
     }
     let limit = crate::supervisor::entry_limit(crate::env);
-    let start = |extra: &[String]| run_once(exe, folder, shared, level, jobs, extra, line, started, stop);
+    let cache_unavailable = std::cell::Cell::new(false);
+    let report = |message: &str| {
+        if message.contains("vk: program cache ")
+            && (message.contains("another Longshot is using it: this one runs without it")
+                || message.contains("did not open: this run without the cache"))
+        {
+            cache_unavailable.set(true);
+        }
+        line(message);
+    };
+    let start = |extra: &[String]| {
+        cache_unavailable.set(false);
+        run_once(exe, folder, shared, level, jobs, extra, &report, started, stop)
+    };
     let say = |text: String| line(&text);
     match crate::supervisor::supervise(start, cache, say, limit, crate::supervisor::Policy::default()) {
         Err(e) => Err(e.to_string()),
+        Ok((_, d)) if d.action == crate::supervisor::Action::Done && cache_unavailable.get() => {
+            Err("the renderer could not use its shader cache".into())
+        }
         Ok((_, d)) if d.action == crate::supervisor::Action::Done => Ok(()),
         // (the supervisor's own reasons: its bounds, a shader of the renderer's own)
         Ok((_, d)) if d.why.is_some() => Err(d.why.unwrap_or_default()),
@@ -295,6 +330,7 @@ fn run_once(
 /// there itself, and nothing crosses.
 pub struct Early {
     staging: PathBuf,
+    cache_lock: std::sync::Mutex<Option<std::fs::File>>,
     /// The shared shader cache folder the game folder's caches are in ([`cache_dir`]), or `None`: its own `cache/`.
     shared: Option<PathBuf>,
     /// The finish's assets' folder, and the files fetched for the game folder (source, its place there).
@@ -350,7 +386,12 @@ impl Early {
         if off || windows || skipped(asked, windows, &get).is_some() || caches.join("longshot_programs.bin").exists() {
             return None;
         }
+        let cache_lock = match shared {
+            Some(cache) => Some(shader_receipt::lock(cache, false).ok()?),
+            None => None,
+        };
         Some(std::sync::Arc::new(Early {
+            cache_lock: std::sync::Mutex::new(cache_lock),
             staging: staging.to_path_buf(),
             shared: shared.map(Path::to_path_buf),
             finish: finish.to_path_buf(),
@@ -476,6 +517,16 @@ impl Early {
     /// folder's cache. `None`: it never started, or what it made could not be moved into the game folder (the
     /// preparation then runs there now, as without it); else whether the shaders are prepared.
     pub fn finish(&self, r: &Reporter) -> Option<bool> {
+        let result = self.collect(r);
+        if result == Some(true) {
+            let cache = self.shared.clone().unwrap_or_else(|| self.out.join("cache"));
+            remember_in(&self.out, &cache, false, self.level, crate::env);
+        }
+        self.cache_lock.lock().unwrap_or_else(|e| e.into_inner()).take();
+        result
+    }
+
+    fn collect(&self, r: &Reporter) -> Option<bool> {
         let (handle, rx) = self.started.lock().unwrap_or_else(|e| e.into_inner()).take()?;
         r.stage(Stage::Shaders, "Preparing the shaders");
         let t = std::time::Instant::now();
@@ -611,9 +662,8 @@ pub fn would_prepare(
     if skipped(true, windows, &get).is_some() {
         return false;
     }
-    let last = Record::read(folder, &cache_of(folder, &get));
-    let now = driver_id(get).and_then(|d| Record::of(folder, windows, level, &d, &last));
-    !(now.is_some_and(|n| !last.key.is_empty() && n.key == last.key))
+    let cache = cache_of(folder, &get);
+    !Preparation::check(folder, &cache, windows, level, &get).is_some_and(|p| p.reuse.is_some())
 }
 
 /// [`prepare`], unless the game folder's last preparation was made from the same renderer, shader list, pipeline
@@ -629,21 +679,34 @@ pub fn prepare_unless_kept(
     get: impl Fn(&str) -> Option<String>,
     r: &Reporter,
 ) -> bool {
-    let last = Record::read(folder, &cache_of(folder, &get));
-    let now = driver_id(get).and_then(|d| Record::of(folder, windows, level, &d, &last));
-    if let Some(now) = &now
-        && !last.key.is_empty()
-        && now.key == last.key
+    let cache = cache_of(folder, &get);
+    let _lock = if cache != folder.join("cache") {
+        match shader_receipt::lock(&cache, true) {
+            Ok(file) => Some(file),
+            Err(e) => return not_prepared(r, &format!("the shared shader cache is unavailable: {e}")),
+        }
+    } else {
+        None
+    };
+    let checked = Preparation::check(folder, &cache, windows, level, &get);
+    if let Some(p) = &checked
+        && let Some(reuse) = p.reuse
     {
+        p.record.write(folder);
+        if matches!(reuse, Reuse::Legacy) {
+            // Its historical key describes this installation. Another instance needs a
+            // confirmed run against the current cache before it can skip preparation.
+            shader_cache::remember_legacy(&cache, &p.driver, &get);
+        }
         r.stage(Stage::Shaders, "Preparing the shaders");
         r.log("shaders: prepared before from the same renderer, shader list, pipeline lists and drivers: kept");
         r.progress(1.0);
         return true;
     }
     Record::forget(folder);
-    let done = prepare(exe, folder, level, jobs, r);
-    if let (true, Some(now)) = (done, now) {
-        now.write(folder);
+    let done = prepare_in(exe, folder, &cache, level, jobs, r);
+    if let (true, Some(p)) = (done, checked) {
+        p.remember(folder, &cache, &get);
     }
     done
 }
@@ -661,8 +724,66 @@ pub fn renderer_hook(early: &std::sync::Arc<Early>) -> build_compile::EarlyRende
 
 /// The game folder's record of a preparation that got to its end ([`Record`]), for one made elsewhere ([`Early`]).
 pub fn remember(folder: &Path, windows: bool, level: CompileShaders, get: impl Fn(&str) -> Option<String>) {
-    if let Some(rec) = driver_id(get).and_then(|d| Record::of(folder, windows, level, &d, &Record::default())) {
-        rec.write(folder);
+    remember_in(folder, &cache_of(folder, &get), windows, level, get);
+}
+
+fn remember_in(
+    folder: &Path,
+    cache: &Path,
+    windows: bool,
+    level: CompileShaders,
+    get: impl Fn(&str) -> Option<String>,
+) {
+    if let Some(p) = Preparation::check(folder, cache, windows, level, &get) {
+        p.remember(folder, cache, &get);
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Reuse {
+    Shared,
+    Legacy,
+}
+
+struct Preparation {
+    record: Record,
+    driver: String,
+    reuse: Option<Reuse>,
+}
+
+impl Preparation {
+    fn check(
+        folder: &Path,
+        cache: &Path,
+        windows: bool,
+        level: CompileShaders,
+        get: &impl Fn(&str) -> Option<String>,
+    ) -> Option<Self> {
+        let driver = driver_id(get)?;
+        let local = Record::read(folder, cache);
+        let record = Record::of(folder, windows, level, &driver, &local)?;
+        let reuse = shader_cache::store_bounds(cache, get).and_then(|bounds| {
+            if shader_receipt::matches(cache, &record.key, bounds) {
+                return Some(Reuse::Shared);
+            }
+            if local.key.is_empty() || !shader_receipt::can_adopt_legacy(cache) {
+                return None;
+            }
+            let matches = local.key == record.key
+                || shader_cache::legacy_driver(cache, &driver, get)
+                    .and_then(|d| Record::of(folder, windows, level, &d, &record))
+                    .is_some_and(|old| old.key == local.key);
+            matches.then_some(Reuse::Legacy)
+        });
+        Some(Self { record, driver, reuse })
+    }
+
+    fn remember(&self, folder: &Path, cache: &Path, get: &impl Fn(&str) -> Option<String>) {
+        self.record.write(folder);
+        if let Some(bounds) = shader_cache::store_bounds(cache, get) {
+            shader_receipt::publish(cache, &self.record.key, bounds);
+            shader_cache::remember_legacy(cache, &self.driver, get);
+        }
     }
 }
 
@@ -742,14 +863,7 @@ impl Record {
         let mut text: String = self.files.iter().map(|f| format!("file {} {} {} {}\n", f.0, f.1, f.2, f.3)).collect();
         text.push_str(&format!("key {}\n", self.key));
         let path = folder.join(PREPARED_KEY);
-        let tmp = path.with_extension("txt.new");
-        // (its cache/ made: a game folder whose caches are in the shared folder has none of its own)
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        if std::fs::write(&tmp, text).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
-        }
+        let _ = build_core::fsx::write_if_changed(&path, text.as_bytes());
     }
 
     /// The record let go before a preparation starts: one stopped half-way must not count.
@@ -821,11 +935,10 @@ fn linux_drivers(get: &impl Fn(&str) -> Option<String>) -> String {
         gpus.sort();
         id.push_str(&format!("gpus {}\n", gpus.join(" ")));
     }
-    // (not where the drivers keep their caches (__GL_SHADER_DISK_CACHE_PATH, MESA_SHADER_CACHE_DIR, XDG_CACHE_HOME):
-    // a key of what made the caches, not of their place. A cache moved or emptied, the game's first start finds and
-    // builds again itself. The shader store's switch is what the game reads its pipelines from: it stays)
-    if let Some(v) = get("LONGSHOT_SHADER_STORE") {
-        id.push_str(&format!("LONGSHOT_SHADER_STORE={v}\n"));
+    // Disabling the store embeds SPIR-V in program records. Moving an enabled
+    // store preserves its format and generation; its path is not a driver input.
+    if get("LONGSHOT_SHADER_STORE").as_deref() == Some("0") {
+        id.push_str("LONGSHOT_SHADER_STORE=0\n");
     }
     id
 }
@@ -874,8 +987,8 @@ fn windows_drivers(
             id.push_str(&format!("{vendor}/{cache} {}\n", Path::new(&local).join(vendor).join(cache).is_dir()));
         }
     }
-    if let Some(v) = get("LONGSHOT_SHADER_STORE") {
-        id.push_str(&format!("LONGSHOT_SHADER_STORE={v}\n"));
+    if get("LONGSHOT_SHADER_STORE").as_deref() == Some("0") {
+        id.push_str("LONGSHOT_SHADER_STORE=0\n");
     }
     id
 }
@@ -1023,9 +1136,12 @@ mod tests {
         for f in key_files(windows) {
             std::fs::write(d.join(f), f.as_bytes()).unwrap();
         }
-        for f in LEFT {
-            std::fs::write(d.join("cache").join(f), b"made").unwrap();
-        }
+        let cache = d.join("cache");
+        std::fs::write(cache.join(LEFT[0]), [1; 48]).unwrap();
+        let mut programs = [0; 17];
+        programs[..4].copy_from_slice(b"HSP1");
+        std::fs::write(cache.join(LEFT[1]), programs).unwrap();
+        std::fs::write(cache.join(LEFT[2]), b"pipelines").unwrap();
         d
     }
 
@@ -1432,7 +1548,9 @@ mod tests {
         if let Some(id) = id
             && cfg!(target_os = "linux")
         {
-            for var in ["__GL_SHADER_DISK_CACHE_PATH", "MESA_SHADER_CACHE_DIR", "XDG_CACHE_HOME"] {
+            for var in
+                ["__GL_SHADER_DISK_CACHE_PATH", "MESA_SHADER_CACHE_DIR", "XDG_CACHE_HOME", "LONGSHOT_SHADER_STORE"]
+            {
                 assert_eq!(driver_id(|k| (k == var).then(|| "/elsewhere".into())).unwrap(), id, "{var}");
             }
             assert_ne!(driver_id(|k| (k == "LONGSHOT_SHADER_STORE").then(|| "0".into())).unwrap(), id);
