@@ -59,6 +59,7 @@ mod info;
 mod output;
 mod play;
 mod progress;
+mod romfs;
 mod self_update;
 mod single;
 mod steam_cmd;
@@ -79,6 +80,7 @@ const USAGE: &str =
        longshot-builder check --game <file.nup | dump folder>
        longshot-builder image --game <...> --work <dir> [--out <folder>] [--root <tools>]
        longshot-builder index --game <file.nup | dump folder> --out <folder>
+       longshot-builder extract-romfs --game <file.nup | dump folder> --out <folder>
        longshot-builder lift --work <dir> [--root <tools>] [--store <dir>] [--jobs N]
        longshot-builder compile --work <dir> [--root <tools>] [--store <dir>] [--jobs N] [--upscaler ..]
                               [--only renderer|game | --dry-run | --third-party-objects <dir>]
@@ -308,7 +310,7 @@ fn parse(args: &[String]) -> std::result::Result<Args, Usage> {
         "perf-report" => need(&a.folder, "a game folder"),
         "check" => need(&a.game, "--game"),
         "image" => need(&a.game, "--game").or_else(|| need(&a.work, "--work")),
-        "index" => need(&a.game, "--game").or_else(|| need(&a.out, "--out")),
+        "index" | "extract-romfs" => need(&a.game, "--game").or_else(|| need(&a.out, "--out")),
         "verify" => need(&a.out, "--out"),
         "lift" | "compile" => need(&a.work, "--work"),
         "sources" => None,
@@ -696,6 +698,7 @@ fn run(a: &Args, r: &Reporter) -> Result<bool> {
     match a.command.as_str() {
         "check" => return build::check(&game()?, &st, r),
         "index" => build::index_only(&game()?, a.out.as_deref().unwrap_or(Path::new(".")), &st, r)?,
+        "extract-romfs" => romfs::run(&game()?, a.out.as_deref().unwrap_or(Path::new(".")), r)?,
         "image" => {
             let p = dev_places(a)?;
             build::read_only(&game()?, &p.root, &p.work, &p.out, None, &st, r)?;

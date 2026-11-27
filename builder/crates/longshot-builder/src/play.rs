@@ -44,12 +44,13 @@ const TITLE: &str = "Longshot";
 
 /// The builder's commands: under a play name, a first word that is none of these starts the game with it. Every
 /// command main.rs takes is here (main.rs's `every_command_it_takes_is_one_play_leaves_alone` checks it).
-pub const COMMANDS: [&str; 29] = [
+pub const COMMANDS: [&str; 30] = [
     "build",
     "update",
     "check",
     "image",
     "index",
+    "extract-romfs",
     "lift",
     "compile",
     "prepare",

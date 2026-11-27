@@ -34,6 +34,7 @@ steam.workspace = true
 ui.workspace = true
 
 [dev-dependencies]
+game-files = { workspace = true, features = ["testkit"] }
 release = { workspace = true, features = ["testkit"] }
 ruzstd.workspace = true
 

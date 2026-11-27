@@ -103,7 +103,14 @@ in the profile, a vendor's new pin) is left out of the update with an `upscaler_
 updated. A record an earlier builder wrote, with its `accepted` list and `id`, still reads: both are ignored, and the
 first play asks for the license again.
 
-### Output
+### Extract RomFS
+
+Run `longshot-builder extract-romfs --game <file.nup | dump folder> --out <existing folder>` to export the
+original RomFS to a new `romfs/` subfolder. The command refuses an existing destination and leaves the original
+copy intact. With `--output json`, the read stage's `progress` events count the bytes copied and a `done` event
+names the exported folder.
+
+## Output
 
 `--output` says how a command that builds or plays speaks:
 
