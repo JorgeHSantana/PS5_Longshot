@@ -45,8 +45,8 @@ project.
 
 ### [🐧 &nbsp;Download for Linux (AppImage)](https://longshot.magicbean.dev/download/launcher/linux)
 
-Windows without installing: [portable zip](https://longshot.magicbean.dev/download/launcher/windows-portable) · Not
-sure? [longshot.magicbean.dev/download](https://longshot.magicbean.dev/download) picks for your computer.
+Windows without installing: choose **Run portable** on the first start (the 1.x launcher also has a
+[portable zip](https://longshot.magicbean.dev/download/launcher/windows-portable)) · Not sure? [longshot.magicbean.dev/download](https://longshot.magicbean.dev/download) picks for your computer.
 
 Longshot doesn't come ready to play: the **Longshot Launcher** builds it on your PC, from your own copy of the game, and
 keeps it up to date. Download the launcher, not the builder: the files on

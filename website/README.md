@@ -125,6 +125,9 @@ page that says so and names the newest launcher there is. The channels follow th
 `npx wrangler dev` (after `npm run build`) serves the site with the Worker; `tests/download.test.ts` checks the channel
 rules.
 
+A release that has `…-windows-x64.exe` offers portable mode in that program. Its portable zip stays attached for older
+launchers' updates, but isn't offered, and its `windows-portable` link goes to the Windows setup file.
+
 The install page reads `versions.json` when opened and shows the selected channel's launcher version above its
 download buttons. Once loaded, the buttons link to that exact release's files, so a later publication cannot change
 the version being offered by an already-open page. Switching channels updates both the version and the links;

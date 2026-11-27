@@ -15,10 +15,11 @@ build ([system requirements](requirements.md)).
 - [Download for Linux](https://longshot.magicbean.dev/download/launcher/linux)
 - [Windows, portable zip](https://longshot.magicbean.dev/download/launcher/windows-portable)
 
-**Windows:** run the setup. It asks once: **Install** (for you, no administrator rights, with a Start menu shortcut) or
-**Run portable**. The portable zip needs no setup: unzip it and run `LongshotLauncher.exe`; it keeps its data in
-`LongshotLauncher-data` beside it, so it can live on an external SSD. Windows may flag the launcher, which isn't
-code-signed yet: see [antivirus warnings](https://longshot.magicbean.dev/help/antivirus/).
+**Windows:** run the download. It asks once: **Install** (for you, no administrator rights, with a Start menu shortcut)
+or **Run portable**, which keeps the launcher's data beside it, so it can live on an external SSD. The nightly launcher
+has only this one download. The 1.x launcher also has a portable zip: unzip it and run `LongshotLauncher.exe`; it keeps
+its data in `LongshotLauncher-data` beside it. Windows may flag the launcher, which isn't code-signed yet: see
+[antivirus warnings](https://longshot.magicbean.dev/help/antivirus/).
 
 **Linux and SteamOS:** before opening the `.AppImage`, open its **Properties** in your file manager and enable
 **Allow executing file as program** (the wording differs between desktops), or run

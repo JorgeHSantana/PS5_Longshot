@@ -42,6 +42,7 @@ test('shows the selected launcher version and pins links to its files, including
   assert.equal(f.root.hidden, false);
   assert.match(f.version.textContent, /Longshot Launcher v1\.0\.5/);
   assert.equal(f.links[0].getAttribute('href'), versions.channels.stable.downloads.windows);
+  assert.equal((f.links[2] as any).hidden, true);
   assert.equal(f.links[2].getAttribute('href'), null);
   assert.equal(f.links[2].getAttribute('aria-disabled'), 'true');
   assert.equal(f.links[2].getAttribute('role'), 'link');
@@ -56,6 +57,20 @@ test('shows the selected launcher version and pins links to its files, including
   assert.equal(f.links[1].textContent, 'linux');
   f.picked.value = ''; f.change();
   assert.match(f.version.textContent, /v1\.0\.5/);
+});
+
+test('the portable file is offered only by a channel whose release lists one', async () => {
+  const f = fixture();
+  const catalog: any = structuredClone(versions);
+  catalog.channels.stable.downloads['windows-portable'] = 'https://git-cdn.magicbean.dev/attachments/stable-zip';
+  await installLauncherChannel(f.document, async () => Response.json(catalog));
+  const portable = f.links[2] as any;
+  assert.equal(portable.hidden, false);
+  f.picked.value = 'nightly'; f.change();
+  assert.equal(portable.hidden, true);
+  f.picked.value = 'stable'; f.change();
+  assert.equal(portable.hidden, false);
+  assert.equal(portable.getAttribute('href'), catalog.channels.stable.downloads['windows-portable']);
 });
 
 test('no published releases is different from a lookup failure', async () => {
@@ -166,7 +181,9 @@ test('pending metadata keeps best-channel routes until the user explicitly choos
 
 test('the front page names the launcher and its channel beside its version, not as the game\'s', async () => {
   const statuses = [{ textContent: '' }, { textContent: '' }];
-  const document = { querySelectorAll: selector => selector === '[data-launcher-status]' ? statuses : [] };
+  const portable = { hidden: false };
+  const document = { querySelectorAll: selector => selector === '[data-launcher-status]' ? statuses : [portable] };
   await installLauncherStatus(document as any, async () => Response.json(versions));
   for (const status of statuses) assert.equal(status.textContent, 'Longshot Launcher v1.0.5 · stable');
+  assert.equal(portable.hidden, true);
 });

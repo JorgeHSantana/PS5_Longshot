@@ -65,8 +65,18 @@ export function newest(releases, channel) {
 
 /** The release asset of a kind (windows, windows-portable, linux), or null */
 export function assetOf(release, kind) {
-  const suffix = FILES[kind].suffix;
+  if (kind === "windows-portable" && portableBuiltIn(release)) return null;
+  return fileOf(release, FILES[kind].suffix);
+}
+
+function fileOf(release, suffix) {
   return (release.assets || []).find((a) => a.name.startsWith("LongshotLauncher-") && a.name.endsWith(suffix)) || null;
+}
+
+// A release with one Windows program (…-windows-x64.exe) asks on first start to install or run portably. Its zip stays
+// attached for older launchers' updates, but isn't offered.
+function portableBuiltIn(release) {
+  return !!fileOf(release, "-windows-x64.exe");
 }
 
 /** The best channel there is: stable, else nightly; [channel, release] or [null, null] */
@@ -351,7 +361,8 @@ async function download(request, ctx, parts) {
   const r = newest(releases, channel);
   if (!r) return notFound(releases, `No ${channel} launcher yet`, kind);
   if (kind === undefined) return redirect(r.html_url);
-  const a = assetOf(r, kind);
+  // (release pages and bookmarks still link windows-portable: the Windows program does that now)
+  const a = assetOf(r, kind === "windows-portable" && portableBuiltIn(r) ? "windows" : kind);
   if (!a) return notFound(releases, `${r.tag_name} has no ${FILES[kind].label} file`, kind);
   return redirect(a.browser_download_url);
 }
