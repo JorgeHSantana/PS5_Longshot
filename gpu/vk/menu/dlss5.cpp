@@ -1,16 +1,17 @@
 // The Insert menu's DLSS 5 rows: NVIDIA's neural rendering model over the upscaler's picture, before the HUD (vk_dlss.cpp
-// dlss_nr_chain). On the Graphics tab right under the Upscaler's rows (after Sharpness): DLSS 5, its preset and a row that
-// opens the DLSS 5 settings page, which holds the tuning rows (vk_menu.cpp TAB_DLSS5). Shown only where it can run: NVIDIA's
+// dlss_nr_chain). On the Graphics tab right under the Upscaler's rows (after Sharpness): DLSS 5 and a row that opens
+// the DLSS 5 settings page, which holds the DLSS 5 preset, the tuning rows and the DLSS 5 model (vk_menu.cpp
+// TAB_DLSS5). Shown only where it can run: NVIDIA's
 // nvngx_dlssnr.dll found in one of the folders NGX searches (the game's ngx folder, LOCALAPPDATA's Longshot/ngx or
 // RX_VK_DLSS_DIR; the player puts it there, Longshot neither ships nor downloads it), an NVIDIA GPU, a build with DLSS, and
 // a temporal Upscaler (DLSS, DLAA or FSR). On Windows the community FP16 conversion of that file counts too, in such
 // a folder's fp16 folder (dlss_nr_model.h: it runs DLSS 5 on RTX 20, 30 and 40); on an RTX 50 with both files the
 // DLSS 5 model row chooses which one runs, after a restart. With none of that there is no row and no line (no heading
 // of their own either: the menu draws a section's title over rows all hidden). The rows are the Bloodborne PC port's
-// DLSS 5 rows; the Default preset
-// holds them as tuned in the game (menu/dlss5.h), and a row moved by hand makes the preset row say Custom. The rows past the first show while DLSS 5
-// is On (the preset, the page's row and the page's rows). The parts that ask the renderer are fenced from a layout-only
-// build (MENU_LAYOUT_ONLY, MENU_HOOK).
+// DLSS 5 rows; the Default preset holds them as tuned in the game (menu/dlss5.h), and a row moved by hand makes the
+// preset row say Custom. The rows as last set by hand are the player's Custom set, saved (dlss5_custom=), which the
+// preset row's Custom gives back after Default. The rows past the first show while DLSS 5 is On (the page's row and the
+// page's rows). The parts that ask the renderer are fenced from a layout-only build (MENU_LAYOUT_ONLY, MENU_HOOK).
 #include "menu_module.h"
 
 #include "menu/dlss5.h"
@@ -83,19 +84,45 @@ bool tuning() { return offered() && opts.dlss5 != 0; }
 bool model_shown() { return tuning() && dlss5_model_offered(); }
 
 int preset_ui = 0;   // (the DLSS 5 preset row: unsaved, synced from the rows it sets)
-bool is_default() {
-    const Dlss5Preset& p = kDlss5Default;
-    return opts.dlss5_resolution == p.resolution && opts.dlss5_detail == p.detail && opts.dlss5_colour == p.colour &&
-           opts.dlss5_style == p.style && opts.dlss5_strengths == p.strengths && opts.dlss5_intensity == p.intensity &&
-           opts.dlss5_local_structure == p.local_structure && opts.dlss5_local_tone == p.local_tone &&
-           opts.dlss5_skin == p.skin && opts.dlss5_auto_mask == p.auto_mask && opts.dlss5_highlight == p.highlight;
+/// The rows the preset sets: each one's name in dlss5_custom=, its option, its place in a Dlss5Preset, its row's ends
+struct PresetRow {
+    const char* name;
+    int Options::*option;
+    int Dlss5Preset::*preset;
+    int lo, hi;
+};
+constexpr PresetRow kPresetRows[] = {
+    {"resolution", &Options::dlss5_resolution, &Dlss5Preset::resolution, 25, 100},
+    {"detail", &Options::dlss5_detail, &Dlss5Preset::detail, 0, 200},
+    {"colour", &Options::dlss5_colour, &Dlss5Preset::colour, 0, 200},
+    {"style", &Options::dlss5_style, &Dlss5Preset::style, 0, 2},
+    {"strengths", &Options::dlss5_strengths, &Dlss5Preset::strengths, 0, 2},
+    {"intensity", &Options::dlss5_intensity, &Dlss5Preset::intensity, 0, 200},
+    {"local_structure", &Options::dlss5_local_structure, &Dlss5Preset::local_structure, 0, 200},
+    {"local_tone", &Options::dlss5_local_tone, &Dlss5Preset::local_tone, 0, 200},
+    {"skin", &Options::dlss5_skin, &Dlss5Preset::skin, -100, 200},
+    {"auto_mask", &Options::dlss5_auto_mask, &Dlss5Preset::auto_mask, 0, 1},
+    {"highlight", &Options::dlss5_highlight, &Dlss5Preset::highlight, 10, 80},
+};
+Dlss5Preset rows_now() {
+    Dlss5Preset p;
+    for (const PresetRow& r : kPresetRows) p.*r.preset = opts.*r.option;
+    return p;
 }
-void apply_default() {
-    const Dlss5Preset& p = kDlss5Default;
-    opts.dlss5_resolution = p.resolution, opts.dlss5_detail = p.detail, opts.dlss5_colour = p.colour;
-    opts.dlss5_style = p.style, opts.dlss5_strengths = p.strengths, opts.dlss5_intensity = p.intensity;
-    opts.dlss5_local_structure = p.local_structure, opts.dlss5_local_tone = p.local_tone, opts.dlss5_skin = p.skin;
-    opts.dlss5_auto_mask = p.auto_mask, opts.dlss5_highlight = p.highlight;
+void apply(const Dlss5Preset& p) {
+    for (const PresetRow& r : kPresetRows) opts.*r.option = p.*r.preset;
+}
+bool is_default() { return rows_now() == kDlss5Default; }
+/// The player's Custom set (saved as dlss5_custom=): the rows as last set by hand, while they differ from the Default
+/// preset. A change that brings them back to Default keeps the set there was
+Dlss5Preset custom_set;
+bool has_custom = false;
+void keep_custom() {
+    if (!is_default()) custom_set = rows_now(), has_custom = true;
+}
+/// The preset row waits for a Custom set: on Default, with none kept
+const char* no_custom() {
+    return has_custom || !is_default() ? nullptr : "Change a row below to make your Custom set.";
 }
 
 /// A value of 0 to 2 in hundredths, as the Bloodborne port shows it ("1.54")
@@ -151,8 +178,44 @@ const char* hn_dlss5(int v, int variant) {
 #endif
 } // namespace
 
+std::string dlss5_custom_text() {
+    keep_custom();   // (the rows as they are, when not Default: also a change the module was not told of)
+    if (!has_custom) return {};
+    std::string s;
+    for (const PresetRow& r : kPresetRows)
+        s += (s.empty() ? "" : ",") + std::string(r.name) + ":" + std::to_string(custom_set.*r.preset);
+    return s;
+}
+
+void dlss5_custom_read(const char* text) {
+    Dlss5Preset p;   // (a row not in the text: its Default value)
+    const std::string s = text ? text : "";
+    for (size_t at = 0; at < s.size();) {
+        size_t end = s.find(',', at);
+        if (end == std::string::npos) end = s.size();
+        const std::string item = s.substr(at, end - at);
+        at = end + 1;
+        const size_t colon = item.find(':');
+        if (colon == std::string::npos) continue;
+        const std::string name = item.substr(0, colon);
+        const char* number = item.c_str() + colon + 1;
+        char* after = nullptr;
+        const long v = strtol(number, &after, 10);
+        if (after == number) continue;   // (not a number)
+        while (*after == ' ' || *after == '\t' || *after == '\r' || *after == '\n') after++;
+        if (*after) continue;
+        for (const PresetRow& r : kPresetRows)
+            if (name == r.name) p.*r.preset = (int)std::clamp(v, (long)r.lo, (long)r.hi);
+    }
+    custom_set = p, has_custom = !(p == kDlss5Default);
+}
+
 MENU_MODULE(dlss5) {
-    const auto changed = [](int) { publish(); };
+    // (a tuning row changed by hand: the Custom set follows it, unless it brings every row back to Default)
+    const auto changed = [](int) {
+        keep_custom();
+        publish();
+    };
     menu::tab("graphics")
         .row({.key = "dlss5",
               .label = "DLSS 5",
@@ -173,42 +236,35 @@ MENU_MODULE(dlss5) {
                   (void)v;
                   publish();
               }}, menu::after("sharpness"))
-        .row({.key = "dlss5_model",
-              .label = "DLSS 5 model",
-              .help = "[EXPERIMENTAL] Which DLSS 5 file runs: NVIDIA's own (FP8, made for RTX 50 cards) or the "
-                      "community FP16 conversion of it. Auto is NVIDIA's. Shown on an RTX 50 card with both files. "
-                      "Applies after a restart.",
-              .value = &opts.dlss5_model,
-              .lo = 0, .hi = 2,
-              .choices = {"Auto", "NVIDIA", "FP16"},
-              .restart = true,
-              .preset_exempt = true,
-              .shown = model_shown}, menu::after("dlss5"))
+        .row({.key = "@DLSS 5 settings",
+              .label = "DLSS 5 settings",
+              .help = "[EXPERIMENTAL] Opens the DLSS 5 page: the DLSS 5 preset, model resolution, detail and colour "
+                      "strength, style, the model's strengths, the skin mask, the highlight guard and, on an RTX 50 "
+                      "card with both files, the DLSS 5 model.",
+              .kind = menu::Kind::Page,
+              .opens = "dlss5_settings",
+              .shown = tuning}, menu::after("dlss5"));
+    // (the DLSS 5 settings page: the preset at the top, the Bloodborne port's tuning rows, the DLSS 5 model at the
+    // bottom; vk_menu.cpp TAB_DLSS5, Back to Graphics)
+    menu::page("dlss5_settings")   // (the core makes the page and names it: vk_menu.cpp kTabIds, kTabLabels)
         .row({.key = "dlss5_preset",
               .label = "DLSS 5 preset",
-              .help = "[EXPERIMENTAL] Default: our settings for every row of the DLSS 5 settings page, tuned in the "
-                      "game. Custom shows once you change one of them; choose Default to put them all back.",
+              .help = "[EXPERIMENTAL] Default: our settings for the rows below, tuned in the game. Custom: the values "
+                      "you last set below, kept while you try Default. Change a row below to make your Custom set.",
               .value = &preset_ui,
               .lo = 0, .hi = 1,
               .choices = {"Default", "Custom"},
               .preset_exempt = true,
               .shown = tuning,
-              .step_fn = [](int, int) { return 0; },   // (Custom is what the rows hold, never chosen: either way is Default)
+              .locked = no_custom,
+              .step_fn = [](int v, int) { return 1 - v; },   // (either way is the other one)
               .on_change = [](int v) {
-                  if (v == 0) apply_default();
+                  keep_custom();   // (the rows as they are, when not Default, before Default goes over them)
+                  apply(v ? custom_set : kDlss5Default);
                   publish();
               },
               .unsaved = true,
-              .sync = [] { return is_default() ? 0 : 1; }}, menu::after("dlss5_model"))
-        .row({.key = "@DLSS 5 settings",
-              .label = "DLSS 5 settings",
-              .help = "[EXPERIMENTAL] Opens the DLSS 5 page: model resolution, detail and colour strength, style, the "
-                      "model's strengths, the skin mask and the highlight guard.",
-              .kind = menu::Kind::Page,
-              .opens = "dlss5_settings",
-              .shown = tuning}, menu::after("dlss5_preset"));
-    // (the DLSS 5 settings page: the Bloodborne port's tuning rows; vk_menu.cpp TAB_DLSS5, Back to Graphics)
-    menu::page("dlss5_settings")   // (the core makes the page and names it: vk_menu.cpp kTabIds, kTabLabels)
+              .sync = [] { return is_default() ? 0 : 1; }}, menu::order(5))
         .row({.key = "dlss5_resolution",
               .label = "Model resolution",
               .help = "[EXPERIMENTAL] The size the model works at, as a share of the picture. Lower is much faster: "
@@ -338,7 +394,18 @@ MENU_MODULE(dlss5) {
               .preset_exempt = true,
               .shown = tuning,
               .text = guard_text,
-              .on_change = changed}, menu::order(110));
+              .on_change = changed}, menu::order(110))
+        .row({.key = "dlss5_model",
+              .label = "DLSS 5 model",
+              .help = "[EXPERIMENTAL] Which DLSS 5 file runs: NVIDIA's own (FP8, made for RTX 50 cards) or the "
+                      "community FP16 conversion of it. Auto is NVIDIA's. Shown on an RTX 50 card with both files. "
+                      "Applies after a restart.",
+              .value = &opts.dlss5_model,
+              .lo = 0, .hi = 2,
+              .choices = {"Auto", "NVIDIA", "FP16"},
+              .restart = true,
+              .preset_exempt = true,
+              .shown = model_shown}, menu::order(120));
 }
 
 } // namespace mkwvk

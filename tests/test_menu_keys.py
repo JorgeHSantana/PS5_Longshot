@@ -402,6 +402,11 @@ static int monitor_pick;
 static std::string monitor_want, monitor_saved_name;
 static std::string output_id_key(const char* text) { return text; }
 static std::string output_name_key(const char* text) { return text; }
+// (menu/dlss5.cpp: the DLSS 5 Custom set's options line as the module gives it to save(), and as menu_init hands it back)
+static std::string dlss5_line, dlss5_read;
+static int dlss5_reads;
+static std::string dlss5_custom_text() { return dlss5_line; }
+static void dlss5_custom_read(const char* text) { dlss5_read = text, dlss5_reads++; }
 [[maybe_unused]] static uint64_t auto_for = 0, auto_tuned = 0;   // (the Quality preset Auto (this PC)'s fingerprints, which save() writes)
 static struct { int steps = 0; bool went_down = false; } auto_tuning;   // (and its tuning's steps)
 static std::string mic_key(const char* name) { return name; }
@@ -516,7 +521,36 @@ static void test_saved() {
         for (int mode = 0; mode <= 2; mode++) CHECK(loaded_as(mode, v) == mode);
         CHECK(loaded_as(-1, v) == 2);
     }
+    // (the DLSS 5 Custom set, menu/dlss5.cpp: save() writes the module's line, once, over the file's old one; no set, no
+    // line; menu_init hands the line it reads to the module)
+    const auto dlss5_lines = [] {
+        int n = 0;
+        if (FILE* r = fopen(ini_file.c_str(), "r")) {
+            char line[512];
+            while (fgets(line, sizeof line, r)) n += !strncmp(line, "dlss5_custom=", 13);
+            fclose(r);
+        }
+        return n;
+    };
+    loaded_as(2, SAVED_VERSION);
+    dlss5_line = "detail:100,style:1";
+    save();
+    CHECK(dlss5_lines() == 1);
+    dlss5_reads = 0, dlss5_read.clear();
+    reload();
+    CHECK(dlss5_reads == 1 && dlss5_read.rfind("detail:100,style:1", 0) == 0);
+    dlss5_line = "detail:120";
+    save();
+    dlss5_reads = 0, dlss5_read.clear();
+    reload();
+    CHECK(dlss5_lines() == 1 && dlss5_reads == 1 && dlss5_read.rfind("detail:120", 0) == 0);
+    dlss5_line.clear();
+    save();
+    dlss5_reads = 0;
+    reload();
+    CHECK(dlss5_lines() == 0 && dlss5_reads == 0);
     std::puts("PASS: an older file's Insert or F1 moves to Insert, F1 or Esc; F1 only and a file saved now keep theirs");
+    std::puts("PASS: the DLSS 5 Custom set's line: written once by save(), none with no set, handed back by menu_init");
 }
 '''
 

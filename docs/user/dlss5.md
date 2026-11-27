@@ -54,14 +54,16 @@ The **DLSS 5** rows of the Graphics tab, under the Upscaler's rows (after Sharpn
 - the build has NVIDIA DLSS;
 - the Upscaler is NVIDIA DLSS, NVIDIA DLAA or AMD FSR.
 
-Without them there is no DLSS 5 row and no message. Turn **DLSS 5** On: **DLSS 5 preset** and **DLSS 5 settings** show,
-and **DLSS 5 model** on an RTX 50 GPU with both files ([above](#rtx-20-30-and-40-the-fp16-file)).
-**DLSS 5 settings** opens a page with the tuning rows below (Back returns to Graphics). The DLSS 5 row's line says what
-the model does now, or why it does not run.
+Without them there is no DLSS 5 row and no message. Turn **DLSS 5** On: **DLSS 5 settings** shows. It opens a page
+(Back returns to Graphics) with **DLSS 5 preset** at the top, the tuning rows below, and at the bottom **DLSS 5 model**
+on an RTX 50 GPU with both files ([above](#rtx-20-30-and-40-the-fp16-file)). The DLSS 5 row's line says what the model
+does now, or why it does not run.
 
 The rows are the DLSS 5 rows of the Bloodborne PC port. **DLSS 5 preset** is **Default**: the values below, tuned in
-the game (Kokiri Forest, an RTX 5090 at 5120x2160 with DLAA). Change a row and the preset says **Custom**; choose
-**Default** to put all of them back.
+the game (Kokiri Forest, an RTX 5090 at 5120x2160 with DLAA). Change a row and the preset says **Custom**: the values
+you set are your Custom set. Choose **Default** to put all the rows back; your Custom set is kept, and **Custom** gives
+it back, also after a restart (`dlss5_custom=` in `longshot_options.ini`). A row changed while on Default makes a new
+Custom set. Until you have one, the preset row stays on Default. The preset does not set **DLSS 5 model**.
 
 | Row (DLSS 5 settings page) | What it does | Default |
 |---|---|---|

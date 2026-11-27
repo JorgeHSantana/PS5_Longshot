@@ -1078,6 +1078,7 @@ void save() {
             // (and the VRAM budget row's, removed: one rule by the card, texture_budget.h and mirror_budget.h)
             mine |= key == "vram_budget";
             mine |= key == "gpu_device_id";   // (the GPU device row's card: written below)
+            mine |= key == "dlss5_custom";    // (the DLSS 5 Custom set: written below)
             for (const Row& r : rows)
                 if (!mine && r.value && !(r.setting && r.setting->unsaved) && key == ini_key(r)) mine = true;
             if (!mine) others += line, others += others.back() == '\n' ? "" : "\n";
@@ -1116,6 +1117,8 @@ void save() {
         const std::string card = opts.gpu_device > 0 ? gpu_choice::card_id(gpu_device_cards, opts.gpu_device - 1)
                                  : opts.gpu_device == 0 && gpu_card_missing ? gpu_saved_card : std::string();
         if (!card.empty()) fprintf(f, "gpu_device_id=%s\n", card.c_str());
+        // (not a row: the DLSS 5 rows as last set by hand, which the DLSS 5 preset row's Custom gives back, menu/dlss5.cpp)
+        if (const std::string custom = dlss5_custom_text(); !custom.empty()) fprintf(f, "dlss5_custom=%s\n", custom.c_str());
         if (auto_for) fprintf(f, "auto_for=%016llx\n", (unsigned long long)auto_for);   // (the hardware Auto (this PC) chose for)
         if (auto_tuned) fprintf(f, "auto_tuned=%016llx\n", (unsigned long long)auto_tuned);   // (and measured in play for)
         // (the tuning's steps so far and whether one went down: the no-seesaw rule and the two steps hold across restarts)
@@ -4300,6 +4303,7 @@ void menu_init() {
             if (!strcmp(line, "audio_output_device_name")) output_saved_name = output_name_key(eq + 1);
             if (!strcmp(line, "fullscreen_monitor_id")) monitor_want = monitor_choice::id_key(eq + 1);
             if (!strcmp(line, "fullscreen_monitor_name")) monitor_saved_name = output_name_key(eq + 1);
+            if (!strcmp(line, "dlss5_custom")) dlss5_custom_read(eq + 1);   // (the DLSS 5 Custom set, menu/dlss5.cpp)
         }
         fclose(f);
         // (the saved microphone by its name, not its place; the host told the row's choice. Off or the default: no list, no SDL

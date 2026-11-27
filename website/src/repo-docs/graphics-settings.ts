@@ -315,17 +315,16 @@ export function readGraphicsSettings(page, menu) {
     // (gpu/vk/menu/sim_turf.cpp: the row that opens the area's simulated-turf page, whose values sim_turf_settings.ini keeps)
     const simTurfPage = row.key === '@Simulated turf' && row.name === 'Simulated turf' && row.value === 'nullptr' &&
       row.kind === 'menu::Kind::Page' && row.opens === 'sim_turf_settings';
-    // (gpu/vk/menu/dlss5.cpp: the row that opens the DLSS 5 settings page, whose rows the Graphics table names on its line)
+    // (gpu/vk/menu/dlss5.cpp: the row that opens the DLSS 5 settings page, whose rows the Graphics table names on its line:
+    // the DLSS 5 preset, the tuning rows and the DLSS 5 model)
     const dlss5Page = row.key === '@DLSS 5 settings' && row.name === 'DLSS 5 settings' && row.value === 'nullptr' &&
       row.kind === 'menu::Kind::Page' && row.opens === 'dlss5_settings';
     // (Dynamic resolution, gpu/vk/menu/upscaler.cpp, and Frame generation multiplier, framegen.cpp: views of opts.resolution
-    // and opts.framegen, which they set; they save nothing themselves. DLSS 5 preset, dlss5.cpp, a choice row: a view of the
-    // DLSS 5 settings page's opts.dlss5_* rows, Default when they hold its values, which it sets; it saves nothing itself)
+    // and opts.framegen, which they set; they save nothing themselves)
     const uiMirror = (row.key === 'dynamic_resolution' && row.name === 'Dynamic resolution' && row.value === '&dyn_res_ui' &&
       row.kind === 'menu::Kind::Toggle') ||
       (row.key === 'frame_generation_multiplier' && row.name === 'Frame generation multiplier' && row.value === '&fg_mult_ui' &&
-      row.kind === 'menu::Kind::Slider') ||
-      (row.key === 'dlss5_preset' && row.name === 'DLSS 5 preset' && row.value === '&preset_ui' && row.kind === undefined);
+      row.kind === 'menu::Kind::Slider');
     if (!row.value.startsWith('&opts.') && !row.textField && !row.monitorSelector && !hudReset && !reshadeAction && !reshadeFile && !simTurfPage &&
         !dlss5Page && !uiMirror && !row.gameRow)
       throw new Error(`table/menu graphics coverage mismatch at ${row.name}`);

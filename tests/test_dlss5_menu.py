@@ -1,13 +1,18 @@
 """The Insert menu's DLSS 5 rows (gpu/vk/menu/dlss5.cpp), built with every module as the game builds them (no game, no GPU):
 
 - where they are: on the Graphics tab right after the Upscaler rows (Sharpness), before Frame generation's section, with
-  no heading of their own (the menu draws a heading over rows all hidden): DLSS 5, its model, its preset and the row that
-  opens the DLSS 5 settings page; the page holds the tuning rows in the Bloodborne port's order;
+  no heading of their own (the menu draws a heading over rows all hidden): DLSS 5 and the row that opens the DLSS 5
+  settings page; the page holds the DLSS 5 preset at its top, the tuning rows in the Bloodborne port's order and the DLSS 5
+  model at its bottom;
 - no DLL, no rows: every row is hidden while the renderer says DLSS 5 cannot run here (no nvngx_dlssnr.dll found, not
   NVIDIA, no DLSS in the build) or the Upscaler is not DLSS, DLAA or FSR; with it, the On row shows, and the rest while On;
   the DLSS 5 model row only where the renderer says there is a choice (an RTX 50 with both files), and it takes a restart;
 - the Default preset: the options' defaults are its values, the preset row says Default with them and Custom once any
-  row is moved, and choosing Longshot puts every row back;
+  row is moved, and choosing Default puts every row back;
+- the Custom set: the rows as last set by hand, kept while on Default and given back by Custom; a row changed on Default
+  makes a new set; a change back to Default keeps the set there was; no set, the row waits (locked); an options file from
+  before the set, rows not at Default, keeps them; its options line (dlss5_custom=) out and in again, each value held to
+  its row's ends, a name not known or a value not a number left out, a set equal to Default no set;
 - the rows' steps, ends, texts and locks (the four strengths wait for Model strengths at Applied), the Quality preset
   leaving them alone, and the sliders that make the model again committing on release;
 - what reaches the renderer (dlss5_publish): each row's value, the strengths sent only at Applied, the model's preset 2,
@@ -31,14 +36,16 @@ from menu_model_fixture import core_module, module_header, renderer_stand_ins  #
 from srccut import block  # noqa: E402
 
 VK = ROOT / "gpu" / "vk"
-GRAPHICS = ["dlss5", "dlss5_model", "dlss5_preset", "@DLSS 5 settings"]
-PAGE = ["dlss5_resolution", "dlss5_detail", "dlss5_colour", "dlss5_style", "dlss5_strengths", "dlss5_intensity",
-        "dlss5_local_structure", "dlss5_local_tone", "dlss5_skin", "dlss5_auto_mask", "dlss5_highlight"]
+GRAPHICS = ["dlss5", "@DLSS 5 settings"]
+PAGE = ["dlss5_preset", "dlss5_resolution", "dlss5_detail", "dlss5_colour", "dlss5_style", "dlss5_strengths",
+        "dlss5_intensity", "dlss5_local_structure", "dlss5_local_tone", "dlss5_skin", "dlss5_auto_mask", "dlss5_highlight",
+        "dlss5_model"]
 ROWS = GRAPHICS + PAGE
 
 MENU_MAIN = r'''#include "menu_module.h"
 #include "menu/dlss5.h"
 #include "upscaler_rows.h"
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -113,25 +120,109 @@ int main() {
     CHECK(p.detail == 164 && p.colour == 126 && p.style == 2 && p.intensity == 162 && p.local_structure == 122 &&
           p.local_tone == 114 && p.skin == 74 && p.auto_mask == 1 && p.strengths == 2 && p.highlight == 17 && p.resolution == 65);
     const menu::Setting& preset = row("dlss5_preset");
-    CHECK(preset.unsaved && preset.sync && preset.on_change && preset.step_fn);
+    CHECK(preset.unsaved && preset.sync && preset.on_change && preset.step_fn && preset.locked);
     CHECK(preset.sync() == 0 && preset.text == nullptr && preset.choices.size() == 2);
     CHECK(!std::strcmp(preset.choices[0], "Default") && !std::strcmp(preset.choices[1], "Custom"));
-    // a row moved by hand, any of them, one step: Custom; choosing the preset (either way) puts every row back
+    // (the preset row chosen as a player would: its step, then its change)
+    const auto choose = [&](int v) {
+        CHECK(preset.step_fn(1 - v, 1) == v && preset.step_fn(1 - v, -1) == v);
+        *preset.value = v;
+        preset.on_change(v);
+        return 0;
+    };
+    // (a row moved by hand one step, as the menu does: its step, then its change)
+    const auto move = [&](const char* k, int dir) {
+        const menu::Setting& s = row(k);
+        int& v = *s.value;
+        const int was = v;
+        v = s.step_fn ? s.step_fn(v, dir) : std::min(std::max(v + dir * s.step, s.lo), s.hi);
+        CHECK(v != was);
+        if (s.on_change) s.on_change(v);
+        return 0;
+    };
+    // a row moved by hand, any of them, one step: Custom; Default puts every row back and keeps the set; Custom gives it back
+    int tuning_rows = 0;
     for (const char* k : keys) {
         const menu::Setting& s = row(k);
         if (!std::strcmp(k, "dlss5") || !std::strcmp(k, "dlss5_model") || s.unsaved || !s.value) continue;   // (not the preset's)
+        tuning_rows++;
         opts = Options{};
+        dlss5_custom_read("");   // (no set)
+        CHECK(preset.sync() == 0 && preset.locked() != nullptr && dlss5_custom_text().empty());   // (no set: it waits)
         int& v = *s.value;
         const int was = v;
-        v = s.step_fn ? s.step_fn(v, v < s.hi ? 1 : -1) : v + (v < s.hi ? s.step : -s.step);
-        CHECK(v != was && v >= s.lo && v <= s.hi);
-        if (s.on_change) s.on_change(v);
-        CHECK(preset.sync() == 1);
-        CHECK(preset.step_fn(1, 1) == 0 && preset.step_fn(1, -1) == 0);
-        *preset.value = 0;
-        preset.on_change(0);
-        CHECK(v == was && preset.sync() == 0);
+        move(k, v < s.hi ? 1 : -1);
+        const int moved = v;
+        CHECK(moved >= s.lo && moved <= s.hi);
+        CHECK(preset.sync() == 1 && preset.locked() == nullptr);
+        choose(0);
+        CHECK(v == was && preset.sync() == 0 && preset.locked() == nullptr);   // (Default, the set kept)
+        choose(1);
+        CHECK(v == moved && preset.sync() == 1);
     }
+    CHECK(tuning_rows == 11);
+    // a row changed while on Default: a new set, the old one replaced
+    opts = Options{};
+    dlss5_custom_read("");
+    move("dlss5_detail", 1);
+    choose(0);
+    move("dlss5_colour", -1);
+    choose(0);
+    choose(1);
+    CHECK(opts.dlss5_detail == kDlss5Default.detail && opts.dlss5_colour == kDlss5Default.colour - 2);
+    // a row changed while on Custom: the set follows; a change back to Default keeps the set there was
+    move("dlss5_style", -1);
+    move("dlss5_style", 1);
+    CHECK(preset.sync() == 1);   // (the colour still moved)
+    move("dlss5_colour", 1);
+    CHECK(preset.sync() == 0 && preset.locked() == nullptr);
+    choose(1);
+    CHECK(opts.dlss5_colour == kDlss5Default.colour - 2 && opts.dlss5_style == kDlss5Default.style);
+    // an options file from before the set: rows not at Default, no dlss5_custom= line. Saved as the set, kept by Default
+    opts = Options{};
+    dlss5_custom_read("");
+    opts.dlss5_intensity = 40, opts.dlss5_skin = -100;
+    CHECK(preset.sync() == 1 && preset.locked() == nullptr);
+    CHECK(dlss5_custom_text() ==
+          "resolution:65,detail:164,colour:126,style:2,strengths:2,intensity:40,local_structure:122,local_tone:114,skin:-100,"
+          "auto_mask:1,highlight:17");
+    choose(0);
+    CHECK(opts.dlss5_intensity == kDlss5Default.intensity);
+    choose(1);
+    CHECK(opts.dlss5_intensity == 40 && opts.dlss5_skin == -100);
+    // the line in again: the set given back by Custom after a restart
+    {
+        const std::string line = dlss5_custom_text();
+        opts = Options{};
+        dlss5_custom_read("");
+        dlss5_custom_read((line + "\r\n").c_str());   // (as the options file's line comes, its end of line with it)
+        CHECK(preset.sync() == 0 && preset.locked() == nullptr && dlss5_custom_text() == line);
+        choose(1);
+        CHECK(opts.dlss5_intensity == 40 && opts.dlss5_skin == -100 && opts.dlss5_detail == kDlss5Default.detail);
+    }
+    // each value held to its row's ends; a name not known, a value not a number, a value with more after it: left out
+    for (int dir : {-1, 1}) {
+        std::string line;
+        for (const char* k : keys)
+            if (!std::strncmp(k, "dlss5_", 6) && std::strcmp(k, "dlss5_model") && std::strcmp(k, "dlss5_preset"))
+                line += std::string(line.empty() ? "" : ",") + (k + 6) + ":" + (dir < 0 ? "-1000" : "1000");
+        opts = Options{};
+        dlss5_custom_read(line.c_str());
+        choose(1);
+        for (const char* k : keys)
+            if (!std::strncmp(k, "dlss5_", 6) && std::strcmp(k, "dlss5_model") && std::strcmp(k, "dlss5_preset"))
+                CHECK(*row(k).value == (dir < 0 ? row(k).lo : row(k).hi));
+    }
+    opts = Options{};
+    dlss5_custom_read("detail:abc,colour:20x,nothing:4,style:1,highlight");
+    choose(1);
+    CHECK(opts.dlss5_detail == kDlss5Default.detail && opts.dlss5_colour == kDlss5Default.colour && opts.dlss5_style == 1);
+    // a set equal to Default is no set
+    opts = Options{};
+    dlss5_custom_read("resolution:65,style:2");
+    CHECK(preset.locked() != nullptr && dlss5_custom_text().empty());
+    dlss5_custom_read(nullptr);
+    CHECK(preset.locked() != nullptr && dlss5_custom_text().empty());
     opts.dlss5 = 1; CHECK(preset.sync() == 0);   // (On and Off are not the preset's)
     // the Quality preset leaves every DLSS 5 row alone; the sliders that make the model again commit on release
     for (const char* k : keys) CHECK(row(k).preset_exempt || row(k).kind == menu::Kind::Page);
@@ -252,11 +343,12 @@ def main():
             at = order.index("dlss5")
             if order[at - 1] != "sharpness" or order[at:at + len(GRAPHICS)] != GRAPHICS or \
                     order[at + len(GRAPHICS)] != "#framegen" or any(k in order for k in PAGE):
-                failed.append("order: DLSS 5, its preset and the page's row are not right after Sharpness, before Frame "
-                              "generation, or a tuning row is on the Graphics tab: " +
+                failed.append("order: DLSS 5 and the page's row are not right after Sharpness, before Frame generation, "
+                              "or a row of the page is on the Graphics tab: " +
                               " ".join(order[max(0, at - 2):at + len(GRAPHICS) + 2]))
         if page != PAGE:
-            failed.append("the DLSS 5 settings page holds %s, not the tuning rows in the Bloodborne port's order" % page)
+            failed.append("the DLSS 5 settings page holds %s, not the preset, the tuning rows in the Bloodborne port's order "
+                          "and the DLSS 5 model" % page)
         # (dlss5_publish, cut from the module: what reaches the renderer)
         publish = block((VK / "menu" / "dlss5.cpp").read_text(encoding="utf-8"), "void dlss5_publish() {")
         options = block((VK / "vk_menu.h").read_text(encoding="utf-8"), "struct Options {")
