@@ -146,8 +146,10 @@ class RecompLauncherJsonTests(unittest.TestCase):
             self.assertNotIn("/", name)
             self.assertNotIn("builder", name.lower())
             self.assertNotEqual(name, manifest["folders"]["game"][0]["path"].rsplit("/", 1)[1])
+        names = (ROOT / "builder" / "crates" / "build-driver" / "src" / "play.rs").read_text(encoding="utf-8")
+        self.assertIn('pub const NAMES: [&str; 2] = ["%s", "%s"];' % tuple(start), names)
         play = (ROOT / "builder" / "crates" / "longshot-builder" / "src" / "play.rs").read_text(encoding="utf-8")
-        self.assertIn('pub const NAMES: [&str; 2] = ["%s", "%s"];' % tuple(start), play)
+        self.assertIn("pub use build_driver::play::NAMES;", play)
         # (its exit statuses, explained: never built, a build, update or start that failed, with its log, and the
         # profile in use by another start, single.rs)
         codes = manifest["exit_codes"]

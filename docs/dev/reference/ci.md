@@ -106,8 +106,8 @@ pinned rustup for Rust. gitleaks is mise.toml's prebuilt release, run by pre-com
 
 The release builds ([`longshot.yml`](https://git.magicbean.dev/MagicBeanAdmin/Release/src/branch/main/.forgejo/workflows/longshot.yml)) keep two caches per platform on their own runners, written by no other
 repository's jobs: the downloads (the pinned Rust's archives, the `.crate` files, tools.lock's archives, llvm-mingw),
-each checked by its SHA-256 every time it is used, and cargo's target folder of the shipped builder's compile, which is
-not checked again. Cargo takes a workspace crate's files' times for whether it changed, and a checkout makes every file
+each checked by its SHA-256 every time it is used, and cargo's target folder of the shipped builder's and
+`longshot-packager`'s compiles, which is not checked again. Cargo takes a workspace crate's files' times for whether it changed, and a checkout makes every file
 new, so the build records each tracked file's SHA-256 in the target folder (`scripts/ci_source_times.py record`) and
 dates unchanged files back after a restore (`apply`).
 

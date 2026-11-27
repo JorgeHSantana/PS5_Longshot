@@ -45,14 +45,13 @@
 
 use build_core::report::{Event, Format, Reporter, Stage};
 use build_core::{Error, Result};
-use build_driver::layout::{self, Stores, Work};
+use build_driver::layout;
 use build_driver::{BuildOptions, CompileShaders, GameSource, GuestProfile, Places, Stages, Upscaler, build, env};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 mod after;
 mod dev;
-mod diagnostics;
 mod doctor;
 mod fetch_cmd;
 mod from_source;
@@ -698,13 +697,7 @@ fn from_source_cmd(a: &Args) -> ExitCode {
 
 /// The places of a developer's one-stage command in `--work`.
 fn dev_places(a: &Args) -> Result<Places> {
-    let root = layout::tree_root(a.root.as_deref(), env)?;
-    let cache = layout::cache_root(build_driver::env_os);
-    let work = a.work.clone().unwrap_or_default();
-    let work = Work::at(std::path::absolute(&work).unwrap_or(work));
-    let stores = Stores { root: layout::store_root(a.store.as_deref(), &cache, env) };
-    let jobs = build_core::jobs::chosen(a.jobs, env("LONGSHOT_JOBS").as_deref())?;
-    Ok(Places { root, out: a.out.clone().unwrap_or_else(|| work.dir.join("folder")), work, stores, jobs })
+    build::stage_places(a.root.as_deref(), a.work.as_deref(), a.out.as_deref(), a.store.as_deref(), a.jobs)
 }
 
 /// A command other than a build: whether its answer is yes (`check`).
@@ -978,9 +971,9 @@ fn version_line(pack: &[u8]) -> String {
 }
 
 fn main() -> ExitCode {
-    diagnostics::init();
-    // (Windows: the version folder's Longshot.exe is a windowed program, release_cmd.rs: what it starts opens no window;
-    // started from a terminal, it says what it does there)
+    build_core::report::console::init("longshot", "longshot_builder");
+    // (Windows: the version folder's Longshot.exe is a windowed program, release::swap::windowed: what it starts opens
+    // no window; started from a terminal, it says what it does there)
     build_core::hidden_console();
     // (Windows: the builder in its own job, so all it starts is from its creation and ends with it; the game breaks
     // away, play.rs)
@@ -1361,7 +1354,7 @@ mod tests {
         let carried = version.join("Longshot");
         assert_eq!(portable_cache(&carried, &[], true, none), Some(portable.join("cache/longshot-builder")));
         assert_eq!(portable_cache(&carried, &w("--cache /explicit"), true, none), None);
-        for own in ["dev release sources", "--version", "help"] {
+        for own in ["dev tools check", "--version", "help"] {
             assert_eq!(portable_cache(&exe, &w(own), true, none), None, "{own}");
         }
         assert_eq!(portable_cache(&d.join("missing/Longshot.x86_64"), &[], true, none), None, "can't be made there");

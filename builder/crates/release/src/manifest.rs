@@ -1,5 +1,5 @@
 //! A release's manifest for one platform, `longshot-builder-<v>-<platform>.json`, signed in its `SHA256SUMS`
-//! (longshot-builder's dev/release_deltas.rs writes it; the Longshot Launcher's LongshotBuildRelease.Parse and Choose,
+//! (longshot-packager's release_deltas.rs writes it; the Longshot Launcher's LongshotBuildRelease.Parse and Choose,
 //! ported):
 //!
 //! ```text

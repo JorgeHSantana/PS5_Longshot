@@ -36,6 +36,7 @@ Each has a README: what it does, its main parts, what it uses, the rules it keep
 | [build-driver](crates/build-driver/README.md) | The driver: the stages in order, the work folder, the stores, the game folder |
 | [steam](crates/steam/README.md) | Longshot as a non-Steam game in Steam's library: `shortcuts.vdf`, the tile's id and art |
 | [longshot-builder](crates/longshot-builder/README.md) | The command the launcher runs, and `dev`: the lifter's own commands, for developers |
+| [longshot-packager](crates/longshot-packager/README.md) | What packages a release of longshot-builder, run by the release's jobs, never shipped |
 | [synthetic-game](crates/synthetic-game/README.md) | The builder end to end on a synthetic game |
 | [rt](rt/README.md) | The runtime (C) the lifted code and the host share |
 
@@ -46,6 +47,7 @@ longer path already gives is left out (each README lists every direct dependency
 graph TD
     subgraph commands
         longshot_builder[longshot-builder]
+        longshot_packager[longshot-packager]
     end
     subgraph tests
         synthetic_game[synthetic-game]
@@ -74,6 +76,7 @@ graph TD
 
     longshot_builder --> build_driver
     longshot_builder --> steam
+    longshot_packager --> build_driver
     steam --> build_core
     synthetic_game -.-> build_driver
     synthetic_game -.->|testkit| game_files

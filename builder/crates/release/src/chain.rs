@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// The most deltas a chain applies: each hop downloads, patches and checks a builder-sized file, so a longer chain
 /// rarely beats the full file.
 pub const MAX_HOPS: usize = 5;
-/// How many of its channel's last releases a release has deltas from (dev/release_deltas.rs's `KEEP`).
+/// How many of its channel's last releases a release has deltas from (longshot-packager's release_deltas.rs's `KEEP`).
 pub const DELTAS_FROM: usize = 5;
 /// How many of the channel's releases before the target a chain may pass through: a chain passes through
 /// `MAX_HOPS - 1` releases, each at most `DELTAS_FROM` before the one after it.

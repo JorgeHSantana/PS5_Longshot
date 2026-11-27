@@ -227,7 +227,7 @@ above; it needs nothing else, and unpacks what it carries into its cache at the 
 | `game/sites/` | One folder per supported game build, `<build id>/locations.toml`: where each hook site is in that build, which the lift finds and hooks ([hooks.md](reference/hooks.md)). Function names, offsets and a few masked instruction words; no other game data. In `host/` because every `longshot-builder` carries it: a pull request built with a nightly's tools gets its own tables |
 | `gpu/vk/` | The Vulkan renderer, with Eden's shader recompiler and sirit ([architecture](reference/architecture.md)) |
 | `gpu/render/`, `gpu/third_party/` | The op stream the host records and the renderer replays; suyu's headers, kept whole (none of its sources is compiled) |
-| `scripts/` | Development builds, test runs, profile readers, release tooling (`longshot_builder.py`: the release's `longshot-builder` built with the pinned Rust; its pack and deltas are `longshot-builder dev release`); `scripts/linux/` (the Linux build tools) |
+| `scripts/` | Development builds, test runs, profile readers, release tooling (`longshot_builder.py`: the release's `longshot-builder` and `longshot-packager` built with the pinned Rust; the latter makes its pack and deltas); `scripts/linux/` (the Linux build tools) |
 | `tests/` | The game-free checks ([developing](developing.md#run-the-checks)) |
 | `third_party/` | Unmodified upstream code, each part with its `PROVENANCE.md` |
 | `assets/` | Shipped data: the guest profile and the renderer's profile (`profiles/`), pipeline state lists (`pipeline_states/`), scrubbed saves (`saves/`) |

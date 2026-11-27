@@ -22,13 +22,13 @@ with. It parses the command line and hands the work to `build-driver`.
   longshot-builder steam-shortcut [--profile <dir>] [--name <text>] [--remove]   (a Steam tile: src/steam_cmd.rs)
   longshot-builder doctor [--profile <dir>]                  (what could stop Longshot here, with fixes: src/doctor.rs)
   longshot-builder dev discover | sites | lift | profile | site-hooks | words | decode ...   (the lifter's own)
-  longshot-builder dev tools check | install | add | missing | publish | make  (tools.lock: developers, CI, the release)
-  longshot-builder dev release sources | unpack | attach | dry-run | fetch-bases | deltas | files | recomplauncher   (the release's)
+  longshot-builder dev tools check | install | add | make    (tools.lock: developers, CI)
   ```
 
-- No pack is compiled in: a release's program carries its pack appended after the link (`longshot-builder dev release
-  sources` makes it, `dev release attach` appends it; build-driver's `sources.rs` reads it from the program's own file).
-  A developer's build carries none and builds from `--root` or its checkout.
+- No pack is compiled in: a release's program carries its pack appended after the link
+  ([longshot-packager](../longshot-packager/README.md)'s `release sources` makes it, `release attach` appends it;
+  build-driver's `sources.rs` reads it from the program's own file). A developer's build carries none and builds from
+  `--root` or its checkout.
 - [`src/dev/`](src/dev): `longshot-builder dev`, the lifter and its parts run alone, over a work folder's image, without
   the rest of a build (players never run it; `longshot-builder lift --work <dir>` is the lift as a build runs it). It is
   left out of the main usage; `longshot-builder dev --help` lists it:
@@ -47,24 +47,16 @@ with. It parses the command line and hands the work to `build-driver`.
     (`tests/sitehooks.py`; docs/dev/reference/builder.md, "Building and checking the builder");
   - [`words.rs`](src/dev/words.rs): `words --in <file> --pc <hex> --out <file.ll> --list <file> [--count-checks]`:
     each word as a function of its own, for `tests/test_lifter_semantics.py`;
-  - [`tools_cmd.rs`](src/dev/tools_cmd.rs): `tools`: `tools.lock`, the build tools the builder carries (over build-driver's
-    `tools::{lock, archive, store}`): `check [--require]`, `install <folder> --system <s>`, `add`, `missing`, `publish`,
-    `make <folder> --out <archive>` (docs/dev/reference/releases.md, "tools.lock");
-  - [`release_cmd.rs`](src/dev/release_cmd.rs): `release`, a release's packaging, run in CI by a builder built first:
-    `sources` (the pack it carries, by build-driver's `sources` writer: the same files give the same bytes), `unpack`
-    (a pack into a plain folder, checked), `dry-run <program>` (a player's build's dry run, with and without AMD FSR 4,
-    checked), `recomplauncher <full file>` (RecompLauncher's zip: the program as `Longshot.exe`, made a windowed
-    program, or `Longshot.x86_64`, stored, the same files giving the same bytes);
-  - [`release_deltas.rs`](src/dev/release_deltas.rs): `fetch-bases` (the channel's last 5 releases' full files, from
-    the release API by curl, each checked against its manifest), `deltas` (`zstd --patch-from` from each, checked to
-    give the full file back, and the manifest), `files` (a release's stamps, bases, deltas and manifest together).
+  - `tools`: `tools.lock`, the build tools the builder carries: `check [--require]`, `install <folder> --system <s>`,
+    `add`, `make <folder> --out <archive>` (build-driver's [`tools/cli.rs`](../build-driver/src/tools/cli.rs), which
+    `longshot-packager tools` runs too; docs/dev/reference/releases.md, "tools.lock").
 
 ## Used by / uses
 
 Used by nothing in the workspace (it is the program); `tests/test_lifter_semantics.py` runs `dev words`, the site tests
-(`tests/sitehooks.py`) `dev site-hooks`; CI's release jobs run `dev tools` and `dev release`. Uses `build-driver`,
+(`tests/sitehooks.py`) `dev site-hooks`; CI, tools-check.yml and Release's Longshot tools workflow run `dev tools`. Uses `build-driver`,
 `build-core`, `build-assets` (`share`), `steam` (`steam-shortcut`) and `game-files` (`doctor`'s disk); `dev` uses `a64`, `cfg`, `edits`, `image`, `lift`, `llvm`, `mir`, `passes`,
-`profile` and `sites`, and `dev release` serde_json (the manifest) and crc32fast (the zip).
+`profile` and `sites`.
 
 ## Rules it keeps
 

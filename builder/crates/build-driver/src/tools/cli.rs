@@ -1,10 +1,12 @@
-//! `longshot-builder dev tools`: tools.lock, the build tools longshot-builder carries (docs/dev/reference/releases.md,
-//! "tools.lock" and "Bumping a tool"), over build_driver::tools (`lock`, `archive`, `store`).
+//! The command line over tools.lock, the build tools longshot-builder carries (docs/dev/reference/releases.md,
+//! "tools.lock" and "Bumping a tool"): `longshot-builder dev tools` (developers, CI, MagicBeanAdmin/Release's Longshot tools workflow) and
+//! `longshot-packager tools` (a release's jobs), one code over [`lock`](super::lock), [`archive`](super::archive) and
+//! [`store`](super::store).
 //!
 //! ```text
 //! check [--require [<name> ...]]   the lock read and checked, and a lock without a tool a builder needs refused;
 //!                                  --require: also each line's copy in Longshot's store with its size and SHA-256 (the
-//!                                  release, which uploads none: the Make tools workflow does); --require <name>...: also
+//!                                  release, which uploads none: Release's Longshot tools workflow does); --require <name>...: also
 //!                                  those tools named
 //! install <folder> [--system <s>] [--cache <folder>] [--only <name> ...]
 //!                                  each tool of the system unpacked at its dest under folder, its stamp in
@@ -22,17 +24,23 @@
 //! runs in). `--system` is `windows-x64` unless given. Exit status 1 when something is wrong, 2 for a command line it
 //! does not take.
 
-use build_driver::tools::archive;
-use build_driver::tools::lock::{self, SYSTEMS, Tool};
-use build_driver::tools::store::{self, InStore};
+use super::archive;
+use super::lock::{self, SYSTEMS, Tool};
+use super::store::{self, InStore};
+use build_core::report::console;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: longshot-builder dev tools [--lock <file>] check [--require [<name> ...]]
-       longshot-builder dev tools [--lock <file>] install <folder> [--system <s>] [--cache <folder>] [--only <name> ...]
-       longshot-builder dev tools [--lock <file>] add <name> <version> <archive> [--dest <folder>] [--prefix <folder>]
-                                                  [--system <s>] [--no-upload]
-       longshot-builder dev tools make <folder> --out <archive.tar.zst>";
+/// The usage, for the command `program` (`longshot-builder dev tools`, `longshot-packager tools`).
+fn usage(program: &str) -> String {
+    format!(
+        "usage: {program} [--lock <file>] check [--require [<name> ...]]
+       {program} [--lock <file>] install <folder> [--system <s>] [--cache <folder>] [--only <name> ...]
+       {program} [--lock <file>] add <name> <version> <archive> [--dest <folder>] [--prefix <folder>]
+                 [--system <s>] [--no-upload]
+       {program} make <folder> --out <archive.tar.zst>"
+    )
+}
 
 /// The command line after `tools`: words, options with one value, options with several (until the next option), flags.
 #[derive(Debug, Default)]
@@ -112,7 +120,7 @@ fn check(tools: &[Tool], require: Option<&[String]>) -> bool {
         Some(names) => names.iter().filter(|n| !tools.iter().any(|t| &t.name == *n)).cloned().collect(),
     };
     for t in tools {
-        crate::output::stdout(format_args!(
+        console::stdout(format_args!(
             "{:<12} {:<36} {} {:>6} MB  {}",
             t.name,
             t.version,
@@ -122,7 +130,7 @@ fn check(tools: &[Tool], require: Option<&[String]>) -> bool {
         ));
     }
     if !missing.is_empty() {
-        crate::output::error(format_args!(
+        console::error(format_args!(
             "error: tools.lock is missing: {} (a builder needs them); docs/dev/reference/releases.md, Bumping a tool",
             missing.join(", ")
         ));
@@ -143,9 +151,9 @@ fn check(tools: &[Tool], require: Option<&[String]>) -> bool {
         })
         .collect();
     if !gone.is_empty() {
-        crate::output::error(format_args!(
-            "error: not in Longshot's store as tools.lock names them: {}; the Make tools workflow (.forgejo/workflows/\
-             tools.yml) uploads them, docs/dev/reference/releases.md, Bumping a tool",
+        console::error(format_args!(
+            "error: not in Longshot's store as tools.lock names them: {}; MagicBeanAdmin/Release's Longshot tools \
+             workflow (longshot-tools.yml) uploads them, docs/dev/reference/releases.md, Bumping a tool",
             gone.join("; ")
         ));
         return false;
@@ -157,7 +165,7 @@ fn run_parsed(a: &Args) -> Result<bool, String> {
     let cmd = a.words[0].as_str();
     if cmd == "make" {
         archive::pack(Path::new(&a.words[1]), a.out.as_deref().unwrap_or(Path::new("")), |text| {
-            crate::output::stdout(format_args!("{text}"));
+            console::stdout(format_args!("{text}"));
         })?;
         return Ok(true);
     }
@@ -179,7 +187,7 @@ fn run_parsed(a: &Args) -> Result<bool, String> {
                 .clone()
                 .unwrap_or_else(|| lock_path.parent().unwrap_or(Path::new(".")).join("build-tools-cache"));
             archive::install(Path::new(&a.words[1]), &chosen, &cache, &store::download, |text| {
-                crate::output::stdout(format_args!("{text}"));
+                console::stdout(format_args!("{text}"));
             })?;
         }
         "add" => {
@@ -197,22 +205,22 @@ fn run_parsed(a: &Args) -> Result<bool, String> {
             };
             t.urls = t.store_urls();
             if !a.no_upload {
-                store::put(archive_path, &t, |text| crate::output::stdout(format_args!("{text}")))?;
+                store::put(archive_path, &t, |text| console::stdout(format_args!("{text}")))?;
             }
             lock::write_line(&t, &lock_path)?;
-            crate::output::stdout(format_args!("tools.lock: {name} {version} {system} {}", t.sha256));
+            console::stdout(format_args!("tools.lock: {name} {version} {system} {}", t.sha256));
         }
         _ => unreachable!("parse takes no other"),
     }
     Ok(true)
 }
 
-/// Runs the command on its arguments (after `tools`).
-pub fn run(args: &[String]) -> ExitCode {
+/// Runs the command on its arguments (after `tools`); `program` is how it was called, for what it says.
+pub fn run(program: &str, args: &[String]) -> ExitCode {
     let a = match parse(args) {
         Ok(a) => a,
         Err(e) => {
-            crate::output::error(format_args!("longshot-builder dev tools: {e}\n{USAGE}"));
+            console::error(format_args!("{program}: {e}\n{}", usage(program)));
             return ExitCode::from(2);
         }
     };
@@ -220,7 +228,7 @@ pub fn run(args: &[String]) -> ExitCode {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
         Err(e) => {
-            crate::output::error(format_args!("longshot-builder dev tools: {e}"));
+            console::error(format_args!("{program}: {e}"));
             ExitCode::FAILURE
         }
     }
@@ -247,7 +255,7 @@ mod tests {
         assert!(args("install . --system mac").is_err());
         assert!(args("install").is_err());
         assert!(args("make dir").is_err(), "--out is needed");
-        assert!(args("missing").is_err(), "a release uploads no tool: the Make tools workflow does");
+        assert!(args("missing").is_err(), "a release uploads no tool: Release's Longshot tools workflow does");
         assert!(args("publish sdl a.tar.zst --system windows-x64").is_err());
         assert!(args("add n 1 a.tar.zst --no-upload").unwrap().no_upload);
         assert!(args("repack x").is_err());

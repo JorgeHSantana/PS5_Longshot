@@ -391,7 +391,7 @@ fn prepare(o: &Options, r: &Reporter) -> Result<Prepared> {
     let store = store::Store::open(&o.store_dir());
     let set_dir = match &o.mode {
         // (the release's set: compiled, but for the objects a set named outright (LONGSHOT_THIRD_PARTY_OBJECTS: the last
-        // release's, `dev release last-objects`) holds by their keys, taken as they are; never the set written now)
+        // release's, `longshot-packager release last-objects`) holds by their keys, taken as they are; never the set written now)
         Mode::ThirdPartySet(out) => match &o.settings.third_party_objects {
             Some(Some(seed)) if seed != out => Some(seed.clone()),
             _ => None,
@@ -469,7 +469,7 @@ pub fn run(o: &Options, r: &Reporter) -> Result<Outcome> {
         };
         r.log(format!("dry run: {} files to compile besides the lift's, {} missing", units.len(), missing.len()));
         // (a release's check: the game's Rust it carries is the prebuilt library of its own sources, so a player's
-        // build compiles no Rust; `longshot-builder dev release dry-run` looks for the line)
+        // build compiles no Rust; `longshot-packager release dry-run` looks for the line)
         if rust::has_rust(&o.root) {
             let target = rust::Target::of(&tc);
             let held = rust::prebuilt(&o.root, target, &rust::source_key(&o.root)?).is_some();

@@ -3,7 +3,7 @@
 //! ruzstd decodes it (pure Rust, the zstd the builder already has: its pack and the game's `.zs` files), so it works the
 //! same on Windows and Linux with no zstd program (the Longshot Launcher's App/ZstdPatcher.cs, ported).
 //!
-//! A delta is one zstd frame, of no dictionary id, whose window is at most 2^[`WINDOW_LOG`] (dev/release_deltas.rs's
+//! A delta is one zstd frame, of no dictionary id, whose window is at most 2^[`WINDOW_LOG`] (longshot-packager's release_deltas.rs's
 //! `LONG`, the launcher's `DeltaWindowLog`): anything else is refused before it is decoded. The base and the result
 //! are held in memory while it decodes (about three times the builder's size at most).
 

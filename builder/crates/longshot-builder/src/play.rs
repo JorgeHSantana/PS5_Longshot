@@ -27,14 +27,12 @@ use build_driver::BuildOptions;
 use build_driver::Upscaler;
 use build_driver::folder::Record;
 use build_driver::modhook::{self, PlayRequest};
+pub use build_driver::play::NAMES;
 use build_driver::play::{self, Host, Played, Profile, RebuildReason};
 use std::path::{Path, PathBuf};
 
 mod json_output;
 
-/// The names this program plays by with any arguments (RecompLauncher's zip, release_cmd.rs; recomplauncher.json's
-/// `start.program`), and has in a version folder.
-pub const NAMES: [&str; 2] = ["Longshot.exe", "Longshot.x86_64"];
 /// Exit status: the game folder was never built, and no copy was given or chosen.
 pub const NOT_BUILT: i32 = 120;
 /// Exit status: the build or the update failed, or the game could not start.

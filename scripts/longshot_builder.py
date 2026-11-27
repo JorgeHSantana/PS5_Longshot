@@ -8,14 +8,18 @@ library only.
     python -I scripts/longshot_builder.py check <file> [--target linux|windows]
     python -I scripts/longshot_builder.py llvm-mingw [<folder>] [--name] [--host linux]
     python -I scripts/longshot_builder.py link-tools <folder>
+    python -I scripts/longshot_builder.py packager [--linker <cc>] [--cache <folder>] [--work <folder>] [--out <file>]
+                                              [--jobs N]
 
-Only what must run before there is a longshot-builder stays here; the rest of a release's packaging is the builder's own,
-`longshot-builder dev release` (builder/crates/longshot-builder/src/dev/release_cmd.rs: the pack it carries, `sources`
-and `unpack`, whose one writer and reader is build-driver's sources.rs; `dry-run`; the earlier releases' files, the
-deltas and the manifest, `fetch-bases`, `deltas`, `files`; RecompLauncher's zip, `recomplauncher`). CI runs it with the
-Linux job's shipped longshot-builder before its pack is attached (`build --target linux`, the dist profile); the Windows
-job takes that program from the Linux job as its tool.
+Only what must run before there is a program of the workspace's stays here; the rest of a release's packaging is
+longshot-packager's (builder/crates/longshot-packager: the pack a release's program carries, `release sources`, `unpack`
+and `attach`, over build-driver's sources.rs; `release dry-run`; the earlier releases' files, the deltas and the
+manifest; RecompLauncher's zip; tools.lock's tools; the third-party objects and the Rust sources' key). Each of the
+release's build jobs builds both: the packager for itself, and the longshot-builder its platform ships.
 - `build`: the program itself, from nothing but the pinned Rust (a builder cannot build its first self).
+- `packager`: longshot-packager, the release jobs' tool, never shipped, for the Linux system that runs it: Cargo.toml's
+  release profile (no LTO, quicker to compile than dist; here without debug info), linked by --linker (default cc)
+  against this system's glibc. In the same --cache and --work as `build`, so one cached target folder holds both.
 - `llvm-mingw`: llvm-mingw unpacked into <folder>, its SHA-256 checked, and its folder printed (--name: only its name, a
   cache key): the Linux build of tools.lock's release (builder/tools/pins.sh pins it), which links the Windows
   longshot-builder, so it is needed before that program exists. (On Windows, tools.lock's own llvm-mingw:
@@ -38,7 +42,7 @@ units, no debug info but its symbols; release, a developer's quicker one):
 - windows (the default on Windows): x86_64-pc-windows-gnullvm, linked by llvm-mingw (--llvm-mingw, else LONGSHOT_MINGW),
   the one the game is built with, its unwinder linked in and the C runtime Windows' own UCRT.
 No time stamp and no path of this machine go in, and no pack: a release's program carries its pack appended after the
-link (`longshot-builder dev release sources` makes it, `dev release attach` appends it: build-driver's sources.rs). Its
+link (`longshot-packager release sources` makes it, `release attach` appends it: build-driver's sources.rs). Its
 output (--out, default
 build-<system>/longshot-builder[.exe]) is checked as `check` checks it.
 
@@ -245,6 +249,29 @@ def cmd_link_tools(a):
     return 0
 
 
+def offline_cargo_home(cache, work):
+    """A cargo home in work whose only source is Cargo.lock's crates, unpacked from their checked downloads in cache into
+    a directory source in work, both made again each time"""
+    shutil.rmtree(os.path.join(work, "cargo-home"), ignore_errors=True)
+    shutil.rmtree(os.path.join(work, "crates"), ignore_errors=True)
+    home = os.path.join(work, "cargo-home")
+    renhdrum.vendor_crates(cache, os.path.join(work, "crates"), lock=os.path.join(ROOT, "Cargo.lock"))
+    os.makedirs(home)
+    with open(os.path.join(home, "config.toml"), "w", encoding="utf-8") as f:
+        f.write('[source.crates-io]\nreplace-with = "pinned"\n\n[source.pinned]\ndirectory = "%s"\n'
+                % os.path.join(work, "crates").replace("\\", "/"))
+    return home
+
+
+def install(built, out, data):
+    """The built program put at out, executable, whole or not at all"""
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    shutil.copyfile(built, out + ".new")
+    os.chmod(out + ".new", 0o755)
+    os.replace(out + ".new", out)
+    print("longshot_builder: %s, %d bytes, sha256 %s" % (out, len(data), hashlib.sha256(data).hexdigest()))
+
+
 def cmd_build(a):
     target = a.target or renhdrum.host()
     triple = TARGETS[target]
@@ -270,14 +297,7 @@ def cmd_build(a):
     # CI cache holds downloads only, and nothing compiled is ever restored from one. Kept between builds on one PC, so a
     # second build compiles only what changed)
     work = os.path.abspath(a.work or cache + "-work")
-    shutil.rmtree(os.path.join(work, "cargo-home"), ignore_errors=True)
-    shutil.rmtree(os.path.join(work, "crates"), ignore_errors=True)
-    home = os.path.join(work, "cargo-home")
-    renhdrum.vendor_crates(cache, os.path.join(work, "crates"), lock=os.path.join(ROOT, "Cargo.lock"))
-    os.makedirs(home)
-    with open(os.path.join(home, "config.toml"), "w", encoding="utf-8") as f:
-        f.write('[source.crates-io]\nreplace-with = "pinned"\n\n[source.pinned]\ndirectory = "%s"\n'
-                % os.path.join(work, "crates").replace("\\", "/"))
+    home = offline_cargo_home(cache, work)
     # (no path of this machine in it: the tree's and the crates' folders by a name of their own. Windows: crt-static
     # links llvm-mingw's unwinder in, the C runtime staying Windows' UCRT; no time stamp in the PE header. Linux: musl's
     # own start files and C library, linked in; no build id)
@@ -319,11 +339,48 @@ def cmd_build(a):
     bad = problems(data, target, this_pc=a.this_pc)
     if bad:
         fail("what was built is not usable: " + "; ".join(bad))
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    shutil.copyfile(built, out + ".new")
-    os.chmod(out + ".new", 0o755)
-    os.replace(out + ".new", out)
-    print("longshot_builder: %s, %d bytes, sha256 %s" % (out, len(data), hashlib.sha256(data).hexdigest()))
+    install(built, out, data)
+    return 0
+
+
+def cmd_packager(a):
+    """longshot-packager (builder/crates/longshot-packager) for this Linux system, which runs it and never ships it"""
+    if renhdrum.host() != "linux":
+        fail("packager builds for the Linux system that runs it; elsewhere: cargo build --release -p longshot-packager")
+    triple = TARGETS["linux"]
+    linker = shutil.which(a.linker or "cc")
+    if not linker:
+        fail("no %s to link with: pass --linker <cc>" % (a.linker or "cc"))
+    cache = os.path.abspath(a.cache or os.path.join(ROOT, "build", "longshot-builder-rust"))
+    bin_dir = renhdrum.toolchain(cache, STD["linux"])
+    out = os.path.abspath(a.out or os.path.join(ROOT, "build-linux", "longshot-packager"))
+    work = os.path.abspath(a.work or cache + "-work")
+    home = offline_cargo_home(cache, work)
+    env = dict(os.environ)
+    env.update({
+        "PATH": os.pathsep.join([bin_dir, env.get("PATH", "")]),
+        "RUSTC": os.path.join(bin_dir, "rustc"),
+        "CARGO_HOME": home,
+        "CARGO_TARGET_DIR": os.path.join(work, "target"),
+        "CARGO_TARGET_%s_LINKER" % triple.replace("-", "_").upper(): linker,
+        # (a tool compiled in each run: no debug info, which only slows its compile and fills the cache)
+        "CARGO_PROFILE_RELEASE_DEBUG": "false",
+    })
+    for k in ("RUSTUP_TOOLCHAIN", "CARGO_BUILD_TARGET", "CARGO_ENCODED_RUSTFLAGS"):
+        env.pop(k, None)
+    # (set, as `build` sets it: a cargo config of the PC's, above the tree, adds no flags of its own)
+    env["RUSTFLAGS"] = "-C link-arg=-Wl,--build-id=none"
+    cmd = [os.path.join(bin_dir, "cargo"), "build", "--profile", "release", "--locked", "--offline",
+           "-p", "longshot-packager", "--target", triple] + (["--jobs", str(a.jobs)] if a.jobs else [])
+    print("longshot_builder: %s (Rust %s, linker %s)" % (" ".join(cmd[1:]), renhdrum.RUST_VERSION, linker), flush=True)
+    if subprocess.run(cmd, cwd=ROOT, env=env).returncode:
+        fail("cargo build -p longshot-packager failed")
+    built = os.path.join(work, "target", triple, "release", "longshot-packager")
+    if not os.path.isfile(built):
+        fail("cargo made no %s" % built)
+    with open(built, "rb") as f:
+        data = f.read()
+    install(built, out, data)
     return 0
 
 
@@ -335,21 +392,14 @@ GAME_RUST_STD = {"linux": "linux", "windows": "windows"}   # (renhdrum.RUST_STD'
 def cmd_game_rust(a):
     """liblongshot_rs.a, the game's Rust (longshot-rs over game/crates), for target, with the pinned Rust and the
     crates Cargo.lock pins, offline: the library a player's build links instead of compiling Rust (build-compile's
-    rust.rs). The release writes the sources' key beside it (longshot-builder dev rust-key) and carries both at
+    rust.rs). The release writes the sources' key beside it (longshot-packager rust-key) and carries both at
     longshot-rs/prebuilt/<platform>/."""
     target = a.target or renhdrum.host()
     triple = GAME_RUST_TARGETS[target]
     cache = os.path.abspath(a.cache or os.path.join(ROOT, "build", "longshot-builder-rust"))
     bin_dir = renhdrum.toolchain(cache, GAME_RUST_STD[target])
     work = os.path.abspath(a.work or cache + "-game-work")
-    shutil.rmtree(os.path.join(work, "cargo-home"), ignore_errors=True)
-    shutil.rmtree(os.path.join(work, "crates"), ignore_errors=True)
-    home = os.path.join(work, "cargo-home")
-    renhdrum.vendor_crates(cache, os.path.join(work, "crates"), lock=os.path.join(ROOT, "Cargo.lock"))
-    os.makedirs(home)
-    with open(os.path.join(home, "config.toml"), "w", encoding="utf-8") as f:
-        f.write('[source.crates-io]\nreplace-with = "pinned"\n\n[source.pinned]\ndirectory = "%s"\n'
-                % os.path.join(work, "crates").replace("\\", "/"))
+    home = offline_cargo_home(cache, work)
     exe = ".exe" if os.name == "nt" else ""
     env = dict(os.environ)
     env.update({
@@ -405,6 +455,13 @@ def main(argv=None):
     m.add_argument("--name", action="store_true")
     m.add_argument("--host", choices=("linux",), default="linux")
     m.set_defaults(fn=cmd_llvm_mingw)
+    k = s.add_parser("packager", help="build longshot-packager, the release's packaging tool, for this Linux system")
+    k.add_argument("--linker", help="the C compiler that links it (default: cc)")
+    k.add_argument("--cache", help="the pinned Rust's and the crates' downloads (default: build/longshot-builder-rust)")
+    k.add_argument("--work", help="where it is built (default: <cache>-work, `build`'s)")
+    k.add_argument("--out", help="its path (default: build-linux/longshot-packager)")
+    k.add_argument("--jobs", type=int, help="cargo's jobs")
+    k.set_defaults(fn=cmd_packager)
     t = s.add_parser("link-tools", help="tools.lock's linux-x64 llvm and sysroot unpacked, each printed as <name>=<folder>")
     t.add_argument("folder")
     t.set_defaults(fn=cmd_link_tools)

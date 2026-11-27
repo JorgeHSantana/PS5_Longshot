@@ -31,6 +31,7 @@ use std::io::Write;
 use std::sync::Mutex;
 use std::time::Instant;
 
+pub mod console;
 mod diagnostics;
 mod forecast;
 pub use diagnostics::Diagnostics;

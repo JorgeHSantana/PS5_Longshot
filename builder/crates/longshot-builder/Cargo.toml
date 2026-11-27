@@ -14,7 +14,6 @@ build-core.workspace = true
 build-driver.workspace = true
 cfg.workspace = true
 crash.workspace = true
-crc32fast.workspace = true
 edits.workspace = true
 flate2.workspace = true
 game-files.workspace = true

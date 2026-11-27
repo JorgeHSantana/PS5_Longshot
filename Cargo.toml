@@ -25,6 +25,7 @@ members = [
     "builder/crates/steam",
     "builder/crates/launcher-profile",
     "builder/crates/longshot-builder",
+    "builder/crates/longshot-packager",
     "builder/crates/ui",
     "builder/crates/synthetic-game",
     "game/crates/guest",

@@ -7,23 +7,17 @@
 //! - `site-hooks`: hook sites as the lift lowers them, each a function a C test calls (site_hooks.rs);
 //! - `words`: single instructions as functions, for the semantics check (words.rs);
 //! - `decode <hex word> ...`: each instruction word as the decoder sees it;
-//! - `tools`: tools.lock, the build tools the builder carries: check, install, add, missing, publish, make (tools_cmd.rs);
-//! - `release`: a release's packaging: the pack it carries (sources, unpack), its dry run, the earlier releases' files,
-//!   the deltas and the manifest (fetch-bases, deltas, files), RecompLauncher's zip (release_cmd.rs, release_deltas.rs);
-//! - `rust-key [--root <dir>]`: the key of the tree's Rust sources, which the release writes beside the prebuilt
-//!   `liblongshot_rs.a` it built (build-compile's `rust`).
+//! - `tools`: tools.lock, the build tools the builder carries: check, install, add, make (build-driver's `tools::cli`).
+//!
+//! A release's packaging is not here: it is longshot-packager's (builder/crates/longshot-packager).
 
 use std::process::ExitCode;
 
 mod discover;
 mod lift_cmd;
 mod profile_cmd;
-pub(crate) mod release_cmd;
-mod release_deltas;
-mod release_objects;
 mod site_hooks;
 mod sites_cmd;
-mod tools_cmd;
 mod words;
 
 const USAGE: &str = "usage: longshot-builder dev discover --image <dir>
@@ -40,9 +34,7 @@ const USAGE: &str = "usage: longshot-builder dev discover --image <dir>
                                        <name>=<site>[@<pc>[:<callee>]][/<ident>] ...
        longshot-builder dev words --in <file> --pc <hex> --out <file.ll> --list <file> [--seq <file>] [--count-checks]
        longshot-builder dev decode <hex word> ...
-       longshot-builder dev tools [--lock <file>] check|install|add|missing|publish|make ... (dev tools --help)
-       longshot-builder dev release sources|unpack|dry-run|fetch-bases|deltas|files|recomplauncher ... (dev release --help)
-       longshot-builder dev rust-key [--root <dir>]";
+       longshot-builder dev tools [--lock <file>] check|install|add|make ...";
 
 fn decode(words: &[String]) -> ExitCode {
     let mut ok = true;
@@ -58,28 +50,6 @@ fn decode(words: &[String]) -> ExitCode {
         }
     }
     if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
-}
-
-/// `rust-key [--root <dir>]`: the key of the Rust sources of the tree (default: the current folder), on stdout.
-fn rust_key(args: &[String]) -> ExitCode {
-    let root = match args {
-        [] => std::path::PathBuf::from("."),
-        [flag, dir] if flag == "--root" => std::path::PathBuf::from(dir),
-        _ => {
-            crate::output::error(format_args!("{USAGE}"));
-            return ExitCode::from(2);
-        }
-    };
-    match build_compile::rust::source_key(&root) {
-        Ok(key) => {
-            crate::output::stdout(format_args!("{key}"));
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            crate::output::error(format_args!("longshot-builder dev rust-key: {e}"));
-            ExitCode::FAILURE
-        }
-    }
 }
 
 /// `longshot-builder dev <args>`: `args` are the words after `dev`.
@@ -101,9 +71,7 @@ pub fn run(args: &[String]) -> ExitCode {
         Some("words") => words::run(&args[1..]),
         Some("profile") => profile_cmd::run(&args[1..]),
         Some("decode") if args.len() > 1 => decode(&args[1..]),
-        Some("tools") => tools_cmd::run(&args[1..]),
-        Some("release") => release_cmd::run(&args[1..]),
-        Some("rust-key") => rust_key(&args[1..]),
+        Some("tools") => build_driver::tools::cli::run("longshot-builder dev tools", &args[1..]),
         Some("--help" | "-h" | "help") => {
             crate::output::stdout(format_args!("{USAGE}"));
             ExitCode::SUCCESS

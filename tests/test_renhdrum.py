@@ -16,7 +16,7 @@ crates Cargo.lock names, unpacked from the cache (each checked by its Cargo.lock
 fails the check is not copied out. A Rust download whose SHA-256 is not the pinned one is refused and not kept.
 
 The release builds the DLL and the .so (MagicBeanAdmin/Release's longshot.yml; the DLL for Windows on Linux,
---target windows) and longshot-builder carries them at third_party/renhdrum/ in its tree (longshot-builder dev release
+--target windows) and longshot-builder carries them at third_party/renhdrum/ in its tree (longshot-packager release
 sources --add), where a player's build takes them. third_party/renhdrum holds the source, with its upstream archive named.
 
     python -I -B tests/test_renhdrum.py

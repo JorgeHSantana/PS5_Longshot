@@ -513,9 +513,9 @@ A change to the lifter, the compile flags, the shader preparation or `tools.lock
    folder, the stores), a new game folder, and an empty `__GL_SHADER_DISK_CACHE_PATH`.
 2. Download the release's (or your build's) `longshot-builder-<v>-<platform>` and `SHA256SUMS`, and check them
    (`python -I ../Tooling/scripts/release.py verify SHA256SUMS --files .`, Tooling's release tool, with
-   `SHA256SUMS.sig` beside it). A build of your own: `longshot-builder dev release sources`, then `python -I
-   scripts/longshot_builder.py build`, then `longshot-builder dev release attach <program> <pack> --out <file>`
-   ([releases](reference/releases.md#tools)).
+   `SHA256SUMS.sig` beside it). A build of your own: `python -I scripts/longshot_builder.py packager` (Linux),
+   `longshot-packager release sources`, then `python -I scripts/longshot_builder.py build`, then `longshot-packager
+   release attach <program> <pack> --out <file>` ([releases](reference/releases.md#tools)).
 3. Run `longshot-builder-<v>-<platform> build --game <your .nup> --out <new folder> --language en-US --compile-shaders
    most --output json`, keeping the events. Its first step unpacks what it carries (about 2 s), in the `tools` stage's time.
 4. Read the times: each stage from its `stage` event to the next, the whole build and the compile from the `done`

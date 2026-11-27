@@ -21,17 +21,18 @@ folder; `longshot-builder` is a thin command over it.
   `longshot --prepare-shaders` under the builder's progress bar.
 - [`src/layout.rs`](src/layout.rs): the per-user cache, a work folder per game folder, the shared stores.
 - [`src/sources.rs`](src/sources.rs): the tree and tools a release carries: the pack's one writer (`write`,
-  `tree_entries`, `tool_entries`, by `longshot-builder dev release sources`) and its reader, unpacked at first use;
+  `tree_entries`, `tool_entries`, by `longshot-packager release sources`) and its reader, unpacked at first use;
   [`src/tools/`](src/tools/mod.rs): the build tools and the stamps (`longshot-builder stamps`); `tools.lock` read and
   checked (`lock.rs`, its one reader), the tools' archives made and unpacked the same every time (`archive.rs`), Longshot's
-  store and the release API read with curl (`store.rs`), for `longshot-builder dev tools` and `dev release`;
+  store and the release API read with curl (`store.rs`), for `longshot-builder dev tools` and `longshot-packager` (their command line:
+  `cli.rs`);
   [`src/runtimes.rs`](src/runtimes.rs): the upscalers' vendor runtimes, pinned by SHA-256.
 - [`src/log.rs`](src/log.rs), [`src/redact.rs`](src/redact.rs): the run log, without the player's home folder and
   name; [`src/times.rs`](src/times.rs): `build_times.json`; [`src/perf.rs`](src/perf.rs): `longshot-builder perf-report`.
 
 ## Used by / uses
 
-Used by `longshot-builder` (and `synthetic-game`'s test). Uses `build-assets`, `build-compile`, `build-core`,
+Used by `longshot-builder` and `longshot-packager` (and `synthetic-game`'s test). Uses `build-assets`, `build-compile`, `build-core`,
 `game-files`, `image`, `lift`, `sites`, serde, serde_json, sha2, ruzstd and sha1_smol.
 
 ## Rules it keeps

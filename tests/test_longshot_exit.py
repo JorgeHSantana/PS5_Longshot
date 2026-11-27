@@ -133,9 +133,8 @@ def sources():
         raise SystemExit("build_driver::play still has the exit code or the variable the channel replaced")
     if '#define LONGSHOT_BUILDS "builds"' not in header or 'pub const BUILDS: &str = "builds";' not in play:
         raise SystemExit("the version folder's builds/ is not the same on both sides")
-    names = (ROOT / "builder" / "crates" / "longshot-builder" / "src" / "play.rs").read_text(encoding="utf-8")
     for name in ("Longshot.exe", "Longshot.x86_64"):
-        if f'"{name}"' not in header or f'"{name}"' not in names:
+        if f'"{name}"' not in header or f'"{name}"' not in play:
             raise SystemExit(f"{name}: not a name both the game and the builder have")
     # (both starts hand over first, before anything of the game runs or is written: Windows after its paths' check,
     # Linux first thing)

@@ -1,7 +1,7 @@
 //! What a release's longshot-builder carries: everything a player's PC builds the game with. The sources the compile
 //! reads (host/, gpu/, the third-party code and assets the build reads, the release's name), the prebuilt third-party
-//! objects, and the build tools, as one pack appended to the program after it is linked (`longshot-builder dev release
-//! sources` makes it, with [`write`] here; `dev release attach` appends it, with [`attach`]). A developer's build carries
+//! objects, and the build tools, as one pack appended to the program after it is linked (`longshot-packager release
+//! sources` makes it, with [`write`] here; `release attach` appends it, with [`attach`]). A developer's build carries
 //! none and builds from a checkout (`--root`, `LONGSHOT_ROOT`, or the checkout the program is in).
 //!
 //! The pack is made of members, each a zstd frame of its own, so that a release whose tools (or most of whose sources)
@@ -50,7 +50,7 @@
 //! frame's checksum), so the same files give the same bytes, and a release's members that did not change keep theirs.
 //! A release's members are made several at once ([`write_with`], one zstd process each, put in the pack in their
 //! order), and each ends with its key, the SHA-256 of its raw bytes' and of what compressed them (the zstd program's
-//! version, [`MEMBER_ZSTD`]): a member of the last release's pack (its signature checked: `dev release last-objects`)
+//! version, [`MEMBER_ZSTD`]): a member of the last release's pack (its signature checked: `release last-objects`)
 //! with this one's name and key, its frame decompressed to these raw bytes, is taken as it is, the bytes compressing
 //! them again would give, and the rest are compressed.
 
@@ -655,7 +655,7 @@ fn write_files(m: &Member<'_>, dir: &Path) -> Result<u64> {
     }
 }
 
-// ---- the writer (`longshot-builder dev release sources`, `unpack`): the one that makes what the reader above reads ----
+// ---- the writer (`longshot-packager release sources`, `unpack`): the one that makes what the reader above reads ----
 
 /// The tree a player's build reads, as tracked: the game's sources (`host/`, `game/`, `gpu/`, and the game's Rust, whose
 /// key says whether the prebuilt `liblongshot_rs.a` added with `--add` is theirs: build-compile's `rust`), the
@@ -1032,7 +1032,7 @@ pub struct Packing<'a> {
     /// ([`key_frame`]), and the member of `reuse` of the same name and key is taken instead of compressing it again.
     /// None: no key frames, nothing reused (a pack for this PC alone).
     pub settings: Option<String>,
-    /// The members of an earlier pack (`(name, bytes)`, [`reusable`]: a signed release's, `dev release last-objects`).
+    /// The members of an earlier pack (`(name, bytes)`, [`reusable`]: a signed release's, `release last-objects`).
     pub reuse: &'a [(String, Vec<u8>)],
     /// How many members are made at once (each by one zstd of one thread); at least 1.
     pub jobs: usize,

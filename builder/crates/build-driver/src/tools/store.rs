@@ -1,6 +1,6 @@
 //! Longshot's store, the server's generic package registry (docs/dev/reference/releases.md, "tools.lock"): a tool's
 //! archive downloaded, asked after and uploaded, with curl (as the builder's other downloads: crate::runtimes). Also the
-//! server's release API, read the same way ([`json`], [`download_checked`]: `longshot-builder dev release fetch-bases`).
+//! server's release API, read the same way ([`json`], [`download_checked`]: `longshot-packager release fetch-bases`).
 //! Anyone downloads with no account; an upload takes a token with write access to the organization's packages
 //! (`RELEASE_TOKEN`), and goes to `FORGEJO_UPLOAD_API` (`<server>/api/v1`, past Cloudflare's 100 MB limit) when set.
 
@@ -169,7 +169,7 @@ pub fn upload_server(upload_api: Option<&str>) -> String {
 
 /// The curl options an upload to `to` starts with: [`CURL_SAFE`](crate::runtimes::CURL_SAFE), HTTPS alone, for the
 /// store; plain HTTP too for an `http://` `FORGEJO_UPLOAD_API` (the server's own address, inside its network), its
-/// redirects still HTTPS alone, as `dev release`'s own asks of it.
+/// redirects still HTTPS alone, as `release fetch-bases`'s own asks of it.
 fn put_protocols(to: &str) -> &'static [&'static str] {
     if to.starts_with("http://") {
         &["-q", "--globoff", "--proto", "=http,https", "--proto-redir", "=https"]

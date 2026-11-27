@@ -151,6 +151,25 @@ pub fn compile_options(p: &Places, upscalers: &[Upscaler], ngx: Option<&Path>) -
     Ok(c)
 }
 
+/// The places of a one-stage command (`longshot-builder image | lift | compile`, `longshot-packager compile`): the tree
+/// (`root`, else `LONGSHOT_ROOT`, else the carried one), the work folder `work` with its output (`out`, else its
+/// `folder`), the stores and the jobs.
+pub fn stage_places(
+    root: Option<&Path>,
+    work: Option<&Path>,
+    out: Option<&Path>,
+    store: Option<&Path>,
+    jobs: Option<usize>,
+) -> Result<Places> {
+    let root = layout::tree_root(root, env)?;
+    let cache = layout::cache_root(crate::env_os);
+    let work = work.map(Path::to_path_buf).unwrap_or_default();
+    let work = Work::at(std::path::absolute(&work).unwrap_or(work));
+    let stores = Stores { root: layout::store_root(store, &cache, env) };
+    let jobs = build_core::jobs::chosen(jobs, env("LONGSHOT_JOBS").as_deref())?;
+    Ok(Places { root, out: out.map_or_else(|| work.dir.join("folder"), Path::to_path_buf), work, stores, jobs })
+}
+
 /// What a link's failure says when its objects are what failed: a symbol no object has, or one two objects have (an
 /// object of another version, a lifted file another lift left), or an object the linker can't read (damaged, of another format). Any other
 /// failure (the linker killed, out of memory, a full disk, a file another program held) says nothing of the objects.

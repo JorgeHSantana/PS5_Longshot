@@ -7,7 +7,7 @@
 //! does not grow and a developer's change is what the game links.
 //!
 //! The key ([`source_key`]) is the Rust's sources and nothing else: the workspace's `Cargo.toml` and `Cargo.lock`, and
-//! every file of `longshot-rs/` and `game/crates/` but the prebuilt libraries. `longshot-builder dev rust-key` prints
+//! every file of `longshot-rs/` and `game/crates/` but the prebuilt libraries. `longshot-packager rust-key` prints
 //! it, for the release to write beside the library it built.
 
 use build_core::key::Key;

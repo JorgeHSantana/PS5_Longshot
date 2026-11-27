@@ -106,6 +106,14 @@ pub fn set_subsystem(exe: &mut [u8], to: u16) -> Result<u16, String> {
     }
 }
 
+/// The Windows program `exe` made a windowed one: its PE subsystem 2 (Windows GUI), not 3 (console). Started by
+/// RecompLauncher, a shortcut or Steam it then opens no console window, and what it starts shares a hidden one
+/// (build-core's `hidden_console`); its output still reaches whoever reads its stdout (RecompLauncher's prepare).
+pub fn windowed(mut exe: Vec<u8>) -> Result<Vec<u8>, String> {
+    set_subsystem(&mut exe, 2)?;
+    Ok(exe)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -118,6 +126,17 @@ pub(crate) mod tests {
         v[0x80 + 24..0x80 + 26].copy_from_slice(&0x20bu16.to_le_bytes());
         v[0x80 + 24 + 68..0x80 + 24 + 70].copy_from_slice(&subsystem.to_le_bytes());
         v
+    }
+
+    #[test]
+    fn the_windows_program_is_made_a_windowed_one() {
+        assert_eq!(windowed(fake_pe(3)).unwrap(), fake_pe(2));
+        assert_eq!(windowed(fake_pe(2)).unwrap(), fake_pe(2));
+        assert!(windowed(fake_pe(1)).is_err(), "a driver's");
+        assert!(windowed(b"the program".to_vec()).is_err());
+        let mut no_header = fake_pe(3);
+        no_header[0x98] = 0;
+        assert!(windowed(no_header).is_err());
     }
 
     #[test]

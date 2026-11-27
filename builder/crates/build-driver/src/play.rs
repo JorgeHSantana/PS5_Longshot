@@ -30,6 +30,10 @@ use crate::{BuildOptions, GameSource, Upscaler, build};
 use build_core::{Error, Result};
 use std::path::{Path, PathBuf};
 
+/// The names longshot-builder plays by with any arguments (RecompLauncher's zip, longshot-packager's `release
+/// recomplauncher`; recomplauncher.json's `start.program`), and has in a version folder.
+pub const NAMES: [&str; 2] = ["Longshot.exe", "Longshot.x86_64"];
+
 /// The profile's file in a profile folder.
 pub const PROFILE_FILE: &str = launcher_profile::FILE;
 /// The folder of a version's game folders ([`game_folder`]).

@@ -91,21 +91,23 @@ run there by hand with its tag and **publish** on:
 
 | Job | What it does | Run by |
 |---|---|---|
-| The version | names the version: a tag is checked; a push gets the nightly name, after waiting for more merges and only when it brings something for the notes. Then, only when there is a version, checks `tools.lock` has every tool the packs carry and every line's archive is in Longshot's store with its size and SHA-256: a release uploads no tool, and stops on a line whose archive isn't there ([bumping a tool](#bumping-a-tool)) | `release.py check-tag`, `nightly-age`, `nightly-news`, `nightly-name`, then `longshot-builder dev tools check`, `dev tools check --require` (a builder built first) |
-| longshot-builder (Linux) | compiles the program it ships once (the dist profile, linked by tools.lock's clang against its sysroot, glibc 2.35, the game's floor; `scripts/longshot_builder.py link-tools` fetches both first, each checked by its size and SHA-256), which carries nothing yet and is the job's tool: it installs `tools.lock`'s linux-x64 tools, builds the third-party objects, packs the sources, objects, RenHDrum and tools (`dev release sources`, taking each member that did not change from the last release's pack), and appends the pack to a copy of itself, the release's file (`dev release attach`, read back; its headers then checked); then starts a player's build's dry run from it, makes the stamps, the deltas from the channel's last 5 releases and a nightly's from the latest stable (their full files through the server's LAN address; fewer than 5 while more releases have the platform's files is a warning, and so is the latest stable's file that could not be had, though no stable with it yet is not) and the manifest, zips RecompLauncher's file and uploads all of it. It uploads the program before its pack too, as `longshot-builder-linux-tool`, the Windows job's tool. Only the release's own caches are restored ([ci](ci.md#the-releases-cache)) | *Linux*: `scripts/longshot_builder.py build`, then that builder's `dev tools install`, `dev release last-objects`, `compile --third-party-objects`, `dev release sources`, `dev release attach`, `scripts/longshot_builder.py check`, `dev release dry-run`, `dev release files` (which runs `fetch-bases`, then `deltas`), `dev release recomplauncher` |
-| longshot-builder (Windows) | the same for windows-x64, after the Linux job: its tool is the Linux job's program before its pack (an artifact of the run), so it compiles only the program it ships, once, cross-built on Linux with llvm-mingw's Linux build, then attaches its pack and checks it under Wine. | *Windows*: `scripts/longshot_builder.py llvm-mingw`, `build`, `check`; the Linux builder's `dev release last-objects`, `sources`, `attach`, `unpack`, `dry-run`, `files`, `recomplauncher` |
+| The version | names the version: a tag is checked; a push gets the nightly name, after waiting for more merges and only when it brings something for the notes | `release.py check-tag`, `nightly-age`, `nightly-news`, `nightly-name` |
+| longshot-builder (Linux) | builds [`longshot-packager`](../../../builder/crates/longshot-packager/README.md), the job's tool, for itself (`scripts/longshot_builder.py packager`: the release profile, never shipped); checks `tools.lock` has every tool the packs carry and every line's archive is in Longshot's store with its size and SHA-256 (a release uploads no tool, and stops on a line whose archive isn't there: [bumping a tool](#bumping-a-tool)); compiles the program it ships once (the dist profile, linked by tools.lock's clang against its sysroot, glibc 2.35, the game's floor; `scripts/longshot_builder.py link-tools` fetches both first, each checked by its size and SHA-256), which carries nothing yet; installs `tools.lock`'s linux-x64 tools, builds the third-party objects, packs the sources, objects, RenHDrum and tools (`release sources`, taking each member that did not change from the last release's pack), and appends the pack to a copy of the program, the release's file (`release attach`, read back; its headers then checked); then starts a player's build's dry run from that file, makes the stamps, the deltas from the channel's last 5 releases and a nightly's from the latest stable (their full files through the server's LAN address; fewer than 5 while more releases have the platform's files is a warning, and so is the latest stable's file that could not be had, though no stable with it yet is not) and the manifest, zips RecompLauncher's file and uploads all of it. Only the release's own caches are restored ([ci](ci.md#the-releases-cache)) | *Linux*: `scripts/longshot_builder.py packager`, `build`; `longshot-packager tools check`, `tools check --require`, `tools install`, `release last-objects`, `compile --third-party-objects`, `rust-key`, `release sources`, `release attach`, `scripts/longshot_builder.py check`, `longshot-packager release dry-run`, `release files` (which runs `fetch-bases`, then `deltas`), `release recomplauncher` |
+| longshot-builder (Windows) | the same for windows-x64, beside the Linux job, not after it: it builds its own `longshot-packager` for its Linux runner, cross-builds the program it ships once, on Linux with llvm-mingw's Linux build, attaches its pack and checks it under Wine. The dry run of a player's Windows build is the packager's own `compile --dry-run` (the builder's code, from the same commit) over the pack's tree, unpacked | *Windows*: `scripts/longshot_builder.py llvm-mingw`, `packager`, `build`, `check`; `longshot-packager tools`, `release last-objects`, `compile`, `rust-key`, `release sources`, `attach`, `unpack`, `dry-run`, `files`, `recomplauncher` |
 | Sign and publish | compiling nothing: checks every platform's files are there (RecompLauncher's zips too), writes and signs `SHA256SUMS`, checks the signature with the key the launcher trusts, writes the notes, uploads everything to a draft and publishes it; a nightly also deletes the nightlies past the newest 20 that are 5 days old or more | `release.py sums`, `sign`, `verify`, `notes`, `publish`, `prune` |
 
+- **The two build jobs depend on the version alone**, and each runs on whichever release runner is free
+  (`trusted-build`), with that runner's own cache.
 - **Drafts make a release appear at once.** Until the last step no launcher sees it; a failed run leaves a draft, which
   a run of the same tag by hand reuses.
-- **A release builds only what it ships.** Every file carries its version, so a tag always builds again. The Vulkan
+- **A release builds only what it ships, and its packager.** Every file carries its version, so a tag always builds again. The Vulkan
   back end's build checks (Linux and Windows, without and with AMD FSR 4), which ship no file, are `ci.yml`'s
   `renderer` job on the pull requests that touch the renderer and on every push to `main`
   ([ci](ci.md#what-a-pull-request-runs)).
 - **Every job runs on Linux.** The Windows files are cross-built; what only Windows can check is a
   [Windows tester's](#windows-tester).
 - **The third-party objects come from the last release where they can.** Before compiling them, each build job runs
-  `longshot-builder dev release last-objects`: the channel's newest release with the platform's file (up to 3 tried,
+  `longshot-packager release last-objects`: the channel's newest release with the platform's file (up to 3 tried,
   newest first) has its `SHA256SUMS` checked against `SHA256SUMS.sig` with the keys the builder trusts, as a player's
   update checks it, then its full file by the SHA-256 the signed sums give, and only then is its pack read (appended,
   or compiled in by a release from before) and its `tree/third_party_objects` member written out, each file checked.
@@ -118,7 +120,7 @@ run there by hand with its tag and **publish** on:
   signed with the release key and checked before a byte of them is used, never a runner's cache that anyone could
   have written.
 - **The pack's members that did not change come from the last release too.** `last-objects` keeps that release's whole
-  pack (`<out>/sources.pack`), read from the file its signed sums named, and `dev release sources --reuse` takes from it
+  pack (`<out>/sources.pack`), read from the file its signed sums named, and `release sources --reuse` takes from it
   each member whose key is this build's: every member of a release's pack ends with a zstd skippable frame holding the
   SHA-256 of its raw bytes and of what compressed them (the zstd program's `-V` and its arguments, `MEMBER_ZSTD`), and
   one is taken only when that key is this member's and its frame, decompressed, is this member's raw bytes, compared
@@ -133,7 +135,6 @@ run there by hand with its tag and **publish** on:
   none (`debug = false`) and strips what the standard library brings (`strip = "debuginfo"`); the symbols stay, so a
   panic's backtrace names its functions, without files or lines.
 - **The build jobs' artifacts are zipped stored** (`compression-level: 0`): what `dist/` holds is compressed already.
-  The Linux tool, a plain program, is zipped at level 1.
 
 ## Making a release
 
@@ -292,8 +293,8 @@ as a recipe of `builder/tools/` that builds it the same
 every time, made and uploaded like the other tools, `tools.lock` then naming
 it. Its cost: an LLVM build of 1.5 to 3 hours in CI on each LLVM bump. Not done yet.
 
-The release puts every tool in its `longshot-builder` (`longshot-builder dev tools install <bundle> --system <s>` unpacks each at its dest,
-`tools/<name>`; `longshot-builder dev release sources --tools <bundle>/tools` packs them in), each a member of the pack of
+The release puts every tool in its `longshot-builder` (`longshot-packager tools install <bundle> --system <s>` unpacks each at its dest,
+`tools/<name>`; `longshot-packager release sources --tools <bundle>/tools` packs them in), each a member of the pack of
 its own. At the first use each is unpacked once into `<cache>/tools/<name>-<hash>/` and linked into the unpacked tree as
 `tools/<name>` (build-driver's `sources.rs`), so a release with the same tool unpacks nothing of it, and its delta
 carries nothing of it. The compile takes them from there (build-driver's `tools/`; [build.md](build.md#the-build-tools)):
@@ -334,18 +335,19 @@ and developers run. Making them is for whoever bumps a pin. A bump is two pull r
 A package version's files never change, and are never pruned: an archive whose version `tools.lock` names already must
 be that line's bytes (`make.sh` and Release's upload refuse another), so a recipe that keeps other files takes a
 new version (its `*_TRIM`). Every line's first two URLs must be the store's (`dev tools check` refuses any other), and
-before any build the release checks every line's archive is there with its size and SHA-256 (`dev tools check
---require`, in the version job): a release only downloads tools. A line whose archive is not there stops it with "a
-tools.lock line's archive is not in Longshot's store": run Release's *Longshot tools* workflow for it. Every one of these is the
-builder's (`longshot-builder dev tools`, the one reader of `tools.lock`: build-driver's `tools/`); each job that runs
-one builds a `longshot-builder` first, which needs none of the tools to be built. In an emergency an archive can be
+each of the release's build jobs checks before it builds the program it ships that every line's archive is there with
+its size and SHA-256 (`longshot-packager tools check --require`): a release only downloads tools. A line whose archive
+is not there stops it with "a tools.lock line's archive is not in Longshot's store": run Release's *Longshot tools*
+workflow for it. Every one of these is build-driver's `tools/`, the one reader of `tools.lock`, run as
+`longshot-builder dev tools` (developers, CI) or `longshot-packager tools` (the release); each job that runs one builds
+its program first, which needs none of the tools to be built. In an emergency an archive can be
 uploaded by hand: `dev tools add` without `--no-upload`, with `RELEASE_TOKEN` (`write:package`) and, past 100 MB,
 `FORGEJO_UPLOAD_API`. Play profiles are not tools: they are committed in `assets/profiles/`.
 
 RenHDrum isn't a tool either. The release builds `renhdrum.dll` and `renhdrum.so` from `third_party/renhdrum`
 (`scripts/renhdrum.py build` in Release's `longshot.yml`, with a pinned Rust, its build crate by its
 `Cargo.lock` SHA-256 and libopus from `third_party/opus`) and packs them into `longshot-builder`'s tree
-(`longshot-builder dev release sources --add`), where a player's build finds them. A newer RenHDrum: its `PROVENANCE.md` says how. A newer Rust:
+(`longshot-packager release sources --add`), where a player's build finds them. A newer RenHDrum: its `PROVENANCE.md` says how. A newer Rust:
 `RUST_VERSION` and the parts' SHA-256 in `scripts/renhdrum.py`.
 
 ## Update channels
@@ -436,8 +438,8 @@ once) and the crates (about 55 MB, once). CI builds no pull request's files for 
 
 [RecompLauncher](https://recomplauncher.com) can install and build Longshot through `recomplauncher.json`
 (`tests/test_recomplauncher_json.py`). A release carries it in `longshot-builder-<v>-<platform>-recomplauncher.zip`, made
-by each platform's build job (`longshot-builder dev release recomplauncher`, the job's Linux builder, right after
-`dev release files`) from the platform's full file, and uploaded with it: `SHA256SUMS` names both. RecompLauncher only finds releases on GitHub, so a
+by each platform's build job (`longshot-packager release recomplauncher`, right after
+`release files`) from the platform's full file, and uploaded with it: `SHA256SUMS` names both. RecompLauncher only finds releases on GitHub, so a
 player adds the zip to it by hand.
 
 RecompLauncher's [Recomp Standards](https://github.com/elripalda/RecompLauncher/blob/main/docs/DEVELOPERS.md#recomp-standards)
@@ -470,7 +472,7 @@ Linux, and `start` and `prepare` both run it. The install folder is a version fo
   RecompLauncher's placeholders are taken in `start.args` as in `prepare.args`; should a
   RecompLauncher take none there, `start` with no arguments still plays, with `profile/` beside the program.
 - **No console on Windows**: the zip's `Longshot.exe` is the full file with its PE subsystem made a windowed one's (2,
-  not 3: `windowed` in `release_cmd.rs`), so nothing opens a console when it starts, and it gives what it starts (the
+  not 3: `windowed` in the release crate's `swap.rs`), so nothing opens a console when it starts, and it gives what it starts (the
   compilers, the shader preparation) a hidden console of its own (build-core's `hidden_console`). Started from a
   console (a developer's terminal), it joins that one instead (`AttachConsole(ATTACH_PARENT_PROCESS)`), so what it says
   shows there. Its standard handles stay the ones it was given, so `prepare`'s lines still reach RecompLauncher and the
@@ -555,7 +557,7 @@ What a repository needs before its first release (the organization's secret is s
 |---|---|
 | `python -I ../Tooling/scripts/release.py` | versions (`next`, `check-tag`, `nightly-name`), notes, sums and signatures (`sums`, `sign`, `verify`, `keygen`), publishing (`publish`, `prune`, `released-as`, `channels`); `--help` lists all |
 | `longshot-builder dev tools` | `tools.lock`: `check`, `install`, `add`, `make` (`cargo run --release -p longshot-builder -- dev tools ...`; `mise run tools` installs this system's into the checkout) |
-| `python -I scripts/longshot_builder.py` | what must run before there is a builder: `longshot-builder` per platform with the pinned Rust (`build`), its headers checked (`check`), the pinned llvm-mingw that links the Windows one (`llvm-mingw`) |
-| `longshot-builder dev release` | the release's packaging, by a builder already built: the last release's third-party objects (`last-objects`), the pack it carries (`sources`, `unpack`: build-driver's `sources.rs` writes and reads it; `attach`, which appends it to a linked program and reads it back), a player's build's dry run (`dry-run`), the earlier releases' files (`fetch-bases`), the deltas and the manifest (`deltas`; `files`: the stamps, `fetch-bases` and `deltas` together), RecompLauncher's zip (`recomplauncher`); `dev release --help` |
+| `python -I scripts/longshot_builder.py` | what builds the release's programs with the pinned Rust: `longshot-builder` per platform (`build`), its headers checked (`check`), `longshot-packager` for the Linux system that runs it (`packager`), the pinned llvm-mingw that links the Windows builder (`llvm-mingw`) |
+| `longshot-packager release` | the release's packaging, never shipped ([longshot-packager](../../../builder/crates/longshot-packager/README.md)): the last release's third-party objects (`last-objects`), the pack the program carries (`sources`, `unpack`: build-driver's `sources.rs` writes and reads it; `attach`, which appends it to a linked program and reads it back), a player's build's dry run (`dry-run`), the earlier releases' files (`fetch-bases`), the deltas and the manifest (`deltas`; `files`: the stamps, `fetch-bases` and `deltas` together), RecompLauncher's zip (`recomplauncher`); `longshot-packager release --help`. Beside it `longshot-packager compile` (the third-party objects, a dry run) and `rust-key` |
 | `builder/tools/make.sh`, `docker.sh` | the build tools' archives, each made from its pins by its recipe (`make.sh linux-x64/sdl2 ...`, `all`; `--check` makes each twice); `docker.sh` in an Ubuntu 22.04 container |
 | [cliff.toml](../../../cliff.toml) | git-cliff's settings for the release notes |

@@ -1,5 +1,5 @@
-//! `longshot-builder dev release`: a release's packaging (docs/dev/reference/releases.md; MagicBeanAdmin/Release's
-//! longshot.yml runs it with its Linux job's longshot-builder, before its pack is attached).
+//! `longshot-packager release`: a release's packaging (docs/dev/reference/releases.md; MagicBeanAdmin/Release's
+//! longshot.yml runs it in each of its build jobs).
 //!
 //! ```text
 //! sources --out <pack> --version <name> [--root <checkout>] [--third-party-objects <folder>]
@@ -21,7 +21,8 @@
 //!                      a player's build's dry run over a tree, with and without AMD FSR 4, checked: every file it
 //!                      compiles there, no unit missing, every third-party object taken from the tools' set.
 //!                      <program>: a release's longshot-builder (its own tree: --clean, nothing of this environment
-//!                      but PATH and HOME, first its `sources`, timed), or one that carries nothing with --root
+//!                      but PATH and HOME, first its `sources`, timed), or with --root one that carries nothing: a
+//!                      developer's longshot-builder, or longshot-packager itself (its `compile`, the builder's code)
 //! last-objects --version <tag> --platform <p> --out <folder> [--api <url>] [--repo <o/n>]
 //!                      the third-party objects of the channel's newest release with the platform's files, its signed
 //!                      SHA256SUMS checked first (release_objects.rs), into <folder>/objects/third_party_objects: the
@@ -39,7 +40,7 @@
 //!                      a release's stamps, deltas and manifest beside its full file (fetch-bases, then deltas)
 //! recomplauncher <full file> [--out <folder>] [--root <checkout>]
 //!                      RecompLauncher's release file: the full file as Longshot.exe (Windows, made a windowed program)
-//!                      or Longshot.x86_64 (Linux), the program players start (play.rs), and the checkout's
+//!                      or Longshot.x86_64 (Linux), the program players start (build-driver's play::NAMES), and the checkout's
 //!                      recomplauncher.json, zipped, stored, the same files giving the same zip
 //! ```
 //!
@@ -47,26 +48,28 @@
 //! when something is wrong, 2 for a command line it does not take.
 
 use super::release_deltas::{self as rd, Net};
+use build_core::report::console;
 use build_driver::sources;
+use release::swap::windowed;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-const USAGE: &str = "usage: longshot-builder dev release sources --out <pack> --version <name> [--root <checkout>]
+const USAGE: &str = "usage: longshot-packager release sources --out <pack> --version <name> [--root <checkout>]
                          [--third-party-objects <folder>] [--add <path>=<file> ...] [--tool <name>=<folder> ...]
                          [--tools <folder> ...] [--reuse <pack>]
-       longshot-builder dev release unpack <pack> <folder>
-       longshot-builder dev release attach <program> <pack> --out <file>
-       longshot-builder dev release dry-run <program> --work <folder> [--root <tree>] [--cache <folder>] [--clean]
-       longshot-builder dev release last-objects --version <tag> --platform <p> --out <folder> [--api <url>]
+       longshot-packager release unpack <pack> <folder>
+       longshot-packager release attach <program> <pack> --out <file>
+       longshot-packager release dry-run <program> --work <folder> [--root <tree>] [--cache <folder>] [--clean]
+       longshot-packager release last-objects --version <tag> --platform <p> --out <folder> [--api <url>]
                          [--repo <owner/name>]
-       longshot-builder dev release fetch-bases --platform <p> --channel nightly|stable --out <folder> [--not <tag>]
+       longshot-packager release fetch-bases --platform <p> --channel nightly|stable --out <folder> [--not <tag>]
                          [--api <url>] [--repo <owner/name>] [--keep N]
-       longshot-builder dev release deltas <full file> --version <tag> --channel nightly|stable --platform <p>
+       longshot-packager release deltas <full file> --version <tag> --channel nightly|stable --platform <p>
                          --out <folder> [--bases <folder>] [--stamps <json file>]
-       longshot-builder dev release files <full file> --version <tag> --platform <p> --work <folder>
+       longshot-packager release files <full file> --version <tag> --platform <p> --work <folder>
                          [--runner <program>] [--api <url>] [--repo <owner/name>]
-       longshot-builder dev release recomplauncher <full file> [--out <folder>] [--root <checkout>]";
+       longshot-packager release recomplauncher <full file> [--out <folder>] [--root <checkout>]";
 
 /// Each command: its words after the command, the options it must have, the others it takes (`--clean` a flag).
 const COMMANDS: [(&str, usize, &[&str], &[&str]); 9] = [
@@ -157,9 +160,9 @@ fn checkout(given: Option<&str>) -> Result<PathBuf, String> {
 /// A line of what it does; a CI annotation (`::warning::...`) as it is, where Forgejo reads it.
 fn say(s: String) {
     if s.starts_with("::") {
-        crate::output::stdout(format_args!("{s}"));
+        console::stdout(format_args!("{s}"));
     } else {
-        crate::output::stdout(format_args!("longshot-builder dev release: {s}"));
+        console::stdout(format_args!("longshot-packager release: {s}"));
     }
 }
 
@@ -382,7 +385,7 @@ fn dry_run_cmd(a: &Args) -> Result<(), String> {
         setup(&mut c);
         let output = build_core::child::output(c.args(["sources", "--output", "text"]).args(&cache))
             .map_err(|e| format!("{program} did not start: {e}"))?;
-        crate::output::tool_output(&output);
+        console::tool_output(&output);
         if !output.status.success() {
             return Err(format!("{program} sources failed"));
         }
@@ -398,7 +401,7 @@ fn dry_run_cmd(a: &Args) -> Result<(), String> {
             c.args(["--root", r]);
         }
         let o = build_core::child::output(&mut c).map_err(|e| format!("{program} did not start: {e}"))?;
-        crate::output::tool_output(&o);
+        console::tool_output(&o);
         if !o.status.success() {
             return Err(format!("the dry run ({up}) failed"));
         }
@@ -476,18 +479,10 @@ pub fn stored_zip(files: &[(&str, &[u8], u32)]) -> Vec<u8> {
     out
 }
 
-/// The Windows program `exe` made a windowed one: its PE subsystem 2 (Windows GUI), not 3 (console). Started by
-/// RecompLauncher, a shortcut or Steam it then opens no console window, and what it starts shares a hidden one
-/// (build-core's `hidden_console`); its output still reaches whoever reads its stdout (RecompLauncher's prepare). That
-/// one field changes: the image carries no signature, and Windows checks no checksum of a program.
-pub(crate) fn windowed(mut exe: Vec<u8>) -> Result<Vec<u8>, String> {
-    release::swap::set_subsystem(&mut exe, 2)?;
-    Ok(exe)
-}
-
-/// RecompLauncher's release file for the full file at `full`, into `out`: the program players start, named as play.rs
-/// plays by (`Longshot.exe`, made a windowed program by [`windowed`], or `Longshot.x86_64`), which recomplauncher.json's
-/// `start` and `prepare` both run, and `manifest` (recomplauncher.json) beside it, where RecompLauncher reads it.
+/// RecompLauncher's release file for the full file at `full`, into `out`: the program players start, named as
+/// longshot-builder plays by (`Longshot.exe`, made a windowed program by [`windowed`], or `Longshot.x86_64`), which
+/// recomplauncher.json's `start` and `prepare` both run, and `manifest` (recomplauncher.json) beside it, where
+/// RecompLauncher reads it.
 /// Stored, not compressed (the program is compressed inside already); on Linux the program is the full file byte for
 /// byte, on Windows all but its subsystem. Returns its path.
 fn recomplauncher(full: &Path, out: Option<&Path>, manifest: &Path) -> Result<PathBuf, String> {
@@ -500,7 +495,7 @@ fn recomplauncher(full: &Path, out: Option<&Path>, manifest: &Path) -> Result<Pa
     let to = dir.join(RECOMPLAUNCHER.replace("{v}", &version).replace("{p}", platform));
     let program = std::fs::read(full).map_err(|e| format!("{}: {e}", full.display()))?;
     let json = std::fs::read(manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
-    let [windows, linux] = crate::play::NAMES;
+    let [windows, linux] = build_driver::play::NAMES;
     let (exe, program) = if name.ends_with(".exe") { (windows, windowed(program)?) } else { (linux, program) };
     let zip = stored_zip(&[(exe, &program, 0o755), ("recomplauncher.json", &json, 0o644)]);
     let mut new = to.as_os_str().to_owned();
@@ -599,7 +594,7 @@ fn run_parsed(a: &Args) -> Result<(), String> {
         "recomplauncher" => {
             let manifest = checkout(a.one("--root"))?.join("recomplauncher.json");
             let to = recomplauncher(Path::new(&a.words[0]), a.one("--out").map(Path::new), &manifest)?;
-            crate::output::stdout(format_args!("{}", to.display()));
+            console::stdout(format_args!("{}", to.display()));
             Ok(())
         }
         _ => unreachable!("parse takes no other"),
@@ -609,20 +604,20 @@ fn run_parsed(a: &Args) -> Result<(), String> {
 /// Runs the command on its arguments (after `release`).
 pub fn run(args: &[String]) -> ExitCode {
     if matches!(args.first().map(String::as_str), Some("--help" | "-h" | "help")) {
-        crate::output::stdout(format_args!("{USAGE}"));
+        console::stdout(format_args!("{USAGE}"));
         return ExitCode::SUCCESS;
     }
     let a = match parse(args) {
         Ok(a) => a,
         Err(e) => {
-            crate::output::error(format_args!("longshot-builder dev release: {e}\n{USAGE}"));
+            console::error(format_args!("longshot-packager release: {e}\n{USAGE}"));
             return ExitCode::from(2);
         }
     };
     match run_parsed(&a) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            crate::output::error(format_args!("longshot-builder dev release: {e}"));
+            console::error(format_args!("longshot-packager release: {e}"));
             ExitCode::FAILURE
         }
     }
@@ -781,17 +776,6 @@ mod tests {
         b[0x98..0x9a].copy_from_slice(&0x20bu16.to_le_bytes());
         b[0xdc..0xde].copy_from_slice(&subsystem.to_le_bytes());
         b
-    }
-
-    #[test]
-    fn the_windows_program_is_made_a_windowed_one() {
-        assert_eq!(windowed(fake_pe(3)).unwrap(), fake_pe(2));
-        assert_eq!(windowed(fake_pe(2)).unwrap(), fake_pe(2));
-        assert!(windowed(fake_pe(1)).is_err(), "a driver's");
-        assert!(windowed(b"the program".to_vec()).is_err());
-        let mut no_header = fake_pe(3);
-        no_header[0x98] = 0;
-        assert!(windowed(no_header).is_err());
     }
 
     #[test]

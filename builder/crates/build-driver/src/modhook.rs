@@ -62,6 +62,29 @@ impl Output {
     }
 }
 
+/// `--output <value>` (or `--output=<value>`) taken out of `args` before a `--`: the output asked, or the error's
+/// text. The others left as they were.
+pub fn take_output(args: &mut Vec<String>) -> Result<Option<Output>, String> {
+    let end = args.iter().position(|a| a == "--").unwrap_or(args.len());
+    let Some(i) = args[..end].iter().position(|a| a == "--output" || a.starts_with("--output=")) else {
+        return Ok(None);
+    };
+    let value = match args[i].strip_prefix("--output=") {
+        Some(v) => {
+            let v = v.to_string();
+            args.remove(i);
+            v
+        }
+        None if i + 1 < end => {
+            let v = args.remove(i + 1);
+            args.remove(i);
+            v
+        }
+        None => return Err("--output needs a value".into()),
+    };
+    Output::parse(&value).map(Some)
+}
+
 /// Environment variables as pairs, name and value.
 pub type Env = Vec<(OsString, OsString)>;
 

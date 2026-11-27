@@ -2569,7 +2569,6 @@ dependencies = [
  "build-driver",
  "cfg",
  "crash",
- "crc32fast",
  "edits",
  "flate2",
  "game-files",
@@ -2590,6 +2589,21 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ui",
+]
+
+[[package]]
+name = "longshot-packager"
+version = "0.1.0"
+dependencies = [
+ "build-compile",
+ "build-core",
+ "build-driver",
+ "crc32fast",
+ "release",
+ "ruzstd",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

@@ -33,7 +33,8 @@ and writes the game folder and its assets.
 | `crates/build-driver` | The driver: the stages in order with their caches, the work folder and the stores, the game folder's files ([below](#a-build)) |
 | `crates/steam` | Longshot as a non-Steam game in Steam's library (`longshot-builder steam-shortcut`, [Steam](build.md#steam)): the binary `shortcuts.vdf`, Steam's id rule, the signed-in account's library, the tile's art; the Longshot Launcher's, ported |
 | `crates/release` | Longshot's releases as a builder installs them (`fetch`, `self-update`: [fetch](build.md#fetch-a-version)): the forge's list through Cloudflare's edge, the signed `SHA256SUMS` (ECDSA P-256, `scripts/release_keys.json`), the manifest, a delta or a chain of up to 5 applied by ruzstd, the program swapped in while it runs; the Longshot Launcher's, ported |
-| `crates/longshot-builder` | The command the launcher runs; a release's carries the pack, appended to the program after the link (`dev release attach`). `longshot-builder dev`, the developers' commands: the lifter's own (`lift`, `discover`, `sites`, `profile`, `site-hooks`, `words`, `decode`), `tools` (`tools.lock`) and `release` (a release's packaging) |
+| `crates/longshot-builder` | The command the launcher runs; a release's carries the pack, appended to the program after the link (`longshot-packager release attach`). `longshot-builder dev`, the developers' commands: the lifter's own (`lift`, `discover`, `sites`, `profile`, `site-hooks`, `words`, `decode`) and `tools` (`tools.lock`) |
+| `crates/longshot-packager` | What packages a release: the pack, the third-party objects, the dry run, the deltas and the manifest, RecompLauncher's zip, `tools.lock`'s tools and the Rust sources' key. Built and run by the release's jobs, never shipped ([releases](releases.md#the-release-workflow)) |
 | `crates/synthetic-game` | The builder end to end on a synthetic game: a small AArch64 program of its own (`game/main.S`) packed as a .nup, built through every stage, run with a test host, and built again after a one-instruction change ([below](#building-and-checking-the-builder)) |
 | `rt/` | The runtime the lifted code and the host share (`a64.h`, `a64_rt.c`, `a64_fp.c`), written into gen/rt/ by the lift ([below](#the-runtime)) |
 
@@ -395,7 +396,7 @@ recompiler, sirit, Dear ImGui, ReShade's FX compiler and zbic's zstd. `cargo run
 
 A release's `longshot-builder` (`longshot-builder-<v>-linux-x64`, `longshot-builder-<v>-windows-x64.exe`) carries one
 pack at the end of its file (`builder/crates/build-driver/src/sources.rs`, the pack's one writer and reader;
-`longshot-builder dev release sources` makes the pack):
+`longshot-packager release sources` makes the pack):
 
 - **the tree** it builds from: `host/`, `gpu/`, the `third_party/` and `assets/` the build reads, the release's name
   (`VERSION`), the prebuilt third-party objects (`third_party_objects/`), RenHDrum's library;
@@ -409,10 +410,10 @@ file checked against its SHA-256 and the folder renamed into place once whole; e
 about 2 s. `longshot-builder sources` unpacks it now and prints the folders (a launcher can do it ahead of the first
 build).
 
-The pack is appended to the linked program, not compiled into it: `longshot-builder dev release attach <program>
+The pack is appended to the linked program, not compiled into it: `longshot-packager release attach <program>
 <pack> --out <file>` writes the program's bytes, then the pack's, then a 64-byte trailer (a magic, its version, the
 pack's offset and length, its SHA-256), and reads the result back to check it. So the program is compiled once per
-platform, and the same program, before its pack is attached, is the release's own tool (CI's jobs,
+platform; what packages it is a program of its own, `longshot-packager`, from the same commit (CI's jobs,
 [releases](releases.md)). The program finds its pack by its own file's last 64 bytes (it maps the file; nothing is
 read whole): past its image (the ELF's segments and sections; on Windows the PE's overlay, which the loader does not
 map). The pack ends at the same place relative to the file's end in every release, so deltas stay as small as they

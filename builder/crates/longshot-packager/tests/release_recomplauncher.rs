@@ -1,4 +1,4 @@
-//! `longshot-builder dev release recomplauncher <program> --out <dir> --root <checkout>`, as the build jobs run
+//! `longshot-packager release recomplauncher <program> --out <dir> --root <checkout>`, as the build jobs run
 //! it: the zip it writes holds the program under the name players start and the checkout's own recomplauncher.json,
 //! byte for byte (what the zip is made of, member by member, is release_cmd.rs's
 //! the_recomplauncher_zip_carries_the_program_and_recomplauncher_json).
@@ -13,8 +13,8 @@ fn the_command_zips_the_checkout_s_recomplauncher_json() {
     std::fs::create_dir_all(&d).unwrap();
     let program = d.join("longshot-builder-v3.2.0-linux-x64");
     std::fs::write(&program, b"the program").unwrap();
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_longshot-builder"))
-        .args(["dev", "release", "recomplauncher"])
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_longshot-packager"))
+        .args(["release", "recomplauncher"])
         .arg(&program)
         .arg("--out")
         .arg(&d)

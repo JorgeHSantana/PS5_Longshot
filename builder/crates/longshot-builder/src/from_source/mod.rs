@@ -660,7 +660,7 @@ fn attach(built: &Path, pack: &Path, to: &Path) -> Result<()> {
 fn install(built: &Path, program: &Path) -> Result<String> {
     let bytes = std::fs::read(built).map_err(|e| Error::io(built, e))?;
     let bytes = if cfg!(windows) {
-        crate::dev::release_cmd::windowed(bytes).map_err(|e| Error::player("pack_failed", e))?
+        release::swap::windowed(bytes).map_err(|e| Error::player("pack_failed", e))?
     } else {
         bytes
     };

@@ -11,7 +11,8 @@
 //! `WAYLAND_DISPLAY`) and nothing says no one is looking (`HOS_HEADLESS=1`, a job queue's job: `LONGSHOT_JOB` or a
 //! `LONGSHOT_JOB_*` variable, `CI`, RecompLauncher's Big Picture mode); else `text` ([`decide`]).
 
-pub use build_driver::modhook::Output;
+pub use build_core::report::console::{child_line, error, json_requested, log, stdout};
+pub use build_driver::modhook::{Output, take_output as take};
 
 /// The output of a run asked `asked` (`--output`'s, if given): it, else `user` or `text` as the module's docs say.
 /// `terminal`: whether stderr is a terminal; `get`: the environment's variables; `names`: their names (for the job
@@ -42,112 +43,14 @@ pub fn set(asked: Option<Output>) -> Output {
     use std::io::IsTerminal;
     let names: Vec<String> = std::env::vars_os().map(|(k, _)| k.to_string_lossy().into_owned()).collect();
     let o = decide(asked, std::io::stderr().is_terminal(), &|k| std::env::var(k).ok(), &names, cfg!(windows));
-    *CHOSEN.get_or_init(|| o)
+    let o = *CHOSEN.get_or_init(|| o);
+    build_core::report::console::set_json(o == Output::Json);
+    o
 }
 
 /// This run's output ([`set`]'s; text before it).
 pub fn chosen() -> Output {
     CHOSEN.get().copied().unwrap_or(Output::Text)
-}
-
-/// Whether the command requested JSON, including when another argument could not be parsed.
-pub fn json_requested(args: &[String]) -> bool {
-    let end = args.iter().position(|arg| arg == "--").unwrap_or(args.len());
-    args[..end].iter().any(|arg| arg == "--output=json")
-        || args[..end].windows(2).any(|pair| pair[0] == "--output" && pair[1] == "json")
-}
-
-/// A builder diagnostic, formatted consistently with the selected output.
-pub fn log(text: impl Into<String>) {
-    let text = text.into();
-    tracing::info!("{text}");
-}
-
-pub fn stdout(text: std::fmt::Arguments<'_>) {
-    if chosen() == Output::Json {
-        log(text.to_string());
-    } else {
-        println!("{text}");
-    }
-}
-
-pub fn error(text: std::fmt::Arguments<'_>) {
-    if chosen() == Output::Json {
-        tracing::error!(code = "command_error", "{text}");
-    } else {
-        eprintln!("{text}");
-    }
-}
-
-/// Child diagnostics share the launcher's line format, including the originating stream.
-pub fn child_line(source: &'static str, stream: &'static str, bytes: &[u8]) {
-    let text = String::from_utf8_lossy(bytes);
-    let code = if source == "game" { "game_output" } else { "tool_output" };
-    tracing::info!(code, source, stream, "{}", text.trim_end_matches('\r'));
-}
-
-pub fn tool_output(output: &std::process::Output) {
-    use std::io::Write;
-    if chosen() == Output::Json {
-        for (stream, bytes) in [("stdout", &output.stdout), ("stderr", &output.stderr)] {
-            for line in bytes.split(|b| *b == b'\n').filter(|line| !line.is_empty()) {
-                child_line("tool", stream, line);
-            }
-        }
-    } else {
-        let _ = std::io::stdout().write_all(&output.stdout);
-        let _ = std::io::stderr().write_all(&output.stderr);
-    }
-}
-
-pub fn tool_status(command: &mut std::process::Command) -> std::io::Result<std::process::ExitStatus> {
-    if chosen() != Output::Json {
-        return build_core::child::status(command);
-    }
-    use std::io::{BufRead, BufReader};
-    use std::process::Stdio;
-
-    let mut child =
-        build_core::child::spawn(command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()))?;
-    fn drain(reader: impl std::io::Read, stream: &'static str) -> std::io::Result<()> {
-        for line in BufReader::new(reader).split(b'\n') {
-            child_line("tool", stream, &line?);
-        }
-        Ok(())
-    }
-    let stdout = child.stdout.take().expect("piped");
-    let stderr = child.stderr.take().expect("piped");
-    std::thread::scope(|scope| {
-        let err = scope.spawn(|| drain(stderr, "stderr"));
-        let out = drain(stdout, "stdout");
-        let status = child.wait();
-        err.join().expect("stderr reader")?;
-        out?;
-        status
-    })
-}
-
-/// `--output <value>` (or `--output=<value>`) taken out of `args` before a `--`: the output asked, or the error's
-/// text. The others left as they were.
-pub fn take(args: &mut Vec<String>) -> Result<Option<Output>, String> {
-    let end = args.iter().position(|a| a == "--").unwrap_or(args.len());
-    let Some(i) = args[..end].iter().position(|a| a == "--output" || a.starts_with("--output=")) else {
-        return Ok(None);
-    };
-    let value = match args[i].strip_prefix("--output=") {
-        Some(v) => {
-            let v = v.to_string();
-            args.remove(i);
-            v
-        }
-        None if i + 1 < end => {
-            let v = args.remove(i + 1);
-            args.remove(i);
-            v
-        }
-        None => return Err("--output needs a value".into()),
-    };
-    Output::parse(&value).map(Some)
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ every release path carries them. v2.0.8 to v2.0.14 shipped none (their app parts
 profile), and a new install's first field load was drawn white for seconds while its pipelines compiled in play.
 
   - the committed sources are xz files of whole lists of this build's format, and hold pipelines;
-  - `longshot-builder dev release sources` carries them in what a release's longshot-builder carries
+  - `longshot-packager release sources` carries them in what a release's longshot-builder carries
     (assets/pipeline_states/), and stops when there are none (build-driver's sources.rs:
     the_tree_carries_the_pipeline_state_lists_and_its_version).
 

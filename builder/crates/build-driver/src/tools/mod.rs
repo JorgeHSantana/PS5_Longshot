@@ -1,7 +1,8 @@
 //! The build tools a build compiles with: tools.lock's compiler, sysroot and libraries, which the builder carries in its
-//! bundle, each unpacked at its line's dest (`<root>/tools/<name>`: `longshot-builder dev tools install`, the release's
-//! bundle), and the stamps a launcher keys shader caches by (`longshot-builder stamps`). The lock itself ([`lock`]), the
-//! tools' archives ([`archive`]) and Longshot's store ([`store`]): `longshot-builder dev tools`.
+//! bundle, each unpacked at its line's dest (`<root>/tools/<name>`: `longshot-builder dev tools install`, `longshot-packager
+//! tools install` for a release's bundle), and the stamps a launcher keys shader caches by (`longshot-builder stamps`). The lock itself ([`lock`]), the
+//! tools' archives ([`archive`]) and Longshot's store ([`store`]): `longshot-builder dev tools` and
+//! `longshot-packager tools` ([`cli`]).
 //!
 //! The compile reads them as the variables of the table below ([`TOOLS`]), set to the bundle's folders: a player's PC's
 //! own `RX_CPM`, `LONGSHOT_MINGW`, ... never stand in for the builder's tools. A developer chooses their own with
@@ -10,6 +11,7 @@
 //! variables too.
 
 pub mod archive;
+pub mod cli;
 pub mod lock;
 pub mod store;
 

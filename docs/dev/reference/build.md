@@ -148,8 +148,8 @@ For developers, to run and time a stage alone. Each takes `--output json`.
 | `... compile --third-party-objects <dir>` | The release's prebuilt third-party set, written to `<dir>`; no game needed |
 
 The developers' own commands are `longshot-builder dev`: the lifter's parts alone (`lift`, `discover`, `sites`,
-`profile`, `site-hooks`, `words`, `decode`; [the builder](builder.md#the-whole-lift)), `tools` (`tools.lock`) and
-`release` (a release's packaging; [releases](releases.md)).
+`profile`, `site-hooks`, `words`, `decode`; [the builder](builder.md#the-whole-lift)) and `tools` (`tools.lock`). A
+release's packaging is a program of its own, `longshot-packager` ([releases](releases.md#tools)).
 
 ## Play: the version folder and the profile
 
@@ -679,7 +679,7 @@ test's override: the launcher sets none of them.
 | `RX_MARCH=<level>` | The game's CPU level. Default: this PC's CPU (`-march=native`); `cpu_unknown` when clang cannot say what that is |
 | `RX_VK_PGO=gen\|<file>` | The renderer counts branches for a profile, or builds with this one. Default: `assets/profiles/longshot_vk.profdata.xz` ([recording one](../developing.md#record-the-renderers-play-profile)) |
 | `RX_RELEASE=1` | A release build: no console window, shaders prepared before the title. `build` and `update` always are; `compile` only with it |
-| `LONGSHOT_THIRD_PARTY_OBJECTS=<dir>\|0` | The prebuilt third-party objects. Default: the tools' `third_party_objects/`; `0`: compile them. With `compile --third-party-objects` (the release's set) only a folder named here is read: the objects it holds by their keys are taken into the new set as they are (the release's: the last release's set, `dev release last-objects`) |
+| `LONGSHOT_THIRD_PARTY_OBJECTS=<dir>\|0` | The prebuilt third-party objects. Default: the tools' `third_party_objects/`; `0`: compile them. With `compile --third-party-objects` (the release's set) only a folder named here is read: the objects it holds by their keys are taken into the new set as they are (the release's: the last release's set, `longshot-packager release last-objects`) |
 | `LONGSHOT_TRACY=1`, `LONGSHOT_TRACY_FIBERS=1` | A Tracy build ([profiling](profiling.md#tracy)); the game's fibers told to Tracy |
 | `--ngx-sdk <dir>` (`LONGSHOT_NGX_SDK`, for one release) | NVIDIA's NGX SDK for `--upscaler dlss`, in place of the one the builder downloads; ignored by a build that did not ask for DLSS |
 | `LONGSHOT_VERSION=<name>` | The release's name. Default: a `VERSION` or `version.txt` file at the root, else `git describe` of the version tags |
