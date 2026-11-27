@@ -164,6 +164,7 @@ FROZEN = {   # (a key: the value its row saves, as players' files hold them)
     "skip_title_screen": "&opts.skip_title",
     "sprint": "&opts.sprint",
     "stick_dead_zone": "&opts.stick_dead_zone",
+    "stick_range": "&opts.stick_range",   # (#1349: new, the Stick range row)
     "text_size": "&opts.text_size",
     "text_speed": "&opts.text_speed",
     "texture_uploads_line": "&opts.fps_dev_show[6]",

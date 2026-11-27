@@ -165,6 +165,7 @@ elements retain their usual placement, including the width limit on very wide sc
 | | Invert camera Y | Off, On | Off |
 | | Camera speed | 50% to 400%, in steps of 25 | 100% |
 | | Stick dead zone | Default (24%), 5%, 10%, 15%, 20%, 30% | Default (24%) |
+| | Stick range | 70% to 100%, in steps of 5 | 100% |
 | | Vibration | Auto, Basic, Off | Auto |
 | | Vibration strength | 25% to 200%, in steps of 25 | 100% |
 | | Test vibration | an action: Confirm buzzes the controller used last; the value says what plays it | Motors |
@@ -319,6 +320,9 @@ helper asks you to.
 - **Camera speed** is how fast the right stick and the camera keys turn the camera, in percent of the game's own.
 - **Stick dead zone:** how far a stick moves before it counts. Lower it for a precise stick, raise it for one that
   drifts.
+- **Stick range:** how far a stick is pushed before the game counts it as fully tilted. Some controllers report a
+  little less than the whole way on a full push, and Link rolls only from a full tilt, so he keeps running instead.
+  If that happens, lower it to 90%. 100%, the default, passes the stick on as the controller reports it.
 - **Vibration:** Auto plays the best each controller can (a DualSense its voice coils, on a cable or over Bluetooth;
   an Xbox One or Series controller all four motors; a Switch Pro Controller its HD rumble; a Steam Controller (2026) its
   grips, still experimental; any other its two motors); Basic plays the two motors on every controller.

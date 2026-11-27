@@ -1,5 +1,5 @@
 // The Insert menu's controller rows (#1633), on the Controls tab: a controller read while another window has the focus,
-// the sticks' dead zone, and its vibration (#405): how, how strongly, and a test of it, which says what plays it.
+// the sticks' dead zone and range, and its vibration (#405): how, how strongly, and a test of it, which says what plays it.
 #include "menu_module.h"
 #include "menu/controller.h"
 
@@ -77,6 +77,18 @@ MENU_MODULE(controller) {
               .lo = 0, .hi = 5,
               .preset_exempt = true,
               .text = [](int v) { return std::string(tx_stick_dead_zone(v)); }}, menu::before("@Controls").order(190))
+        // (Stick range, HOS_OPT_STICK_RANGE 77: host/nn_hid.c hos_stick_range; 100%, the default, changes nothing)
+        .row({.key = "stick_range",
+              .label = "Stick range",
+              .help = "How far a controller's stick is pushed before the game counts it as fully tilted, in percent of the stick's own range. "
+                      "Lower it if Link runs when he should roll, or never reaches his full speed. "
+                      "100% passes the stick on as the controller reports it.",
+              .value = &opts.stick_range,
+              .lo = 70, .hi = 100,
+              .step = 5,
+              .preset_exempt = true,
+              .stops_at_ends = true,
+              .text = menu_text::percent}, menu::before("@Controls").order(191))
         .row({.key = "vibration",
               .label = "Vibration",
               .help = "How the controller vibrates. Auto plays the best it can: a DualSense its voice coils, a Switch controller "

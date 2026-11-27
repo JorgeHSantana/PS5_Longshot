@@ -125,6 +125,8 @@ struct Options {
     int vibration = 0;    // (longshot) Vibration: 0 Auto, 1 Basic (the motors), 2 Off (host/vibration.h)
     int ds_hd_haptics = 1;   // (longshot) DualSense HD Haptics: its speaker and triggers too, 1 on (HOS_OPT_DS_HD_HAPTICS)
     int stick_dead_zone = 0;  // circular stick cutoff: 0 XInput's 7849 (~24%), 1..5 5% to 30% (host/nn_hid.c)
+    int stick_range = 100;    // a pad's stick counts as fully tilted at this percent of its own range, 70 to 100 (100: as the
+                              // pad reports it; host/nn_hid.c hos_stick_range: HOS_OPT_STICK_RANGE, 77)
     int hold_toggle = 0;  // enabled Switch buttons (1 << HOS_SW_*); persisted as toggle_<button>, not one mask entry
     int pad_layout = 0;   // 0 Nintendo (default), 1 Xbox / PC, 2 Swap Face Buttons, 3 Switch 2 Pro (every button the pad's own), 4 Custom
     int pad_menu = 1;     // the controller's button that opens and closes the Insert menu: 0 none, 1 Home, 2 GL, 3 GR (the back buttons)

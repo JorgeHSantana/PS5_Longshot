@@ -119,6 +119,11 @@ enum { HOS_OPT_PAD_SPEAKER_SYNC = 153 };
    HOS_OPT_PAD_SPEAKER_HEADPHONE_VOLUME, 155: their volume in percent. host/pad_speaker.c) */
 enum { HOS_OPT_PAD_SPEAKER_HEADPHONES = 154 };
 enum { HOS_OPT_PAD_SPEAKER_HEADPHONE_VOLUME = 155 };
+/* (HOS_OPT_STICK_RANGE, 77: Controls' Stick range, host/nn_hid.c hos_stick_range: percent of a pad's own range at which a
+   stick counts as fully tilted, 70 to 100; 100 leaves the sticks as the pad reports them. The existing option callback:
+   no new member. 77: free on main and in the open pull requests on 2026-11-20 (72 to 74 are the HUD's here, and 72 is
+   claimed by three open ones too).) */
+enum { HOS_OPT_STICK_RANGE = 77 };
 
 /* (longshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of longshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:

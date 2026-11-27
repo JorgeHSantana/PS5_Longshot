@@ -85,6 +85,7 @@ def main():
     constants += block(api, "enum { HOS_OPT_SPRINT_TOGGLE") + ";\n"   # (Sprint's Toggle: the fixture's rx_option says off)
     constants += block(api, "enum { HOS_BIND_PAD") + ";\n"   # (the live input's !bind)
     constants += block(api, "enum { HOS_OPT_WALK_MODE") + ";\n"   # (the Walk key's rows: read_input asks for them)
+    constants += block(api, "enum { HOS_OPT_STICK_RANGE") + ";\n"   # (the Stick range row: stick_witness says it)
     for name in ("STATE_SIZE", "NPAD_NO1", "ATTR_CONNECTED"):
         matches = re.findall(r"^#define " + name + r"\s+[^\n]+", hid, re.M)
         assert len(matches) == 1, name
@@ -136,6 +137,8 @@ static void player_used(void) { player_stamps++; }
         block(hid, "static int walk_held("), block(hid, "enum { WALK_SPEED_DEFAULT") + ";",
         block(hid, "static int walk_percent("), block(hid, "static void move_keys_stick("),
         block(hid, "static int flight_jump_shortcut("), read,
+        # (HOS_STICK_LOG's line for each press of Action with the stick held: off here, npad_states calls it)
+        "#include <math.h>\nstatic volatile LONG pad_left_raw[2];", block(hid, "static void stick_witness("),
         block(hid, "static void npad_states(")))
     glue = (ROOT / "host/mkw_glue.c").read_text(encoding="utf-8")
     actual += "\n" + "\n".join(block(glue, "uint64_t " + name + "(")

@@ -115,6 +115,7 @@ static int motion_head, motion_count, motion_live;
 static volatile LONG gyro_status;   /* 0 no controller, 1 controllers but none with a gyro, 2 one with a gyro */
 
 void hos_filter_stick(int16_t x, int16_t y, int zone, int32_t out[2]);   /* nn_hid.c */
+void hos_stick_range(int percent, int32_t v[4]);                         /* nn_hid.c */
 
 /* SDL's controller support started; 0 when it could not be */
 static int pads_start(void) {
@@ -758,6 +759,7 @@ static void pads_poll(void) {
                the dead zone. Values are already clamped and the circle keeps them, so this changes nothing otherwise. */
             hos_filter_stick((int16_t)v[0], (int16_t)v[1], z, v);
             hos_filter_stick((int16_t)v[2], (int16_t)v[3], z, v + 2);
+            hos_stick_range(rx_option(HOS_OPT_STICK_RANGE, 100), v);   /* (the menu's Stick range: once, after the dead zone) */
             /* Camera inversion changes output, not whether the physical stick crossed its rest position. Otherwise
                toggling the setting admits a held phantom axis, which stays admitted after the setting is restored. */
             if (inv_x) v[2] = -v[2];

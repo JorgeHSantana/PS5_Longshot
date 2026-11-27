@@ -230,6 +230,7 @@ SW(HOS_SPIN_OTHER_US, hw, int, "5 us with more logical processors than the short
 SW(HOS_SPIN_US, tune, int, "20 us", "Sets the spin before a wait sleeps on the frame's serial threads, in us (0: no spin).")
 SW(HOS_START_SLOT, player, int, "no slot: the profile names none, or there is no profile", "Set by the game itself at the start, from the profile's start_slot (LONGSHOT_PROFILE, profile.json): the save slot (slot_NN, 0-99) the run starts on, handed to the game's side (the Mod API's Skip title mod presses through to it). The profile is its one source: a value the environment or longshot_env.txt sets is taken away first.")
 SW(HOS_STATS_AFTER, diag, int, "unset: the host call statistics come at exit only", "With HOS_HOSTCALL_STATS=1, prints the host call counts and last calls after that many seconds.")
+SW(HOS_STICK_LOG, diag, bool, "off", "Logs each press of Action with the left stick held (the first 300): the stick as the game got it and as the pad gave it, and the Stick range row.")
 SW(HOS_SWITCH2, kill, bool, "Windows: on: the game reads a Switch 2 Pro Controller plugged in over USB itself", "=0 leaves that controller alone, so a bridge program can have it.")
 SW(HOS_SWITCH2_RUMBLE_TEST, diag, bool, "Windows: off", "=1 (a test's) logs how far the controller's accelerometer moved in a second at rest and in 0.8 s of rumble; the controller must lie still.")
 SW(HOS_SYNC_TABLE_LOCK, kill, bool, "off: lock-free table reads", "Sync object lookups take the table's shared lock, as before.")

@@ -8283,6 +8283,7 @@ void fill_replay_table(MkwVkRenderer& t) {
         // Ultrawide menus, by their option ids; a Toggle's 0 or 1)
         if (int v; menu_game_option(id, &v)) return v;
         if (id == 11) return opts.stick_dead_zone;
+        if (id == HOS_OPT_STICK_RANGE) return opts.stick_range;
         if (id == HOS_OPT_WALK_MODE) return opts.walk_mode;
         if (id == HOS_OPT_WALK_SPEED) return opts.walk_speed;
         if (id == HOS_OPT_CHEAT_HEARTS) return menu_heart_protection();

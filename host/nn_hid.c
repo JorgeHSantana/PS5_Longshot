@@ -991,6 +991,44 @@ void hos_filter_stick(int16_t x, int16_t y, int zone, int32_t out[2]) {
     out[1] = active ? b : 0;
 }
 
+/* Apply the Insert menu's Stick range to a pad's two sticks (left x, y, right x, y), for XInput and SDL, once, after the
+   dead zone: percent of the pad's own range at which a stick counts as fully tilted, 70 to 100 (100, the default: as the
+   pad reports it). Some pads read short of +-32767 on an ordinary full push (a Switch Pro Controller over Bluetooth
+   through SDL read 89 to 98%; why is not known), and the game needs nearly the whole way for some moves: Link rolls only
+   from a full tilt and otherwise keeps running (#88). The player lowers it for such a pad; 90% was enough there.
+   Each stick is scaled along its own direction, and one past an axis's end is brought back along it, so the angle the
+   player holds is the angle the game gets. The left stick as the pad gave it is kept for stick_witness. */
+static volatile LONG pad_left_raw[2];
+void hos_stick_range(int percent, int32_t v[4]) {
+    if (v[0] || v[1])   /* (a second pad at rest leaves the moving one's, for the log's "the pad gave") */
+        InterlockedExchange(&pad_left_raw[0], v[0]), InterlockedExchange(&pad_left_raw[1], v[1]);
+    if (percent < 70 || percent >= 100) return;
+    for (int s = 0; s < 4; s += 2) {
+        const int64_t x = v[s], y = v[s + 1], ax = x < 0 ? -x : x, ay = y < 0 ? -y : y, top = ax > ay ? ax : ay;
+        /* (past an axis's end at this range: from the pad's own values, so that rounding never gives less than they were) */
+        const int past = top * 100 > (int64_t)32767 * percent;
+        v[s] = (int32_t)(past ? x * 32767 / top : x * 100 / percent);
+        v[s + 1] = (int32_t)(past ? y * 32767 / top : y * 100 / percent);
+    }
+}
+
+/* HOS_STICK_LOG=1: a press of Action with the left stick held, as the game got it and as the pad gave it, in percent of
+   the whole way: what a report of a roll that became a run needs (#88). The first 300 of a run, a press each. */
+static void stick_witness(uint64_t buttons, const int32_t stick[4]) {
+    static uint64_t was;
+    static int logged, on = -1;
+    if (on < 0) on = env_on("HOS_STICK_LOG");
+    if (!on) return;
+    const uint64_t pressed = buttons & ~was & (1ULL << B_A);
+    was = buttons;
+    if (!pressed || logged >= 300 || (!stick[0] && !stick[1])) return;
+    const int32_t rx = (int32_t)pad_left_raw[0], ry = (int32_t)pad_left_raw[1];
+    logged++;
+    hos_log("hid: Action pressed with the left stick at %d, %d (%.0f%% of the way); the pad gave %d, %d (%.0f%%), Stick range %d%%",
+            stick[0], stick[1], sqrt((double)stick[0] * stick[0] + (double)stick[1] * stick[1]) * 100 / 32767, (int)rx, (int)ry,
+            sqrt((double)rx * rx + (double)ry * ry) * 100 / 32767, rx_option(HOS_OPT_STICK_RANGE, 100));
+}
+
 static volatile int xinput_pads_now;   /* (xinput_poll: the controllers XInput has, while it is polled) */
 int hos_xinput_pads(void) { return xinput_pads_now; }   /* (host/prompts.c: Auto's face) */
 
@@ -1054,6 +1092,7 @@ static void xinput_poll(int64_t now, uint64_t *out_raw, int32_t s[4]) {
         const int zone = rx_option(11, 0);   /* (the menu's Stick dead zone) */
         hos_filter_stick(thumb[0], thumb[1], zone, v);
         hos_filter_stick(thumb[2], thumb[3], zone, v + 2);
+        hos_stick_range(rx_option(HOS_OPT_STICK_RANGE, 100), v);
         if (rx_option(16, 0)) v[2] = -v[2];
         if (rx_option(17, 0)) v[3] = -v[3];
         stick_max(s, v);
@@ -1625,6 +1664,7 @@ static void npad_states(Ctx *c) {
         const int synthetic_sprint = buttons >> B_SPRINT & 1;
         buttons &= ~(1ULL << B_SPRINT);
         hos_hid_buttons = buttons;   /* (cheats.c: the cheats' button conditions) */
+        stick_witness(buttons, stick);
         const int menu_open = rx_option(1, 0);
         const uint64_t enabled = (uint32_t)rx_option(HOS_OPT_HOLD_TOGGLE, 0) &
                                  ~((1ULL << B_PLUS) | (1ULL << B_MINUS));

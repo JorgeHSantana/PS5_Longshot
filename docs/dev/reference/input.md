@@ -217,6 +217,7 @@ the game or copied for a recording.
 | `HOS_NO_SDL=1` | No SDL controllers, XInput only |
 | `HOS_XINPUT=1` | Poll XInput as well as SDL |
 | `HOS_SWITCH2=0` | Leave a Switch 2 Pro Controller to a bridge program |
+| `HOS_STICK_LOG=1` | Log each press of Action with the left stick held (the first 300): the stick as the game got it and as the pad gave it, and the Stick range row. For reports of a roll that became a run (#88) |
 | `HOS_INPUT_BACKGROUND` | Controllers count in the background (1) or never (0), over the menu |
 | `HOS_RUMBLE_BACKEND` | `renhdrum`: also a DualSense whose connection SDL can't tell, through RenHDrum; `motors`: every pad's motors; `hd`: no RenHDrum (a Switch pad its own HD rumble) |
 | `HOS_MOUSE_NATIVE`, `HOS_MOUSE_SENS`, `HOS_MOUSE_INVERT_X`, `HOS_MOUSE_INVERT_Y` | Mouse camera settings over the menu |
@@ -230,6 +231,7 @@ Scripted input for test runs (`HOS_INPUT_SCRIPT`, `HOS_INPUT_LIVE`) is in [devel
 |---|---|
 | `tests/test_stick_rest.py`, `tests/test_stick_inversion_rest.py`, `tests/test_stick_dead_zone.py` | Rest detection, inversion and dead zones |
 | `tests/test_trigger_rest.py` | A trigger presses only once seen let go; one held for good never does |
+| `tests/test_stick_range.py` | The Stick range row and its scaling, its option number against the enums' values |
 | `tests/test_display_pointer.py` | Pointer sampling and consumption on both hosts, DPI ratios, concurrent samples |
 | `tests/test_menu_hit.py`, `tests/test_game_menu_mouse_buttons.py` | Menu hit regions and the game-menu mailbox |
 | `tests/test_steam_pads.py` | Steam's ignore list |
