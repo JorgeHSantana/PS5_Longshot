@@ -21,6 +21,9 @@ export const BADGES = [
   { test: /shown where DLSS runs/i, label: 'Where DLSS runs', shown: true },
   { test: /\bshown with NVIDIA DLSS\b/i, label: 'With NVIDIA DLSS', shown: true },
   { test: /\bshown while Frame generation is on\b/i, label: 'While Frame generation is on', shown: true },
+  { test: /\bshown while Dynamic resolution is Off\b/i, label: 'While Dynamic resolution is Off', shown: true },
+  { test: /\bshown unless the Upscaler fixes the render size\b/i, label: 'Unless the Upscaler fixes the render size', shown: true },
+  { test: /\bshown while Frame generation is Fixed\b/i, label: 'While Frame generation is Fixed', shown: true },
   { test: /\bshown with a CRT filter on\b/i, label: 'With a CRT filter on', shown: true },
   { test: /\bshown with HUD layout set to Custom and no `HOS_WIDE_UI` override\b/i, label: 'Custom HUD layout without a HOS_WIDE_UI override', shown: true },
   { test: /while HDR is on/i, label: 'While HDR is on', shown: true },
@@ -273,7 +276,14 @@ export function readGraphicsSettings(page, menu) {
     // (gpu/vk/menu/sim_turf.cpp: the row that opens the area's simulated-turf page, whose values sim_turf_settings.ini keeps)
     const simTurfPage = row.key === '@Simulated turf' && row.name === 'Simulated turf' && row.value === 'nullptr' &&
       row.kind === 'menu::Kind::Page' && row.opens === 'sim_turf_settings';
-    if (!row.value.startsWith('&opts.') && !row.textField && !row.monitorSelector && !hudReset && !reshadeAction && !reshadeFile && !simTurfPage)
+    // (Dynamic resolution, gpu/vk/menu/upscaler.cpp, and Frame generation multiplier, framegen.cpp: views of opts.resolution
+    // and opts.framegen, which they set; they save nothing themselves)
+    const uiMirror = (row.key === 'dynamic_resolution' && row.name === 'Dynamic resolution' && row.value === '&dyn_res_ui' &&
+      row.kind === 'menu::Kind::Toggle') ||
+      (row.key === 'frame_generation_multiplier' && row.name === 'Frame generation multiplier' && row.value === '&fg_mult_ui' &&
+      row.kind === 'menu::Kind::Slider');
+    if (!row.value.startsWith('&opts.') && !row.textField && !row.monitorSelector && !hudReset && !reshadeAction && !reshadeFile && !simTurfPage &&
+        !uiMirror)
       throw new Error(`table/menu graphics coverage mismatch at ${row.name}`);
     if (row.section !== groups.at(-1).section) {
       if (!titles.has(row.section) || groups.some(group => group.section === row.section)) throw new Error(`table/menu graphics order mismatch at ${row.name}`);

@@ -46,6 +46,8 @@ static void recomp_store64(Ctx *c, uint64_t a, uint64_t v) { (void)c; memcpy(mem
 typedef void (*A64Fn)(Ctx *);
 A64Fn a64_lookup(uint64_t addr);
 static void hos_log(const char *f, ...) { (void)f; }
+#define HOS_LOG_TRACE 0
+static void hos_log_at(int level, const char *f, ...) { (void)level; (void)f; }
 static int64_t hos_now_ns(void) { return 0; }
 /* (the Insert menu's rows, host/rx_backend.c rx_option: the Graphics tab's HUD layout, 71, as fixture_hud_layout says) */
 int fixture_hud_layout, fixture_wide_menus;

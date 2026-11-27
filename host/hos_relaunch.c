@@ -190,6 +190,8 @@ void hos_close_finish(void) {
     hos_pad_speaker_shutdown();
     void hos_fs_wait_writes(void);   /* (nn_fs.c: a file the game is writing, up to 3 s) */
     hos_fs_wait_writes();
+    void hos_sdl_vibration_shutdown(void);
+    hos_sdl_vibration_shutdown();
     hos_log("stop: close work done (a file the game was writing waited for, at most 3 s)");
     hos_ab_end();   /* (longshot) HOS_AB: the sides' sums in the log (host/hos_ab.c) */
     hos_log_flush();

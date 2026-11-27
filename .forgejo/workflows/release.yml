@@ -20,8 +20,8 @@
 #    nightlies past the newest 20 that are 5 days old or more. Nothing is committed back to the repository.
 #
 # Secret (docs/dev/reference/releases.md, One-time setup): RELEASE_SIGNING_KEY_SEALED (the release key's private PEM, sealed:
-# scripts/ci_secret.sh). version and publish run only on the runner kept for them (runs-on: deploy), which alone has the
-# seal.key that opens it; the builds run on the release runners (docs/dev/reference/ci.md, Runners). Releases are made with the job's
+# scripts/ci_secret.sh). version and publish run on the runner kept for them (runs-on: deploy); publish gets the seal.key
+# that opens it from the seal broker, which hands it to a run of main or a v* tag only; the builds run on the release runners (docs/dev/reference/ci.md, Runners). Releases are made with the job's
 # own token (forgejo.token, passed to Tooling's scripts/release.py as RELEASE_TOKEN; no secret, no bot account): on a push to this repository Forgejo gives it write access to this repository's every
 # unit (routers/api/v1/permissions/repo_access.go), so it may make, upload to, publish and delete releases and delete tags
 # here, and nowhere else. No `permissions:` key: Forgejo 17 ignores it (with a warning). Variable: RELEASE_UPLOAD_API (passed to release.py as FORGEJO_UPLOAD_API; Forgejo reserves the FORGEJO_ prefix for variables), the
@@ -151,12 +151,13 @@ jobs:
     name: Sign and publish
     needs: [version, linux, windows]
     if: needs.version.outputs.tag != ''
-    runs-on: deploy  # (only the runner kept for deploys and releases: it alone has seal.key, docs/dev/reference/ci.md)
+    runs-on: deploy  # (the runner kept for deploys and releases, on the seal broker's network; docs/dev/reference/ci.md)
     container:
       image: ghcr.io/catthehacker/ubuntu:act-24.04
-      volumes: ['/magicbean-secrets:/run/magicbean-secrets:ro']   # (seal.key; a runner that doesn't allow it mounts nothing)
+    enable-openid-connect: true   # (the ID token the seal broker checks: this job only)
     timeout-minutes: 60
     env:
+      SEAL_BROKER_PIN: ${{ vars.SEAL_BROKER_PIN }}
       TAG: ${{ needs.version.outputs.tag }}
       REF: ${{ needs.version.outputs.ref }}
       RELEASE_TOKEN: ${{ forgejo.token }}
@@ -219,7 +220,7 @@ jobs:
         run: |
           python3 -I "$RELEASE_PY" sums files/* --out files/SHA256SUMS
           umask 077
-          # (the key is sealed: only this runner's seal.key opens it, scripts/ci_secret.sh)
+          # (the key is sealed: only the seal broker's seal.key opens it, for main and v* tags, scripts/ci_secret.sh)
           printf '%s' "$SEALED" | scripts/ci_secret.sh unseal > "$RUNNER_TEMP/key.pem"
           python3 -I "$RELEASE_PY" sign files/SHA256SUMS --key "$RUNNER_TEMP/key.pem" --out files/SHA256SUMS.sig
           rm -f "$RUNNER_TEMP/key.pem"

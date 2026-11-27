@@ -91,6 +91,9 @@ int snap_render(int, int v) { return v; }
 bool full_scale(int) { return false; }
 int step_engine(int, int, unsigned) { return 0; }
 void step_render(int up, int v, int dir, int* u, int* r) { *u = up, *r = v + dir; }
+int engine(int up) { return up; }   // (#2383's stepped Render resolution: not a row here)
+void apply_fixed_stop(int up, int, int stop, int* u, int* r) { *u = up, *r = stop; }
+void step_fixed_render(int up, int v, int dir, int* u, int* r) { *u = up, *r = v + dir; }
 }
 namespace mr { constexpr int kMax = 8; }
 namespace i18n { inline void set_game_language(int) {} }

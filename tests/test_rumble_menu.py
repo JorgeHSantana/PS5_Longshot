@@ -87,6 +87,9 @@ int snap_render(int, int v) { return v; }   // (the slider)
 bool full_scale(int) { return false; }   // (only the game's own upscaler here)
 int step_engine(int, int, unsigned) { return 0; }   // (the Upscaler by engine)
 void step_render(int up, int v, int dir, int* u, int* r) { *u = up, *r = v + dir; }
+int engine(int up) { return up; }   // (#2383's stepped Render resolution: not a row here)
+void apply_fixed_stop(int up, int, int stop, int* u, int* r) { *u = up, *r = stop; }
+void step_fixed_render(int up, int v, int dir, int* u, int* r) { *u = up, *r = v + dir; }
 }
 namespace mr { constexpr int kMax = 8; }
 /* (the Game language row's hook in set_row: language.txt, not written here) */
@@ -171,7 +174,8 @@ int main() {
 def wheel_free(menu):
     """the wheel scrolls the rows, the Controls page and the lists, and changes no value, selection or tab"""
     tick = menu[menu.index("void menu_tick() {"):]
-    if not re.search(r"if \(ptr\.wheel && drag_row < 0\) wheel_rows\[cur_tab\] \+= ptr\.wheel, changed = true;", tick):
+    # (not while a slider is dragged: drag_state, #2383's commit-on-release drag)
+    if not re.search(r"if \(ptr\.wheel && !drag_state\.active\(\)\) wheel_rows\[cur_tab\] \+= ptr\.wheel, changed = true;", tick):
         raise SystemExit("FAIL: the wheel on the tabs does not scroll the rows")
     if "if (ptr.wheel) wheel_rows[kControlsSlot] += ptr.wheel" not in tick:
         raise SystemExit("FAIL: the wheel on the Controls page does not scroll it")

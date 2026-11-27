@@ -36,6 +36,7 @@ static struct {
     void *PadHasSensor, *PadSensorEnable, *PadSensorData;   /* (motion: optional, NULL in an SDL without them) */
     void *PadVendor, *PadProduct, *PadSteamHandle, *SetHintPriority;   /* (Steam's stand-in pads: optional, host/steam_pads.h; PadProduct also for vibration.h's Steam Controller (2026)) */
     void *JoystickGUID, *PadMapping;   /* (optional connection diagnostics: no serial number or device path) */
+    void *JoystickVirtual;   /* SDL3, or SDL2 by device index at open */
     void *PadWireless;   /* (optional: a pad's transport, SDL_GetJoystickConnectionState) */
     /* (optional, host/pad_sdl.c's vibration: an Xbox pad's trigger motors; a pad's HID device, written beside SDL for a
        DualSense's Bluetooth haptics. Without them those pads keep their two motors) */
@@ -84,6 +85,7 @@ static int get_all(HMODULE m, int three) {
     GET2(PadRumble, "SDL_RumbleGamepad", "SDL_GameControllerRumble");
     /* (SDL2 2.0.12 and 2.0.16 on, SDL3 3.2 on: without them every pad keeps the motor rumble) */
     *(FARPROC *)&f.PadType = GetProcAddress(m, three ? "SDL_GetGamepadType" : "SDL_GameControllerGetType");
+    *(FARPROC *)&f.JoystickVirtual = GetProcAddress(m, three ? "SDL_IsJoystickVirtual" : "SDL_JoystickIsVirtual");
     *(FARPROC *)&f.PadEffect = GetProcAddress(m, three ? "SDL_SendGamepadEffect" : "SDL_GameControllerSendEffect");
     /* (longshot, vibration: SDL2 2.0.14 / 2.0.18 / 2.24 on, every SDL3) */
     *(FARPROC *)&f.PadTriggers = GetProcAddress(m, three ? "SDL_RumbleGamepadTriggers" : "SDL_GameControllerRumbleTriggers");
@@ -1136,6 +1138,11 @@ void hos_sdl_pad_rumble(void *pad, uint16_t low, uint16_t high, uint32_t ms) {
     else CALL(int (*)(void *, uint16_t, uint16_t, uint32_t), PadRumble)(pad, low, high, ms);
 }
 int hos_sdl_pad_type(void *pad) { return f.PadType ? CALL(int (*)(void *), PadType)(pad) : 0; }
+int hos_sdl_pad_virtual(int32_t id, int open_index) {
+    if (!f.JoystickVirtual) return 0;
+    if (version == 3) return CALL(_Bool (*)(uint32_t), JoystickVirtual)((uint32_t)id);
+    return CALL(int (*)(int), JoystickVirtual)(open_index) != 0;
+}
 int hos_sdl_pad_has_effect(void) { return f.PadEffect != NULL; }
 int hos_sdl_pad_effect(void *pad, const void *data, int size) {
     if (!f.PadEffect) return 0;
