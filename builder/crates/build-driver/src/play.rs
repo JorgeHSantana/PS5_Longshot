@@ -504,7 +504,7 @@ pub fn check(
 
 fn rebuild_reason(now: &Stamp, folder: &Path, get: impl Fn(&str) -> Option<String>) -> Option<RebuildReason> {
     let program = game_program(folder);
-    let Ok(rec) = Record::read(&folder) else { return Some(RebuildReason::NotBuilt) };
+    let Ok(rec) = Record::read(folder) else { return Some(RebuildReason::NotBuilt) };
     if !program.is_file() {
         return Some(RebuildReason::NotBuilt);
     }
@@ -522,8 +522,8 @@ fn rebuild_reason(now: &Stamp, folder: &Path, get: impl Fn(&str) -> Option<Strin
         return Some(RebuildReason::Mods);
     }
     let windows = program.extension().is_some_and(|e| e == "exe");
-    let level = crate::folder::folder_compile_shaders(&folder).unwrap_or(crate::CompileShaders::Most);
-    let shaders_dir = program.parent().unwrap_or(&folder);
+    let level = crate::folder::folder_compile_shaders(folder).unwrap_or(crate::CompileShaders::Most);
+    let shaders_dir = program.parent().unwrap_or(folder);
     if crate::shaders::would_prepare(shaders_dir, windows, level, get) {
         return Some(RebuildReason::Shaders);
     }
