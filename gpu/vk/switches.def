@@ -34,6 +34,7 @@ SW(HOS_CRASH_MINIDUMP, diag, bool, "off: no minidump", "=1 has a worker made at 
 SW(HOS_CRASH_TEST, diag, string, "off", "Crashes the game on purpose (=start, or after <seconds>) to see its crash record and the builder's crash window.")
 SW(HOS_CV_SIGNAL_ALWAYS, kill, bool, "off: a signal with no waiter returns at once", "SignalConditionVariable always takes its lock and wakes, as before.")
 SW(HOS_DAV1D_THREADS, hw, int, "dav1d's own (one per logical core); 2 on a PC with 4 or fewer", "Sets dav1d's decoder thread count.")
+SW(HOS_DECK_IMU, kill, bool, "on: the Steam Deck's own gyroscope and accelerometer, read from the controller when no open pad has any", "=0: no gyro on a Deck started from Steam, where SDL opens only Steam Input's stand-in pad, which has no sensors.")
 SW(HOS_DISCORD, kill, bool, "on: the Discord presence thread starts", "=0 starts no Discord rich presence thread at all.")
 SW(HOS_DISCORD_APP_ID, player, string, "the options file's discord_app_id=, else the built-in id", "Sets the Discord application id used for rich presence, over the options file's.")
 SW(HOS_DISPLAY_MODES, diag, string, "the screen's own display modes", "Gives a list of WxH display modes in place of the screen's, to check the menu's size rows for a screen you lack.")
