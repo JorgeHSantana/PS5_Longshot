@@ -119,8 +119,12 @@ They keep one more, `release-rust-target-<platform>-dist-<target>-<renhdrum.py a
 of the shipped builder's one compile (`$RUNNER_TEMP/rust-work/target`), restored right before it and saved right after
 it, by the same runs only. Another Cargo.lock restores the newest entry for the same platform, profile, target and
 pinned Rust (`scripts/renhdrum.py` pins it); another Rust starts cold. Cargo compiles again whatever its fingerprints
-find changed, which is every crate of the checkout's own (a fresh checkout's files are all new) and any crate whose
-version or flags changed; the third-party crates' compiled code is reused. A cold compile of the builder takes about
+find changed: any crate whose version or flags changed, and a crate of the checkout's own whose files changed; the
+third-party crates' compiled code is reused. Cargo takes a workspace crate's files' times for that, and a fresh checkout
+makes every file new, so the build records each tracked file's SHA-256 in the target folder before it is saved
+(`scripts/ci_source_times.py record`), and after a restore dates the files whose content is the same 2000-01-01
+(`apply`): only the workspace's crates whose files changed compile again. By content, not by commit dates: a commit
+merged with a date older than the cached build is still compiled. A cold compile of the builder takes about
 17 minutes on the release runner's 2 cores. Warm, only the workspace's crates and the link are left; until the job
 logs show it, expect roughly half that.
 

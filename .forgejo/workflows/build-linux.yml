@@ -130,6 +130,12 @@ jobs:
           path: ${{ runner.temp }}/rust-work/target
           key: release-rust-target-linux-dist-x86_64-unknown-linux-gnu-${{ hashFiles('scripts/renhdrum.py', 'Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: release-rust-target-linux-dist-x86_64-unknown-linux-gnu-${{ hashFiles('scripts/renhdrum.py', 'Cargo.toml') }}-
+      # (cargo takes a workspace crate's files' times for whether it changed, and the checkout made every file new: files
+      # whose SHA-256 is what the cached build recorded are dated 2000-01-01, so only the crates whose files changed
+      # compile again; scripts/ci_source_times.py, docs/dev/reference/ci.md, The release's cache)
+      - name: The checkout's unchanged files, as the cached build saw them
+        if: steps.rust-target.outputs.cache-matched-key != ''
+        run: python3 -I scripts/ci_source_times.py apply "$RUNNER_TEMP/rust-work/target"
       # (the program this release ships, the dist profile, compiled once, before it carries anything: linked by tools.lock's
       # clang (lld) against tools.lock's sysroot, glibc 2.35, the game's floor, which the build checks. Until its pack is attached
       # it is this job's tool: it installs the tools, makes the third-party objects from the checkout (--root), packs what
@@ -140,6 +146,9 @@ jobs:
           python3 -I scripts/longshot_builder.py build --target linux --profile dist --cache "$RUNNER_TEMP/rust"
           --out "$RUNNER_TEMP/host/longshot-builder" --jobs "$(nproc)"
           --linker "$RUNNER_TEMP/link-tools/llvm/bin/clang" --sysroot "$RUNNER_TEMP/link-tools/sysroot"
+      - name: The checkout's files, recorded for the next run's build
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.rust-target.outputs.cache-hit != 'true'
+        run: python3 -I scripts/ci_source_times.py record "$RUNNER_TEMP/rust-work/target"
       - name: Save the shipped builder's compiled Rust (main's and tags' runs only)
         if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.rust-target.outputs.cache-hit != 'true'
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

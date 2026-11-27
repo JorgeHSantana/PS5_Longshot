@@ -126,6 +126,14 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 build = workflow.index("longshot_builder.py build --target")
                 self.assertLess(workflow.index("id: rust-target"), build)
                 self.assertLess(build, workflow.index("key: release-rust-target-", workflow.index("id: rust-target") + 300))
+                # (the checkout's unchanged files dated before the build, by content (scripts/ci_source_times.py), and
+                # its files recorded into the target folder before it is saved)
+                apply = workflow.index('ci_source_times.py apply "$RUNNER_TEMP/rust-work/target"')
+                self.assertLess(workflow.index("id: rust-target"), apply)
+                self.assertLess(apply, build)
+                record = workflow.index('ci_source_times.py record "$RUNNER_TEMP/rust-work/target"')
+                self.assertLess(build, record)
+                self.assertLess(record, workflow.index("name: Save the shipped builder's compiled Rust"))
                 upload = workflow.index("name: " + artifact)
                 for made in ("dev release files", "dev release recomplauncher"):
                     self.assertLess(workflow.index(made), upload)

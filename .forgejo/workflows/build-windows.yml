@@ -180,11 +180,20 @@ jobs:
           path: ${{ runner.temp }}/rust-work/target
           key: release-rust-target-windows-dist-x86_64-pc-windows-gnullvm-${{ hashFiles('scripts/renhdrum.py', 'Cargo.toml') }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: release-rust-target-windows-dist-x86_64-pc-windows-gnullvm-${{ hashFiles('scripts/renhdrum.py', 'Cargo.toml') }}-
+      # (cargo takes a workspace crate's files' times for whether it changed, and the checkout made every file new: files
+      # whose SHA-256 is what the cached build recorded are dated 2000-01-01, so only the crates whose files changed
+      # compile again; scripts/ci_source_times.py, docs/dev/reference/ci.md, The release's cache)
+      - name: The checkout's unchanged files, as the cached build saw them
+        if: steps.rust-target.outputs.cache-matched-key != ''
+        run: python -I scripts/ci_source_times.py apply "$RUNNER_TEMP/rust-work/target"
       # (the program this release ships, the dist profile, compiled once, before it carries anything)
       - name: longshot-builder-<version>-windows-x64.exe, before its pack
         run: >-
           python -I scripts/longshot_builder.py build --target windows --profile dist --llvm-mingw "$LLVM_MINGW"
           --cache "$RUNNER_TEMP/rust" --out "$RUNNER_TEMP/longshot-builder.exe"
+      - name: The checkout's files, recorded for the next run's build
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.rust-target.outputs.cache-hit != 'true'
+        run: python -I scripts/ci_source_times.py record "$RUNNER_TEMP/rust-work/target"
       - name: Save the shipped builder's compiled Rust (main's and tags' runs only)
         if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && steps.rust-target.outputs.cache-hit != 'true'
         uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
