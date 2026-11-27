@@ -255,12 +255,18 @@ pub fn profile_for(
 
 /// main.rs's build or update with options `o`, said in a format on stdout and in the logs, every event told to an
 /// observer when one is given: the error's text when it stopped.
-pub type RunBuild = fn(&BuildOptions, Format, Option<build_core::report::Observer>) -> Result<(), String>;
+pub type RunBuild = fn(&BuildOptions, Format, Option<build_core::report::Observer>, bool) -> Result<(), String>;
 
 /// [`RunBuild`] with options `o` in `format`, shown to a person (progress.rs's [`crate::progress::UserUi`]) when this
 /// run's output is `user`: `text` first (a long build's sentence, when it is one), then each step and how far. The
 /// error's text when it stopped (said by the caller).
-pub fn shown_build(o: &BuildOptions, run_build: RunBuild, format: Format, text: Option<&str>) -> Result<(), String> {
+pub fn shown_build(
+    o: &BuildOptions,
+    run_build: RunBuild,
+    format: Format,
+    text: Option<&str>,
+    launching: bool,
+) -> Result<(), String> {
     use std::sync::{Arc, Mutex};
     let windows = crate::output::chosen().windows();
     let ui = Arc::new(Mutex::new(crate::progress::open()));
@@ -277,7 +283,7 @@ pub fn shown_build(o: &BuildOptions, run_build: RunBuild, format: Format, text: 
             shown.lock().unwrap_or_else(|p| p.into_inner()).step(step, *fraction);
         }
     });
-    let done = run_build(o, format, Some(observer));
+    let done = run_build(o, format, Some(observer), launching);
     if done.is_ok() {
         ui.lock().unwrap_or_else(|p| p.into_inner()).done();
     }
@@ -329,7 +335,7 @@ impl Host for Player<'_> {
             _ => crash::build_report::REBUILD,
         };
         crate::after::build_began(&o, kind);
-        let done = shown_build(&o, self.run_build, crate::output::chosen().format(), text);
+        let done = shown_build(&o, self.run_build, crate::output::chosen().format(), text, true);
         crate::after::build_ended(&done, self.release, self.builder);
         done
     }
@@ -367,6 +373,8 @@ impl Host for Player<'_> {
             if let Some(ch) = &mut channel {
                 ch.child = None;
             }
+            build_core::report::Reporter::stdout(crate::output::chosen().format())
+                .send(build_core::report::Event::GameStarted);
             run = Some((pid, crate::after::watch(pid)));
         });
         let status = match status {
@@ -611,6 +619,8 @@ pub fn run_with(
         let since = if std::mem::take(&mut first) { t.elapsed() } else { took };
         let said = stale.map_or("up to date", |s| s.why());
         eprintln!("longshot: fast check: {said} ({:.1} ms)", since.as_secs_f64() * 1000.0);
+        build_core::report::Reporter::stdout(crate::output::chosen().format())
+            .send(build_core::report::Event::PlayPlan { rebuild: stale.map(RebuildReason::why) });
     };
     let status = match play::play(&version, &profile, &p, builder, &rest, &build_driver::env, &mut host, &mut checked) {
         Played::Exited(status) => status,

@@ -41,13 +41,19 @@ pub struct Places {
 impl Places {
     /// The places of a build of `o`.
     pub fn of(o: &BuildOptions) -> Result<Places> {
-        let root = layout::tree_root(o.root.as_deref(), env)?;
+        Self::resolve(o, |_, _| {})
+    }
+
+    /// Determine the work folder and worker count before unpacking the tools.
+    pub fn resolve(o: &BuildOptions, before_tools: impl FnOnce(&Work, usize)) -> Result<Places> {
         let out = layout::game_folder(&o.out);
         let cache = layout::cache_root(crate::env_os);
         let work = o.work.clone().unwrap_or_else(|| layout::default_work(&cache, &out));
         let work = Work::at(std::path::absolute(&work).unwrap_or(work));
         let stores = Stores { root: layout::store_root(o.store.as_deref(), &cache, env) };
         let jobs = build_core::jobs::chosen(o.jobs, env("LONGSHOT_JOBS").as_deref())?;
+        before_tools(&work, jobs);
+        let root = layout::tree_root(o.root.as_deref(), env)?;
         Ok(Places { root, out, work, stores, jobs })
     }
 }
@@ -316,6 +322,57 @@ impl Clock {
     }
 }
 
+/// Announce the work before the first stage. The compiler refines its share after it checks
+/// the object cache, and the shader stage refines its estimate once the GPU reports progress.
+pub fn report_plan(o: &BuildOptions, work: &Work, jobs: usize, launching: bool, r: &Reporter) -> bool {
+    let carried = crate::sources::embedded();
+    let unpack = o.root.is_none()
+        && env("LONGSHOT_ROOT").is_none_or(|root| root.trim().is_empty())
+        && !carried.is_empty()
+        && crate::sources::unpacks_now(carried, &layout::cache_root(crate::env_os));
+    let windows = cfg!(windows) || env("RX_TARGET").is_some_and(|target| target.eq_ignore_ascii_case("windows"));
+    let shaders = shaders::skipped(o.prepare_shaders, windows, env).is_none();
+    let cpu = (24.0 / jobs.max(1) as f64).powf(0.85);
+    let prior = times::last(&work.times(), if o.update { "update" } else { "build" });
+    let time = |stage, default| {
+        prior
+            .as_ref()
+            .and_then(|build| build.stages.get(stage))
+            .copied()
+            .filter(|time| time.is_finite() && *time >= 1.0)
+            .unwrap_or(default)
+    };
+    let compile = prior
+        .as_ref()
+        .and_then(|build| {
+            let (changed, total) = build.compiled;
+            (total > 0 && changed > 0 && build.compile_seconds.is_finite()).then(|| {
+                let uncached = (changed as f64 / total as f64).max(0.03);
+                (build.compile_seconds / uncached).clamp(20.0 * cpu, 1800.0 * cpu)
+            })
+        })
+        .unwrap_or(305.0 * cpu);
+    let mut plan = Vec::new();
+    if unpack {
+        plan.push((Stage::Tools, 12.0));
+    }
+    plan.extend([
+        (Stage::Read, time("read", 76.0)),
+        (Stage::Lift, time("lift", 57.0 * cpu)),
+        // Use a full compile baseline until the compiler knows how many objects it needs.
+        (Stage::Compile, compile),
+        (Stage::Finish, time("finish", 66.0)),
+    ]);
+    if shaders {
+        plan.push((Stage::Shaders, time("shaders", 311.0)));
+    }
+    if launching {
+        plan.push((Stage::Start, 2.0));
+    }
+    r.plan(plan);
+    unpack
+}
+
 /// The build `o` asks for, in `p`, by `st`'s stages, said through `r`.
 pub fn build(o: &BuildOptions, p: &Places, st: &Stages, r: &Reporter) -> Result<Built> {
     let mut clock = Clock::new();
@@ -434,6 +491,9 @@ pub fn build(o: &BuildOptions, p: &Places, st: &Stages, r: &Reporter) -> Result<
         &gate,
     );
     let _stop_early = StopEarly(early.clone());
+    if let Some(early) = early.clone() {
+        r.parallel_shaders(move || early.progress());
+    }
     compile_opts.early = early.as_ref().map(shaders::renderer_hook);
     let (lifted, compiled, romfs, made) = std::thread::scope(|s| -> Result<_> {
         // (the romfs's index, then the finish's assets from it (texts, prompts, shader list, pipeline lists, icon):
@@ -636,21 +696,9 @@ pub fn build(o: &BuildOptions, p: &Places, st: &Stages, r: &Reporter) -> Result<
     record.stamp = o.stamp.clone();
     record.features = folder::features(&features);
     record.write(&p.out)?;
-    r.progress(1.0);
     clock.done("finish");
     let total = clock.t0.elapsed().as_secs_f64();
     let compile_seconds = clock.stages.get("compile").copied().unwrap_or(0.0);
-    let previous = times::record(
-        &p.work.times(),
-        BuildTime {
-            when: times::now(),
-            kind: if o.update { "update" } else { "build" }.into(),
-            compiled: (compiled.compiled, compiled.units),
-            compile_seconds,
-            total_seconds: total,
-            stages: clock.stages.clone(),
-        },
-    );
     // (the rest of the per-user folders' clean-up: what this build's own folders do not need, nothing it reads)
     let cache = layout::cache_root(crate::env_os);
     // (only in the builder's own cache: a launcher's own folder (LONGSHOT_CACHE, --cache) may hold anything)
@@ -668,6 +716,30 @@ pub fn build(o: &BuildOptions, p: &Places, st: &Stages, r: &Reporter) -> Result<
     // (the cache's one budget: the least recently used of every kind let go while it is over, crate::storage)
     crate::storage::prune_here(Some(&p.stores.root), r);
     let stages_text: Vec<String> = clock.stages.iter().map(|(k, v)| format!("{k} {}", times::clock(*v))).collect();
+    r.progress(1.0);
+
+    // ---- the shaders (after the times: they stay comparable, without a GPU's minutes that can be switched off)
+    let shader_start = Instant::now();
+    let prepared = match shaders::skipped(o.prepare_shaders, windows, env) {
+        Some(why) => shaders::not_prepared(r, why),
+        None => early.as_ref().and_then(|e| e.finish(r)).unwrap_or_else(|| {
+            shaders::prepare_unless_kept(&exe, exe.parent().unwrap_or(&p.out), windows, level, p.jobs, env, r)
+        }),
+    };
+    if prepared && shader_start.elapsed().as_secs_f64() >= 1.0 {
+        clock.stages.insert("shaders".into(), shader_start.elapsed().as_secs_f64());
+    }
+    let previous = times::record(
+        &p.work.times(),
+        BuildTime {
+            when: times::now(),
+            kind: if o.update { "update" } else { "build" }.into(),
+            compiled: (compiled.compiled, compiled.units),
+            compile_seconds,
+            total_seconds: total,
+            stages: clock.stages.clone(),
+        },
+    );
     r.log(format!(
         "the build took {} ({}){}",
         times::clock(total),
@@ -675,18 +747,6 @@ pub fn build(o: &BuildOptions, p: &Places, st: &Stages, r: &Reporter) -> Result<
         previous.map_or(String::new(), |p| format!(", the last one {}", times::clock(p)))
     ));
 
-    // ---- the shaders (after the times: they stay comparable, without a GPU's minutes that can be switched off)
-    match shaders::skipped(o.prepare_shaders, windows, env) {
-        Some(why) => {
-            shaders::not_prepared(r, why);
-        }
-        None => match early.as_ref().and_then(|e| e.finish(r)) {
-            Some(_) => {}
-            None => {
-                shaders::prepare_unless_kept(&exe, exe.parent().unwrap_or(&p.out), windows, level, p.jobs, env, r);
-            }
-        },
-    }
     r.send(Event::Done {
         folder: p.out.display().to_string(),
         seconds: total,

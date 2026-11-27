@@ -53,6 +53,10 @@ A command line it does not take (an argument that is not valid Unicode among the
 |---|---|---|
 | `stage` | `stage`, `text` | A step begins. `text` is the builder's sentence for it. |
 | `progress` | `stage`, `fraction` (0 to 1, the step's own), `overall` (0 to 1, the whole build's) | As a step goes. |
+| `build_plan` | `stages` (ordered array of stage IDs) | The builder's plan before work starts. It lists tool unpacking and shader preparation when expected, and `start` for a build triggered by Play or Reload. Cache checks during the build can shorten stages. |
+| `build_progress` | `fraction` (0 to 1), `seconds` (estimated seconds left) | The estimate across the whole plan. It starts at zero, updates when the builder learns the work or sees its progress, and includes the estimated shader wait. A standalone build reports 1 before `done`. A play-triggered build still has a handoff after `done`. |
+| `play_plan` | `rebuild` (reason, or `null`) | The fast check found whether Play or a game-requested reload needs a build. A rebuild is followed by `build_plan` if build setup succeeds. |
+| `game_started` | — | The builder successfully spawned the game, completing the handoff for Play or Reload. |
 | `compile_plan` | `changed`, `total` | Once the compile knows how many units it compiles of all of them (the others come from the store). |
 | `unit` | `name`, `seconds`, `result`: `compiled`, `cached`, `retried` (compiled again alone after failing among others) or `failed` | A unit of the compile done. |
 | `eta` | `seconds` | The compile's time left, from what earlier builds took on this PC. |
@@ -82,6 +86,10 @@ A command line it does not take (an argument that is not valid Unicode among the
 shares). `tools` comes first, and only on a
 release's first run (any command but `sources`): the tools and sources the program carries unpacked into the
 per-user cache, seconds on an SSD and a minute or so on a hard drive, with no `progress`; its `overall` is 0.
+Use `build_progress` for the current build's total percentage and ETA. The builder starts with local build
+history where available, then updates the estimate from object-cache checks, the compiler's live ETA and
+measured progress during the build. The launcher's countdown can expire while a stage has no new estimate.
+The progress event below remains available to older launchers and to displays of individual stages.
 `overall` places a step's progress in the whole
 build by its usual share of the time (read 0 to 0.15, lift to 0.26, compile to 0.87, finish to 1), so one bar can show
 it; `shaders`, the built game preparing its shaders after the build's times, keeps `overall` at 1 and has its own

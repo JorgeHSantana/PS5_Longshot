@@ -29,6 +29,9 @@
 use serde::Serialize;
 use std::io::Write;
 use std::sync::Mutex;
+use std::time::Instant;
+
+mod forecast;
 
 /// The events' format version: the `"v"` of every JSON line. A change that a reader of an older version would
 /// misread raises it.
@@ -52,6 +55,8 @@ pub enum Stage {
     /// The shaders prepared by the built game (`longshot --prepare-shaders`), after the build's times: the build's own
     /// bar is full, and the step's `fraction` is its own.
     Shaders,
+    /// Handing off to the game process after a play-triggered build.
+    Start,
     /// `from-source`: the commit's source, downloaded (or the archive given) and checked, unpacked into the cache. The
     /// `from-source` steps share a bar of their own (the run's `overall`), not a build's.
     Source,
@@ -78,7 +83,7 @@ impl Stage {
             Stage::Lift => (0.15, 0.26),
             Stage::Compile => (0.26, 0.87),
             Stage::Finish => (0.87, 1.0),
-            Stage::Shaders => (1.0, 1.0),
+            Stage::Shaders | Stage::Start => (1.0, 1.0),
             // (from-source's own bar: a cold run's usual shares, docs/dev/reference/build.md, "A builder from source")
             Stage::Source => (0.0, 0.02),
             Stage::Rust => (0.02, 0.08),
@@ -124,6 +129,25 @@ pub enum Event {
         /// The whole build's, 0 to 1.
         overall: f64,
     },
+    /// The work needed for a build, in execution order.
+    BuildPlan {
+        /// The stages the builder expects to perform.
+        stages: Vec<Stage>,
+    },
+    /// The builder's estimate across the current operation, including work still to come.
+    BuildProgress {
+        /// Estimated fraction done, from 0 to 1.
+        fraction: f64,
+        /// Estimated seconds until completion.
+        seconds: u64,
+    },
+    /// The result of checking whether a play or reload requires a rebuild.
+    PlayPlan {
+        /// The reason a rebuild is required, or none when the game can start directly.
+        rebuild: Option<&'static str>,
+    },
+    /// The game process was successfully started.
+    GameStarted,
     /// What the compile will do.
     CompilePlan {
         /// The units it compiles.
@@ -428,6 +452,7 @@ struct State {
     shown_eta: u64,
     /// The step's sentence ([`Format::Lines`] says it with each progress line).
     stage_text: String,
+    forecast: Option<forecast::Forecast>,
 }
 
 /// The run's last event, once a reporter of this process sent it: 1 `done`, 2 `error` (0: not yet). A panic after it
@@ -453,6 +478,8 @@ pub struct Reporter {
 /// What a [`Reporter`] tells every event to, beside its output.
 pub type Observer = std::sync::Arc<dyn Fn(&Event) + Send + Sync>;
 
+type ShaderProgress = Box<dyn Fn() -> Option<f64> + Send + Sync>;
+
 #[derive(Serialize)]
 struct Line<'a> {
     v: u32,
@@ -476,6 +503,7 @@ impl Reporter {
                 shown_percent: -1,
                 shown_eta: u64::MAX,
                 stage_text: String::new(),
+                forecast: None,
             }),
             observer: None,
         }
@@ -487,9 +515,43 @@ impl Reporter {
         self
     }
 
+    /// Add the build logs once the work folder has been resolved.
+    pub fn set_output(&mut self, out: Box<dyn Write + Send>) {
+        self.state.get_mut().unwrap_or_else(|p| p.into_inner()).out = out;
+    }
+
     /// How it writes.
     pub fn format(&self) -> Format {
         self.format
+    }
+
+    /// Announce the stages and their initial time estimates, then use their live progress to refine them.
+    pub fn plan(&self, estimates: Vec<(Stage, f64)>) {
+        let plan = Event::BuildPlan { stages: estimates.iter().map(|&(stage, _)| stage).collect() };
+        let (forecast, progress) = forecast::Forecast::new(estimates);
+        let mut st = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if self.format == Format::Json {
+            json_line(&mut st.out, &plan);
+            json_line(&mut st.out, &progress);
+        }
+        st.forecast = Some(forecast);
+        drop(st);
+        self.observe(&plan);
+        self.observe(&progress);
+    }
+
+    /// Sample shader preparation that runs alongside the compile without switching the active stage.
+    pub fn parallel_shaders(&self, progress: impl Fn() -> Option<f64> + Send + Sync + 'static) {
+        let mut st = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(forecast) = &mut st.forecast {
+            forecast.parallel_shaders(Box::new(progress));
+        }
+    }
+
+    fn observe(&self, event: &Event) {
+        if let Some(o) = &self.observer {
+            o(event);
+        }
     }
 
     /// Says `event`.
@@ -520,13 +582,27 @@ impl Reporter {
                 }
             }
         };
+        let progress = st.forecast.as_mut().and_then(|f| f.observe(&event, Instant::now()));
+        if self.format == Format::Json
+            && matches!(event, Event::Done { .. })
+            && let Some(progress) = &progress
+        {
+            json_line(&mut st.out, progress);
+        }
         if let Some(line) = line {
             let _ = writeln!(st.out, "{line}");
             let _ = st.out.flush();
         }
+        if self.format == Format::Json
+            && !matches!(event, Event::Done { .. })
+            && let Some(progress) = &progress
+        {
+            json_line(&mut st.out, progress);
+        }
         drop(st);
-        if let Some(o) = &self.observer {
-            o(&event);
+        self.observe(&event);
+        if let Some(progress) = &progress {
+            self.observe(progress);
         }
     }
 
@@ -556,6 +632,13 @@ impl Reporter {
     /// The build stopped on `error`.
     pub fn error(&self, error: &crate::Error) {
         self.send(Event::Error { code: error.code(), text: error.to_string() });
+    }
+}
+
+fn json_line(out: &mut dyn Write, event: &Event) {
+    if let Ok(line) = serde_json::to_string(&Line { v: VERSION, event }) {
+        let _ = writeln!(out, "{line}");
+        let _ = out.flush();
     }
 }
 
@@ -600,6 +683,9 @@ fn text_line(event: &Event, shown_percent: &mut i64, shown_eta: &mut u64) -> Opt
             }
             *shown_eta = min;
             format!("compile: about {min} min left")
+        }
+        Event::BuildPlan { .. } | Event::BuildProgress { .. } | Event::PlayPlan { .. } | Event::GameStarted => {
+            return None;
         }
         Event::Log { text } => text.clone(),
         Event::Warning { text, .. } => format!("warning: {text}"),
@@ -736,6 +822,29 @@ mod tests {
         let r = Reporter::to(format, Box::new(buf.clone()));
         f(&r);
         String::from_utf8(buf.0.lock().unwrap().clone()).unwrap().lines().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn json_announces_the_plan_and_reaches_one_before_the_build_done_event() {
+        let output: Vec<serde_json::Value> = lines(Format::Json, |r| {
+            r.plan(vec![(Stage::Read, 10.0), (Stage::Shaders, 90.0)]);
+            r.stage(Stage::Read, "Read");
+            r.stage(Stage::Shaders, "Prepare the shaders");
+            r.progress(0.5);
+            r.send(Event::Done { folder: "game".into(), seconds: 1.0, compile_seconds: 0.0, previous_seconds: None });
+        })
+        .iter()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+        assert_eq!(output[0], serde_json::json!({"v":1,"type":"build_plan","stages":["read","shaders"]}));
+        assert_eq!(output[1], serde_json::json!({"v":1,"type":"build_progress","fraction":0.0,"seconds":100}));
+        assert_eq!(output[output.len() - 3]["fraction"], 0.55);
+        assert_eq!(output[output.len() - 3]["seconds"], 45);
+        assert_eq!(
+            output[output.len() - 2],
+            serde_json::json!({"v":1,"type":"build_progress","fraction":1.0,"seconds":0})
+        );
+        assert_eq!(output.last().unwrap()["type"], "done");
     }
 
     #[test]

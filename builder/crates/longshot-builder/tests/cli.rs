@@ -19,6 +19,41 @@ fn help_is_the_usage_and_version_says_what_is_carried() {
 }
 
 #[test]
+fn build_announces_its_plan_before_resolving_the_tools() {
+    use std::fs;
+    let fixture = std::env::temp_dir().join(format!("longshot-build-plan-cli-{}", std::process::id()));
+    fs::create_dir(&fixture).unwrap();
+    let game = fixture.join("game.nup");
+    let out = fixture.join("game");
+    let tools = fixture.join("missing-tools");
+    let work = fixture.join("work");
+    fs::write(&game, b"the builder never opens this fixture").unwrap();
+    let (status, stdout) = run(&[
+        "build",
+        "--game",
+        game.to_str().unwrap(),
+        "--out",
+        out.to_str().unwrap(),
+        "--root",
+        tools.to_str().unwrap(),
+        "--work",
+        work.to_str().unwrap(),
+        "--no-prepare-shaders",
+        "--output",
+        "json",
+    ]);
+    assert_eq!(status, Some(1), "{stdout}");
+    let events: Vec<serde_json::Value> = stdout.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert_eq!(events[0], serde_json::json!({"v":1,"type":"build_plan","stages":["read","lift","compile","finish"]}));
+    assert_eq!(events[1]["type"], "build_progress");
+    assert_eq!(events[1]["fraction"], 0.0);
+    let error = events.iter().find(|event| event["type"] == "error").unwrap();
+    assert_eq!(error["code"], "tools_incomplete");
+    assert!(!work.exists());
+    fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
 fn extracts_only_romfs_and_preserves_an_existing_destination() {
     use std::fs;
     let fixture = std::env::temp_dir().join(format!("longshot-romfs-cli-{}", std::process::id()));

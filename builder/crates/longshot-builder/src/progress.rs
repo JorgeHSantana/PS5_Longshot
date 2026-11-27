@@ -3,7 +3,9 @@
 //! in the system's message box (play.rs's `say`); the builder's own windows (Slint, with the crash window) come behind
 //! the same trait.
 
-use build_core::report::{Event, Stage};
+use build_core::report::Event;
+#[cfg(test)]
+use build_core::report::Stage;
 
 /// A person's view of a build: its step and how far it is, an error, its end.
 pub trait UserUi: Send {
@@ -15,13 +17,12 @@ pub trait UserUi: Send {
     fn done(&mut self);
 }
 
-/// A build event as a person's view shows it: the step's sentence (`step`) and how far (`fraction`: the whole
-/// build's; the shader preparation, after the build's own steps, its own). Whether the event changed either.
+/// A build event as a person's view shows it: the current step's sentence and the whole build's fraction.
+/// Whether the event changed either.
 pub fn shown(event: &Event, step: &mut String, fraction: &mut f64) -> bool {
     match event {
         Event::Stage { text, .. } => *step = text.clone(),
-        Event::Progress { stage: Stage::Shaders, fraction: f, .. } => *fraction = f.clamp(0.0, 1.0),
-        Event::Progress { overall, .. } => *fraction = overall.clamp(0.0, 1.0),
+        Event::BuildProgress { fraction: overall, .. } => *fraction = *overall,
         _ => return false,
     }
     true
@@ -78,11 +79,11 @@ mod tests {
         let stage = Event::Stage { stage: Stage::Compile, text: "Compiling the game".into() };
         assert!(shown(&stage, &mut step, &mut f));
         assert_eq!(step, "Compiling the game");
-        assert!(shown(&Event::Progress { stage: Stage::Compile, fraction: 0.5, overall: 0.565 }, &mut step, &mut f));
+        assert!(shown(&Event::BuildProgress { fraction: 0.565, seconds: 20 }, &mut step, &mut f));
         assert_eq!(f, 0.565);
         // (the shaders: their own fraction, the build's overall held at 1)
-        assert!(shown(&Event::Progress { stage: Stage::Shaders, fraction: 0.25, overall: 1.0 }, &mut step, &mut f));
-        assert_eq!(f, 0.25);
+        assert!(!shown(&Event::Progress { stage: Stage::Shaders, fraction: 0.25, overall: 1.0 }, &mut step, &mut f));
+        assert_eq!(f, 0.565);
         assert!(!shown(&Event::Log { text: "x".into() }, &mut step, &mut f));
     }
 

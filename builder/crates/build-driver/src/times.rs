@@ -33,14 +33,23 @@ struct Saved {
     builds: Vec<BuildTime>,
 }
 
-/// `build` added to the record at `path` (a record missing, half written or of another format is started again); the
-/// last build's total before it.
-pub fn record(path: &Path, build: BuildTime) -> Option<f64> {
-    let mut saved = std::fs::read(path)
+fn read(path: &Path) -> Saved {
+    std::fs::read(path)
         .ok()
         .and_then(|b| serde_json::from_slice::<Saved>(&b).ok())
         .filter(|s| s.format == FORMAT)
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+/// The last comparable build in this work folder, if any.
+pub fn last(path: &Path, kind: &str) -> Option<BuildTime> {
+    read(path).builds.into_iter().rev().find(|build| build.kind == kind)
+}
+
+/// `build` added to the record at `path` (a record missing, half written or of another format is started again); the
+/// last build's total before it.
+pub fn record(path: &Path, build: BuildTime) -> Option<f64> {
+    let mut saved = read(path);
     let previous = saved.builds.last().map(|b| b.total_seconds);
     saved.format = FORMAT;
     saved.builds.push(build);

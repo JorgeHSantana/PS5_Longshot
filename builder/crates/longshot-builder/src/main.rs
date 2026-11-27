@@ -438,7 +438,7 @@ fn build_cmd(a: &Args, release: Option<&str>, builder: &str, version: &Path) -> 
             let kind =
                 if a.command == "build" { crash::build_report::FIRST_BUILD } else { crash::build_report::UPDATE };
             after::build_began(&o, kind);
-            let done = play::shown_build(&o, run_build, format(a), Some("Longshot is building the game"));
+            let done = play::shown_build(&o, run_build, format(a), Some("Longshot is building the game"), false);
             after::build_ended(&done, release, builder);
             after::wait_sent();
             done
@@ -471,16 +471,22 @@ fn run_build(
     o: &BuildOptions,
     format: Format,
     observer: Option<build_core::report::Observer>,
+    launching: bool,
 ) -> std::result::Result<(), String> {
-    let p = Places::of(o).map_err(|e| say_error(&Reporter::stdout(format), e, None))?;
+    let mut r = Reporter::stdout(format).observed(observer);
+    let p = Places::resolve(o, |work, jobs| {
+        if build::report_plan(o, work, jobs, launching, &r) {
+            r.stage(Stage::Tools, "Unpacking the builder's tools (once for this release)");
+        }
+    })
+    .map_err(|e| say_error(&r, e, None))?;
     let log = p.work.log();
     on_panic(format, [Some(log.clone()), o.log.clone()].into_iter().flatten().collect());
     let mut files: Vec<&Path> = vec![&log];
     if let Some(l) = &o.log {
         files.push(l);
     }
-    let r = Reporter::to(format, Box::new(build_driver::log::Tee::new(Box::new(std::io::stdout()), &files)))
-        .observed(observer);
+    r.set_output(Box::new(build_driver::log::Tee::new(Box::new(std::io::stdout()), &files)));
     build::build(o, &p, &Stages::real(), &r).map(|_| ()).map_err(|e| say_error(&r, e, Some(&log)))
 }
 
@@ -520,7 +526,7 @@ fn verify_cmd(a: &Args) -> ExitCode {
                     }
                 }
                 o.prepare_shaders = !a.no_prepare;
-                run_build(&o, format(a), None)?;
+                run_build(&o, format(a), None, false)?;
                 let after = verify::verify(&out, jobs).map_err(fail)?;
                 let damaged = |rel: &String| after.missing.contains(rel) || after.changed.contains(rel);
                 repaired.extend(left.damaged().into_iter().filter(|rel| !damaged(rel)));
@@ -1052,7 +1058,8 @@ fn main() -> ExitCode {
         build_driver::set_flag(var, value);
     }
     // (the first run of a release unpacks what it carries before anything: said, so a launcher shows it)
-    if unpacks_carried(&a, env)
+    if !matches!(a.command.as_str(), "build" | "update")
+        && unpacks_carried(&a, env)
         && build_driver::sources::unpacks_now(carried, &layout::cache_root(build_driver::env_os))
         && !carried.is_empty()
     {

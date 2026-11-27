@@ -132,9 +132,13 @@ pub fn game_env(cmd: &mut Command) {
     configure_store(cmd);
 }
 
+fn progress_of(line: &str) -> Option<f64> {
+    line.strip_prefix("@@progress ").and_then(|v| v.trim().parse::<f64>().ok()).filter(|f| (0.0..=1.0).contains(f))
+}
+
 /// A line of the game's own: its `@@progress <0..1>` the stage's progress, its other lines the log.
 fn said(r: &Reporter, line: &str) {
-    if let Some(f) = line.strip_prefix("@@progress ").and_then(|v| v.trim().parse::<f64>().ok()) {
+    if let Some(f) = progress_of(line) {
         r.progress(f);
     } else if let Some(rest) = line.strip_prefix("@@stage ") {
         r.log(format!("shaders: {}", rest.split_once(' ').map_or(rest, |x| x.1)));
@@ -344,6 +348,7 @@ pub struct Early {
     gate: std::sync::Arc<build_core::memory::Gate>,
     stopped: std::sync::atomic::AtomicBool,
     assets: (std::sync::Mutex<Option<bool>>, std::sync::Condvar),
+    progress: std::sync::Mutex<Option<f64>>,
     started: std::sync::Mutex<Option<(std::thread::JoinHandle<Prepared>, mpsc::Receiver<String>)>>,
 }
 
@@ -403,6 +408,7 @@ impl Early {
             gate: gate.clone(),
             stopped: Default::default(),
             assets: Default::default(),
+            progress: Default::default(),
             started: Default::default(),
         }))
     }
@@ -467,6 +473,11 @@ impl Early {
         Ok(())
     }
 
+    /// Last reported progress while the preparation runs beside the compile.
+    pub fn progress(&self) -> Option<f64> {
+        *self.progress.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// The renderer and the driver are linked: the preparation starts on a thread of its own, once the assets are
     /// made and the memory gate has room.
     pub fn start(self: &std::sync::Arc<Self>, module: &Path, driver: &Path) {
@@ -500,13 +511,19 @@ impl Early {
             let t = std::time::Instant::now();
             let exe = me.staging.join("longshot");
             // (each line kept in the channel for the shader step: none lost if the build never gets there)
+            let set_progress = |fraction| *me.progress.lock().unwrap_or_else(|e| e.into_inner()) = fraction;
+            set_progress(Some(0.0));
             let line = |l: &str| {
+                if let Some(fraction) = progress_of(l) {
+                    set_progress(Some(fraction));
+                }
                 let _ = tx.send(l.to_string());
             };
             // (each run's game given to the ticket: the gate then counts what it holds as it grows, and only the rest
             // of its need on top, not its whole need on top of the memory it already took from the free)
             let started = |pid| room.started(pid);
             let result = supervised(&exe, &me.staging, &cache, me.level, me.jobs, &line, &started, &|| me.stopping());
+            set_progress(result.is_ok().then_some(1.0));
             Prepared { result, seconds: t.elapsed().as_secs_f64(), unstaged: false }
         });
         *self.started.lock().unwrap_or_else(|e| e.into_inner()) = Some((handle, rx));
@@ -532,7 +549,7 @@ impl Early {
         let t = std::time::Instant::now();
         let mut last = None;
         for l in rx.try_iter() {
-            match l.strip_prefix("@@progress ").and_then(|v| v.trim().parse::<f64>().ok()) {
+            match progress_of(&l) {
                 Some(f) => last = Some(f),
                 None => said(r, &l),
             }
