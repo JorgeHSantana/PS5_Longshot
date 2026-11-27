@@ -40,13 +40,14 @@ pub(crate) fn cache_root_for<S: Into<std::ffi::OsString>>(windows: bool, get: im
     let set = |k: &str| {
         let v: std::ffi::OsString = get(k)?.into();
         let v = match v.to_str() {
+            Some(s) if windows && k == "LONGSHOT_CACHE" && s.starts_with(r"\\?\") => v,
             Some(s) => s.trim().into(),
             None => v,
         };
         (!v.is_empty()).then(|| PathBuf::from(v))
     };
     if let Some(p) = set("LONGSHOT_CACHE") {
-        return p;
+        return if windows { plain(p) } else { p };
     }
     if windows {
         let base = set("LOCALAPPDATA")
@@ -71,6 +72,46 @@ pub(crate) fn cache_root_for<S: Into<std::ffi::OsString>>(windows: bool, get: im
     } else {
         previous
     }
+}
+
+/// A Windows path without the verbatim prefix `fs::canonicalize` gives it: `X:\...` for `\\?\X:\...`,
+/// `\\server\share\...` for `\\?\UNC\server\share\...`; and paths requiring verbatim semantics as given. clang finds no header beside a source
+/// nor in an include folder spelt `\\?\...`, so a cache given so (a launcher's chosen folder, canonicalized) failed every
+/// compile of the sources unpacked in it.
+fn plain(p: PathBuf) -> PathBuf {
+    let Some(s) = p.to_str() else { return p };
+    let Some(rest) = s.strip_prefix(r"\\?\") else { return p };
+    let candidate = if let Some(unc) = rest.strip_prefix(r"UNC\") {
+        if !ordinary_components(unc) {
+            return p;
+        }
+        format!(r"\\{unc}")
+    } else {
+        if !rest.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+            || rest.get(1..3) != Some(r":\")
+            || !ordinary_components(&rest[3..])
+        {
+            return p;
+        }
+        rest.to_owned()
+    };
+    // Ordinary names and lengths must still address the same directory.
+    if candidate.encode_utf16().count() >= 260 { p } else { PathBuf::from(candidate) }
+}
+
+fn ordinary_components(tail: &str) -> bool {
+    tail.trim_end_matches('\\').split('\\').all(|part| {
+        if part.ends_with(['.', ' ']) || part.chars().any(|c| c < ' ' || "<>:\"/|?*".contains(c)) {
+            return false;
+        }
+        let stem = part.split('.').next().unwrap_or_default().trim_end_matches(' ');
+        let stem = stem.to_ascii_uppercase();
+        let device_port = stem
+            .strip_prefix("COM")
+            .or_else(|| stem.strip_prefix("LPT"))
+            .is_some_and(|n| n.chars().count() == 1 && "123456789¹²³".contains(n));
+        !matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") && !device_port
+    })
 }
 
 fn existing_or<const N: usize>(older: [PathBuf; N], fresh: PathBuf) -> PathBuf {
@@ -475,5 +516,28 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn a_verbatim_cache_is_taken_in_its_plain_spelling() {
+        // (a launcher saved its build files folder as fs::canonicalize gives it on Windows, \\?\X:\...: clang finds no
+        // header from a source or an include folder spelt so, and every compile of the unpacked sources failed,
+        // https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/issues/297)
+        let cache =
+            |windows: bool, v: &str| cache_root_for(windows, |k| (k == "LONGSHOT_CACHE").then(|| v.to_string()));
+        assert_eq!(cache(true, r"\\?\X:\Games\Build\longshot-builder"), Path::new(r"X:\Games\Build\longshot-builder"));
+        assert_eq!(cache(true, r"\\?\UNC\server\share\cache"), Path::new(r"\\server\share\cache"));
+        assert_eq!(cache(true, r"X:\Games\Build"), Path::new(r"X:\Games\Build"));
+        // (a verbatim name that is no drive's or share's, a device's, is left as it is)
+        assert_eq!(cache(true, r"\\?\Volume{0}\cache"), Path::new(r"\\?\Volume{0}\cache"));
+        for path in
+            [r"\\?\X:\Cache.", r"\\?\X:\Cache ", r"\\?\X:\NUL.txt.log\cache", r"\\?\UNC\server\share\Cache.\build"]
+        {
+            assert_eq!(cache(true, path), Path::new(path));
+        }
+        let long = format!(r"\\?\X:\{}\{}", "c".repeat(150), "d".repeat(150));
+        assert_eq!(cache(true, &long), Path::new(&long));
+        // (elsewhere the same text is a name like any other)
+        assert_eq!(cache(false, r"\\?\X:\a"), Path::new(r"\\?\X:\a"));
     }
 }
