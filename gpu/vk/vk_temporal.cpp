@@ -1539,6 +1539,25 @@ bool route_told(State& s, const TemporalEngine* e, bool pre) {
     return changed && (changes++ < 20 || changes % 600 == 0);
 }
 
+/// (longshot) A change of place, before the bloom or at the network, in the log: whether that frame's motion was kept from the
+/// engine's frame at the other place (moved, draw_engine), the actors drawn over it, and whether AMD FSR 3.1's frame
+/// interpolation took it (vk_fsr3_inputs.h take_motion: its inputs are made at the game's upscale, so DLAA run before the
+/// bloom comes ahead of them, and FSR keeps its own, the camera's). The first 20 changes, then every 600th, as route_told
+void place_told(const char* name, bool pre, uint64_t now, bool made, uint64_t moved, bool motion, int actors,
+                bool fsr_wanted, bool fsr_took) {
+    static uint64_t changes = 0;
+    if (!(changes++ < 20 || changes % 600 == 0)) return;
+    char kept[128];
+    if (made) snprintf(kept, sizeof kept, "a new feature: no motion");
+    else if (motion) snprintf(kept, sizeof kept, "the motion kept from frame %llu, %d actors drawn over it",
+                              (unsigned long long)moved, actors);
+    else if (!moved || now - moved > 2) snprintf(kept, sizeof kept, "no motion: no frame before within 2");
+    else snprintf(kept, sizeof kept, "no motion: no reprojection to the frame before");
+    logf("vk: %s changed place, %s the game's bloom (frame %llu): a new history, %s; FSR 3.1's frame interpolation %s",
+         name, pre ? "before" : "after", (unsigned long long)now, kept,
+         !fsr_wanted ? "not on" : fsr_took ? "took it" : motion ? "did not take it" : "keeps its own");
+}
+
 /// The engine's evaluation of this frame, with the chain's lock held: at the gameplay upscale (pre false: in, the network's input
 /// as it samples it, square-root encoded; out, its output), or before the game's bloom (pre true, temporal_pre_bloom: in and
 /// out the scene's colour, linear light, the picture written back into it). key: the program it runs at, for the log. false:
@@ -1633,6 +1652,7 @@ bool draw_engine(VkCommandBuffer cmd, State& s, int mode, const Camera& cam, uin
     const bool rgba = pre ? in->format == VK_FORMAT_R16G16B16A16_SFLOAT
                           : psycho && in->format == VK_FORMAT_R16G16B16A16_SFLOAT &&
                                 out->format == VK_FORMAT_R16G16B16A16_SFLOAT;
+    const uint64_t drawn = s.last_frame;   // (longshot: the engine's frame before, ahead of this frame's changes: moved)
     if (s.psycho_last != psycho || s.history_input != in->format) {
         if (psycho || s.psycho_last || s.history_input == VK_FORMAT_R16G16B16A16_SFLOAT)
             logf("vk: PsychoV35 %s: %s route; scene format %u, network input %u, output %u",
@@ -1643,9 +1663,14 @@ bool draw_engine(VkCommandBuffer cmd, State& s, int mode, const Camera& cam, uin
         s.last_frame = 0;
     }
     // (longshot) before the bloom or at the network: the scene's linear light or the tone-mapped picture, a history of each
-    // of its own. A frame that moves it from one to the other starts a new one
-    if (s.pre_last != pre) s.pre_last = pre, s.last_frame = 0;
-    if (ready == 2) s.engines_made++, s.last_frame = 0;   // (made just now: a new history)
+    // of its own. A frame that moves it from one to the other starts a new one: the engine's, not the motion's. The
+    // camera and the actors' poses are the same either side of the bloom: moved keeps the engine's frame before for the
+    // motion: that frame's motion vectors are the camera's and the actors', not zeros. NGX's frame generation still
+    // starts a new one with the engine's (vk_dlss.cpp dlss_fg_inputs: f.reset)
+    uint64_t moved = 0;
+    const bool placed = s.pre_last != pre;   // (for the log: place_told)
+    if (s.pre_last != pre) s.pre_last = pre, s.last_frame = 0, moved = drawn;
+    if (ready == 2) s.engines_made++, s.last_frame = 0, moved = 0;   // (made just now: a new history)
     // (NVIDIA DLSS Frame Generation through NGX copies the depth and the motion each frame, vk_dlss.cpp dlss_fg_inputs: a
     // transfer's source too, always, so the Frame generation by row can turn it on at any time)
     const VkImageUsageFlags copied = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
@@ -1682,7 +1707,9 @@ bool draw_engine(VkCommandBuffer cmd, State& s, int mode, const Camera& cam, uin
     float previous[16];
     std::memcpy(previous, s.last_vp, sizeof previous);
     dlss_math::unjitter(previous, s.last_jitter);
-    const bool motion = !reset && dlss_math::reprojection(cam.current, previous, pc.reproject);
+    // (the frame the camera before was drawn at: the engine's last, or across a change of place its frame before, moved)
+    const uint64_t seen = last ? last : moved;
+    const bool motion = seen && now - seen <= 2 && dlss_math::reprojection(cam.current, previous, pc.reproject);
     if (!motion) reset = true;   // (without a valid reprojection, prior history has no mapping to this camera)
     pc.jitter[0] = cam.jitter[0], pc.jitter[1] = cam.jitter[1];
     pc.size[0] = (int32_t)rw, pc.size[1] = (int32_t)rh;
@@ -1728,7 +1755,7 @@ bool draw_engine(VkCommandBuffer cmd, State& s, int mode, const Camera& cam, uin
                       VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
                       VK_ACCESS_2_TRANSFER_READ_BIT);
     // (what moves by itself: the skinned draws drawn again over the camera's motion, with their own)
-    const int actors = actor_motion(cmd, cam, previous, rw, rh, dview, motion, s.last_frame);
+    const int actors = actor_motion(cmd, cam, previous, rw, rh, dview, motion, seen);
     if (actors)
         stage_barrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                       VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -1788,7 +1815,9 @@ bool draw_engine(VkCommandBuffer cmd, State& s, int mode, const Camera& cam, uin
     dlss_fg_inputs(cmd, f, cam.projection, cam.current, cam.jitter, motion);
     // (longshot) and AMD FSR 3.1's frame interpolation: this motion, the skinned draws' own in it, over the camera's alone that
     // its own inputs made at this dispatch (vk_fsr3_inputs.h take_motion). Nothing unless it is asked for
-    if (motion && fsr3fi::frames_wanted()) (void)fsr3_inputs::take_motion(cmd, f.motion.image, rw, rh);
+    const bool fsr_wanted = fsr3fi::frames_wanted();
+    const bool fsr_took = motion && fsr_wanted && fsr3_inputs::take_motion(cmd, f.motion.image, rw, rh);
+    if (placed) place_told(name_of(mode), pre, now, ready == 2, moved, motion, actors, fsr_wanted, fsr_took);
     s.last_frame = now;
     s.drawn_mode = draw_mode;
     s.last_jitter[0] = cam.jitter[0], s.last_jitter[1] = cam.jitter[1];

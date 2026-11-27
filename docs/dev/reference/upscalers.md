@@ -173,7 +173,9 @@ The chain starts a new history (`reset`) in the same frame when any of these hol
   (`dlss_math::reprojection`). Without a valid reprojection, the old picture has no mapping to the new camera;
 - a different engine draws (the previous engine is released);
 - the engine made its feature or context again (`prepare` returned 2);
-- the scene's format, the PsychoV35 route, or DLAA's before/after-bloom position changed;
+- the scene's format, the PsychoV35 route, or DLAA's before/after-bloom position changed. A change of position
+  starts the engine's history alone: the camera and the actors are the same either side of the bloom, so that
+  frame's motion is reprojected from the frame the engine drew at the other position (`moved`), not zeros;
 - the previous evaluation failed with `retry` set.
 
 Valid consecutive camera motion keeps history. There is no camera-cut heuristic beyond these.

@@ -57,6 +57,32 @@ def check_sources():
     assert "pre ? s.prep_lin" in engine, "draw_engine: the scene's linear colour taken as it is"
     assert "if (pre && (!engine.e->hdr || !engine.e->hdr()))" in engine, "draw_engine: only a feature made for HDR colour"
     assert "s.pre_last != pre" in engine, "draw_engine: a change of place starts a new history"
+    # (a change of place restarts the engine's history, not the motion: the engine's frame before is read ahead of the
+    # changes that zero it, kept by the change of place alone, and the motion and the actors' poses pair with it.
+    # tests/temporal_history_test.cpp checks the decision itself)
+    drawn = "const uint64_t drawn = s.last_frame;"
+    assert drawn in engine and engine.index(drawn) < engine.index("if (s.psycho_last != psycho"), \
+        "draw_engine: the engine's frame before is read after a change has zeroed it"
+    assert "if (s.pre_last != pre) s.pre_last = pre, s.last_frame = 0, moved = drawn;" in engine, \
+        "draw_engine: a change of place loses the engine's frame before for the motion"
+    assert "if (ready == 2) s.engines_made++, s.last_frame = 0, moved = 0;" in engine, \
+        "draw_engine: a feature made just now keeps the motion of another"
+    assert "actor_motion(cmd, cam, previous, rw, rh, dview, motion, seen)" in engine, \
+        "draw_engine: the actors' poses do not pair with the frame the motion is from"
+    # (a change of place says in the log whether its motion was kept, the actors drawn over it, and whether FSR 3.1's frame
+    # interpolation took it: the frame where the kept motion is used, seen in a game run)
+    placed = "const bool placed = s.pre_last != pre;"
+    assert placed in engine and engine.index(placed) < engine.index("if (s.pre_last != pre) s.pre_last = pre,"), \
+        "draw_engine: the change of place noted before it is applied"
+    took = "const bool fsr_took = motion && fsr_wanted && fsr3_inputs::take_motion(cmd, f.motion.image, rw, rh);"
+    assert took in engine, "draw_engine: whether FSR 3.1's frame interpolation took this frame's motion"
+    told = "if (placed) place_told(name_of(mode), pre, now, ready == 2, moved, motion, actors, fsr_wanted, fsr_took);"
+    assert told in engine and engine.index(took) < engine.index(told), "draw_engine: a change of place logged"
+    told_fn = block(chain, "void place_told(const char* name, bool pre")
+    for part in ["a new feature", "the motion kept from frame", "actors drawn over it", "no frame before within 2",
+                 "no reprojection", "FSR 3.1's frame interpolation %s", "took it", "did not take it", "not on"]:
+        assert part in told_fn, "place_told: the line says " + repr(part)
+    assert "changes++ < 20 || changes % 600 == 0" in told_fn, "place_told: bounded, as route_told"
     assert "prep_lin_data{16384.0f, VK_FALSE}" in chain, "make_pipelines: prep_lin neither squares nor clamps at 1"
 
     up = block(chain, "bool temporal_upscale(VkCommandBuffer cmd")
