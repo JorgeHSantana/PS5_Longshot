@@ -192,7 +192,11 @@ shaders' preparation at the build, the launcher's Play), so the shaders are prep
   buffers record an op stream (`gpu/render/rx_nvn.h`), and queue submits hand that stream to the back end.
 - `gpu/vk` replays it on Vulkan 1.3. Guest pools are imported as host memory and mirrored in VRAM. SM86 programs go
   through Eden's recompiler to SPIR-V, and mesh and task programs use `VK_EXT_mesh_shader` or a compute fallback
-  (`RX_VK_MESH_SHADERS`).
+  (`RX_VK_MESH_SHADERS`). NVN wrote those programs for 32-lane warps. Where a compute stage can be held to 32 lanes, the
+  fallback's warp is the subgroup's, and on RADV it stays the subgroup's on GCN too (RX 400/500 and Vega, 64 lanes
+  only), where it compiles and draws right. On AMD's Windows driver on GCN, whose compiler took minutes over each such
+  stage, and on Mesa's Intel driver, a 32-invocation stage with no warp operation in a loop has its ballots, votes and
+  shuffles go through workgroup memory instead (`device_policy.h` `mesh_shared_warp`, `RX_VK_MESH_SHARED_WARP`).
 - Its threads: the game's own, one render thread that replays every command buffer, from 4 cores (where Auto's mode is
   safe; or alone with serial replay at 6 or more cores when only buffer-pool mirrors are absent on integrated GPUs or
   `RX_VK_MIRROR=0`) a recorder thread that makes the driver's calls for it and ends and submits each part the replay hands

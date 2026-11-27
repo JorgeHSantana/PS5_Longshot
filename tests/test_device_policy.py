@@ -46,7 +46,7 @@ BOOLS = """fetch_bounds nan_bits mesh_fallback_strict_fmul bc_copy_per_layer gat
 amd_retry_no_optimizer amd_cloth_no_optimizer fault_gate_serial task_mesh_fallback intel_compile_gate compute_builds_serial
 pcache_fetch_lock split_before_draw astc_on_cpu inline_deku_web_loads networks_left_out dma_buf_imports nv_checkpoints
 allowance_at_count_rule
-mirrors ub_snapshot split_ub_flush native_float_add warp64 batch_submits mma_unroll_try global_table_loop occ_copy
+mirrors ub_snapshot split_ub_flush native_float_add warp64 mesh_shared_warp batch_submits mma_unroll_try global_table_loop occ_copy
 intel_side_by_side_auto fsr4_tune gpu_clock_peak readback_late_newest acquire_ahead pcache_small_pc bc_small_runs small_vram_textures astc_bc_all
 room_in_blocks_rule squeeze_damped linux_hold_caps_budget dlss_cnn auto_render_third rtx rdna4 threaded_auto_render
 threaded_auto_recorder drop_modules_small_ram native_zstd_keep_core""".split()
@@ -169,7 +169,8 @@ PCS = [
          num=(0, 2, 0, 1, 85, 4, 11000, 3072, 768, 512, 1912, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
     # (GCN: no batched submits, the phi limit. Its heap is 8192 MB exactly: the small blocks (<= 8 GB) and the large
     # card's 15% of blocks at the start (< 8 GB is the other branch), the two comparators the study names.
-    # Corrected: fault_gate_serial is off on RADV)
+    # Corrected: fault_gate_serial is off on RADV. Its compute stages run at 64 lanes only, but RADV compiles and draws the
+    # mesh fallback right on the subgroup: no shared warp here, tests/test_gcn_mesh_shared_warp.py)
     dict(name="RX 580 (8 GB), RADV on GCN",
          facts=(0x1002, 0x67DF, "MESA_RADV", 0, "DISCRETE_GPU", "Mesa 26.2.5", "AMD Radeon RX 580 Series (RADV POLARIS10)", 0, 0,
                 8192, 8000, 16000, 8, 8, 4, 0, 1, 1, 0, 0, 0, 1, 64, 64, 0),
@@ -263,7 +264,7 @@ PCS = [
          facts=(0x8086, 0x9A49, "INTEL_OPEN_SOURCE_MESA", 0, "INTEGRATED_GPU", "Mesa 26.0.1", "Mesa Intel(R) Xe Graphics (TGL GT2)", 0, 0,
                 11850, 10000, 15800, 8, 8, 4, 0, 1, 1, 0, 0, 1, 1, 32, 32, 0xFF),
          on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant split_before_draw dma_buf_imports "
-            "allowance_at_count_rule ub_snapshot global_table_loop small_vram_textures astc_bc_all linux_hold_caps_budget "
+            "allowance_at_count_rule ub_snapshot mesh_shared_warp global_table_loop small_vram_textures astc_bc_all linux_hold_caps_budget "
             "threaded_auto_render threaded_auto_recorder drop_modules_small_ram native_zstd_keep_core",
          num=(0, 0, 20000, 1, 85, 16, 2560, 2048, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 2, 2, 4, 4, 2)),
     # (neither discrete nor integrated: no mirrors, yet a dedicated card's budgets, blocks at the start and 97% line.
