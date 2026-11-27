@@ -26,7 +26,7 @@ static int version;   /* 3, 2, or 0 none */
 static struct {
     void *InitSubSystem, *SetHint, *GetError;
     /* window */
-    void *CreateWindow, *SetWindowPosition, *SetWindowFullscreen, *SetRelativeMouseMode, *GetPrimaryDisplay,
+    void *CreateWindow, *ShowWindow, *SetWindowPosition, *SetWindowFullscreen, *SetRelativeMouseMode, *GetPrimaryDisplay,
         *GetDesktopDisplayMode, *Vulkan_CreateSurface, *PixelSize, *GetKeyboardState, *GetMouseState, *WaitEventTimeout,
         *PollEvent, *GetWindowSize, *LoadPNG, *SetWindowIcon, *DestroySurface, *GetWindowDisplay, *GetCurrentDisplayMode;
     void *StartTextInput, *StopTextInput, *GetClipboardText;   /* (longshot: the menu's text fields; optional) */
@@ -68,6 +68,7 @@ static int get_all(HMODULE m, int three) {
     GET(SetHint, "SDL_SetHint");
     GET(GetError, "SDL_GetError");
     GET(CreateWindow, "SDL_CreateWindow");
+    GET(ShowWindow, "SDL_ShowWindow");
     GET(SetWindowFullscreen, "SDL_SetWindowFullscreen");
     GET2(SetRelativeMouseMode, "SDL_SetWindowRelativeMouseMode", "SDL_SetRelativeMouseMode");
     GET(GetDesktopDisplayMode, "SDL_GetDesktopDisplayMode");
@@ -214,15 +215,21 @@ void hos_sdl_identity(const char *name, const char *app_id) {
 const char *hos_sdl_error(void) { return version ? CALL(const char *(*)(void), GetError)() : "no SDL"; }
 
 /* ---- the window ---- */
-enum { WIN_SHOWN2 = 0x4, WIN_RESIZABLE = 0x20, WIN_HIGH_DENSITY = 0x2000, WIN_VULKAN = 0x10000000, CENTRED = 0x2FFF0000 };
-void *hos_sdl_window(const char *title, int width, int height) {
+enum { WIN_HIDDEN = 0x8, WIN_RESIZABLE = 0x20, WIN_HIGH_DENSITY = 0x2000, WIN_VULKAN = 0x10000000, CENTRED = 0x2FFF0000 };
+void *hos_sdl_window(const char *title, int width, int height, int hidden) {
+    const uint32_t flags = WIN_RESIZABLE | WIN_HIGH_DENSITY | WIN_VULKAN | (hidden ? WIN_HIDDEN : 0);
     if (version == 2)
         return CALL(void *(*)(const char *, int, int, int, int, uint32_t), CreateWindow)(
-            title, CENTRED, CENTRED, width, height, WIN_SHOWN2 | WIN_RESIZABLE | WIN_HIGH_DENSITY | WIN_VULKAN);
+            title, CENTRED, CENTRED, width, height, flags);
     void *w = CALL(void *(*)(const char *, int, int, uint64_t), CreateWindow)(title, width, height,
-                                                                              WIN_RESIZABLE | WIN_HIGH_DENSITY | WIN_VULKAN);
+                                                                              flags);
     if (w) CALL(_Bool (*)(void *, int, int), SetWindowPosition)(w, CENTRED, CENTRED);
     return w;
+}
+int hos_sdl_show_window(void *window) {
+    if (version == 3) return CALL(_Bool (*)(void *), ShowWindow)(window);
+    CALL(void (*)(void *), ShowWindow)(window);
+    return 1;
 }
 void hos_sdl_fullscreen(void *window, int on) {
     if (version == 3) CALL(_Bool (*)(void *, _Bool), SetWindowFullscreen)(window, on != 0);

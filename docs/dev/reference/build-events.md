@@ -47,6 +47,12 @@ sequenceDiagram
 
 A command line it does not take (an argument that is not valid Unicode among them) is exit status 2, said on stderr, and with `--output json` as an `error` event too (`usage`).
 
+For launcher-managed Play and Reload, the launcher's builder command sets
+`LONGSHOT_LAUNCHER_STARTUP=1`. The builder passes this to a windowed game only when its build
+record advertises `launcher_startup`. The game runs the normal preparation without the built-in
+loading screen, then shows its window as it sends its first frame. Standalone launches and older
+builds use their usual startup.
+
 ## The events
 
 | `type` | Fields | When |
@@ -56,7 +62,10 @@ A command line it does not take (an argument that is not valid Unicode among the
 | `build_plan` | `stages` (ordered array of stage IDs) | The builder's plan before work starts. It lists tool unpacking and shader preparation when expected, and `start` for a build triggered by Play or Reload. Cache checks during the build can shorten stages. |
 | `build_progress` | `fraction` (0 to 1), `seconds` (estimated seconds left) | The estimate across the whole plan. It starts at zero, updates when the builder learns the work or sees its progress, and includes the estimated shader wait. A standalone build reports 1 before `done`. A play-triggered build still has a handoff after `done`. |
 | `play_plan` | `rebuild` (reason, or `null`) | The fast check found whether Play or a game-requested reload needs a build. A rebuild is followed by `build_plan` if build setup succeeds. |
-| `game_started` | — | The builder successfully spawned the game, completing the handoff for Play or Reload. |
+| `game_starting` | — | The builder negotiated launcher-managed startup and is about to spawn the game. |
+| `startup_progress` | `stage` (`shaders` or `pipelines`), `permille` (0 to 1000), optional `seconds` | The game reports renderer startup on the inherited builder stdout. The percentage and estimate cover the remaining game startup work reported by the renderer. |
+| `game_ready` | — | The game window thread has revealed the window as the first game frame is handed to the renderer. |
+| `game_started` | — | The builder successfully spawned the game. Managed launches complete the handoff at `game_ready`. |
 | `compile_plan` | `changed`, `total` | Once the compile knows how many units it compiles of all of them (the others come from the store). |
 | `unit` | `name`, `seconds`, `result`: `compiled`, `cached`, `retried` (compiled again alone after failing among others) or `failed` | A unit of the compile done. |
 | `eta` | `seconds` | The compile's time left, from what earlier builds took on this PC. |

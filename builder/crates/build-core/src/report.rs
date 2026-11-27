@@ -146,6 +146,8 @@ pub enum Event {
         /// The reason a rebuild is required, or none when the game can start directly.
         rebuild: Option<&'static str>,
     },
+    /// The game will report its startup work and signal when it reveals its window.
+    GameStarting,
     /// The game process was successfully started.
     GameStarted,
     /// What the compile will do.
@@ -684,7 +686,11 @@ fn text_line(event: &Event, shown_percent: &mut i64, shown_eta: &mut u64) -> Opt
             *shown_eta = min;
             format!("compile: about {min} min left")
         }
-        Event::BuildPlan { .. } | Event::BuildProgress { .. } | Event::PlayPlan { .. } | Event::GameStarted => {
+        Event::BuildPlan { .. }
+        | Event::BuildProgress { .. }
+        | Event::PlayPlan { .. }
+        | Event::GameStarting
+        | Event::GameStarted => {
             return None;
         }
         Event::Log { text } => text.clone(),

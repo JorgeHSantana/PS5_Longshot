@@ -18,7 +18,8 @@ const char *hos_sdl_error(void);
 void hos_sdl_identity(const char *name, const char *app_id);
 
 /* ---- the window: centred, resizable, at the display's pixel density, for Vulkan ---- */
-void *hos_sdl_window(const char *title, int width, int height);
+void *hos_sdl_window(const char *title, int width, int height, int hidden);
+int hos_sdl_show_window(void *window);
 void hos_sdl_fullscreen(void *window, int on);   /* (the desktop's mode, borderless) */
 struct MkwVkMonitor;
 int hos_sdl_monitor_list(void *window, struct MkwVkMonitor *out, uint32_t *tokens, int cap);

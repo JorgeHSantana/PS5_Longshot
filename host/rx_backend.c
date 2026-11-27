@@ -727,6 +727,10 @@ static void nvn_present_with_generation(const nvn_tex *t, const int crop[4], uin
     hos_slow_frame_present();   /* (HOS_SLOW_FRAMES: a late frame's samples written out, host/slow_frames.c) */
     hos_ab_present();   /* (longshot) HOS_AB: the frame counted for its side (host/hos_ab.c) */
     if (hos_control_on) control_picture_note(t, crop);
+    if (t) {
+        void hos_display_first_frame(void);
+        hos_display_first_frame();
+    }
     if (vk && generation && vk->nvn_present_trial) vk->nvn_present_trial(t, crop, generation);
     else if (vk) vk->nvn_present(t, crop);
     else wgr_nvn_present(t, crop);

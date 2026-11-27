@@ -367,7 +367,9 @@ pub fn report_plan(o: &BuildOptions, work: &Work, jobs: usize, launching: bool, 
         plan.push((Stage::Shaders, time("shaders", 311.0)));
     }
     if launching {
-        plan.push((Stage::Start, 2.0));
+        // A managed launch also loads cached pipelines before presenting its first frame.
+        let start = if env("LONGSHOT_LAUNCHER_STARTUP").as_deref() == Some("1") { 15.0 } else { 2.0 };
+        plan.push((Stage::Start, start));
     }
     r.plan(plan);
     unpack

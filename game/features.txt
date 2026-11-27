@@ -6,3 +6,6 @@
 # profile: LONGSHOT_PROFILE=<folder> plays that profile: its saves/, settings.ini and profile.json's start_slot
 # (host/longshot_profile.h, docs/dev/reference/profiles.md).
 profile
+
+# launcher_startup: progress and window handoff for launcher-managed Play and Reload.
+launcher_startup

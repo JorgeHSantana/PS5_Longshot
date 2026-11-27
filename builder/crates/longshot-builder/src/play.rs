@@ -347,11 +347,28 @@ impl Host for Player<'_> {
 
     fn start(&mut self, program: &Path, args: &[String], profile: &Path) -> std::io::Result<play::Started> {
         let mut c = std::process::Command::new(program);
+        let format = crate::output::chosen().format();
+        let indexed = program.parent().and_then(|folder| {
+            Record::read(folder).ok().or_else(|| {
+                (folder.file_name().is_some_and(|name| name == "bin"))
+                    .then(|| folder.parent().and_then(|parent| Record::read(parent).ok()))
+                    .flatten()
+            })
+        });
+        let managed = format == Format::Json
+            && build_driver::env("LONGSHOT_LAUNCHER_STARTUP").as_deref() == Some("1")
+            && !build_driver::env("HOS_HEADLESS").is_some_and(|value| !value.is_empty() && value != "0")
+            && indexed.is_some_and(|record| record.features.iter().any(|name| name == "launcher_startup"));
         build_driver::shaders::configure_store(&mut c);
         c.args(args)
             .current_dir(program.parent().unwrap_or(Path::new(".")))
             .env(play::PROFILE_VAR, profile)
             .envs(self.env.iter().map(|(k, v)| (k, v)));
+        if managed {
+            c.env("LONGSHOT_LAUNCHER_STARTUP", "1");
+        } else {
+            c.env_remove("LONGSHOT_LAUNCHER_STARTUP");
+        }
         // (the shader caches in the builder's cache, shared by every build of this translator on this driver)
         if let Some(dir) =
             build_driver::shaders::shared_dir(program.parent().unwrap_or(Path::new(".")), build_driver::env)
@@ -367,14 +384,18 @@ impl Host for Player<'_> {
         // (the channel to the builder: its game ends given to this one child, the builder's served on a thread)
         let mut channel = self.open_channel(&mut c, profile);
         let mut run = None;
+        let reporter = build_core::report::Reporter::stdout(format);
+        if managed {
+            // A child can report immediately, so establish the startup phase before spawn.
+            reporter.send(build_core::report::Event::GameStarting);
+        }
         let status = build_core::run_game_with(&mut c, &mut |pid| {
             // (started: the builder's copies of the game's ends close first, before the watch starts anything, so the
             // game's closing is the end of the stream)
             if let Some(ch) = &mut channel {
                 ch.child = None;
             }
-            build_core::report::Reporter::stdout(crate::output::chosen().format())
-                .send(build_core::report::Event::GameStarted);
+            reporter.send(build_core::report::Event::GameStarted);
             run = Some((pid, crate::after::watch(pid)));
         });
         let status = match status {

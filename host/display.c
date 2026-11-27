@@ -22,6 +22,7 @@ void hos_input_clear_toggles(void);
 void rx_close_asked(void);   /* host/rx_backend.c */
 #include "../gpu/vk/vk_api.h"
 #include "display_pointer.h"
+#include "launcher_startup.h"
 #include "fullscreen_monitor.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
@@ -403,6 +404,21 @@ void hos_display_paste(void) {
     if (hwnd) PostMessageA(hwnd, WM_APP + 12, 0, 0);
 }
 
+/* The first game frame asks the window thread to reveal the window. */
+static LONG launcher_window_hidden;
+void hos_display_first_frame(void) {
+    if (__atomic_load_n(&launcher_window_hidden, __ATOMIC_RELAXED) &&
+        __atomic_exchange_n(&launcher_window_hidden, 0, __ATOMIC_RELAXED))
+        PostMessageA(hwnd, WM_APP + 13, 0, 0);
+}
+
+static void show_game_window(HWND window) {
+    if (env_on("HOS_WINDOW_NOACTIVATE"))
+        SetWindowPos(window, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    else
+        ShowWindow(window, SW_SHOW);
+}
+
 static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_MOUSEMOVE: {
@@ -595,6 +611,11 @@ static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         break;
     case WM_ERASEBKGND:
         return renderer ? 1 : DefWindowProcA(w, msg, wp, lp);
+    case WM_APP + 13:
+        show_game_window(w);
+        if (hos_monitor_start_fullscreen()) set_fullscreen(w, 1);
+        launcher_game_ready();
+        return 0;
     case WM_APP + 9:   /* (the Insert menu's Restart now: closed as by the player, then started again: host/hos_relaunch.c) */
         hos_relaunch_ask();
         /* fall through */
@@ -642,7 +663,6 @@ static DWORD WINAPI display_main(void *p) {
     }
     RECT r = {0, 0, win_w, win_h};
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    const int noactivate = env_on("HOS_WINDOW_NOACTIVATE");
     hwnd = CreateWindowA("Longshot", HOS_GAME_TITLE, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
                          CW_USEDEFAULT, r.right - r.left, r.bottom - r.top, NULL, NULL, wc.hInstance, NULL);
     if (!hwnd) display_start_failed("CreateWindowA");
@@ -657,14 +677,12 @@ static DWORD WINAPI display_main(void *p) {
         if (MultiByteToWideChar(CP_UTF8, 0, hos_game_title(HOS_GAME_TITLE), -1, title, 256))
             DefWindowProcW(hwnd, WM_SETTEXT, 0, (LPARAM)title);
     }
-    /* (no activate: shown at the bottom of the z-order, so a game in front keeps its focus) */
-    if (noactivate)
-        SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    else
-        ShowWindow(hwnd, SW_SHOW);
+    const int managed = launcher_startup();
+    __atomic_store_n(&launcher_window_hidden, managed, __ATOMIC_RELAXED);
+    if (!managed) show_game_window(hwnd);
     hos_monitor_load();
     refresh_monitors();
-    if (hos_monitor_start_fullscreen()) set_fullscreen(hwnd, 1);
+    if (!managed && hos_monitor_start_fullscreen()) set_fullscreen(hwnd, 1);
     RAWINPUTDEVICE rid = {1, 2, 0, hwnd};   /* generic desktop mouse: WM_INPUT while the window is in front */
     RegisterRawInputDevices(&rid, 1, sizeof rid);
     pointer_update(hwnd, 0, 0);

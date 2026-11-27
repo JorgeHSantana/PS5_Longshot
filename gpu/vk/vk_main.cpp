@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -22,6 +23,7 @@
 #endif
 
 #include "vk_api.h"
+#include "../../host/launcher_startup.h"
 #include "vk_draw.h"
 #include "vk_framegen.h"
 #include "vk_internal.h"
@@ -1580,6 +1582,7 @@ void window_size(uint32_t* w, uint32_t* h) {
 #endif
 }
 void prepare_with_screen() {
+    const bool launcher = launcher_startup();
     prep_ended = CreateEventA(nullptr, TRUE, FALSE, nullptr);
     prep_running.store(true);
     std::thread worker([] {
@@ -1620,10 +1623,11 @@ void prepare_with_screen() {
     const auto t0 = clock::now();
     static std::atomic<bool> paint_stop{false};
     HANDLE painted = CreateEventA(nullptr, TRUE, FALSE, nullptr);
-    std::thread painter([t0, painted] {
+    std::thread painter([t0, painted, launcher] {
         ProgressClock eta;   // (over the whole bar: its units, PrepareBar)
         PrepareBar bar;
-        double next_log = 10;
+        double next_log = 10, next_progress = 0;
+        int announced_stage = -1;
         bool prepared = false;   // (this start prepares the programs: a first start after an update, two steps)
         uint32_t last_w = dev.swap_extent.width, last_h = dev.swap_extent.height;
         for (;;) {
@@ -1646,6 +1650,24 @@ void prepare_with_screen() {
                      total, whole * 100, left >= 0 ? ", " : "", left_text(left).c_str());
                 next_log = secs + 10;
             }
+            if (launcher) {
+                // No acquire or present on a hidden surface. The launcher shows this same progress.
+                if (secs >= next_progress || stage != announced_stage || finished) {
+                    const char* step = prep_skip[0].load() || stage ? "pipelines" : "shaders";
+                    if (left >= 0 && std::isfinite(left))
+                        printf("{\"v\":1,\"type\":\"startup_progress\",\"stage\":\"%s\",\"permille\":%d,\"seconds\":%.0f}\n",
+                               step, (int)(whole * 1000), std::ceil(left));
+                    else
+                        printf("{\"v\":1,\"type\":\"startup_progress\",\"stage\":\"%s\",\"permille\":%d}\n",
+                               step, (int)(whole * 1000));
+                    fflush(stdout);
+                    next_progress = secs + 0.25;
+                    announced_stage = stage;
+                }
+                if (finished) break;
+                Sleep(33);
+                continue;
+            }
             if (stage == 0 && total) prepared = true;
             StartupState st;
             st.stage = stage, st.done = done, st.total = total, st.left = left, st.secs = secs;
@@ -1663,6 +1685,10 @@ void prepare_with_screen() {
             if (w && h) present_image(nullptr, dev.swap_extent.width, dev.swap_extent.height, nullptr);
             if (finished || paint_stop.load()) break;
             Sleep(33);
+        }
+        if (launcher) {
+            SetEvent(painted);
+            return;
         }
         // (the end: a fade to black over 0.4 s, so the game's first frame comes out of black, not cut in over the screen; none
         // after a screen of under 1.5 s, a blink, or when the window is not shown (paint_stop: its presents wait))
