@@ -1,8 +1,7 @@
-"""Game-free checks that Longshot's Windows files are made on the Linux runner (docs/dev/reference/ci.md: there is no Windows
-one): no workflow asks for a Windows runner, which would queue forever and hold a release; the Linux llvm-mingw that compiles
-them is tools.lock's release; the Windows longshot-builder's job checks what it made and the bundle's dav1d (no dav1d is
-built in CI); and the Vulkan back end's build check, which ships nothing, is ci.yml's (Linux and Windows, without and
-with AMD FSR 4, when a change touches the renderer), not a release's.
+"""Game-free checks that Longshot's Windows files are made on Linux (docs/dev/reference/ci.md: there is no Windows
+runner): no workflow asks for one, which would queue forever; the Linux llvm-mingw that compiles them is tools.lock's
+release; the bundle's dav1d has its recipe; and the Vulkan back end's build check, which ships nothing, is ci.yml's
+(Linux and Windows, without and with AMD FSR 4, when a change touches the renderer).
 
 Run with: python -I tests/test_windows_on_linux.py
 """
@@ -42,44 +41,21 @@ class WindowsOnLinuxTests(unittest.TestCase):
         self.assertRegex(sha256, r"^[0-9a-f]{64}$")
         self.assertEqual(url, "https://github.com/mstorsjo/llvm-mingw/releases/download/%s/%s.tar.xz" % (version, prefix))
 
-    def test_the_windows_job(self):
-        wf = (WORKFLOWS / "build-windows.yml").read_text(encoding="utf-8")
-        self.assertIn("scripts/longshot_builder.py build --target windows --profile dist", wf)
-        self.assertIn('scripts/longshot_builder.py check "dist/longshot-builder-$TAG-windows-x64.exe"', wf)
-        self.assertIn('"dist/longshot-builder-$TAG-windows-x64.exe" sources', wf)   # (started under Wine)
-        for name in ("build-windows.yml", "vulkan-dlss.yml"):
-            text = (WORKFLOWS / name).read_text(encoding="utf-8")
-            with self.subTest(name):
-                self.assertNotIn("NUMBER_OF_PROCESSORS", text)   # (Windows' own variable)
-                # (each command that runs it, not a comment naming it)
-                for line in re.findall(r"^(?![ \t]*#).*longshot_builder\.py llvm-mingw.*", text, re.M):
-                    self.assertIn("--host linux", line)
+    def test_llvm_mingw_is_the_linux_build_in_ci(self):
+        text = (WORKFLOWS / "vulkan-dlss.yml").read_text(encoding="utf-8")
+        self.assertNotIn("NUMBER_OF_PROCESSORS", text)   # (Windows' own variable)
+        # (each command that runs it, not a comment naming it)
+        for line in re.findall(r"^(?![ \t]*#).*longshot_builder\.py llvm-mingw.*", text, re.M):
+            self.assertIn("--host linux", line)
 
     def test_dav1d_is_the_bundles(self):
-        # (dav1d comes from tools.lock's cpm package, in the bundle: CI checks it under Wine and builds none of its own;
-        # builder/tools/windows-x64/dav1d.sh makes it, part of the package's recipe)
-        wf = (WORKFLOWS / "build-windows.yml").read_text(encoding="utf-8")
-        self.assertNotIn("dav1d.sh", wf)
-        self.assertNotIn("meson", wf)
-        package = wf[wf.index("\n  package:"):]   # (its only job)
-        self.assertIn('dev tools install "$PWD" --system windows-x64', package)
-        self.assertRegex(package, r"tests/test_dav1d_av1\.py --cross \"\$LLVM_MINGW/bin/x86_64-w64-mingw32-clang\" \\\n\s+--run ")
-        self.assertLess(package.index("Wine, installed"), package.index("test_dav1d_av1.py"))
+        # (dav1d comes from tools.lock's cpm package, in the bundle; builder/tools/windows-x64/dav1d.sh makes it)
         self.assertTrue((ROOT / "builder" / "tools" / "windows-x64" / "dav1d.sh").is_file())
 
     def test_the_back_end_is_checked_in_ci_not_in_a_release(self):
         # (the Vulkan back end alone, which ships nothing, is built by ci.yml's renderer job on the pull request runners,
         # for Linux and for Windows, without and with AMD FSR 4; a release builds only what it ships, so nothing of a
         # release's skips it)
-        release = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
-        self.assertNotIn("released-as", release)
-        self.assertNotIn("outputs.checked", release)
-        for name in ("build-linux.yml", "build-windows.yml"):
-            text = (WORKFLOWS / name).read_text(encoding="utf-8")
-            with self.subTest(name):
-                self.assertNotIn("compile --only renderer", text)
-                self.assertNotIn("RELEASE_CHECKED", text)
-                self.assertNotIn("inputs.checked", text)
         ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
         job = ci[ci.index("\n  renderer:\n"):]
         job = job[:job.index("\n\n  # ")]

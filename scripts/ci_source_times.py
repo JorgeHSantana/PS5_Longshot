@@ -1,5 +1,5 @@
-"""Let a restored cargo target folder see the checkout's unchanged files as unchanged (build-linux.yml and
-build-windows.yml).
+"""Let a restored cargo target folder see the checkout's unchanged files as unchanged (the release builds,
+MagicBeanAdmin/Release's longshot.yml).
 
 Cargo decides that a workspace crate (the builder's own) is up to date by its files' times, and a fresh checkout
 makes every file new, so every run would compile all of them again, the most of a warm build. `record` writes each

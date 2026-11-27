@@ -1,5 +1,5 @@
-//! `longshot-builder dev release`: a release's packaging (docs/dev/reference/releases.md; CI's build-linux.yml,
-//! build-windows.yml and release.yml run it with build-linux.yml's own longshot-builder, before its pack is attached).
+//! `longshot-builder dev release`: a release's packaging (docs/dev/reference/releases.md; MagicBeanAdmin/Release's
+//! longshot.yml runs it with its Linux job's longshot-builder, before its pack is attached).
 //!
 //! ```text
 //! sources --out <pack> --version <name> [--root <checkout>] [--third-party-objects <folder>]

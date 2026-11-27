@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# A release's builds run only on the server's release runner (docs/dev/reference/ci.md, Runners). The `release` label
-# only routes a job, so build-linux.yml's and build-windows.yml's jobs start with this check: the job must reach the seal
+# `release` jobs run only on the server's release runner (docs/dev/reference/ci.md, Runners). The `release` label
+# only routes a job, so tools.yml's and ci-image.yml's jobs start with this check: the job must reach the seal
 # broker, which only the server's CI network can, and the broker must show the key SEAL_BROKER_PIN names (a TLS
 # handshake; nothing is asked of it and no ID token is used). Any other runner that takes the job fails here, before it
 # builds anything. This catches a runner given the label by mistake. A runner whose owner rewrites the job's steps is

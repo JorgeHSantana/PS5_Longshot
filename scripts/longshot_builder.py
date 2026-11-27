@@ -42,7 +42,7 @@ link (`longshot-builder dev release sources` makes it, `dev release attach` appe
 output (--out, default
 build-<system>/longshot-builder[.exe]) is checked as `check` checks it.
 
-The release builds both in CI (.forgejo/workflows/build-linux.yml, build-windows.yml) and publishes them as they are:
+The release builds both in CI (MagicBeanAdmin/Release's longshot.yml) and publishes them as they are:
 longshot-builder-<version>-linux-x64 and longshot-builder-<version>-windows-x64.exe. A developer runs `cargo build
 --release -p longshot-builder` in builder/ with mise's Rust instead (scripts/devtools/packs.py does), which carries no
 sources and builds from the checkout (--root).

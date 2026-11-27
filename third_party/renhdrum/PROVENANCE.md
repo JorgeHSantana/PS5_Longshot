@@ -25,7 +25,7 @@ upstream-root: RenHDrum-0.5.0
 **How it reaches the game.** `python -I scripts/renhdrum.py build` compiles it into `renhdrum.dll` (ignored by git) for
 x86_64-pc-windows-gnullvm, with a pinned Rust and the llvm-mingw the game is built with (its clang compiles libopus too),
 and the `cc` crate downloaded by the SHA-256 `Cargo.lock` gives it; the same source gives the same bytes. The release
-does that in CI (`.forgejo/workflows/build-windows.yml`, and `build-linux.yml` for `renhdrum.so`) and longshot-builder
+does that in CI (MagicBeanAdmin/Release's `longshot.yml`) and longshot-builder
 carries the library at `third_party/renhdrum/` in its tree (`longshot-builder dev release sources --add`), so a player's
 build puts it beside the game (build-compile) and needs no Rust. `host/rumble_renhdrum.c` loads it (`renhdrum.dll`, `renhdrum.so` on Linux) from the game's own folder by full path; without it
 every controller keeps its motors or its own HD rumble, and Test vibration says why.

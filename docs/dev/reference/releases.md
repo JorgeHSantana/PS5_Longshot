@@ -85,17 +85,19 @@ tells two builds of one version apart.
 
 ## The release workflow
 
-`.forgejo/workflows/release.yml` runs on every push to `main` and every `v*` tag:
+[MagicBeanAdmin/Release](https://git.magicbean.dev/MagicBeanAdmin/Release)'s [`longshot.yml`](https://git.magicbean.dev/MagicBeanAdmin/Release/src/branch/main/.forgejo/workflows/longshot.yml) makes the releases. Every 5 minutes it looks for a nightly of
+`main` to make (5 minutes after the last of a few merges, hourly while they keep coming); a stable is tagged here, then
+run there by hand with its tag and **publish** on:
 
 | Job | What it does | Run by |
 |---|---|---|
 | The version | names the version: a tag is checked; a push gets the nightly name, after waiting for more merges and only when it brings something for the notes. Then, only when there is a version, checks `tools.lock` has every tool the packs carry and every line's archive is in Longshot's store with its size and SHA-256: a release uploads no tool, and stops on a line whose archive isn't there ([bumping a tool](#bumping-a-tool)) | `release.py check-tag`, `nightly-age`, `nightly-news`, `nightly-name`, then `longshot-builder dev tools check`, `dev tools check --require` (a builder built first) |
-| longshot-builder (Linux) | compiles the program it ships once (the dist profile, linked by tools.lock's clang against its sysroot, glibc 2.35, the game's floor; `scripts/longshot_builder.py link-tools` fetches both first, each checked by its size and SHA-256), which carries nothing yet and is the job's tool: it installs `tools.lock`'s linux-x64 tools, builds the third-party objects, packs the sources, objects, RenHDrum and tools (`dev release sources`, taking each member that did not change from the last release's pack), and appends the pack to a copy of itself, the release's file (`dev release attach`, read back; its headers then checked); then starts a player's build's dry run from it, makes the stamps, the deltas from the channel's last 5 releases and a nightly's from the latest stable (their full files through `RELEASE_UPLOAD_API` when the runner reaches it; fewer than 5 while more releases have the platform's files is a warning, and so is the latest stable's file that could not be had, though no stable with it yet is not) and the manifest, zips RecompLauncher's file and uploads all of it. It uploads the program before its pack too, as `longshot-builder-linux-tool`, the Windows job's tool. Only the release's own caches are restored ([ci](ci.md#the-releases-cache)) | `build-linux.yml`: `scripts/longshot_builder.py build`, then that builder's `dev tools install`, `dev release last-objects`, `compile --third-party-objects`, `dev release sources`, `dev release attach`, `scripts/longshot_builder.py check`, `dev release dry-run`, `dev release files` (which runs `fetch-bases`, then `deltas`), `dev release recomplauncher` |
-| longshot-builder (Windows) | the same for windows-x64, after the Linux job: its tool is the Linux job's program before its pack (an artifact of the run), so it compiles only the program it ships, once, cross-built on Linux with llvm-mingw's Linux build, then attaches its pack and checks it under Wine. Forgejo lists each build's job under the release's, as "longshot-builder (Linux): build" and "longshot-builder (Windows): build" | `build-windows.yml`: `scripts/longshot_builder.py llvm-mingw`, `build`, `check`; the Linux builder's `dev release last-objects`, `sources`, `attach`, `unpack`, `dry-run`, `files`, `recomplauncher` |
-| Sign and publish | on the deploy runner, which compiles nothing: checks every platform's files are there (RecompLauncher's zips too), writes and signs `SHA256SUMS`, checks the signature with the key the launcher trusts, writes the notes, uploads everything to a draft and publishes it; a nightly also deletes the nightlies past the newest 20 that are 5 days old or more | `release.py sums`, `sign`, `verify`, `notes`, `publish`, `prune` |
+| longshot-builder (Linux) | compiles the program it ships once (the dist profile, linked by tools.lock's clang against its sysroot, glibc 2.35, the game's floor; `scripts/longshot_builder.py link-tools` fetches both first, each checked by its size and SHA-256), which carries nothing yet and is the job's tool: it installs `tools.lock`'s linux-x64 tools, builds the third-party objects, packs the sources, objects, RenHDrum and tools (`dev release sources`, taking each member that did not change from the last release's pack), and appends the pack to a copy of itself, the release's file (`dev release attach`, read back; its headers then checked); then starts a player's build's dry run from it, makes the stamps, the deltas from the channel's last 5 releases and a nightly's from the latest stable (their full files through the server's LAN address; fewer than 5 while more releases have the platform's files is a warning, and so is the latest stable's file that could not be had, though no stable with it yet is not) and the manifest, zips RecompLauncher's file and uploads all of it. It uploads the program before its pack too, as `longshot-builder-linux-tool`, the Windows job's tool. Only the release's own caches are restored ([ci](ci.md#the-releases-cache)) | *Linux*: `scripts/longshot_builder.py build`, then that builder's `dev tools install`, `dev release last-objects`, `compile --third-party-objects`, `dev release sources`, `dev release attach`, `scripts/longshot_builder.py check`, `dev release dry-run`, `dev release files` (which runs `fetch-bases`, then `deltas`), `dev release recomplauncher` |
+| longshot-builder (Windows) | the same for windows-x64, after the Linux job: its tool is the Linux job's program before its pack (an artifact of the run), so it compiles only the program it ships, once, cross-built on Linux with llvm-mingw's Linux build, then attaches its pack and checks it under Wine. | *Windows*: `scripts/longshot_builder.py llvm-mingw`, `build`, `check`; the Linux builder's `dev release last-objects`, `sources`, `attach`, `unpack`, `dry-run`, `files`, `recomplauncher` |
+| Sign and publish | compiling nothing: checks every platform's files are there (RecompLauncher's zips too), writes and signs `SHA256SUMS`, checks the signature with the key the launcher trusts, writes the notes, uploads everything to a draft and publishes it; a nightly also deletes the nightlies past the newest 20 that are 5 days old or more | `release.py sums`, `sign`, `verify`, `notes`, `publish`, `prune` |
 
 - **Drafts make a release appear at once.** Until the last step no launcher sees it; a failed run leaves a draft, which
-  a re-run of the same tag reuses.
+  a run of the same tag by hand reuses.
 - **A release builds only what it ships.** Every file carries its version, so a tag always builds again. The Vulkan
   back end's build checks (Linux and Windows, without and with AMD FSR 4), which ship no file, are `ci.yml`'s
   `renderer` job on the pull requests that touch the renderer and on every push to `main`
@@ -245,30 +247,12 @@ the signature, then each file it downloads against `SHA256SUMS`, and a file it m
 manifest's SHA-256 of the full file. `longshot-builder` checks every file of its pack against its SHA-256 as it unpacks it.
 `LONGSHOT_LAUNCHER_TRUST=<public .pem>` makes a launcher trust one more key, for trying a test release; `longshot-builder`'s `fetch` and `self-update` read it too, and `LONGSHOT_TRUST` for the builder alone (`release::trust::TRUST_VARIABLES`). Never set either for players.
 
-Who can sign: anyone who can push a branch to this repository can run a workflow on the deploy runner and unseal the
-release key and the packages token ([CI](ci.md#secrets-only-our-runners-can-open)): push access is release-signing
-access, until the deploy runner takes only `main`'s and the tags' jobs.
+Who can sign: whoever can push to [MagicBeanAdmin/Release](https://git.magicbean.dev/MagicBeanAdmin/Release), which holds the release key as an ordinary secret, and
+whoever can push to `main` or a `v*` tag here, since that is what gets built and signed.
 
-Uploads go through `RELEASE_UPLOAD_API` (an organization variable, passed to `release.py` as `FORGEJO_UPLOAD_API`): the
-API without Cloudflare in front, which cuts uploads at 100 MB. The build jobs' artifacts (`longshot-builder-<platform>`, the Linux
-tool) and the CI images' layers are uploaded the same way first: `upload-artifact` with `ACTIONS_RESULTS_URL` set to
-that host; when that fails, or the variable is unset, through the public address, then once more. (If Forgejo answers
-with upload addresses under its `ROOT_URL`, the bytes still go through Cloudflare: the run's log shows which.) Releases are made with the job's own token; no other
-secret is needed.
-
-### Rotating the key
-
-When it may have leaked, or on a schedule:
-
-1. `python -I ../Tooling/scripts/release.py keygen <safe folder>` makes `release.pem` and `release.pub.pem` and prints the lines.
-2. **The launcher first:** add the new key beside the old one in `Core/ReleaseTrust.cs` and `scripts/release_keys.json`,
-   and release the launcher **signed with the old key**.
-3. **Then switch,** once most players have that launcher: replace `RELEASE_SIGNING_KEY_SEALED` with the new
-   `release.pem`, sealed (`scripts/ci_secret.sh seal --key seal.key < release.pem`),
-   remove the old key from both files, and release the launcher with the new key.
-
-Older launchers then refuse new releases and the player downloads the launcher by hand. If the old key leaked, do
-steps 2 and 3 at once and tell players.
+Releases are uploaded over Release's runners' own network, past Cloudflare, which cuts uploads at 100 MB (its
+README). The CI images' and the tools' uploads here go through `RELEASE_UPLOAD_API` (an organization variable, the API
+without Cloudflare in front).
 
 ## tools.lock
 
@@ -357,7 +341,7 @@ uploaded by hand: `dev tools add` without `--no-upload`, with `RELEASE_TOKEN` (`
 `FORGEJO_UPLOAD_API`. Play profiles are not tools: they are committed in `assets/profiles/`.
 
 RenHDrum isn't a tool either. The release builds `renhdrum.dll` and `renhdrum.so` from `third_party/renhdrum`
-(`scripts/renhdrum.py build` in `build-windows.yml` and `build-linux.yml`, with a pinned Rust, its build crate by its
+(`scripts/renhdrum.py build` in Release's `longshot.yml`, with a pinned Rust, its build crate by its
 `Cargo.lock` SHA-256 and libopus from `third_party/opus`) and packs them into `longshot-builder`'s tree
 (`longshot-builder dev release sources --add`), where a player's build finds them. A newer RenHDrum: its `PROVENANCE.md` says how. A newer Rust:
 `RUST_VERSION` and the parts' SHA-256 in `scripts/renhdrum.py`.
@@ -523,18 +507,15 @@ What a repository needs before its first release (the organization's secret is s
    launcher's `Core/ReleaseTrust.cs` and in [`scripts/release_keys.json`](../../../scripts/release_keys.json), a pull
    request to each. Keep `release.pem` backed up offline: losing it means a launcher with a new key that every player
    downloads by hand.
-2. **The secret** (MagicBeanDev > *Settings* > *Actions* > *Secrets*): `RELEASE_SIGNING_KEY_SEALED`, `release.pem`
-   sealed with the server's `seal.key` (`scripts/ci_secret.sh seal --key seal.key < release.pem`; [CI](ci.md#secrets-only-our-runners-can-open)).
-   No token secret or bot account: `release.yml` makes the release with the job's own token, which Forgejo
-   gives write access to its own repository on a push or a tag. Don't protect `nightly-*` tags, or the prune can't delete
+2. **The secrets**, in [MagicBeanAdmin/Release](https://git.magicbean.dev/MagicBeanAdmin/Release): `RELEASE_SIGNING_KEY`, `release.pem` as it is, and
+   `PUBLISH_TOKEN`, a token that writes this repository. Don't protect `nightly-*` tags here, or the prune can't delete
    them. `longshot-builder dev tools` and `release.py` run by hand (`add`, `publish`, `prune`) take your own token as
    `RELEASE_TOKEN`.
    `PACKAGES_TOKEN_SEALED`: the token of BeanTools (an account in a team with *Packages: Write* alone, `write:package`),
    sealed the same way; the Make tools workflow's publish job opens it on the deploy runner only.
-3. **The upload address.** Uploads through Cloudflare are cut at 100 MB, and the Linux `longshot-builder` is larger. Set the
-   organization variable `RELEASE_UPLOAD_API` (passed to `release.py` as `FORGEJO_UPLOAD_API`, since Forgejo refuses
-   variable names that start with `FORGEJO_`) to the API without Cloudflare, as the runners reach it. Unset, uploads go
-   to `https://git.magicbean.dev/api/v1`.
+3. **The upload address** (the Make tools workflow and the CI images; a release's uploads are Release's own). Set the
+   organization variable `RELEASE_UPLOAD_API` (passed on as `FORGEJO_UPLOAD_API`, since Forgejo refuses variable names
+   that start with `FORGEJO_`) to the API without Cloudflare, as the runners reach it.
 4. **The attachment limits** in Forgejo's `app.ini`: `[attachment] MAX_SIZE` at least the largest file, and
    `[repository.release] ALLOWED_TYPES` empty, so `.exe`, `.zst-patch`, `.json`, files without an extension and
    `SHA256SUMS` are accepted.
@@ -549,14 +530,10 @@ What a repository needs before its first release (the organization's secret is s
 
 | Symptom | Fix |
 |---|---|
-| *SHA256SUMS, signed*: "the sealed secret is empty" | `RELEASE_SIGNING_KEY_SEALED` isn't set or visible to the repository ([one-time setup](#one-time-setup), step 2) |
-| *SHA256SUMS, signed*: "the seal broker gave no key (refused: ...)" | the broker's reason follows: a run that isn't main's or a `v*` tag's, or another repository ([CI](ci.md#secrets-only-our-runners-can-open)) |
-| *SHA256SUMS, signed*: "the seal broker gave no key ()", or curl can't connect | the job ran on a runner that can't reach the broker (only the server's quick runner should carry `deploy`), or `SEAL_BROKER_PIN` doesn't match the broker's certificate |
-| *SHA256SUMS, signed*: "no ID token" | the publish job lost `enable-openid-connect: true` |
-| *SHA256SUMS, signed*: "bad decrypt" | the secret was sealed with another `seal.key`: seal it again with the server's |
+| *SHA256SUMS, signed*: "no RELEASE_SIGNING_KEY secret" | add it in MagicBeanAdmin/Release ([one-time setup](#one-time-setup), step 2) |
+| *Publish*: HTTP 413 or a cut connection | the upload went through Cloudflare (100 MB): the runner must reach the server's LAN address (Release's README) |
 | `verify`: "not signed by a trusted key" | the secret's key isn't in `release_keys.json`: set the matching key, or rotate |
-| *Publish*: HTTP 413 or a cut connection | an upload over Cloudflare's 100 MB limit: set `RELEASE_UPLOAD_API` |
-| *Publish*: "upload N of 4 failed", HTTP 5xx | `release.py` tries each upload four times; if all fail, check Forgejo's log and re-run (the draft is reused) |
+| *Publish*: "upload N of 4 failed", HTTP 5xx | `release.py` tries each upload four times; if all fail, check Forgejo's log and run the release again by hand (the draft is reused) |
 | *Publish*: HTTP 400/422 | Forgejo's attachment size or type limits (`[attachment] MAX_SIZE`, `[repository.release] ALLOWED_TYPES` empty) |
 | *Publish*: HTTP 401/403 | the run isn't a push to this repository: release from a tag or push here only |
 | "is already published" | a re-run of a released version: nothing to do |

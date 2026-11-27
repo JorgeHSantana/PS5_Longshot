@@ -183,29 +183,6 @@ class RecompLauncherJsonTests(unittest.TestCase):
         folder = (ROOT / "builder" / "crates" / "build-driver" / "src" / "folder.rs").read_text(encoding="utf-8")
         self.assertIn('pub const RECORD_FILE: &str = "longshot_build.json";', folder)
 
-    def test_the_release_zip_carries_it(self):
-        # (longshot-builder dev release recomplauncher: the release's program as Longshot.exe (a windowed program) or
-        # Longshot.x86_64, and this file as it is, beside it, where RecompLauncher reads it; the release workflow makes one a
-        # platform, and SHA256SUMS names it.
-        # The zip's name and contents are longshot-builder's tests: release_cmd.rs's
-        # the_recomplauncher_zip_carries_the_program_and_recomplauncher_json, and tests/release_recomplauncher.rs, the
-        # command as the build jobs run it)
-        # (made by each build job's own longshot-builder into dist/, before dist/ is uploaded: it travels with the other
-        # files, and publish, which signs them, names it in SHA256SUMS and builds nothing)
-        workflows = ROOT / ".forgejo" / "workflows"
-        for name, full in (("build-linux.yml", "dist/longshot-builder-$TAG-linux-x64"),
-                           ("build-windows.yml", "dist/longshot-builder-$TAG-windows-x64.exe")):
-            with self.subTest(name):
-                workflow = (workflows / name).read_text(encoding="utf-8")
-                made = workflow.index('"$RUNNER_TEMP/host/longshot-builder" dev release recomplauncher "%s" --out dist' % full)
-                self.assertLess(workflow.index("dev release files"), made)
-                self.assertLess(made, workflow.index("name: longshot-builder-" + ("linux" if "linux" in name else "windows")))
-        release = (workflows / "release.yml").read_text(encoding="utf-8")
-        publish = release[release.index("\n  publish:"):]
-        self.assertIn('"longshot-builder-$TAG-$p-recomplauncher.zip"', publish)
-        self.assertLess(publish.index("recomplauncher.zip"), publish.index("sums files/*"))
-        self.assertNotIn("dev release recomplauncher", publish)
-
     def test_the_copy_is_the_input_game(self):
         # (RecompLauncher's named input game: the .nup or the extracted folder, refused when its build ID isn't the one
         # Longshot is made from)

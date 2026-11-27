@@ -7,7 +7,7 @@
 # vk_temporal.cpp.
 # It runs on the Linux runner (there is no Windows one, docs/dev/reference/ci.md): RX_TARGET=windows, with llvm-mingw's Linux
 # build of tools.lock's release (scripts/longshot_builder.py llvm-mingw --host linux) and a Linux longshot-builder (scripts/longshot_builder.py,
-# the pinned Rust), as build-windows.yml builds the back end.
+# the pinned Rust), as a Windows player's build makes the back end.
 name: Vulkan back end with NVIDIA DLSS
 
 on:

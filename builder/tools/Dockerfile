@@ -1,6 +1,6 @@
 # Ubuntu 22.04's build environment, on any distribution: what the build tools' archives are made in (builder/tools/make.sh;
 # the Make tools workflow, .forgejo/workflows/tools.yml, installs the same packages) and what CI builds the Linux
-# longshot-builder in (.forgejo/workflows/build-linux.yml). Ubuntu 22.04 is not a preference: the sysroot tools.lock gives
+# longshot-builder in (MagicBeanAdmin/Release's longshot.yml). Ubuntu 22.04 is not a preference: the sysroot tools.lock gives
 # a player's build is this system's C library, so the game it builds runs on glibc 2.35 and newer.
 #
 # The image holds the system packages only. The checkout is mounted at /src when it runs, so the downloads and the pinned

@@ -8,7 +8,7 @@
 #   LONGSHOT_MINGW=<llvm-mingw folder> builder/tools/windows-x64/dav1d.sh [<cpm folder>, default $RX_CPM, else build-windows/cpm]
 #
 # Part of windows-x64/cpm, which runs it (builder/tools/make.sh windows-x64/cpm). CI builds no dav1d: the Windows builder
-# gets it from tools.lock's cpm package, and build-windows.yml checks that package's dav1d under Wine.
+# gets it from tools.lock's cpm package, and the release's Windows build checks that package's dav1d under Wine.
 #
 # Needs meson, ninja and nasm 2.15 or newer (--reproducible: no time stamps in its objects). Prints the SHA-256 of the library
 # it made: the same pins, llvm-mingw and nasm give the same file.

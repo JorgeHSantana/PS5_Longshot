@@ -73,7 +73,7 @@ jobs:
           }
           retry_packages base_packages
           retry_packages toolchain_packages
-      # (build-linux.yml's Node for the actions: ubuntu:22.04 has none)
+      # (Node for the actions: ubuntu:22.04 has none; the release's Linux build pins the same)
       - name: Node for the actions
         env:
           NODE_VER: v24.22.3

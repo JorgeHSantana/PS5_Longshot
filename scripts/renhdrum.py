@@ -17,7 +17,7 @@ third_party/renhdrum leaves out), with the same C compiler that links it:
 No time stamp and no path of this machine go in: the same source gives the same bytes. Its output (--out, default
 third_party/renhdrum/renhdrum.dll or .so, which .gitignore leaves out) is checked as `check` checks it.
 
-The release makes the DLL and the .so in CI (.forgejo/workflows/build-windows.yml, build-linux.yml) and longshot-builder
+The release makes the DLL and the .so in CI (MagicBeanAdmin/Release's longshot.yml) and longshot-builder
 carries them (longshot-builder dev release sources --add third_party/renhdrum/...), so a player's build places it
 beside the game (longshot-builder: build-compile and build-driver's finished_files) with no Rust on their PC. A build without it plays every controller's
 motors or its own HD rumble.

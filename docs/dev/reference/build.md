@@ -510,7 +510,7 @@ longshot-builder from-source --archive <file.tar.gz> [--commit <40 hex>] --out <
 | `--name <version>` | The version's name the program carries (`--version`, the game's version line, the fast check's stamp): 1 to 64 of `[A-Za-z0-9._-]`. Default `source-<commit's first 8>`; the launcher passes its own (`pr-<number>-<commit's first 8>`) |
 | `--jobs N`, `--cache`, `--output` | As for a build. `--cache` holds everything it keeps ([below](#what-it-keeps)) |
 
-It goes as the release's workflows do (`.forgejo/workflows/build-linux.yml`, `build-windows.yml`,
+It goes as the release's builds do (MagicBeanAdmin/Release's `longshot.yml`,
 `scripts/longshot_builder.py`, `scripts/renhdrum.py`), with what the source pins (`builder/crates/longshot-builder/src/from_source/`):
 
 1. **The source** (`stage` `source`): the archive downloaded (at most 128 MB, curl), or the file given, then read by

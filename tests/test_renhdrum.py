@@ -15,8 +15,8 @@ out); libopus is compiled by the same C compiler that links it, its paths relati
 crates Cargo.lock names, unpacked from the cache (each checked by its Cargo.lock SHA-256, one that is not refused); what
 fails the check is not copied out. A Rust download whose SHA-256 is not the pinned one is refused and not kept.
 
-The release builds the DLL and the .so (.forgejo/workflows/build-windows.yml, build-linux.yml; the DLL for Windows on the
-Linux runner, --target windows) and longshot-builder carries them at third_party/renhdrum/ in its tree (longshot-builder dev release
+The release builds the DLL and the .so (MagicBeanAdmin/Release's longshot.yml; the DLL for Windows on Linux,
+--target windows) and longshot-builder carries them at third_party/renhdrum/ in its tree (longshot-builder dev release
 sources --add), where a player's build takes them. third_party/renhdrum holds the source, with its upstream archive named.
 
     python -I -B tests/test_renhdrum.py
@@ -363,12 +363,7 @@ class Ships(unittest.TestCase):
         for name in bound:
             self.assertIn(name + "(", header)
 
-    def test_the_release_builds_and_carries_it(self):
-        for wf, target, name in (("build-windows.yml", "windows", "renhdrum.dll"), ("build-linux.yml", "linux", "renhdrum.so")):
-            text = (ROOT / ".forgejo" / "workflows" / wf).read_text(encoding="utf-8")
-            with self.subTest(wf):
-                self.assertIn("scripts/renhdrum.py build --target %s" % target, text)
-                self.assertIn('--add "third_party/renhdrum/%s=$RUNNER_TEMP/renhdrum/%s"' % (name, name), text)
+    def test_a_players_build_takes_it(self):
         # (a player's build takes it from there: the tree longshot-builder carries, its compile)
         build = (ROOT / "builder" / "crates" / "build-compile" / "src" / "lib.rs").read_text(encoding="utf-8")
         self.assertIn('root.join("third_party/renhdrum/renhdrum.dll")', build)

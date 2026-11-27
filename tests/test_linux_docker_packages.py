@@ -1,11 +1,10 @@
 """builder/tools/Dockerfile is the Linux build environment for any distribution: what the build tools are made in
-(builder/tools/make.sh, their sysroot among them) and what CI builds the Linux longshot-builder in
-(.forgejo/workflows/build-linux.yml). Reads both files; nothing is built.
+(builder/tools/make.sh, their sysroot among them). Reads the files; nothing is built.
 
-The two are kept by hand. The base system is the same, or a newer one puts a newer glibc in the sysroot and the game a
-player builds no longer runs on the systems the release is for. Every package the workflow installs is in the image, or
-CI's build fails in the container. The image has more (the recipes' own builds), and the toolchain PPA's GCC 13: the
-sysroot's recipe copies the newest GCC's runtime into it, and the game needs libstdc++ 13 (C++20 <format>).
+The Make tools workflow and the image are kept by hand and must match, or CI's build fails in the container. The
+sysroot's recipe copies the newest GCC's runtime into it, and the game needs libstdc++ 13 (C++20 <format>): the
+toolchain PPA's. (That a release's Linux build installs nothing the image lacks is checked where that build is,
+MagicBeanAdmin/Release's tests/test_longshot.py.)
 
     python -I -B tests/test_linux_docker_packages.py
 """
@@ -15,7 +14,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCKERFILE = ROOT / "builder/tools/Dockerfile"
-WORKFLOW = ROOT / ".forgejo/workflows/build-linux.yml"
 TOOLS_WORKFLOW = ROOT / ".forgejo/workflows/tools.yml"
 
 
@@ -37,20 +35,9 @@ def ppas(text):
 class LinuxDockerPackages(unittest.TestCase):
     def setUp(self):
         self.docker = DOCKERFILE.read_text(encoding="utf-8")
-        self.workflow = WORKFLOW.read_text(encoding="utf-8")
-
-    def test_base_image(self):
-        ci = re.search(r"^\s*container:\s*(\S+)", self.workflow, re.M)
-        base = re.search(r"^FROM\s+(\S+)", self.docker, re.M)
-        self.assertIsNotNone(ci, "the workflow's container")
-        self.assertIsNotNone(base, "the Dockerfile's FROM")
-        self.assertEqual(base.group(1), ci.group(1))
 
     def test_packages(self):
-        ci, docker = installs(self.workflow), installs(self.docker)
-        self.assertIn("build-essential", ci, "the workflow's package list was not found")
-        self.assertEqual(sorted(ci - docker), [], "in the workflow, not in the Dockerfile")
-        self.assertLessEqual({"g++-13", "libstdc++-13-dev"}, docker, "the Dockerfile has no GCC 13 for the sysroot")
+        self.assertLessEqual({"g++-13", "libstdc++-13-dev"}, installs(self.docker), "the Dockerfile has no GCC 13 for the sysroot")
 
     def test_the_make_tools_workflow_is_the_image(self):
         """The Make tools workflow makes the archives a developer makes in the image (builder/tools/docker.sh): the same
@@ -70,13 +57,12 @@ class LinuxDockerPackages(unittest.TestCase):
 
     def test_ppas(self):
         self.assertEqual(ppas(self.docker), {"ppa:ubuntu-toolchain-r/test"}, "the Dockerfile's toolchain PPA (GCC 13)")
-        self.assertLessEqual(ppas(self.workflow), ppas(self.docker))
 
     def test_ppa_from_launchpad_net(self):
         """(main's #2373) where the toolchain PPA is added, its source is rewritten to ppa.launchpad.net:
         ppa.launchpadcontent.net, add-apt-repository's choice, answered 503 for hours and every build that added it failed"""
         rewrite = "sed -i 's|https://ppa\\.launchpadcontent\\.net/|http://ppa.launchpad.net/|g' /etc/apt/sources.list.d/*.list"
-        files = [DOCKERFILE, WORKFLOW] + sorted((ROOT / ".forgejo/workflows").glob("*.yml"))
+        files = [DOCKERFILE] + sorted((ROOT / ".forgejo/workflows").glob("*.yml"))
         adders = 0
         for f in dict.fromkeys(files):
             text = re.sub(r"\\\n", " ", f.read_text(encoding="utf-8")) if f.exists() else ""
