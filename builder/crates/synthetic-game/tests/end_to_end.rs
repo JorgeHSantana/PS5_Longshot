@@ -290,13 +290,13 @@ fn build_with(
 struct Synthetic<'a> {
     d: &'a Path,
     events: Events,
-    updates: Vec<build_driver::play::Stale>,
+    updates: Vec<build_driver::play::RebuildReason>,
     results: Vec<u64>,
     asks: usize,
 }
 
 impl build_driver::play::Host for Synthetic<'_> {
-    fn update(&mut self, o: &BuildOptions, why: build_driver::play::Stale) -> std::result::Result<(), String> {
+    fn update(&mut self, o: &BuildOptions, why: build_driver::play::RebuildReason) -> std::result::Result<(), String> {
         self.updates.push(why);
         build_with(self.d, o.clone(), &self.d.join("work-play"), &self.events).map(|_| ()).map_err(|e| e.to_string())
     }
@@ -414,7 +414,7 @@ fn the_synthetic_game_builds_runs_and_builds_again_one_unit() {
     assert_eq!(result, expected_result(7, 16400), "the second build's result");
 
     // ---- played as a player starts it: a version folder, its default profile naming the .nup
-    use build_driver::play::{self as bp, Profile, Stale};
+    use build_driver::play::{self as bp, Profile, RebuildReason};
     let version = d.join("version");
     let profile = version.join("profile");
     std::fs::create_dir_all(&profile).unwrap();
@@ -444,7 +444,11 @@ fn the_synthetic_game_builds_runs_and_builds_again_one_unit() {
         said.iter().all(|e| !e["text"].as_str().is_some_and(|t| t.contains("ExeFS patches:"))),
         "the old mod's patch built in: {said:#?}"
     );
-    assert_eq!(host.updates, [Stale::NotBuilt, Stale::Asked], "built, then built again when the game asked");
+    assert_eq!(
+        host.updates,
+        [RebuildReason::NotBuilt, RebuildReason::GameRequested],
+        "built, then built again when the game asked"
+    );
     assert_eq!(host.results, [expected_result(7, 16400); 2], "the game run twice");
     let folder = bp::game_folder(&version, None);
     assert!(folder.ends_with("builds/default") && bp::game_program(&folder).is_file());

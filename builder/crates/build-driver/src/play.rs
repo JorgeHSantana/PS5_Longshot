@@ -285,8 +285,12 @@ pub fn mods(profile: &Path) -> PathBuf {
 }
 
 /// Whether folder `dir` has a save: a `save/` folder with something in it.
-fn has_save(dir: &Path) -> bool {
-    std::fs::read_dir(dir.join("save")).is_ok_and(|mut d| d.next().is_some())
+fn nonempty_dir(dir: &Path) -> std::io::Result<bool> {
+    match std::fs::read_dir(dir) {
+        Ok(mut entries) => Ok(entries.next().transpose()?.is_some()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 /// A user folder's settings file ([`carry_saves`]: the profile's [`settings`] when it has none).
@@ -297,15 +301,22 @@ const OPTIONS_FILE: &str = "longshot_options.ini";
 /// them to). Its `save/` into `saves/save/`, and its settings (`longshot_options.ini`) as the profile's `settings.ini`
 /// when the profile has none; never `save-work/` (a write cut halfway, which the game in the old place finishes), nor
 /// anything else. Where they came from, when they did.
-pub fn carry_saves(profile: &Path, from: &[PathBuf]) -> Option<PathBuf> {
+pub fn carry_saves(profile: &Path, from: &[PathBuf]) -> std::io::Result<Option<PathBuf>> {
     let to = saves(profile);
-    if std::fs::read_dir(&to).is_ok_and(|mut d| d.next().is_some()) {
-        return None;
+    if nonempty_dir(&to)? {
+        return Ok(None);
     }
-    let old = from.iter().find(|f| has_save(f))?;
-    // (into a folder of its own first, renamed whole: a copy cut halfway is never the profile's saves)
-    let part = profile.join(".saves-copying");
-    let _ = std::fs::remove_dir_all(&part);
+    let mut source = None;
+    for path in from {
+        if nonempty_dir(&path.join("save"))? {
+            source = Some(path);
+            break;
+        }
+    }
+    let Some(old) = source else { return Ok(None) };
+    std::fs::create_dir_all(profile)?;
+    let part = build_core::fsx::temporary(&profile.join(".saves-copying"));
+    std::fs::create_dir(&part)?;
     fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(to)?;
         for e in std::fs::read_dir(from)? {
@@ -315,6 +326,11 @@ pub fn carry_saves(profile: &Path, from: &[PathBuf]) -> Option<PathBuf> {
                 copy_tree(&e.path(), &to.join(e.file_name()))?;
             } else if kind.is_file() {
                 std::fs::copy(e.path(), to.join(e.file_name()))?;
+            } else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Save entry is not a regular file or directory: {}", e.path().display()),
+                ));
             }
         }
         Ok(())
@@ -332,11 +348,11 @@ pub fn carry_saves(profile: &Path, from: &[PathBuf]) -> Option<PathBuf> {
         let _ = std::fs::remove_dir(&to);
         std::fs::rename(&part, &to)
     });
-    if done.is_err() {
+    if let Err(error) = done {
         let _ = std::fs::remove_dir_all(&part);
-        return None;
+        return Err(error);
     }
-    Some(old.clone())
+    Ok(Some(old.clone()))
 }
 
 /// Where a player's saves were before profiles, for [`carry_saves`]: the user folders of the game folders an earlier
@@ -373,9 +389,19 @@ pub fn game_stamp(game: &Path) -> String {
         let id = "";
         Some(format!("{} {t}{id}", m.len()))
     };
-    let parts =
-        if game.is_dir() { vec![game.join("exefs").join("main"), game.join("romfs")] } else { vec![game.into()] };
-    parts.iter().map(|p| one(p)).collect::<Option<Vec<_>>>().map(|v| v.join("; ")).unwrap_or_default()
+    if !game.is_dir() {
+        return one(game).unwrap_or_default();
+    }
+    let dump = || -> Option<String> {
+        let mut key = build_core::key::Key::new();
+        key.text("exefs/main", &one(&game.join("exefs/main"))?);
+        let romfs = game.join("romfs");
+        for path in build_core::fsx::files_under(&romfs).ok()? {
+            key.part("path", path.as_os_str().as_encoded_bytes()).text("metadata", &one(&romfs.join(path))?);
+        }
+        Some(key.hex())
+    };
+    dump().unwrap_or_default()
 }
 
 /// The stamp a build of profile `p` (at `profile`) in the version folder at `version` by builder `builder` (its version
@@ -392,7 +418,7 @@ pub fn stamp(version: &Path, profile: &Path, p: &Profile, builder: &str) -> Stam
 
 /// The ExeFS patches the build of profile `profile` takes (crate::read::manifest_mods, the enabled ones, in order):
 /// each mod's name and each patch file's name and SHA-256, hashed; empty for none. A patch added, changed, removed,
-/// switched off or moved in the order changes it, so the next start builds the game again ([`Stale::Mods`]).
+/// switched off or moved in the order changes it, so the next start builds the game again ([`RebuildReason::Mods`]).
 pub fn patches_stamp(profile: &Path) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
@@ -414,7 +440,7 @@ pub fn patches_stamp(profile: &Path) -> String {
 
 /// Why a game folder needs an update before the game starts ([`check`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Stale {
+pub enum RebuildReason {
     /// Never built (no record), or its game's program is missing.
     NotBuilt,
     /// Built without a stamp (by `build` or `update` for no profile, or an earlier builder).
@@ -430,21 +456,21 @@ pub enum Stale {
     /// The shaders are to be prepared again (a new driver, another GPU: crate::shaders::would_prepare).
     Shaders,
     /// The game asked for it (`restart_to_apply` over its channel, [`crate::channel`]) and exited normally.
-    Asked,
+    GameRequested,
 }
 
-impl Stale {
+impl RebuildReason {
     /// Its words, for the log.
     pub fn why(self) -> &'static str {
         match self {
-            Stale::NotBuilt => "not built yet",
-            Stale::NoStamp => "built for no profile",
-            Stale::Builder => "another builder",
-            Stale::Profile => "the profile's game files or upscalers changed",
-            Stale::Game => "the game files changed",
-            Stale::Mods => "the mods that need a build changed",
-            Stale::Shaders => "the shaders are to be prepared again",
-            Stale::Asked => "the game asked for a build",
+            RebuildReason::NotBuilt => "not built yet",
+            RebuildReason::NoStamp => "built for no profile",
+            RebuildReason::Builder => "another builder",
+            RebuildReason::Profile => "the profile's game files or upscalers changed",
+            RebuildReason::Game => "the game files changed",
+            RebuildReason::Mods => "the mods that need a build changed",
+            RebuildReason::Shaders => "the shaders are to be prepared again",
+            RebuildReason::GameRequested => "the game asked for a build",
         }
     }
 }
@@ -466,32 +492,36 @@ pub fn check(
     p: &Profile,
     builder: &str,
     get: impl Fn(&str) -> Option<String>,
-) -> Option<Stale> {
+) -> Option<RebuildReason> {
     let now = stamp(version, profile, p, builder);
     let folder = game_folder(version, now.mods.as_deref());
-    let program = game_program(&folder);
-    let Ok(rec) = Record::read(&folder) else { return Some(Stale::NotBuilt) };
+    rebuild_reason(&now, &folder, get)
+}
+
+fn rebuild_reason(now: &Stamp, folder: &Path, get: impl Fn(&str) -> Option<String>) -> Option<RebuildReason> {
+    let program = game_program(folder);
+    let Ok(rec) = Record::read(&folder) else { return Some(RebuildReason::NotBuilt) };
     if !program.is_file() {
-        return Some(Stale::NotBuilt);
+        return Some(RebuildReason::NotBuilt);
     }
-    let Some(was) = rec.stamp else { return Some(Stale::NoStamp) };
+    let Some(was) = rec.stamp else { return Some(RebuildReason::NoStamp) };
     if was.builder != now.builder {
-        return Some(Stale::Builder);
+        return Some(RebuildReason::Builder);
     }
     if was.profile != now.profile {
-        return Some(Stale::Profile);
+        return Some(RebuildReason::Profile);
     }
     if now.game.is_empty() || was.game != now.game {
-        return Some(Stale::Game);
+        return Some(RebuildReason::Game);
     }
     if (now.mods.is_some() && was.mods != now.mods) || was.patches != now.patches {
-        return Some(Stale::Mods);
+        return Some(RebuildReason::Mods);
     }
     let windows = program.extension().is_some_and(|e| e == "exe");
     let level = crate::folder::folder_compile_shaders(&folder).unwrap_or(crate::CompileShaders::Most);
     let shaders_dir = program.parent().unwrap_or(&folder);
     if crate::shaders::would_prepare(shaders_dir, windows, level, get) {
-        return Some(Stale::Shaders);
+        return Some(RebuildReason::Shaders);
     }
     None
 }
@@ -503,6 +533,10 @@ pub fn check(
 pub fn options(version: &Path, profile: &Path, p: &Profile, builder: &str) -> Result<BuildOptions> {
     let stamp = stamp(version, profile, p, builder);
     let folder = game_folder(version, stamp.mods.as_deref());
+    options_for(profile, p, stamp, folder)
+}
+
+fn options_for(profile: &Path, p: &Profile, stamp: Stamp, folder: PathBuf) -> Result<BuildOptions> {
     let Some(game) = p.game_in(profile) else {
         return Err(Error::player(
             "profile_unreadable",
@@ -534,7 +568,7 @@ pub fn options(version: &Path, profile: &Path, p: &Profile, builder: &str) -> Re
 /// test's).
 pub trait Host {
     /// The update with options `o`, for reason `why`: the error's text when it stopped.
-    fn update(&mut self, o: &BuildOptions, why: Stale) -> std::result::Result<(), String>;
+    fn update(&mut self, o: &BuildOptions, why: RebuildReason) -> std::result::Result<(), String>;
     /// An update that stopped, the game folder's game still there: whether to start it anyway (said to the player).
     fn play_anyway(&mut self, text: &str) -> bool;
     /// The game's program started with `args`, its environment with [`PROFILE_VAR`] (`profile`, absolute) and its
@@ -605,14 +639,23 @@ pub fn play(
     args: &[String],
     get: &dyn Fn(&str) -> Option<String>,
     host: &mut dyn Host,
-    checked: &mut dyn FnMut(Option<Stale>, std::time::Duration),
+    checked: &mut dyn FnMut(Option<RebuildReason>, std::time::Duration),
 ) -> Played {
     let (mut asked, mut restarts) = (false, 0);
     let profile = std::path::absolute(profile).unwrap_or_else(|_| profile.to_path_buf());
     // (the profile's saves (host/longshot_profile.h, longshot_profile_saves): made, as the game makes only its last
     // folder; a player's earlier saves copied in, once)
-    if let Some(from) = carry_saves(&profile, &earlier_saves(version, get)) {
-        eprintln!("longshot: your saves in {} copied into the profile (kept there too)", from.display());
+    match carry_saves(&profile, &earlier_saves(version, get)) {
+        Ok(Some(from)) => {
+            eprintln!("longshot: your saves in {} copied into the profile (kept there too)", from.display())
+        }
+        Ok(None) => {}
+        Err(error) => {
+            return Played::ProfileUnusable(format!(
+                "Could not import earlier saves into {}: {error}",
+                profile.display()
+            ));
+        }
     }
     // (the profile's folders made and tried before the game starts, not the game's to find: it treats a missing or
     // unwritable one as a plain fatal error)
@@ -622,13 +665,16 @@ pub fn play(
     let game_args = args.to_vec();
     loop {
         let t = std::time::Instant::now();
-        let stale = if asked { Some(Stale::Asked) } else { check(version, &profile, p, builder, get) };
+        let current = stamp(version, &profile, p, builder);
+        let folder = game_folder(version, current.mods.as_deref());
+        let stale = if asked { Some(RebuildReason::GameRequested) } else { rebuild_reason(&current, &folder, get) };
         checked(stale, t.elapsed());
         // (the profile's game folder, as the Mod API's stamp names it now)
-        let folder = game_folder(version, mods_stamp(&profile, version).as_deref());
+
         if let Some(why) = stale {
-            let done =
-                options(version, &profile, p, builder).map_err(|e| e.to_string()).and_then(|o| host.update(&o, why));
+            let done = options_for(&profile, p, current, folder.clone())
+                .map_err(|e| e.to_string())
+                .and_then(|o| host.update(&o, why));
             if let Err(text) = done {
                 // (an update that failed leaves the folder's game as it was, whole (the swap puts in all or nothing):
                 // played, when there is one and the host says so)
@@ -830,28 +876,28 @@ mod tests {
         eprintln!("the fast check: {:?} each", t.elapsed() / 100);
         assert!(t.elapsed() / 100 < std::time::Duration::from_millis(100));
         // (each input changed)
-        assert_eq!(check(&d, &prof, &p, "b2", no_prepare), Some(Stale::Builder), "another builder");
+        assert_eq!(check(&d, &prof, &p, "b2", no_prepare), Some(RebuildReason::Builder), "another builder");
         let mut ups = p.clone();
         ups.upscalers = vec![Upscaler::Fsr4];
-        assert_eq!(check(&d, &prof, &ups, "b1", no_prepare), Some(Stale::Profile), "the profile's upscalers");
+        assert_eq!(check(&d, &prof, &ups, "b1", no_prepare), Some(RebuildReason::Profile), "the profile's upscalers");
         let mut other = p.clone();
         other.game = Some("other.nup".into());
-        assert_eq!(check(&d, &prof, &other, "b1", no_prepare), Some(Stale::Profile), "the profile's copy");
+        assert_eq!(check(&d, &prof, &other, "b1", no_prepare), Some(RebuildReason::Profile), "the profile's copy");
         let mut named = p.clone();
         named.file.set_string("name", Some("Ann"));
         named.file.put("mods", launcher_profile::RawValue::from_string("[]".into()).unwrap());
         assert_eq!(check(&d, &prof, &named, "b1", no_prepare), None, "the profile's other keys build nothing");
         std::fs::write(d.join("g.nup"), b"nup, another dump").unwrap();
-        assert_eq!(check(&d, &prof, &p, "b1", no_prepare), Some(Stale::Game), "the copy's size");
+        assert_eq!(check(&d, &prof, &p, "b1", no_prepare), Some(RebuildReason::Game), "the copy's size");
         std::fs::write(d.join("g.nup"), b"nup").unwrap();
         let f = std::fs::File::options().write(true).open(d.join("g.nup")).unwrap();
         f.set_modified(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000)).unwrap();
-        assert_eq!(check(&d, &prof, &p, "b1", no_prepare), Some(Stale::Game), "the copy's time");
+        assert_eq!(check(&d, &prof, &p, "b1", no_prepare), Some(RebuildReason::Game), "the copy's time");
         std::fs::remove_file(d.join("g.nup")).unwrap();
-        assert_eq!(check(&d, &prof, &p, "b1", no_prepare), Some(Stale::Game), "the copy gone");
+        assert_eq!(check(&d, &prof, &p, "b1", no_prepare), Some(RebuildReason::Game), "the copy gone");
         // (the shaders: their key not the folder's, with the preparation on)
         let (prof, p) = built(&d, "b1");
-        assert_eq!(check(&d, &prof, &p, "b1", |_| None), Some(Stale::Shaders), "never prepared here");
+        assert_eq!(check(&d, &prof, &p, "b1", |_| None), Some(RebuildReason::Shaders), "never prepared here");
         // (the mods' stamp, when the record has one and the builder none: not compared)
         let folder = game_folder(&d, None);
         let mut rec = Record::read(&folder).unwrap();
@@ -861,11 +907,11 @@ mod tests {
         // (the record without a stamp, or none, or no game)
         rec.stamp = None;
         rec.write(&folder).unwrap();
-        assert_eq!(check(&d, &prof, &p, "b1", no_prepare), Some(Stale::NoStamp));
+        assert_eq!(check(&d, &prof, &p, "b1", no_prepare), Some(RebuildReason::NoStamp));
         std::fs::remove_file(game_program(&folder)).unwrap();
-        assert_eq!(check(&d, &prof, &p, "b1", no_prepare), Some(Stale::NotBuilt));
+        assert_eq!(check(&d, &prof, &p, "b1", no_prepare), Some(RebuildReason::NotBuilt));
         std::fs::remove_file(folder.join(crate::folder::RECORD_FILE)).unwrap();
-        assert_eq!(check(&d, &prof, &p, "b1", no_prepare), Some(Stale::NotBuilt));
+        assert_eq!(check(&d, &prof, &p, "b1", no_prepare), Some(RebuildReason::NotBuilt));
         std::fs::remove_dir_all(&d).unwrap();
     }
 
@@ -903,11 +949,60 @@ mod tests {
     }
 
     #[test]
+    fn nested_romfs_edits_invalidate_the_build() {
+        let dump = scratch("nested-romfs");
+        std::fs::create_dir_all(dump.join("exefs")).unwrap();
+        std::fs::create_dir_all(dump.join("romfs/scene")).unwrap();
+        std::fs::write(dump.join("exefs/main"), b"main").unwrap();
+        let file = dump.join("romfs/scene/object");
+        std::fs::write(&file, b"old").unwrap();
+        let before = game_stamp(&dump);
+        assert!(!before.is_empty());
+        std::fs::write(file, b"updated").unwrap();
+        assert_ne!(before, game_stamp(&dump));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linked_save_is_reported_without_publishing_a_partial_copy() {
+        let root = scratch("linked-save-import");
+        let old = root.join("old");
+        let profile = root.join("profile");
+        std::fs::create_dir_all(old.join("save")).unwrap();
+        let link = old.join("save/progress.sav");
+        std::os::unix::fs::symlink("missing", &link).unwrap();
+        let error = carry_saves(&profile, std::slice::from_ref(&old)).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(!saves(&profile).exists());
+        assert!(link.is_symlink());
+        std::fs::remove_file(&link).unwrap();
+        std::fs::write(&link, b"progress").unwrap();
+        assert_eq!(carry_saves(&profile, std::slice::from_ref(&old)).unwrap(), Some(old));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_import_keeps_source_and_can_retry() {
+        let root = scratch("failed-save-import");
+        let old = root.join("old");
+        let profile = root.join("profile");
+        std::fs::create_dir_all(old.join("save")).unwrap();
+        std::fs::write(old.join("save/test"), b"fixture").unwrap();
+        std::fs::create_dir_all(&profile).unwrap();
+        std::fs::write(saves(&profile), b"obstruction").unwrap();
+        assert!(carry_saves(&profile, std::slice::from_ref(&old)).is_err());
+        assert_eq!(std::fs::read(old.join("save/test")).unwrap(), b"fixture");
+        std::fs::remove_file(saves(&profile)).unwrap();
+        assert_eq!(carry_saves(&profile, std::slice::from_ref(&old)).unwrap(), Some(old));
+        assert_eq!(std::fs::read(saves(&profile).join("save/test")).unwrap(), b"fixture");
+    }
+
+    #[test]
     fn earlier_saves_are_copied_into_an_empty_profile_once_and_kept() {
         let d = scratch("play-saves");
         let (old, appdata, profile) = (d.join("game/user"), d.join("appdata/Longshot"), d.join("profile"));
         // (none anywhere: nothing)
-        assert_eq!(carry_saves(&profile, &[old.clone(), appdata.clone()]), None);
+        assert_eq!(carry_saves(&profile, &[old.clone(), appdata.clone()]).unwrap(), None);
         std::fs::create_dir_all(old.join("save/0000")).unwrap();
         std::fs::create_dir_all(old.join("save-work/0000")).unwrap();
         std::fs::create_dir_all(old.join("recordings")).unwrap();
@@ -916,7 +1011,7 @@ mod tests {
         std::fs::write(old.join("mouse_sens.txt"), b"1.5").unwrap();
         std::fs::write(old.join("longshot_options.ini"), b"dlss=1\n").unwrap();
         // (the first place that has a save: copied, the original kept, the journal of a cut write left)
-        assert_eq!(carry_saves(&profile, &[old.clone(), appdata.clone()]), Some(old.clone()));
+        assert_eq!(carry_saves(&profile, &[old.clone(), appdata.clone()]).unwrap(), Some(old.clone()));
         let to = saves(&profile);
         assert_eq!(std::fs::read(to.join("save/0000/file")).unwrap(), b"slot");
         assert_eq!(std::fs::read(settings(&profile)).unwrap(), b"dlss=1\n", "the settings: the profile's settings.ini");
@@ -929,19 +1024,19 @@ mod tests {
         assert!(!profile.join(".saves-copying").exists());
         // (once: the profile has saves now)
         std::fs::write(old.join("save/0000/file"), b"newer").unwrap();
-        assert_eq!(carry_saves(&profile, std::slice::from_ref(&old)), None);
+        assert_eq!(carry_saves(&profile, std::slice::from_ref(&old)).unwrap(), None);
         assert_eq!(std::fs::read(to.join("save/0000/file")).unwrap(), b"slot");
         // (the profile is the per-user place itself (RecompLauncher's {config}/Longshot on Windows): its own save/
         // copied into its saves/)
         let own = d.join("own");
         std::fs::create_dir_all(own.join("save/2222")).unwrap();
-        assert_eq!(carry_saves(&own, std::slice::from_ref(&own)), Some(own.clone()));
+        assert_eq!(carry_saves(&own, std::slice::from_ref(&own)).unwrap(), Some(own.clone()));
         assert!(saves(&own).join("save/2222").is_dir() && own.join("save/2222").is_dir());
         // (a profile with settings of its own keeps them)
         let kept = d.join("kept");
         std::fs::create_dir_all(&kept).unwrap();
         std::fs::write(settings(&kept), b"dlss=4\n").unwrap();
-        assert_eq!(carry_saves(&kept, std::slice::from_ref(&old)), Some(old.clone()));
+        assert_eq!(carry_saves(&kept, std::slice::from_ref(&old)).unwrap(), Some(old.clone()));
         assert_eq!(std::fs::read(settings(&kept)).unwrap(), b"dlss=4\n");
         // (the places looked in)
         let env = |k: &str| match k {
@@ -964,14 +1059,14 @@ mod tests {
     #[derive(Default)]
     struct Fake {
         statuses: Vec<(i32, bool)>,
-        updates: Vec<Stale>,
+        updates: Vec<RebuildReason>,
         starts: Vec<(Vec<String>, PathBuf)>,
         fail_update: bool,
         too_many: bool,
     }
 
     impl Host for Fake {
-        fn update(&mut self, o: &BuildOptions, why: Stale) -> std::result::Result<(), String> {
+        fn update(&mut self, o: &BuildOptions, why: RebuildReason) -> std::result::Result<(), String> {
             self.updates.push(why);
             if self.fail_update {
                 return Err("stopped".into());
@@ -1032,7 +1127,7 @@ mod tests {
         // (the first: built, then started, with the profile's saves as its user folder, made)
         let mut h = fake(&[]);
         let r = play(&d, &prof, &p, "b1", &args, &no_prepare, &mut h, &mut |s, _| said.push(s));
-        assert_eq!((r, h.updates.as_slice(), h.starts.len()), (Played::Exited(0), &[Stale::NotBuilt][..], 1));
+        assert_eq!((r, h.updates.as_slice(), h.starts.len()), (Played::Exited(0), &[RebuildReason::NotBuilt][..], 1));
         let game_args = vec!["--fullscreen".to_string()];
         assert_eq!(h.starts[0], (game_args.clone(), prof.clone()));
         assert!(saves(&prof).is_dir());
@@ -1044,7 +1139,7 @@ mod tests {
         let mut h = fake(&[(0, true), (0, true), (0, false)]);
         let r = play(&d, &prof, &p, "b1", &args, &no_prepare, &mut h, &mut |s, _| said.push(s));
         assert_eq!(r, Played::Exited(0));
-        assert_eq!(h.updates, [Stale::Asked, Stale::Asked]);
+        assert_eq!(h.updates, [RebuildReason::GameRequested, RebuildReason::GameRequested]);
         assert!(h.starts.iter().all(|(a, _)| *a == game_args) && h.starts.len() == 3);
         assert!(!h.too_many);
         // (the guard: three in a row, then the game's status is the end)
@@ -1054,7 +1149,7 @@ mod tests {
         assert_eq!(h.updates.len() as u32, MAX_RESTARTS);
         assert_eq!(h.starts.len() as u32, MAX_RESTARTS + 1);
         assert!(h.too_many);
-        assert_eq!(said[..2], [Some(Stale::NotBuilt), None]);
+        assert_eq!(said[..2], [Some(RebuildReason::NotBuilt), None]);
         // (a game that asked and then crashed is not started again)
         let mut h = fake(&[(139, true)]);
         let r = play(&d, &prof, &p, "b1", &args, &no_prepare, &mut h, &mut |_, _| {});

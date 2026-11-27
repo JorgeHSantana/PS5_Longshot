@@ -87,7 +87,8 @@ pub fn answer(me: &Me<'_>, profile: &Path, get: &dyn Fn(&str) -> Option<String>)
     let mods = play::mods_stamp(profile, &version);
     let folder = play::game_folder(&version, mods.as_deref());
     let rec = Record::read(&folder).ok();
-    let stale = p.as_ref().map_or(Some(play::Stale::NotBuilt), |p| play::check(&version, profile, p, me.stamp, get));
+    let stale =
+        p.as_ref().map_or(Some(play::RebuildReason::NotBuilt), |p| play::check(&version, profile, p, me.stamp, get));
     let present = rec.is_some() && play::game_program(&folder).is_file();
     let features = game_features(&folder, rec.as_ref());
     let build = json!({

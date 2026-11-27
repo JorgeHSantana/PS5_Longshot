@@ -27,7 +27,7 @@ use build_driver::BuildOptions;
 use build_driver::Upscaler;
 use build_driver::folder::Record;
 use build_driver::modhook::{self, PlayRequest};
-use build_driver::play::{self, Host, Played, Profile, Stale};
+use build_driver::play::{self, Host, Played, Profile, RebuildReason};
 use std::path::{Path, PathBuf};
 
 /// The names this program plays by with any arguments (RecompLauncher's zip, release_cmd.rs; recomplauncher.json's
@@ -295,14 +295,14 @@ struct Player<'a> {
 }
 
 impl Host for Player<'_> {
-    fn update(&mut self, o: &BuildOptions, why: Stale) -> Result<(), String> {
+    fn update(&mut self, o: &BuildOptions, why: RebuildReason) -> Result<(), String> {
         let mut o = o.clone();
         o.log = Some(o.out.join(LOG));
         // (a build that takes long: said, while it goes on. An update by the release that built the folder is quick)
         let built_by = Record::read(&o.out).ok().map(|r| r.builder);
         let new_release = matches!((built_by.as_deref(), self.release), (Some(by), Some(this)) if by != this);
         let text = match why {
-            Stale::NotBuilt | Stale::Game | Stale::Profile => Some(
+            RebuildReason::NotBuilt | RebuildReason::Game | RebuildReason::Profile => Some(
                 "Longshot is building the game (10 to 20 minutes the first time, less after). It starts by itself \
                  when it's done.",
             ),
@@ -310,21 +310,21 @@ impl Host for Player<'_> {
                 "Longshot is building the game for this release (10 to 20 minutes the first time, less after). It \
                  starts by itself when it's done.",
             ),
-            Stale::Asked | Stale::Mods => Some(
+            RebuildReason::GameRequested | RebuildReason::Mods => Some(
                 "Longshot is building the game again for your changes (a few minutes). It starts by itself when it's \
                  done.",
             ),
             // (an update that only prepares the shaders again: a driver update, another GPU. Minutes, said)
-            Stale::Shaders => Some(
+            RebuildReason::Shaders => Some(
                 "Longshot is preparing the shaders for your graphics driver (a few minutes). The game starts by \
                  itself when it's done.",
             ),
-            Stale::NoStamp | Stale::Builder => None,
+            RebuildReason::NoStamp | RebuildReason::Builder => None,
         };
         eprintln!("longshot: updating the game folder: {}", why.why());
         let kind = match why {
-            Stale::NotBuilt => crash::build_report::FIRST_BUILD,
-            Stale::Builder | Stale::Shaders | Stale::NoStamp => crash::build_report::UPDATE,
+            RebuildReason::NotBuilt => crash::build_report::FIRST_BUILD,
+            RebuildReason::Builder | RebuildReason::Shaders | RebuildReason::NoStamp => crash::build_report::UPDATE,
             _ => crash::build_report::REBUILD,
         };
         crate::after::build_began(&o, kind);
@@ -605,7 +605,7 @@ pub fn run_with(
     }
     let mut host = Player { run_build, release, builder, env, version: &version };
     let mut first = true;
-    let mut checked = |stale: Option<Stale>, took: std::time::Duration| {
+    let mut checked = |stale: Option<RebuildReason>, took: std::time::Duration| {
         // (the first check's time from this program's start: longshot.json read and checked)
         let since = if std::mem::take(&mut first) { t.elapsed() } else { took };
         let said = stale.map_or("up to date", |s| s.why());
