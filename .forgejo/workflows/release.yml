@@ -71,8 +71,9 @@ jobs:
           persist-credentials: false
       - name: Tooling's release.py, at the commit .tooling-rev names
         run: |
-          git clone -q https://git.magicbean.dev/MagicBeanDev/Tooling.git "$RUNNER_TEMP/tooling"
-          git -C "$RUNNER_TEMP/tooling" checkout -q --detach "$(cat .tooling-rev)"
+          git init -q "$RUNNER_TEMP/tooling"
+          git -C "$RUNNER_TEMP/tooling" fetch -q --depth 1 https://git.magicbean.dev/MagicBeanDev/Tooling.git "$(cat .tooling-rev)"
+          git -C "$RUNNER_TEMP/tooling" checkout -q --detach FETCH_HEAD
           echo "RELEASE_PY=$RUNNER_TEMP/tooling/scripts/release.py" >> "$GITHUB_ENV"
       - name: The version's name (on a push to main, a wait of 5 minutes for more merges first, unless the last nightly is an hour old)
         id: name
@@ -178,8 +179,9 @@ jobs:
           persist-credentials: false
       - name: Tooling's release.py, at the commit .tooling-rev names
         run: |
-          git clone -q https://git.magicbean.dev/MagicBeanDev/Tooling.git "$RUNNER_TEMP/tooling"
-          git -C "$RUNNER_TEMP/tooling" checkout -q --detach "$(cat .tooling-rev)"
+          git init -q "$RUNNER_TEMP/tooling"
+          git -C "$RUNNER_TEMP/tooling" fetch -q --depth 1 https://git.magicbean.dev/MagicBeanDev/Tooling.git "$(cat .tooling-rev)"
+          git -C "$RUNNER_TEMP/tooling" checkout -q --detach FETCH_HEAD
           echo "RELEASE_PY=$RUNNER_TEMP/tooling/scripts/release.py" >> "$GITHUB_ENV"
       # (the programs, deltas and manifests from Forgejo's own address, RELEASE_UPLOAD_API on this runner's network, where the artifacts are on its
       # disk: through its public address behind Cloudflare, as download-artifact fetches them, they came at about 1 MB/s,
