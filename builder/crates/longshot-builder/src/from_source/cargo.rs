@@ -200,7 +200,7 @@ pub fn build(
             // (cargo's own lines and the diagnostics: the log, but its "Compiling" lines, which progress stands for)
             for line in BufReader::new(stderr.expect("piped")).lines().map_while(std::result::Result::ok) {
                 if !line.trim_start().starts_with("Compiling ") {
-                    r.log(line.clone());
+                    r.trace(|| tracing::info!(source = "tool", tool = "cargo", stream = "stderr", "{line}"));
                 }
                 said.lock().unwrap_or_else(|p| p.into_inner()).push(line);
             }

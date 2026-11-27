@@ -50,7 +50,84 @@ pub fn chosen() -> Output {
     CHOSEN.get().copied().unwrap_or(Output::Text)
 }
 
-/// `--output <value>` (or `--output=<value>`) taken out of `args` (before a `--`): the output asked, or the error's
+/// Whether the command requested JSON, including when another argument could not be parsed.
+pub fn json_requested(args: &[String]) -> bool {
+    let end = args.iter().position(|arg| arg == "--").unwrap_or(args.len());
+    args[..end].iter().any(|arg| arg == "--output=json")
+        || args[..end].windows(2).any(|pair| pair[0] == "--output" && pair[1] == "json")
+}
+
+/// A builder diagnostic, formatted consistently with the selected output.
+pub fn log(text: impl Into<String>) {
+    let text = text.into();
+    tracing::info!("{text}");
+}
+
+pub fn stdout(text: std::fmt::Arguments<'_>) {
+    if chosen() == Output::Json {
+        log(text.to_string());
+    } else {
+        println!("{text}");
+    }
+}
+
+pub fn error(text: std::fmt::Arguments<'_>) {
+    if chosen() == Output::Json {
+        tracing::error!(code = "command_error", "{text}");
+    } else {
+        eprintln!("{text}");
+    }
+}
+
+/// Child diagnostics share the launcher's line format, including the originating stream.
+pub fn child_line(source: &'static str, stream: &'static str, bytes: &[u8]) {
+    let text = String::from_utf8_lossy(bytes);
+    let code = if source == "game" { "game_output" } else { "tool_output" };
+    tracing::info!(code, source, stream, "{}", text.trim_end_matches('\r'));
+}
+
+pub fn tool_output(output: &std::process::Output) {
+    use std::io::Write;
+    if chosen() == Output::Json {
+        for (stream, bytes) in [("stdout", &output.stdout), ("stderr", &output.stderr)] {
+            for line in bytes.split(|b| *b == b'\n').filter(|line| !line.is_empty()) {
+                child_line("tool", stream, line);
+            }
+        }
+    } else {
+        let _ = std::io::stdout().write_all(&output.stdout);
+        let _ = std::io::stderr().write_all(&output.stderr);
+    }
+}
+
+pub fn tool_status(command: &mut std::process::Command) -> std::io::Result<std::process::ExitStatus> {
+    if chosen() != Output::Json {
+        return build_core::child::status(command);
+    }
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+
+    let mut child =
+        build_core::child::spawn(command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()))?;
+    fn drain(reader: impl std::io::Read, stream: &'static str) -> std::io::Result<()> {
+        for line in BufReader::new(reader).split(b'\n') {
+            child_line("tool", stream, &line?);
+        }
+        Ok(())
+    }
+    let stdout = child.stdout.take().expect("piped");
+    let stderr = child.stderr.take().expect("piped");
+    std::thread::scope(|scope| {
+        let err = scope.spawn(|| drain(stderr, "stderr"));
+        let out = drain(stdout, "stdout");
+        let status = child.wait();
+        err.join().expect("stderr reader")?;
+        out?;
+        status
+    })
+}
+
+/// `--output <value>` (or `--output=<value>`) taken out of `args` before a `--`: the output asked, or the error's
 /// text. The others left as they were.
 pub fn take(args: &mut Vec<String>) -> Result<Option<Output>, String> {
     let end = args.iter().position(|a| a == "--").unwrap_or(args.len());
@@ -131,6 +208,11 @@ mod tests {
         let mut a = w("--output=user -w");
         assert_eq!(take(&mut a), Ok(Some(Output::User)));
         assert_eq!(a, w("-w"));
+        let mut a = w("build --output=json -- --output json");
+        assert!(json_requested(&a));
+        assert_eq!(take(&mut a), Ok(Some(Output::Json)));
+        assert_eq!(a, w("build -- --output json"));
+        assert!(!json_requested(&a));
         let mut a = w("-- --output json");
         assert_eq!(take(&mut a), Ok(None), "the game's");
         assert!(take(&mut w("--output")).is_err());

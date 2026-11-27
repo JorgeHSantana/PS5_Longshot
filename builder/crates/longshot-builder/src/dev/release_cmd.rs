@@ -157,9 +157,9 @@ fn checkout(given: Option<&str>) -> Result<PathBuf, String> {
 /// A line of what it does; a CI annotation (`::warning::...`) as it is, where Forgejo reads it.
 fn say(s: String) {
     if s.starts_with("::") {
-        println!("{s}");
+        crate::output::stdout(format_args!("{s}"));
     } else {
-        println!("longshot-builder dev release: {s}");
+        crate::output::stdout(format_args!("longshot-builder dev release: {s}"));
     }
 }
 
@@ -360,7 +360,6 @@ fn clean_env(
 }
 
 fn dry_run_cmd(a: &Args) -> Result<(), String> {
-    use std::io::Write;
     let program = &a.words[0];
     let work = Path::new(a.one("--work").unwrap_or(""));
     let root = a.one("--root");
@@ -381,9 +380,10 @@ fn dry_run_cmd(a: &Args) -> Result<(), String> {
         let start = std::time::Instant::now();
         let mut c = build_core::child::command(program);
         setup(&mut c);
-        let s = build_core::child::status(c.args(["sources", "--output", "text"]).args(&cache))
+        let output = build_core::child::output(c.args(["sources", "--output", "text"]).args(&cache))
             .map_err(|e| format!("{program} did not start: {e}"))?;
-        if !s.success() {
+        crate::output::tool_output(&output);
+        if !output.status.success() {
             return Err(format!("{program} sources failed"));
         }
         say(format!("first start: {:.1} s to unpack", start.elapsed().as_secs_f64()));
@@ -398,8 +398,7 @@ fn dry_run_cmd(a: &Args) -> Result<(), String> {
             c.args(["--root", r]);
         }
         let o = build_core::child::output(&mut c).map_err(|e| format!("{program} did not start: {e}"))?;
-        let _ = std::io::stdout().write_all(&o.stdout);
-        let _ = std::io::stderr().write_all(&o.stderr);
+        crate::output::tool_output(&o);
         if !o.status.success() {
             return Err(format!("the dry run ({up}) failed"));
         }
@@ -600,7 +599,7 @@ fn run_parsed(a: &Args) -> Result<(), String> {
         "recomplauncher" => {
             let manifest = checkout(a.one("--root"))?.join("recomplauncher.json");
             let to = recomplauncher(Path::new(&a.words[0]), a.one("--out").map(Path::new), &manifest)?;
-            println!("{}", to.display());
+            crate::output::stdout(format_args!("{}", to.display()));
             Ok(())
         }
         _ => unreachable!("parse takes no other"),
@@ -610,20 +609,20 @@ fn run_parsed(a: &Args) -> Result<(), String> {
 /// Runs the command on its arguments (after `release`).
 pub fn run(args: &[String]) -> ExitCode {
     if matches!(args.first().map(String::as_str), Some("--help" | "-h" | "help")) {
-        println!("{USAGE}");
+        crate::output::stdout(format_args!("{USAGE}"));
         return ExitCode::SUCCESS;
     }
     let a = match parse(args) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("longshot-builder dev release: {e}\n{USAGE}");
+            crate::output::error(format_args!("longshot-builder dev release: {e}\n{USAGE}"));
             return ExitCode::from(2);
         }
     };
     match run_parsed(&a) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("longshot-builder dev release: {e}");
+            crate::output::error(format_args!("longshot-builder dev release: {e}"));
             ExitCode::FAILURE
         }
     }

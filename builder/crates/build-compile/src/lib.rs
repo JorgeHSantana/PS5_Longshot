@@ -760,12 +760,12 @@ pub fn compile_all(units: &[Unit], keys: &Keys, s: &Session) -> Result<Compiled>
                 Made::Stored(k) => key[i] = Some(k),
                 Made::Unstored => compiled += 1,
                 Made::Failed { text, killed, made } => {
-                    r.log(format!(
-                        "not compiled: {} ({secs:.0}s){}:\n{}",
-                        units[i].name,
-                        if killed || !cfg!(unix) || made.is_some() { ", tried again alone at the end" } else { "" },
-                        compile::short(&text, 1500)
-                    ));
+                    let retry = killed || !cfg!(unix) || made.is_some();
+                    r.trace(|| {
+                        tracing::warn!(code = "compile_attempt_failed", unit = %units[i].name, retry, seconds = secs,
+                        "not compiled: {} ({secs:.0}s){}:\n{}", units[i].name,
+                        if retry { ", tried again alone at the end" } else { "" }, compile::short(&text, 1500))
+                    });
                     failed.push((i, text, killed, made));
                     return true;
                 }
@@ -796,7 +796,7 @@ pub fn compile_all(units: &[Unit], keys: &Keys, s: &Session) -> Result<Compiled>
         // now (players' builds stopped on one-character typos in the lift's output: main's #2305))
         if !killed && cfg!(unix) && first.is_none() {
             r.send(Event::Unit { name: units[i].name.clone(), seconds: 0.0, result: UnitResult::Failed });
-            r.log(format!("FAILED {}:\n{text}", units[i].name));
+            r.trace(|| tracing::error!(code = "compile_failed", unit = %units[i].name, retried = false, "FAILED {}:\n{text}", units[i].name));
             still.push(FailedUnit {
                 name: units[i].name.clone(),
                 from_lift: units[i].kind.from_lift(),
@@ -826,7 +826,7 @@ pub fn compile_all(units: &[Unit], keys: &Keys, s: &Session) -> Result<Compiled>
             Made::Stored(k) => key[i] = Some(k),
             Made::Unstored => retried += 1,
             Made::Failed { text, .. } => {
-                r.log(format!("FAILED {} ({secs:.0}s, alone too):\n{text}", units[i].name));
+                r.trace(|| tracing::error!(code = "compile_failed", unit = %units[i].name, retried = true, seconds = secs, "FAILED {} ({secs:.0}s, alone too):\n{text}", units[i].name));
                 still.push(FailedUnit {
                     name: units[i].name.clone(),
                     from_lift: units[i].kind.from_lift(),
@@ -1041,7 +1041,7 @@ fn links(
         let res = link::run(&cmd, &exe, cc_id, &log)?;
         if !res.ok {
             let undefined = res.undefined();
-            r.log(format!("link FAILED ({:.0}s), {} undefined symbols", compile::since(t), undefined.len()));
+            r.trace(|| tracing::error!(code = "link_failed", output = %exe.display(), undefined = undefined.len(), seconds = compile::since(t), "link FAILED: {} undefined symbols", undefined.len()));
             let text = if undefined.is_empty() {
                 compile::short(&res.said, 3000)
             } else {
@@ -1158,7 +1158,7 @@ fn link_renderer(
     let name = vdll.file_name().unwrap_or_default().to_string_lossy().into_owned();
     if !res.ok {
         let undefined = res.undefined();
-        r.log(format!("{name} link FAILED, {} undefined symbols", undefined.len()));
+        r.trace(|| tracing::error!(code = "link_failed", output = %name, undefined = undefined.len(), "{name} link FAILED, {} undefined symbols", undefined.len()));
         let text = if undefined.is_empty() {
             compile::short(&res.said, 3000)
         } else {
@@ -1220,7 +1220,7 @@ fn link_forwarder(
     let res = link::run(&cmd, &dst, cc_id, &|t: &str| r.log(t))?;
     if !res.ok {
         let text = compile::short(&res.said, 3000);
-        r.log(format!("{NR_FORWARDER} link FAILED"));
+        r.trace(|| tracing::error!(code = "link_failed", output = NR_FORWARDER, "{NR_FORWARDER} link FAILED"));
         r.log(text.as_str());
         return Ok(Err(Failure { stopped: Stopped::RendererLink, units: Vec::new(), text, objects: Vec::new() }));
     }

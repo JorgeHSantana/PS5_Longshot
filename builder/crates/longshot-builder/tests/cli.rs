@@ -19,6 +19,40 @@ fn help_is_the_usage_and_version_says_what_is_carried() {
 }
 
 #[test]
+fn json_output_formats_early_errors_and_help_on_stdout() {
+    for flag in [vec!["--output=json"], vec!["--output", "json"]] {
+        for command in ["build", "diagnostics", "--help", "--version"] {
+            let output = std::process::Command::new(env!("CARGO_BIN_EXE_longshot-builder"))
+                .arg(command)
+                .args(&flag)
+                .output()
+                .unwrap();
+            assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+            let event: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(event["v"], 1);
+            assert_eq!(event["type"], if output.status.success() { "log" } else { "error" });
+        }
+    }
+}
+
+#[test]
+fn json_output_captures_developer_results_and_diagnostics() {
+    for (word, success) in [("d503201f", true), ("invalid", false)] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_longshot-builder"))
+            .args(["dev", "decode", word, "--output", "json"])
+            .output()
+            .unwrap();
+        assert!(output.stderr.is_empty());
+        assert_eq!(output.status.success(), success);
+        let event: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(event["v"], 1);
+        assert_eq!(event["type"], "log");
+        assert!(event["text"].as_str().unwrap().contains(word));
+        assert_eq!(event["level"], if success { "INFO" } else { "ERROR" });
+    }
+}
+
+#[test]
 fn build_announces_its_plan_before_resolving_the_tools() {
     use std::fs;
     let fixture = std::env::temp_dir().join(format!("longshot-build-plan-cli-{}", std::process::id()));

@@ -29,14 +29,14 @@ pub fn run(args: &[String]) -> ExitCode {
     let a = match parse(args) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("longshot-builder dev discover: {e}");
+            crate::output::error(format_args!("longshot-builder dev discover: {e}"));
             return ExitCode::from(2);
         }
     };
     match discover(&a) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("longshot-builder dev discover: {e}");
+            crate::output::error(format_args!("longshot-builder dev discover: {e}"));
             ExitCode::from(2)
         }
     }
@@ -53,7 +53,7 @@ fn discover(a: &Args) -> Result<(), Box<dyn std::error::Error>> {
     d.run();
     let t_walk = t1.elapsed();
     let new = d.plan(&a.image.join("image.bin"));
-    println!(
+    crate::output::stdout(format_args!(
         "discover: {} entries, {} functions, {} instructions, {} jump tables, {} PLT stubs, {} setjmp owners",
         new.entries.len(),
         new.functions.len(),
@@ -61,14 +61,14 @@ fn discover(a: &Args) -> Result<(), Box<dyn std::error::Error>> {
         new.jump_tables.len(),
         new.plt.len(),
         new.setjmp_owners.len()
-    );
+    ));
     let counts: Vec<String> = d.stats.counts.iter().map(|(k, v)| format!("{k} {v}")).collect();
-    println!("discover: {}", counts.join(", "));
-    println!(
+    crate::output::stdout(format_args!("discover: {}", counts.join(", ")));
+    crate::output::stdout(format_args!(
         "discover: read {:.2}s, entries {:.2}s, walks {:.2}s",
         t_read.as_secs_f64(),
         t_inputs.as_secs_f64(),
         t_walk.as_secs_f64()
-    );
+    ));
     Ok(())
 }

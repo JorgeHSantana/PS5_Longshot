@@ -410,26 +410,27 @@ pub(crate) fn downloader(name: &str, path: Option<std::ffi::OsString>, avoid: &[
 
 /// One download of `url` into `to`: curl (every Windows 10 and 11 has it, as most Linux systems), else wget; neither
 /// from a folder of `avoid` ([`downloader`]).
-fn download(url: &str, to: &Path, avoid: &[&Path]) -> std::result::Result<(), String> {
+fn download(url: &str, to: &Path, avoid: &[&Path], r: &Reporter) -> std::result::Result<(), String> {
     let exe = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
     let mut avoid: Vec<&Path> = avoid.to_vec();
     if let Some(e) = &exe {
         avoid.push(e);
     }
     let path = std::env::var_os("PATH");
+    let run = |name: &str, cmd: &mut std::process::Command| {
+        let output = build_core::child::output(cmd).map_err(|e| format!("{name} did not start ({e})"))?;
+        for stream in [&output.stdout, &output.stderr] {
+            for line in String::from_utf8_lossy(stream).lines() {
+                r.log(line);
+            }
+        }
+        if output.status.success() { Ok(()) } else { Err(format!("{name} failed ({})", output.status)) }
+    };
     if let Some(curl) = downloader("curl", path.clone(), &avoid) {
-        return match build_core::child::status(build_core::child::command(curl).args(CURL).arg("-o").arg(to).arg(url)) {
-            Ok(s) if s.success() => Ok(()),
-            Ok(s) => Err(format!("curl failed ({s})")),
-            Err(e) => Err(format!("curl did not start ({e})")),
-        };
+        return run("curl", build_core::child::command(curl).args(CURL).arg("-o").arg(to).arg(url));
     }
     let Some(wget) = downloader("wget", path, &avoid) else { return Err("neither curl nor wget is on this PC".into()) };
-    match build_core::child::status(build_core::child::command(wget).args(WGET).arg("-O").arg(to).arg(url)) {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(format!("wget failed ({s})")),
-        Err(e) => Err(format!("wget did not start ({e})")),
-    }
+    run("wget", build_core::child::command(wget).args(WGET).arg("-O").arg(to).arg(url))
 }
 
 /// The file in the cache (`<dir>/<sha256>-<its name>`), downloaded and checked when it is not there.
@@ -456,7 +457,7 @@ fn cached(dir: &Path, repo: (&str, &str), file: &File, out: &Path, r: &Reporter)
             ),
         )
     };
-    download(&url, &part, &[out]).map_err(failed)?;
+    download(&url, &part, &[out], r).map_err(failed)?;
     match sha256_of(&part) {
         Some(s) if s == file.sha256 => {}
         got => {

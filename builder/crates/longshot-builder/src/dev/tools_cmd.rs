@@ -112,13 +112,20 @@ fn check(tools: &[Tool], require: Option<&[String]>) -> bool {
         Some(names) => names.iter().filter(|n| !tools.iter().any(|t| &t.name == *n)).cloned().collect(),
     };
     for t in tools {
-        println!("{:<12} {:<36} {} {:>6} MB  {}", t.name, t.version, t.system, t.size >> 20, t.urls[0]);
+        crate::output::stdout(format_args!(
+            "{:<12} {:<36} {} {:>6} MB  {}",
+            t.name,
+            t.version,
+            t.system,
+            t.size >> 20,
+            t.urls[0]
+        ));
     }
     if !missing.is_empty() {
-        eprintln!(
+        crate::output::error(format_args!(
             "error: tools.lock is missing: {} (a builder needs them); docs/dev/reference/releases.md, Bumping a tool",
             missing.join(", ")
-        );
+        ));
         return false;
     }
     if require.is_none() {
@@ -136,11 +143,11 @@ fn check(tools: &[Tool], require: Option<&[String]>) -> bool {
         })
         .collect();
     if !gone.is_empty() {
-        eprintln!(
+        crate::output::error(format_args!(
             "error: not in Longshot's store as tools.lock names them: {}; the Make tools workflow (.forgejo/workflows/\
              tools.yml) uploads them, docs/dev/reference/releases.md, Bumping a tool",
             gone.join("; ")
-        );
+        ));
         return false;
     }
     true
@@ -149,7 +156,9 @@ fn check(tools: &[Tool], require: Option<&[String]>) -> bool {
 fn run_parsed(a: &Args) -> Result<bool, String> {
     let cmd = a.words[0].as_str();
     if cmd == "make" {
-        archive::pack(Path::new(&a.words[1]), a.out.as_deref().unwrap_or(Path::new("")))?;
+        archive::pack(Path::new(&a.words[1]), a.out.as_deref().unwrap_or(Path::new("")), |text| {
+            crate::output::stdout(format_args!("{text}"));
+        })?;
         return Ok(true);
     }
     let lock_path = match &a.lock {
@@ -169,7 +178,9 @@ fn run_parsed(a: &Args) -> Result<bool, String> {
                 .cache
                 .clone()
                 .unwrap_or_else(|| lock_path.parent().unwrap_or(Path::new(".")).join("build-tools-cache"));
-            archive::install(Path::new(&a.words[1]), &chosen, &cache, &store::download)?;
+            archive::install(Path::new(&a.words[1]), &chosen, &cache, &store::download, |text| {
+                crate::output::stdout(format_args!("{text}"));
+            })?;
         }
         "add" => {
             let (name, version, archive_path) = (&a.words[1], &a.words[2], Path::new(&a.words[3]));
@@ -186,10 +197,10 @@ fn run_parsed(a: &Args) -> Result<bool, String> {
             };
             t.urls = t.store_urls();
             if !a.no_upload {
-                store::put(archive_path, &t)?;
+                store::put(archive_path, &t, |text| crate::output::stdout(format_args!("{text}")))?;
             }
             lock::write_line(&t, &lock_path)?;
-            println!("tools.lock: {name} {version} {system} {}", t.sha256);
+            crate::output::stdout(format_args!("tools.lock: {name} {version} {system} {}", t.sha256));
         }
         _ => unreachable!("parse takes no other"),
     }
@@ -201,7 +212,7 @@ pub fn run(args: &[String]) -> ExitCode {
     let a = match parse(args) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("longshot-builder dev tools: {e}\n{USAGE}");
+            crate::output::error(format_args!("longshot-builder dev tools: {e}\n{USAGE}"));
             return ExitCode::from(2);
         }
     };
@@ -209,7 +220,7 @@ pub fn run(args: &[String]) -> ExitCode {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
         Err(e) => {
-            eprintln!("longshot-builder dev tools: {e}");
+            crate::output::error(format_args!("longshot-builder dev tools: {e}"));
             ExitCode::FAILURE
         }
     }

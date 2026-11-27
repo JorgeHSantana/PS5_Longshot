@@ -35,7 +35,7 @@ fn each_exit_status_of_the_preparation_says_why() {
     for (exit, why) in [(3, "no usable Vulkan here"), (4, "the GPU driver stopped responding")] {
         let (exe, folder) = game_that_exits(&format!("shaders-outcome-{exit}"), exit);
         assert_eq!(
-            supervised(&exe, &folder, &folder.join("cache"), CompileShaders::Most, 1, &|_| {}, &|_| {}, &|| false),
+            supervised(&exe, &folder, &folder.join("cache"), CompileShaders::Most, 1, &|_, _| {}, &|_| {}, &|| false),
             Err(why.to_string()),
             "exit {exit}"
         );
@@ -65,7 +65,7 @@ fn each_run_s_game_is_given_to_the_memory_gate_s_ticket() {
         &folder.join("cache"),
         CompileShaders::Most,
         1,
-        &|_| {},
+        &|_, _| {},
         &|pid| pids.lock().unwrap().push(pid),
         &|| false,
     );

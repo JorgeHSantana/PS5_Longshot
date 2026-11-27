@@ -84,7 +84,7 @@ mod tests {
         // (the shaders: their own fraction, the build's overall held at 1)
         assert!(!shown(&Event::Progress { stage: Stage::Shaders, fraction: 0.25, overall: 1.0 }, &mut step, &mut f));
         assert_eq!(f, 0.565);
-        assert!(!shown(&Event::Log { text: "x".into() }, &mut step, &mut f));
+        assert!(!shown(&Event::Warning { code: "example", text: "x".into() }, &mut step, &mut f));
     }
 
     #[test]

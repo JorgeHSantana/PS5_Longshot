@@ -112,11 +112,12 @@ pub fn run(args: &[String]) -> ExitCode {
     let a = match parse(args) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("longshot-builder dev lift: {e}");
+            crate::output::error(format_args!("longshot-builder dev lift: {e}"));
             return ExitCode::from(2);
         }
     };
-    let r = Reporter::stdout(if a.json { Format::Json } else { Format::Text });
+    let json = a.json || crate::output::chosen() == crate::output::Output::Json;
+    let r = Reporter::stdout(if json { Format::Json } else { Format::Text });
     match whole::run(&a.o, &r) {
         Ok(_) => ExitCode::SUCCESS,
         Err(e) => {

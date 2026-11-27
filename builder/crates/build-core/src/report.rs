@@ -31,7 +31,11 @@ use std::io::Write;
 use std::sync::Mutex;
 use std::time::Instant;
 
+mod diagnostics;
 mod forecast;
+pub use diagnostics::Diagnostics;
+use std::sync::{Arc, OnceLock};
+use tracing_subscriber::prelude::*;
 
 fn serialize_build_eta<S: serde::Serializer>(seconds: &Option<u64>, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_u64(seconds.unwrap_or_default())
@@ -184,6 +188,20 @@ pub enum Event {
     Log {
         /// The line.
         text: String,
+        /// Tracing severity.
+        level: &'static str,
+        /// Tracing target.
+        target: String,
+        /// Origin of the diagnostic.
+        source: String,
+        /// Child process stream, if applicable.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stream: Option<String>,
+        /// Stable diagnostic identifier, when available.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+        /// Typed diagnostic fields.
+        fields: serde_json::Map<String, serde_json::Value>,
     },
     /// Something the player may want to know or fix, that does not stop the build.
     Warning {
@@ -481,7 +499,8 @@ pub fn ended() -> Option<bool> {
 /// The build's voice, shared by every thread.
 pub struct Reporter {
     format: Format,
-    state: Mutex<State>,
+    state: Arc<Mutex<State>>,
+    dispatch: OnceLock<tracing::Dispatch>,
     /// Told every event as it is said ([`Reporter::observed`]: play's progress window).
     observer: Option<Observer>,
 }
@@ -508,27 +527,29 @@ impl Reporter {
     pub fn to(format: Format, out: Box<dyn Write + Send>) -> Reporter {
         Reporter {
             format,
-            state: Mutex::new(State {
+            dispatch: OnceLock::new(),
+            state: Arc::new(Mutex::new(State {
                 out,
                 stage: None,
                 shown_percent: -1,
                 shown_eta: u64::MAX,
                 stage_text: String::new(),
                 forecast: None,
-            }),
+            })),
             observer: None,
         }
     }
 
     /// This reporter, telling `observer` every event too (play's progress window: the step and how far it is).
     pub fn observed(mut self, observer: Option<Observer>) -> Reporter {
+        self.dispatch.take();
         self.observer = observer;
         self
     }
 
     /// Add the build logs once the work folder has been resolved.
     pub fn set_output(&mut self, out: Box<dyn Write + Send>) {
-        self.state.get_mut().unwrap_or_else(|p| p.into_inner()).out = out;
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).out = out;
     }
 
     /// How it writes.
@@ -642,9 +663,26 @@ impl Reporter {
         self.send(Event::Progress { stage, fraction, overall: lo + (hi - lo) * fraction });
     }
 
+    /// Route worker diagnostics through this build's writer and observer, including on worker threads.
+    pub fn trace(&self, emit: impl FnOnce()) {
+        let dispatch = self.dispatch.get_or_init(|| {
+            let sink = Reporter {
+                format: self.format,
+                state: Arc::clone(&self.state),
+                observer: self.observer.clone(),
+                dispatch: OnceLock::new(),
+            };
+            tracing::Dispatch::new(tracing_subscriber::registry().with(Diagnostics(move |event| sink.send(event))))
+        });
+        tracing::dispatcher::with_default(dispatch, emit);
+    }
+
     /// A line of the log.
+    #[track_caller]
     pub fn log(&self, text: impl Into<String>) {
-        self.send(Event::Log { text: text.into() });
+        let caller = std::panic::Location::caller();
+        let text = text.into();
+        self.trace(|| tracing::info!(file = caller.file(), line = caller.line(), "{text}"));
     }
 
     /// A warning.
@@ -714,7 +752,7 @@ fn text_line(event: &Event, shown_percent: &mut i64, shown_eta: &mut u64) -> Opt
         | Event::GameStarted => {
             return None;
         }
-        Event::Log { text } => text.clone(),
+        Event::Log { text, .. } => text.clone(),
         Event::Warning { text, .. } => format!("warning: {text}"),
         Event::Check { ok, build, text } => {
             format!("{} (build {build}): {text}", if *ok { "supported" } else { "not supported" })
@@ -849,6 +887,35 @@ mod tests {
         let r = Reporter::to(format, Box::new(buf.clone()));
         f(&r);
         String::from_utf8(buf.0.lock().unwrap().clone()).unwrap().lines().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn worker_diagnostics_reach_the_build_writer_with_typed_fields() {
+        let output = lines(Format::Json, |r| {
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    r.trace(|| {
+                        tracing::error!(
+                            code = "compile_failed",
+                            seconds = 1.25,
+                            retry = false,
+                            "bad header\nsecond line"
+                        )
+                    })
+                });
+            });
+            r.log("finished");
+        });
+        assert_eq!(output.len(), 2);
+        let row: serde_json::Value = serde_json::from_str(&output[0]).unwrap();
+        assert_eq!(row["type"], "log");
+        assert_eq!(row["level"], "ERROR");
+        assert_eq!(row["fields"], serde_json::json!({"retry": false, "seconds": 1.25}));
+        assert_eq!(row["code"], "compile_failed");
+        assert_eq!(row["text"], "bad header\nsecond line");
+        let row: serde_json::Value = serde_json::from_str(&output[1]).unwrap();
+        assert_eq!(row["source"], "builder");
+        assert_eq!(row["text"], "finished");
     }
 
     #[test]

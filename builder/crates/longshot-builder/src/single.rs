@@ -46,7 +46,7 @@ pub fn hold(profile: &Path) -> Result<Option<ProfileLock>, i32> {
         Ok(Some(lock)) => Ok(Some(lock)),
         Ok(None) => Err(said(profile, crate::output::chosen())),
         Err(e) => {
-            eprintln!("longshot: the profile can't be locked ({e}): a second start of it isn't stopped");
+            tracing::warn!(code = "profile_lock_failed", error = %e, "the profile can't be locked ({e}): a second start of it isn't stopped");
             Ok(None)
         }
     }
@@ -68,7 +68,9 @@ fn said(profile: &Path, output: crate::output::Output) -> i32 {
             0
         }
         Second::Refuse => {
-            eprintln!("longshot: {text}");
+            if output != crate::output::Output::Json {
+                eprintln!("longshot: {text}");
+            }
             if output.format() != build_core::report::Format::Text {
                 Reporter::stdout(output.format()).send(Event::Error { code: "profile_in_use", text });
             }

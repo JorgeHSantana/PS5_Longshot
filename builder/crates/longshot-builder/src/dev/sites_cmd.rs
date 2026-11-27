@@ -35,21 +35,21 @@ pub fn run(args: &[String]) -> ExitCode {
     let args = match parse(args) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("longshot-builder dev sites: {e}\n{USAGE}");
+            crate::output::error(format_args!("longshot-builder dev sites: {e}\n{USAGE}"));
             return ExitCode::from(2);
         }
     };
     let image = match Image::load(&args.image) {
         Ok(i) => i,
         Err(e) => {
-            eprintln!("longshot-builder dev sites: {}: {e}", args.image.display());
+            crate::output::error(format_args!("longshot-builder dev sites: {}: {e}", args.image.display()));
             return ExitCode::FAILURE;
         }
     };
     let inputs = match cfg::entries::inputs(&image) {
         Ok(i) => i,
         Err(e) => {
-            eprintln!("longshot-builder dev sites: the image's modules: {e}");
+            crate::output::error(format_args!("longshot-builder dev sites: the image's modules: {e}"));
             return ExitCode::FAILURE;
         }
     };
@@ -59,17 +59,17 @@ pub fn run(args: &[String]) -> ExitCode {
     match sites::apply(&sites::Tables::new(&args.tables), &image, &plan) {
         Ok(Some((_, placement))) => {
             for line in &placement.log {
-                println!("{line}");
+                crate::output::stdout(format_args!("{line}"));
             }
-            println!("sites: {} placed", placement.sites.len());
+            crate::output::stdout(format_args!("sites: {} placed", placement.sites.len()));
             ExitCode::SUCCESS
         }
         Ok(None) => {
-            println!("hooks: no site table for this build: nothing placed");
+            crate::output::stdout(format_args!("hooks: no site table for this build: nothing placed"));
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("{e}");
+            crate::output::error(format_args!("{e}"));
             ExitCode::FAILURE
         }
     }

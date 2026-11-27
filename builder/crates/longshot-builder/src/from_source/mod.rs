@@ -496,7 +496,7 @@ fn third_party_objects(src: &Path, fs: &Path, cache: &Path, jobs: usize, r: &Rep
         s.spawn(|| {
             use std::io::BufRead;
             for line in std::io::BufReader::new(stderr.expect("piped")).lines().map_while(std::result::Result::ok) {
-                r.log(line);
+                r.trace(|| tracing::info!(source = "tool", tool = "builder", stream = "stderr", "{line}"));
             }
         });
         use std::io::BufRead;
@@ -504,7 +504,25 @@ fn third_party_objects(src: &Path, fs: &Path, cache: &Path, jobs: usize, r: &Rep
             let Ok(e) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
             match e["type"].as_str() {
                 Some("progress") => r.progress(0.2 + 0.7 * e["fraction"].as_f64().unwrap_or(0.0)),
-                Some("log") | Some("warning") => r.log(e["text"].as_str().unwrap_or_default().to_string()),
+                Some("log" | "warning") => {
+                    // The nested builder already encoded the diagnostic. Preserve its severity and fields.
+                    let level = match (e["type"].as_str(), e["level"].as_str()) {
+                        (Some("warning"), _) | (_, Some("WARN")) => "WARN",
+                        (_, Some("ERROR")) => "ERROR",
+                        (_, Some("DEBUG")) => "DEBUG",
+                        (_, Some("TRACE")) => "TRACE",
+                        _ => "INFO",
+                    };
+                    r.send(build_core::report::Event::Log {
+                        text: e["text"].as_str().unwrap_or_default().into(),
+                        level,
+                        target: e["target"].as_str().unwrap_or("longshot_builder").into(),
+                        source: e["source"].as_str().unwrap_or("builder").into(),
+                        code: e["code"].as_str().map(str::to_owned),
+                        stream: e["stream"].as_str().map(str::to_owned),
+                        fields: e["fields"].as_object().cloned().unwrap_or_default(),
+                    });
+                }
                 Some("error") => why = e["text"].as_str().unwrap_or_default().to_string(),
                 _ => {}
             }

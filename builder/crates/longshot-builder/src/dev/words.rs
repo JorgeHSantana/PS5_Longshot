@@ -71,11 +71,11 @@ fn unpredictable(insn: &Insn) -> bool {
 pub fn run(args: &[String]) -> ExitCode {
     match words(args) {
         Ok(n) => {
-            println!("longshot-builder dev words: {n} functions");
+            crate::output::stdout(format_args!("longshot-builder dev words: {n} functions"));
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("longshot-builder dev words: {e}");
+            crate::output::error(format_args!("longshot-builder dev words: {e}"));
             ExitCode::FAILURE
         }
     }

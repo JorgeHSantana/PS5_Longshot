@@ -48,13 +48,13 @@ fn decode(words: &[String]) -> ExitCode {
     let mut ok = true;
     for a in words {
         let Ok(w) = u32::from_str_radix(a.trim_start_matches("0x"), 16) else {
-            eprintln!("longshot-builder dev decode: not a hex word: {a}");
+            crate::output::error(format_args!("longshot-builder dev decode: not a hex word: {a}"));
             ok = false;
             continue;
         };
         match a64::decode(w) {
-            Some(insn) => println!("{w:08x}  {insn}  {:?}", insn.flow()),
-            None => println!("{w:08x}  (unallocated)"),
+            Some(insn) => crate::output::stdout(format_args!("{w:08x}  {insn}  {:?}", insn.flow())),
+            None => crate::output::stdout(format_args!("{w:08x}  (unallocated)")),
         }
     }
     if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
@@ -66,17 +66,17 @@ fn rust_key(args: &[String]) -> ExitCode {
         [] => std::path::PathBuf::from("."),
         [flag, dir] if flag == "--root" => std::path::PathBuf::from(dir),
         _ => {
-            eprintln!("{USAGE}");
+            crate::output::error(format_args!("{USAGE}"));
             return ExitCode::from(2);
         }
     };
     match build_compile::rust::source_key(&root) {
         Ok(key) => {
-            println!("{key}");
+            crate::output::stdout(format_args!("{key}"));
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("longshot-builder dev rust-key: {e}");
+            crate::output::error(format_args!("longshot-builder dev rust-key: {e}"));
             ExitCode::FAILURE
         }
     }
@@ -84,6 +84,15 @@ fn rust_key(args: &[String]) -> ExitCode {
 
 /// `longshot-builder dev <args>`: `args` are the words after `dev`.
 pub fn run(args: &[String]) -> ExitCode {
+    let mut args = args.to_vec();
+    if crate::output::json_requested(&args) {
+        match crate::output::take(&mut args) {
+            Ok(asked) => {
+                crate::output::set(asked);
+            }
+            Err(error) => return crate::usage_error(error, true),
+        }
+    }
     match args.first().map(String::as_str) {
         Some("discover") => discover::run(&args[1..]),
         Some("sites") => sites_cmd::run(&args[1..]),
@@ -96,11 +105,11 @@ pub fn run(args: &[String]) -> ExitCode {
         Some("release") => release_cmd::run(&args[1..]),
         Some("rust-key") => rust_key(&args[1..]),
         Some("--help" | "-h" | "help") => {
-            println!("{USAGE}");
+            crate::output::stdout(format_args!("{USAGE}"));
             ExitCode::SUCCESS
         }
         _ => {
-            eprintln!("{USAGE}");
+            crate::output::error(format_args!("{USAGE}"));
             ExitCode::from(2)
         }
     }

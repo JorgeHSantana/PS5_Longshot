@@ -31,8 +31,8 @@ impl Tee {
         Tee { out, files: vec![file], line: Vec::new(), who: Who::here() }
     }
 
-    /// stdout and `files` (each made again; one that cannot be opened is left out, said on stderr).
-    pub fn new(out: Box<dyn Write + Send>, files: &[&Path]) -> Tee {
+    /// stdout and `files` (each made again; one that cannot be opened is reported and left out).
+    pub fn new(out: Box<dyn Write + Send>, files: &[&Path], mut report: impl FnMut(String)) -> Tee {
         let mut opened = Vec::new();
         for f in files {
             if let Some(dir) = f.parent() {
@@ -40,7 +40,7 @@ impl Tee {
             }
             match std::fs::File::create(f) {
                 Ok(h) => opened.push(h),
-                Err(e) => eprintln!("the build log {} was not opened: {e}", f.display()),
+                Err(e) => report(format!("the build log {} was not opened: {e}", f.display())),
             }
         }
         Tee { out, files: opened, line: Vec::new(), who: Who::here() }
@@ -70,7 +70,13 @@ impl Drop for Tee {
 
 impl Write for Tee {
     fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-        self.out.write_all(b)?;
+        if let Err(error) = self.out.write_all(b) {
+            if error.kind() != std::io::ErrorKind::BrokenPipe {
+                return Err(error);
+            }
+            // The launcher closed its pipe. Finish writing the local build logs.
+            self.out = Box::new(std::io::sink());
+        }
         self.line.extend_from_slice(b);
         while let Some(i) = self.line.iter().position(|&c| c == b'\n') {
             let line: Vec<u8> = self.line.drain(..=i).collect();
@@ -92,10 +98,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_disconnected_launcher_does_not_interrupt_the_saved_build_log() {
+        struct Closed;
+        impl Write for Closed {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let dir = crate::scratch("log-pipe");
+        let file = dir.join("build.log");
+        let mut tee = Tee::new(Box::new(Closed), &[&file], |error| panic!("{error}"));
+        writeln!(tee, "first").unwrap();
+        writeln!(tee, "second").unwrap();
+        drop(tee);
+        assert_eq!(std::fs::read_to_string(file).unwrap(), "first\nsecond\n");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn whole_lines_without_the_home_folder() {
         let d = crate::scratch("log");
         let f = d.join("build.log");
-        let mut t = Tee::new(Box::new(std::io::sink()), &[&f]);
+        let mut t = Tee::new(Box::new(std::io::sink()), &[&f], |error| panic!("{error}"));
         t.who = Who { home: "/home/player".into(), user: "player".into(), folder: String::new(), windows: false };
         write!(t, "reading /home/player/Games/x.nup").unwrap();
         writeln!(t, " now, from /media/player/usb").unwrap();

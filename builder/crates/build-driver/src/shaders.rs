@@ -137,13 +137,18 @@ fn progress_of(line: &str) -> Option<f64> {
 }
 
 /// A line of the game's own: its `@@progress <0..1>` the stage's progress, its other lines the log.
-fn said(r: &Reporter, line: &str) {
+fn said(r: &Reporter, stream: Option<&'static str>, line: &str) {
     if let Some(f) = progress_of(line) {
         r.progress(f);
     } else if let Some(rest) = line.strip_prefix("@@stage ") {
         r.log(format!("shaders: {}", rest.split_once(' ').map_or(rest, |x| x.1)));
     } else {
-        r.log(line.strip_prefix("@@").unwrap_or(line));
+        let text = line.strip_prefix("@@").unwrap_or(line);
+        if let Some(stream) = stream {
+            r.trace(|| tracing::info!(source = "game", stream, code = "shader_output", "{text}"));
+        } else {
+            r.log(text);
+        }
     }
 }
 
@@ -166,7 +171,7 @@ pub fn prepare(exe: &Path, folder: &Path, level: CompileShaders, jobs: usize, r:
 
 fn prepare_in(exe: &Path, folder: &Path, cache: &Path, level: CompileShaders, jobs: usize, r: &Reporter) -> bool {
     r.stage(Stage::Shaders, "Preparing the shaders");
-    match supervised(exe, folder, cache, level, jobs, &|line| said(r, line), &|_| {}, &|| false) {
+    match supervised(exe, folder, cache, level, jobs, &|stream, line| said(r, stream, line), &|_| {}, &|| false) {
         Ok(()) => {
             r.progress(1.0);
             true
@@ -187,7 +192,7 @@ fn supervised(
     cache: &Path,
     level: CompileShaders,
     jobs: usize,
-    line: &dyn Fn(&str),
+    line: &dyn Fn(Option<&'static str>, &str),
     started: &dyn Fn(u32),
     stop: &dyn Fn() -> bool,
 ) -> std::result::Result<(), String> {
@@ -198,20 +203,20 @@ fn supervised(
     }
     let limit = crate::supervisor::entry_limit(crate::env);
     let cache_unavailable = std::cell::Cell::new(false);
-    let report = |message: &str| {
+    let report = |stream, message: &str| {
         if message.contains("vk: program cache ")
             && (message.contains("another Longshot is using it: this one runs without it")
                 || message.contains("did not open: this run without the cache"))
         {
             cache_unavailable.set(true);
         }
-        line(message);
+        line(stream, message);
     };
     let start = |extra: &[String]| {
         cache_unavailable.set(false);
         run_once(exe, folder, shared, level, jobs, extra, &report, started, stop)
     };
-    let say = |text: String| line(&text);
+    let say = |text: String| line(None, &text);
     match crate::supervisor::supervise(start, cache, say, limit, crate::supervisor::Policy::default()) {
         Err(e) => Err(e.to_string()),
         Ok((_, d)) if d.action == crate::supervisor::Action::Done && cache_unavailable.get() => {
@@ -248,7 +253,7 @@ fn run_once(
     level: CompileShaders,
     jobs: usize,
     extra: &[String],
-    line: &dyn Fn(&str),
+    line: &dyn Fn(Option<&'static str>, &str),
     started: &dyn Fn(u32),
     stop: &dyn Fn() -> bool,
 ) -> std::io::Result<Option<i32>> {
@@ -262,18 +267,15 @@ fn run_once(
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = build_core::child::spawn(&mut cmd)?;
     started(child.id());
-    let (tx, rx) = mpsc::channel::<String>();
-    for pipe in [
-        child.stdout.take().map(|p| Box::new(p) as Box<dyn std::io::Read + Send>),
-        child.stderr.take().map(|p| Box::new(p) as _),
-    ]
-    .into_iter()
-    .flatten()
-    {
+    let (tx, rx) = mpsc::channel();
+    for (stream, pipe) in [
+        ("stdout", Box::new(child.stdout.take().expect("piped")) as Box<dyn std::io::Read + Send>),
+        ("stderr", Box::new(child.stderr.take().expect("piped")) as _),
+    ] {
         let tx = tx.clone();
         std::thread::spawn(move || {
             for line in std::io::BufReader::new(pipe).lines().map_while(std::result::Result::ok) {
-                if tx.send(line).is_err() {
+                if tx.send((stream, line)).is_err() {
                     break;
                 }
             }
@@ -283,9 +285,9 @@ fn run_once(
     let mut heard = std::time::Instant::now();
     let status = loop {
         match rx.recv_timeout(POLL) {
-            Ok(l) => {
+            Ok((stream, l)) => {
                 heard = std::time::Instant::now();
-                line(&l);
+                line(Some(stream), &l);
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break child.wait()?,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -303,7 +305,7 @@ fn run_once(
             let until = std::time::Instant::now() + DRAIN;
             while let Some(left) = until.checked_duration_since(std::time::Instant::now()) {
                 match rx.recv_timeout(left) {
-                    Ok(l) => line(&l),
+                    Ok((stream, l)) => line(Some(stream), &l),
                     Err(_) => break,
                 }
             }
@@ -349,8 +351,10 @@ pub struct Early {
     stopped: std::sync::atomic::AtomicBool,
     assets: (std::sync::Mutex<Option<bool>>, std::sync::Condvar),
     progress: std::sync::Mutex<Option<f64>>,
-    started: std::sync::Mutex<Option<(std::thread::JoinHandle<Prepared>, mpsc::Receiver<String>)>>,
+    started: std::sync::Mutex<Option<(std::thread::JoinHandle<Prepared>, mpsc::Receiver<ShaderLine>)>>,
 }
+
+type ShaderLine = (Option<&'static str>, String);
 
 /// What an early preparation came to: whether it got to its end (its lines went through [`Early::start`]'s channel).
 struct Prepared {
@@ -485,7 +489,7 @@ impl Early {
             return;
         }
         let (me, module, driver) = (self.clone(), module.to_path_buf(), driver.to_path_buf());
-        let (tx, rx) = mpsc::channel::<String>();
+        let (tx, rx) = mpsc::channel();
         let handle = std::thread::spawn(move || {
             let stopped = || Prepared { result: Err("the build stopped".into()), seconds: 0.0, unstaged: false };
             let ok = {
@@ -513,11 +517,11 @@ impl Early {
             // (each line kept in the channel for the shader step: none lost if the build never gets there)
             let set_progress = |fraction| *me.progress.lock().unwrap_or_else(|e| e.into_inner()) = fraction;
             set_progress(Some(0.0));
-            let line = |l: &str| {
+            let line = |stream, l: &str| {
                 if let Some(fraction) = progress_of(l) {
                     set_progress(Some(fraction));
                 }
-                let _ = tx.send(l.to_string());
+                let _ = tx.send((stream, l.to_string()));
             };
             // (each run's game given to the ticket: the gate then counts what it holds as it grows, and only the rest
             // of its need on top, not its whole need on top of the memory it already took from the free)
@@ -548,18 +552,18 @@ impl Early {
         r.stage(Stage::Shaders, "Preparing the shaders");
         let t = std::time::Instant::now();
         let mut last = None;
-        for l in rx.try_iter() {
+        for (stream, l) in rx.try_iter() {
             match progress_of(&l) {
                 Some(f) => last = Some(f),
-                None => said(r, &l),
+                None => said(r, stream, &l),
             }
         }
         if let Some(f) = last {
             r.progress(f);
         }
         // (until the thread lets its sender go: at its end, or a panic's; a run silent for SILENCE is stopped)
-        for l in rx.iter() {
-            said(r, &l);
+        for (stream, l) in rx.iter() {
+            said(r, stream, &l);
         }
         let Ok(p) = handle.join() else { return Some(not_prepared(r, "its thread stopped")) };
         if p.unstaged {

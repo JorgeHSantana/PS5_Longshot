@@ -567,6 +567,11 @@ fn options_for(profile: &Path, p: &Profile, stamp: Stamp, folder: PathBuf) -> Re
 /// What [`play`] asks of the program around it: the update and the game's start (longshot-builder's play.rs, a
 /// test's).
 pub trait Host {
+    /// A notice from the profile check, on the same stream as the host's other logs.
+    fn log(&mut self, text: &str) {
+        eprintln!("longshot: {text}");
+    }
+
     /// The update with options `o`, for reason `why`: the error's text when it stopped.
     fn update(&mut self, o: &BuildOptions, why: RebuildReason) -> std::result::Result<(), String>;
     /// An update that stopped, the game folder's game still there: whether to start it anyway (said to the player).
@@ -647,7 +652,7 @@ pub fn play(
     // folder; a player's earlier saves copied in, once)
     match carry_saves(&profile, &earlier_saves(version, get)) {
         Ok(Some(from)) => {
-            eprintln!("longshot: your saves in {} copied into the profile (kept there too)", from.display())
+            host.log(&format!("your saves in {} copied into the profile (kept there too)", from.display()));
         }
         Ok(None) => {}
         Err(error) => {

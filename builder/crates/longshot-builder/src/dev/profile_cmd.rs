@@ -11,7 +11,7 @@ pub fn run(args: &[String]) -> ExitCode {
     match profile(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("longshot-builder dev profile: {e}");
+            crate::output::error(format_args!("longshot-builder dev profile: {e}"));
             ExitCode::FAILURE
         }
     }
@@ -42,10 +42,18 @@ fn profile(args: &[String]) -> Result<(), String> {
     for raw in &raws {
         let text = std::fs::read_to_string(raw).map_err(|e| format!("{}: {e}", raw.display()))?;
         let run = map.read_raw(&text, &raw.display().to_string()).map_err(|e| e.to_string())?;
-        println!("longshot-builder dev profile: {}: {} functions ran", raw.display(), run.functions.len());
+        crate::output::stdout(format_args!(
+            "longshot-builder dev profile: {}: {} functions ran",
+            raw.display(),
+            run.functions.len()
+        ));
         p.merge(&run);
     }
     std::fs::write(&out, p.to_text()).map_err(|e| format!("{}: {e}", out.display()))?;
-    println!("longshot-builder dev profile: {} functions in {}", p.functions.len(), out.display());
+    crate::output::stdout(format_args!(
+        "longshot-builder dev profile: {} functions in {}",
+        p.functions.len(),
+        out.display()
+    ));
     Ok(())
 }

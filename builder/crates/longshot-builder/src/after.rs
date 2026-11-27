@@ -285,7 +285,7 @@ pub fn build_ended(result: &Result<(), String>, release: Option<&str>, builder: 
         let t = std::thread::spawn(move || {
             let _ = std::fs::create_dir_all(payload.parent().unwrap_or(Path::new(".")));
             let (_, said, _) = br::send(&json, &payload, br::ADDRESS);
-            eprintln!("longshot: build statistics: {said}");
+            crate::output::log(format!("build statistics: {said}"));
         });
         SENDING.lock().unwrap_or_else(|e| e.into_inner()).push(t);
     }
@@ -383,6 +383,24 @@ pub fn error_window(text: &str) -> bool {
 /// nothing sent. Without `--folder`, the version folder's (this program's) `builds/*`; without `--profile`, its
 /// `profile/`. The exit status.
 pub fn diagnostics(exe: &Path, args: &[String]) -> i32 {
+    let mut args = args.to_vec();
+    let requested_json = crate::output::json_requested(&args);
+    let json = match crate::output::take(&mut args) {
+        Ok(output) => output == Some(crate::output::Output::Json),
+        Err(error) => {
+            crate::usage_error(error, requested_json);
+            return 2;
+        }
+    };
+    let reporter = build_core::report::Reporter::stdout(build_core::report::Format::Json);
+    let failed = |code, text: String, status| {
+        if json {
+            reporter.send(build_core::report::Event::Error { code, text });
+        } else {
+            eprintln!("longshot-builder diagnostics: {text}");
+        }
+        status
+    };
     let (mut out, mut profile, mut folders) = (None, None, Vec::new());
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -391,16 +409,16 @@ pub fn diagnostics(exe: &Path, args: &[String]) -> i32 {
             "--profile" => profile = it.next().map(PathBuf::from),
             "--folder" => folders.extend(it.next().map(PathBuf::from)),
             other => {
-                eprintln!(
-                    "longshot-builder diagnostics: {other:?}: usage: diagnostics --out <zip> [--profile <dir>] [--folder <dir>]"
+                return failed(
+                    "usage",
+                    format!("{other:?}: usage: diagnostics --out <zip> [--profile <dir>] [--folder <dir>]"),
+                    2,
                 );
-                return 2;
             }
         }
     }
     let Some(out) = out else {
-        eprintln!("longshot-builder diagnostics: --out <zip> is needed");
-        return 2;
+        return failed("usage", "--out <zip> is needed".into(), 2);
     };
     let version = exe.parent().unwrap_or(Path::new(".")).to_path_buf();
     let profile = profile.unwrap_or_else(|| build_driver::play::default_profile(&version));
@@ -419,13 +437,15 @@ pub fn diagnostics(exe: &Path, args: &[String]) -> i32 {
     b.add(profile.join("profile.json"));
     match crash::diag::write(&b, &out, &crash::redact::Who::here()) {
         Ok(()) => {
-            println!("{}: {} files and system.txt (redacted; nothing sent)", out.display(), b.files.len());
+            let text = format!("{}: {} files and system.txt (redacted; nothing sent)", out.display(), b.files.len());
+            if json {
+                reporter.log(text);
+            } else {
+                println!("{text}");
+            }
             0
         }
-        Err(e) => {
-            eprintln!("longshot-builder diagnostics: {}: {e}", out.display());
-            1
-        }
+        Err(e) => failed("diagnostics_failed", format!("{}: {e}", out.display()), 1),
     }
 }
 

@@ -311,12 +311,20 @@ pub fn in_background(exe: &Path, own: Option<&str>, args: &mut Vec<String>) {
             return; // (a folder it can't write: a launcher's or a read-only copy, never updated)
         }
         let channel = Channel::of(&own).unwrap_or(Channel::Stable);
-        let r = Reporter::to(Format::Text, Box::new(std::io::stderr()));
+        let r = if crate::output::chosen() == crate::output::Output::Json {
+            Reporter::stdout(Format::Json)
+        } else {
+            Reporter::to(Format::Text, Box::new(std::io::stderr()))
+        };
         let Ok(Some(to)) = check(&own, channel, &Cancel::default()) else { return };
         if s.answer == Some(true) {
             match update_to(&exe, &to, &r, &Cancel::default(), false) {
-                Ok(()) => eprintln!("longshot: updated to {to}, used from the next start"),
-                Err(e) => eprintln!("longshot: the update to {to} failed: {e}"),
+                Ok(()) => {
+                    tracing::info!(code = "update_installed", version = %to, "updated to {to}, used from the next start")
+                }
+                Err(e) => {
+                    tracing::warn!(code = "update_failed", version = %to, error = %e, "the update to {to} failed: {e}")
+                }
             }
         } else {
             s.offered = Some(to);

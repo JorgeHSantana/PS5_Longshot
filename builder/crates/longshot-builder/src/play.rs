@@ -30,6 +30,8 @@ use build_driver::modhook::{self, PlayRequest};
 use build_driver::play::{self, Host, Played, Profile, RebuildReason};
 use std::path::{Path, PathBuf};
 
+mod json_output;
+
 /// The names this program plays by with any arguments (RecompLauncher's zip, release_cmd.rs; recomplauncher.json's
 /// `start.program`), and has in a version folder.
 pub const NAMES: [&str; 2] = ["Longshot.exe", "Longshot.x86_64"];
@@ -152,6 +154,14 @@ pub(crate) fn places(exe: &Path, asked: Option<&Path>) -> (PathBuf, PathBuf) {
 /// a job or RecompLauncher's Big Picture mode, whose `exit_codes` say it there). `wait`: until it is closed; else it
 /// stays while the work goes on.
 pub fn say(text: &str, error: bool, wait: bool) {
+    if crate::output::chosen() == crate::output::Output::Json {
+        if error {
+            build_core::report::Reporter::stdout(Format::Json).warn("play_notice", text);
+        } else {
+            crate::output::log(text);
+        }
+        return;
+    }
     // (--output user: the builder's own error window, its Send report and Save diagnostics)
     if error && wait && crate::after::error_window(text) {
         eprintln!("longshot: {text}");
@@ -270,7 +280,9 @@ pub fn shown_build(
     use std::sync::{Arc, Mutex};
     let windows = crate::output::chosen().windows();
     let ui = Arc::new(Mutex::new(crate::progress::open()));
-    if let Some(t) = text {
+    if format != Format::Json
+        && let Some(t) = text
+    {
         ui.lock().unwrap_or_else(|p| p.into_inner()).step(t, 0.0);
     }
     let seen = Mutex::new((String::new(), 0.0));
@@ -302,6 +314,10 @@ struct Player<'a> {
 }
 
 impl Host for Player<'_> {
+    fn log(&mut self, text: &str) {
+        crate::output::log(text);
+    }
+
     fn update(&mut self, o: &BuildOptions, why: RebuildReason) -> Result<(), String> {
         let mut o = o.clone();
         o.log = Some(o.out.join(LOG));
@@ -328,7 +344,7 @@ impl Host for Player<'_> {
             ),
             RebuildReason::NoStamp | RebuildReason::Builder => None,
         };
-        eprintln!("longshot: updating the game folder: {}", why.why());
+        crate::output::log(format!("updating the game folder: {}", why.why()));
         let kind = match why {
             RebuildReason::NotBuilt => crash::build_report::FIRST_BUILD,
             RebuildReason::Builder | RebuildReason::Shaders | RebuildReason::NoStamp => crash::build_report::UPDATE,
@@ -385,6 +401,7 @@ impl Host for Player<'_> {
         let mut channel = self.open_channel(&mut c, profile);
         let mut run = None;
         let reporter = build_core::report::Reporter::stdout(format);
+        let json_output = (format == Format::Json).then(|| json_output::Output::attach(&mut c)).transpose()?;
         if managed {
             // A child can report immediately, so establish the startup phase before spawn.
             reporter.send(build_core::report::Event::GameStarting);
@@ -398,6 +415,10 @@ impl Host for Player<'_> {
             reporter.send(build_core::report::Event::GameStarted);
             run = Some((pid, crate::after::watch(pid)));
         });
+        drop(c);
+        if let Some(output) = json_output {
+            output.finish();
+        }
         let status = match status {
             Ok(s) => s,
             Err(e) => {
@@ -481,7 +502,7 @@ pub fn confirm(c: &modhook::Confirmation) -> bool {
             Err(e) => e.to_string(),
         }
     };
-    eprintln!("longshot: \"{}\" declined: {why}", c.title);
+    crate::output::log(format!("\"{}\" declined: {why}", c.title));
     if output == crate::output::Output::Json {
         build_core::report::Reporter::stdout(Format::Json).warn("confirm_declined", format!("{}: {why}", c.title));
     }
@@ -508,7 +529,7 @@ impl GameChannel {
         let _ = self.served.recv_timeout(std::time::Duration::from_millis(500));
         let restart = self.restart.load(std::sync::atomic::Ordering::SeqCst);
         if restart {
-            eprintln!("longshot: the game asked to be built again");
+            crate::output::log("the game asked to be built again");
         }
         restart
     }
@@ -522,7 +543,7 @@ impl Player<'_> {
         let (server, child) = match build_core::channel::open() {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("longshot: no channel to the game: {e}");
+                crate::output::log(format!("no channel to the game: {e}"));
                 return None;
             }
         };
@@ -576,10 +597,11 @@ pub fn run_with(
 ) -> i32 {
     let t = std::time::Instant::now();
     let mut args = args.to_vec();
+    let json = crate::output::json_requested(&args);
     match crate::output::take(&mut args) {
         Ok(asked) => crate::output::set(asked),
         Err(why) => {
-            eprintln!("longshot: {why}");
+            crate::usage_error(why, json);
             return 2;
         }
     };
@@ -639,7 +661,14 @@ pub fn run_with(
         // (the first check's time from this program's start: longshot.json read and checked)
         let since = if std::mem::take(&mut first) { t.elapsed() } else { took };
         let said = stale.map_or("up to date", |s| s.why());
-        eprintln!("longshot: fast check: {said} ({:.1} ms)", since.as_secs_f64() * 1000.0);
+        let elapsed_ms = since.as_secs_f64() * 1000.0;
+        tracing::info!(
+            code = "fast_check",
+            elapsed_ms,
+            rebuild = stale.is_some(),
+            reason = said,
+            "fast check: {said} ({elapsed_ms:.1} ms)"
+        );
         build_core::report::Reporter::stdout(crate::output::chosen().format())
             .send(build_core::report::Event::PlayPlan { rebuild: stale.map(RebuildReason::why) });
     };
@@ -663,7 +692,11 @@ pub fn run_with(
         }
     };
     // (the cache's budget, at most once an hour at play's end; a build's end prunes every time: build_driver::storage)
-    let said = build_core::report::Reporter::to(Format::Text, Box::new(std::io::stderr()));
+    let said = if crate::output::chosen() == crate::output::Output::Json {
+        build_core::report::Reporter::stdout(Format::Json)
+    } else {
+        build_core::report::Reporter::to(Format::Text, Box::new(std::io::stderr()))
+    };
     build_driver::storage::prune_if_due(&said);
     crate::after::wait_sent();
     crate::self_update::wait_swap();

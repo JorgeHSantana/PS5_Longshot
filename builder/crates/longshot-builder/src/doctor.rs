@@ -285,6 +285,13 @@ pub fn ask_vulkan(exe: &Path) -> Probe {
 
 /// The probe's process: Vulkan asked, its answer as JSON on stdout.
 pub fn vulkan_probe_main() -> std::process::ExitCode {
+    if crate::output::chosen() == crate::output::Output::Json {
+        println!(
+            "{}",
+            serde_json::json!({"v": build_core::report::VERSION, "type": "vulkan_probe", "probe": vulkan::probe()})
+        );
+        return std::process::ExitCode::SUCCESS;
+    }
     match serde_json::to_string(&vulkan::probe()) {
         Ok(json) => {
             println!("{json}");

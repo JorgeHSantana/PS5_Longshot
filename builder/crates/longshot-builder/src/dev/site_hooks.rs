@@ -300,24 +300,26 @@ pub fn run(args: &[String]) -> ExitCode {
             s => spec(s).map(|s| specs.push(s)),
         };
         if let Err(e) = r {
-            eprintln!("longshot-builder dev site-hooks: {e}\n{USAGE}");
+            crate::output::error(format_args!("longshot-builder dev site-hooks: {e}\n{USAGE}"));
             return ExitCode::from(2);
         }
     }
     let (Some(tables), Some(build), Some(out)) = (tables, build, out) else {
-        eprintln!("longshot-builder dev site-hooks: --tables, --build and --out are each needed\n{USAGE}");
+        crate::output::error(format_args!(
+            "longshot-builder dev site-hooks: --tables, --build and --out are each needed\n{USAGE}"
+        ));
         return ExitCode::from(2);
     };
     match module(&Tables::new(tables), &build, &specs) {
         Ok(text) => match std::fs::write(&out, text) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
-                eprintln!("longshot-builder dev site-hooks: {}: {e}", out.display());
+                crate::output::error(format_args!("longshot-builder dev site-hooks: {}: {e}", out.display()));
                 ExitCode::FAILURE
             }
         },
         Err(e) => {
-            eprintln!("longshot-builder dev site-hooks: {e}");
+            crate::output::error(format_args!("longshot-builder dev site-hooks: {e}"));
             ExitCode::FAILURE
         }
     }

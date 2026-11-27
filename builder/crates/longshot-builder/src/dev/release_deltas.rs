@@ -128,7 +128,7 @@ fn curl_file(url: &str, to: &Path, sha256: &str, size: u64) -> Result<(), String
     let mut part = to.as_os_str().to_owned();
     part.push(".part");
     let part = PathBuf::from(part);
-    let got = build_core::child::status(
+    let got = crate::output::tool_status(
         plain_curl()
             .args(["--speed-limit", "1024", "--speed-time", "60", "--max-filesize", &size.to_string(), "-o"])
             .arg(&part)
@@ -392,7 +392,7 @@ pub fn manifest_text(v: Value) -> String {
 
 fn zstd(args: &[&std::ffi::OsStr]) -> Result<bool, String> {
     let z = archive::zstd()?;
-    build_core::child::status(build_core::child::command(&z).args(args))
+    crate::output::tool_status(build_core::child::command(&z).args(args))
         .map(|s| s.success())
         .map_err(|e| format!("zstd did not start: {e}"))
 }
@@ -566,11 +566,15 @@ pub fn files(f: &Files<'_>, net: &Net<'_>, say: &mut dyn FnMut(String)) -> Resul
         }
         None => build_core::child::command(&full),
     };
-    let ran = build_core::child::status(
-        cmd.args(["stamps", "--output", "json", "--cache"]).arg(work.join("stamps-cache")).stdout(file),
-    )
-    .map_err(|e| format!("{} did not start: {e}", full.display()))?;
-    if !ran.success() {
+    cmd.args(["stamps", "--output", "json", "--cache"])
+        .arg(work.join("stamps-cache"))
+        .stdout(file)
+        .stderr(std::process::Stdio::piped());
+    let ran = build_core::child::spawn(&mut cmd)
+        .and_then(|child| child.wait_with_output())
+        .map_err(|e| format!("{} did not start: {e}", full.display()))?;
+    crate::output::tool_output(&ran);
+    if !ran.status.success() {
         return Err("longshot-builder stamps failed".into());
     }
     let d = Deltas {

@@ -52,6 +52,7 @@ use std::process::ExitCode;
 
 mod after;
 mod dev;
+mod diagnostics;
 mod doctor;
 mod fetch_cmd;
 mod from_source;
@@ -207,6 +208,9 @@ fn parse(args: &[String]) -> std::result::Result<Args, Usage> {
                     .map_err(|_| Usage("--jobs: 1 or more, or 0 for automatic".into()))?
             }
             "--output" => a.output = Some(output::Output::parse(&value()?).map_err(Usage)?),
+            flag if flag.starts_with("--output=") => {
+                a.output = Some(output::Output::parse(&flag["--output=".len()..]).map_err(Usage)?);
+            }
             flag if FLAG_VARS.iter().any(|(f, _)| *f == flag) => {
                 let var = FLAG_VARS.iter().find(|(f, _)| *f == flag).map(|(_, v)| *v).unwrap_or_default();
                 a.flags.push((var, value()?));
@@ -486,7 +490,14 @@ fn run_build(
     if let Some(l) = &o.log {
         files.push(l);
     }
-    r.set_output(Box::new(build_driver::log::Tee::new(Box::new(std::io::stdout()), &files)));
+    let tee = build_driver::log::Tee::new(Box::new(std::io::stdout()), &files, |error| {
+        if format == Format::Json {
+            r.warn("log_unavailable", error);
+        } else {
+            eprintln!("{error}");
+        }
+    });
+    r.set_output(Box::new(tee));
     build::build(o, &p, &Stages::real(), &r).map(|_| ()).map_err(|e| say_error(&r, e, Some(&log)))
 }
 
@@ -617,7 +628,7 @@ fn mod_cmd(
 ) -> ExitCode {
     let m = match split_mod_args(args) {
         Ok(m) => m,
-        Err(why) => return usage_error(why, args.windows(2).any(|w| w[0] == "--output" && w[1] == "json")),
+        Err(why) => return usage_error(why, output::json_requested(args)),
     };
     let out = output::set(m.output);
     if let Some(c) = &m.cache {
@@ -906,9 +917,10 @@ fn unicode_args(args: impl Iterator<Item = std::ffi::OsString>) -> std::result::
 /// A command line it does not take: said on stderr with the usage, and as an `error` event (`usage`) with `--output json`,
 /// so a launcher reading the events sees why; exit status 2.
 fn usage_error(why: String, json: bool) -> ExitCode {
-    eprintln!("longshot-builder: {why}\n{USAGE}");
     if json {
         Reporter::stdout(Format::Json).send(Event::Error { code: "usage", text: format!("longshot-builder: {why}") });
+    } else {
+        eprintln!("longshot-builder: {why}\n{USAGE}");
     }
     ExitCode::from(2)
 }
@@ -966,6 +978,7 @@ fn version_line(pack: &[u8]) -> String {
 }
 
 fn main() -> ExitCode {
+    diagnostics::init();
     // (Windows: the version folder's Longshot.exe is a windowed program, release_cmd.rs: what it starts opens no window;
     // started from a terminal, it says what it does there)
     build_core::hidden_console();
@@ -976,14 +989,20 @@ fn main() -> ExitCode {
     let damaged = build_driver::sources::load_carried().err();
     let args: Vec<String> = match unicode_args(std::env::args_os().skip(1)) {
         Ok(a) => a,
-        Err(why) => return usage_error(why, false),
+        Err(why) => {
+            let args = std::env::args_os().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>();
+            return usage_error(why, output::json_requested(&args));
+        }
     };
+    let json = output::json_requested(&args);
+    if json {
+        on_panic(Format::Json, Vec::new());
+    }
     // (a program cut short or damaged does nothing but say so, as an `error` event with `--output json`, so a launcher
     // downloads it again; `dev`, `self-update` and the usage still run)
     if let Some(e) = damaged
         && !matches!(args.first().map(String::as_str), Some("dev" | "self-update" | "--help" | "-h" | "help"))
     {
-        let json = args.windows(2).any(|w| w[0] == "--output" && w[1] == "json");
         say_error(&Reporter::stdout(if json { Format::Json } else { Format::Text }), e, None);
         return ExitCode::FAILURE;
     }
@@ -999,14 +1018,18 @@ fn main() -> ExitCode {
                         "the folder {} is not named in Unicode: move Longshot to a folder that is",
                         cache.display()
                     ),
-                    false,
+                    json,
                 );
             }
         }
     }
     // (what the last self-update left: the program before it deleted, or put back after an update cut short)
     if let Some(done) = release::swap::tidy(&exe) {
-        eprintln!("longshot-builder: {done}");
+        if json {
+            Reporter::stdout(Format::Json).log(done);
+        } else {
+            eprintln!("longshot-builder: {done}");
+        }
     }
     if let Some(game_args) = play::wanted(&exe, &args) {
         let release = build_driver::sources::carried_release(carried).map(|(release, _)| release);
@@ -1035,11 +1058,11 @@ fn main() -> ExitCode {
             return info::run(&args[1..], &me);
         }
         Some("--version") => {
-            println!("{}", version_line(carried));
+            Reporter::stdout(if json { Format::Json } else { Format::Text }).log(version_line(carried));
             return ExitCode::SUCCESS;
         }
         Some("--help" | "-h" | "help") => {
-            println!("{USAGE}");
+            Reporter::stdout(if json { Format::Json } else { Format::Text }).log(USAGE);
             return ExitCode::SUCCESS;
         }
         _ => {}
@@ -1051,7 +1074,7 @@ fn main() -> ExitCode {
     }
     let a = match parse(&args) {
         Ok(a) => a,
-        Err(Usage(why)) => return usage_error(why, args.windows(2).any(|w| w[0] == "--output" && w[1] == "json")),
+        Err(Usage(why)) => return usage_error(why, json),
     };
     output::set(a.output);
     for (var, value) in &a.flags {
@@ -1150,9 +1173,8 @@ mod tests {
             (Some(4), Some(output::Output::Json), Some(CompileShaders::All))
         );
         assert_eq!(format(&a), Format::Json);
-        for gone in ["--json", "--progress-lines"] {
-            assert!(args(&format!("build --game g --out o {gone}")).is_err(), "{gone}: --output's now");
-        }
+        assert!(args("build --game g --out o --json").is_err());
+        assert!(args("build --game g --out o --progress-lines").is_err());
         assert!(args("build --game g --out o --output lines").is_err());
         assert_eq!(a.upscalers, Some(vec![Upscaler::Fsr4]));
         assert_eq!(args("update /games/L").ok().unwrap().folder, Some(PathBuf::from("/games/L")));

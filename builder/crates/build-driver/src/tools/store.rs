@@ -15,7 +15,7 @@ fn curl() -> Result<PathBuf, String> {
 
 /// `url` into `to`, refused past `most` bytes (the network's [`super::archive::Getter`]).
 pub fn download(url: &str, to: &Path, most: u64) -> Result<(), String> {
-    let s = build_core::child::status(
+    let output = build_core::child::output(
         build_core::child::command(curl()?)
             .args(crate::runtimes::CURL)
             .args(["-A", "longshot-tools", "--max-filesize", &most.to_string(), "-o"])
@@ -23,8 +23,12 @@ pub fn download(url: &str, to: &Path, most: u64) -> Result<(), String> {
             .arg(url),
     )
     .map_err(|e| format!("curl did not start: {e}"))?;
-    if !s.success() {
-        return Err(format!("{url}: curl failed ({s})"));
+    if !output.status.success() {
+        return Err(format!(
+            "{url}: curl failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
     }
     // (older curls hold --max-filesize to the Content-Length alone: an answer with none is measured here)
     if std::fs::metadata(to).map_or(0, |m| m.len()) > most {
@@ -176,7 +180,7 @@ fn put_protocols(to: &str) -> &'static [&'static str] {
 
 /// The archive at `path` put in the store as `t`'s copy (PUT). A copy there already (409) is kept when it is the same:
 /// its bytes cannot change. Returns the copy's URL.
-pub fn put(path: &Path, t: &Tool) -> Result<String, String> {
+pub fn put(path: &Path, t: &Tool, mut say: impl FnMut(&str)) -> Result<String, String> {
     let url = t.store_url(SERVER);
     let to = t.store_url(&upload_server(crate::env("FORGEJO_UPLOAD_API").as_deref()));
     let token = crate::env("RELEASE_TOKEN")
@@ -191,16 +195,20 @@ pub fn put(path: &Path, t: &Tool) -> Result<String, String> {
         .args(["-w", "\n%{http_code}"])
         .arg(&to)
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped());
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     let mut child = build_core::child::spawn(&mut put).map_err(|e| format!("curl did not start: {e}"))?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(format!("Authorization: token {token}\n").as_bytes()).map_err(|e| e.to_string())?;
     }
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    for line in String::from_utf8_lossy(&out.stderr).lines() {
+        say(line);
+    }
     let text = String::from_utf8_lossy(&out.stdout);
     let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));
     match code.trim() {
-        "200" | "201" => println!("uploaded {url}"),
+        "200" | "201" => say(&format!("uploaded {url}")),
         "409" => {
             let (size, sha) = match exists(t) {
                 InStore::There { size, sha256 } => (size, sha256),
@@ -212,7 +220,7 @@ pub fn put(path: &Path, t: &Tool) -> Result<String, String> {
                      version, then"
                 ));
             }
-            println!("{url} is in the package registry already");
+            say(&format!("{url} is in the package registry already"));
         }
         c => return Err(format!("PUT {url}: HTTP {c} {}", body.chars().take(300).collect::<String>())),
     }

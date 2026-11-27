@@ -150,8 +150,8 @@ pub fn ffmpeg_linux(s: &Settings) -> Result<(Vec<String>, Vec<String>), Vec<Stri
             let absent: Vec<&String> = names
                 .iter()
                 .filter(|n| {
-                    !build_core::child::status(build_core::child::command("pkg-config").args(["--exists", n]))
-                        .is_ok_and(|s| s.success())
+                    !build_core::child::output(build_core::child::command("pkg-config").args(["--exists", n]))
+                        .is_ok_and(|out| out.status.success())
                 })
                 .collect();
             let absent = if absent.is_empty() { names.iter().collect() } else { absent };

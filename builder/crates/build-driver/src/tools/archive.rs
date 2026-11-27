@@ -140,7 +140,7 @@ pub(crate) fn executable(_: &std::fs::Metadata) -> bool {
 }
 
 /// `folder` as a tool's archive at `out`, its files at the top (prefix `-`). Returns (SHA-256, size).
-pub fn pack(folder: &Path, out: &Path) -> Result<(String, u64), String> {
+pub fn pack(folder: &Path, out: &Path, mut say: impl FnMut(&str)) -> Result<(String, u64), String> {
     let folder = std::path::absolute(folder).map_err(|e| e.to_string())?;
     let all = entries(&folder)?;
     if !all.iter().any(|(_, p)| std::fs::symlink_metadata(p).is_ok_and(|m| !m.is_dir())) {
@@ -193,16 +193,21 @@ pub fn pack(folder: &Path, out: &Path) -> Result<(String, u64), String> {
         t.flush().map_err(|e| format!("{}: {e}", tar_path.display()))
     })()
     .and_then(|()| {
-        let s = build_core::child::status(
+        let output = build_core::child::output(
             build_core::child::command(zstd()?).args(ZSTD_ARGS).arg("-f").arg("-o").arg(out).arg(&tar_path),
         )
         .map_err(|e| format!("zstd did not start: {e}"))?;
-        if s.success() { Ok(()) } else { Err(format!("zstd failed ({s})")) }
+        for stream in [&output.stdout, &output.stderr] {
+            for line in String::from_utf8_lossy(stream).lines() {
+                say(line);
+            }
+        }
+        if output.status.success() { Ok(()) } else { Err(format!("zstd failed ({})", output.status)) }
     });
     let _ = std::fs::remove_file(&tar_path);
     written?;
     let (sha, size) = sha256_file(out)?;
-    println!("{}: {} entries, {size} bytes, sha256 {sha} (prefix -)", out.display(), all.len());
+    say(&format!("{}: {} entries, {size} bytes, sha256 {sha} (prefix -)", out.display(), all.len()));
     Ok((sha, size))
 }
 
@@ -510,20 +515,26 @@ pub fn fetch(t: &Tool, cache: &Path, get: Getter<'_>) -> Result<PathBuf, String>
 
 /// Each tool's archive unpacked at its dest under `folder`, its stamp beside (`folder/.tools/<name>`). A tool there
 /// with another stamp (the lock changed), or none, is unpacked again.
-pub fn install(folder: &Path, tools: &[&Tool], cache: &Path, get: Getter<'_>) -> Result<(), String> {
+pub fn install(
+    folder: &Path,
+    tools: &[&Tool],
+    cache: &Path,
+    get: Getter<'_>,
+    mut say: impl FnMut(&str),
+) -> Result<(), String> {
     for t in tools {
         let dest = folder.join(&t.dest);
         if dest.is_dir() {
             if stamp_of(folder, &t.name).as_deref() == Some(t.sha256.as_str()) {
-                println!("{:<12} there already", t.name);
+                say(&format!("{:<12} there already", t.name));
                 continue;
             }
-            println!("{:<12} {}: not tools.lock's archive, unpacked again", t.name, t.version);
+            say(&format!("{:<12} {}: not tools.lock's archive, unpacked again", t.name, t.version));
             std::fs::remove_dir_all(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
         }
         let n = unpack(&fetch(t, cache, get)?, &t.prefix, &dest)?;
         write_stamp(folder, t)?;
-        println!("{:<12} {}: {n} files into {}", t.name, t.version, t.dest);
+        say(&format!("{:<12} {}: {n} files into {}", t.name, t.version, t.dest));
     }
     Ok(())
 }
@@ -544,7 +555,7 @@ mod tests {
             std::fs::write(src.join(rel), text).unwrap();
         }
         let out = d.join(format!("{name}{EXT}"));
-        let (sha, size) = pack(&src, &out).unwrap();
+        let (sha, size) = pack(&src, &out, |_| {}).unwrap();
         (out, sha, size)
     }
 
@@ -618,13 +629,13 @@ mod tests {
         let old = line("t", "1", "linux-x64", &sha, size);
         let from =
             |p: PathBuf| move |_: &str, to: &Path, _: u64| std::fs::copy(&p, to).map(|_| ()).map_err(|e| e.to_string());
-        install(&d.join("b"), &[&old], &d.join("cache"), &from(a.clone())).unwrap();
+        install(&d.join("b"), &[&old], &d.join("cache"), &from(a.clone()), |_| {}).unwrap();
         assert_eq!(stamp_of(&d.join("b"), "t"), Some(sha));
         let never = |_: &str, _: &Path, _: u64| -> Result<(), String> { panic!("again") };
-        install(&d.join("b"), &[&old], &d.join("cache"), &never).unwrap();
+        install(&d.join("b"), &[&old], &d.join("cache"), &never, |_| {}).unwrap();
         let (b, sha2, size2) = archive(&d, "b", &[("new.txt", "2")]);
         let new = line("t", "2", "linux-x64", &sha2, size2);
-        install(&d.join("b"), &[&new], &d.join("cache"), &from(b)).unwrap();
+        install(&d.join("b"), &[&new], &d.join("cache"), &from(b), |_| {}).unwrap();
         let names: Vec<String> = std::fs::read_dir(d.join("b/tools/t"))
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
@@ -647,17 +658,17 @@ mod tests {
         std::fs::set_permissions(src.join("bin/clang"), std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::write(src.join("LICENSE.TXT"), "license").unwrap();
         std::os::unix::fs::symlink("bin", src.join("b")).unwrap();
-        let first = pack(&src, &d.join("1.tar.zst")).unwrap();
+        let first = pack(&src, &d.join("1.tar.zst"), |_| {}).unwrap();
         let f = std::fs::File::options().write(true).open(src.join("LICENSE.TXT")).unwrap();
         f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1)).unwrap();
-        assert_eq!(pack(&src, &d.join("2.tar.zst")).unwrap(), first, "times are not in it");
+        assert_eq!(pack(&src, &d.join("2.tar.zst"), |_| {}).unwrap(), first, "times are not in it");
         unpack(&d.join("1.tar.zst"), "-", &d.join("out")).unwrap();
         let mode = |p: &str| std::fs::metadata(d.join("out").join(p)).unwrap().permissions().mode() & 0o777;
         assert_eq!((mode("bin/clang"), mode("LICENSE.TXT")), (0o755, 0o644));
         assert_eq!(std::fs::read_link(d.join("out/b")).unwrap(), Path::new("bin"));
         for target in ["/usr/bin/clang", "../../outside"] {
             std::os::unix::fs::symlink(target, src.join("bad")).unwrap();
-            assert!(pack(&src, &d.join("bad.tar.zst")).is_err(), "{target}");
+            assert!(pack(&src, &d.join("bad.tar.zst"), |_| {}).is_err(), "{target}");
             std::fs::remove_file(src.join("bad")).unwrap();
         }
         let _ = std::fs::remove_dir_all(&d);
