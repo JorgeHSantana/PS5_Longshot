@@ -129,6 +129,34 @@ static void release(Decoded *d) {
 
 /* (a folder of the system's: 1) */
 static int os_stat(const char *path, uint64_t *size);
+#ifdef __PROSPERO__
+/* (PS5) The romfs "folder" is the game's .nup, read in place (host/ps5/nup_romfs.c: NUP_ROMFS_ROOT, where host/hos_main.c
+   points hos_romfs_dir): the console has neither the builder's index nor room for 26 GB of extracted files. The folder's
+   own calls below (its stat, its listing, a file's open, read and close) ask the package for a path under that root. */
+#include "ps5/nup_romfs.h"
+#define NUP_FILE_BIT 0x40000000   /* (a file of the package's as a RomfsFile: its handle's number over this bit) */
+#endif
+static RomfsFile folder_open(const char *path) {
+#ifdef __PROSPERO__
+    if (nup_romfs_path(path)) {
+        const int64_t h = nup_romfs_open_file(path);
+        return h < 0 || h >= NUP_FILE_BIT ? ROMFS_NO_FILE : (RomfsFile)(h | NUP_FILE_BIT);
+    }
+#endif
+    return romfs_os_open(path);
+}
+static int64_t folder_read(RomfsFile f, uint64_t off, void *buf, uint64_t n) {
+#ifdef __PROSPERO__
+    if (f >= NUP_FILE_BIT) return nup_romfs_pread(f - NUP_FILE_BIT, buf, (size_t)n, off);
+#endif
+    return romfs_os_read(f, off, buf, n);
+}
+static void folder_close(RomfsFile f) {
+#ifdef __PROSPERO__
+    if (f >= NUP_FILE_BIT) { nup_romfs_close(f - NUP_FILE_BIT); return; }
+#endif
+    romfs_os_close(f);
+}
 
 uint64_t hos_romfs_decoded_bytes(void) {
     LOCK();
@@ -193,6 +221,16 @@ static int os_list(const char *dir, HosRomfsVisit fn, void *arg) {
 }
 #else
 static int os_stat(const char *path, uint64_t *size) {
+#ifdef __PROSPERO__
+    if (nup_romfs_path(path)) {
+        int is_dir = 0;
+        uint64_t bytes = 0;
+        if (nup_romfs_find(path, &is_dir, &bytes) < 0) return 0;
+        if (is_dir) return 2;
+        if (size) *size = bytes;
+        return 1;
+    }
+#endif
     struct stat st;
     if (stat(path, &st)) return 0;
     if (S_ISDIR(st.st_mode)) return 2;
@@ -201,6 +239,25 @@ static int os_stat(const char *path, uint64_t *size) {
     return 1;
 }
 static int os_list(const char *dir, HosRomfsVisit fn, void *arg) {
+#ifdef __PROSPERO__
+    if (nup_romfs_path(dir)) {
+        int is_dir = 0, n = 0;
+        const int64_t node = nup_romfs_find(dir, &is_dir, NULL);
+        if (node < 0 || !is_dir) return -1;
+        uint32_t cursor = 0;
+        const char *name;
+        size_t len;
+        uint64_t bytes;
+        char text[CAP];
+        while (nup_romfs_dir_next(node, &cursor, &name, &len, &is_dir, &bytes)) {
+            if (len >= sizeof text) continue;
+            memcpy(text, name, len), text[len] = 0;
+            fn(arg, text, is_dir, is_dir ? 0 : bytes);
+            n++;
+        }
+        return n;
+    }
+#endif
     DIR *d = opendir(dir);
     if (!d) return -1;
     int n = 0;
@@ -371,12 +428,12 @@ static HosRomfsFile *open_file(const char *rel, int stored, int *framed) {
         if (f.e.zstd && stored) f.frame = 1, f.size = f.e.stored, *framed = 1;
         else if (f.e.zstd && !(f.decoded = decode(&f.e))) return NULL;
     } else {
-        if (!folder_path(rel, path, sizeof path) || os_stat(path, &f.size) != 1 || (f.os = romfs_os_open(path)) == ROMFS_NO_FILE)
+        if (!folder_path(rel, path, sizeof path) || os_stat(path, &f.size) != 1 || (f.os = folder_open(path)) == ROMFS_NO_FILE)
             return NULL;
     }
     HosRomfsFile *out = (HosRomfsFile *)malloc(sizeof *out);
     if (out) *out = f;
-    else if (f.os != ROMFS_NO_FILE) romfs_os_close(f.os);
+    else if (f.os != ROMFS_NO_FILE) folder_close(f.os);
     else if (f.decoded) release(f.decoded);
     return out;
 }
@@ -398,12 +455,12 @@ int64_t hos_romfs_file_read(HosRomfsFile *f, uint64_t off, void *buf, uint64_t n
     }
     if (f->frame) return hos_romfs_index_read_frame(hos_romfs_index, &f->e, off, buf, n);
     if (f->in_nup) return hos_romfs_index_read(hos_romfs_index, &f->e, off, buf, n);
-    return romfs_os_read(f->os, off, buf, n > f->size - off ? f->size - off : n);
+    return folder_read(f->os, off, buf, n > f->size - off ? f->size - off : n);
 }
 
 void hos_romfs_file_close(HosRomfsFile *f) {
     if (!f) return;
-    if (f->os != ROMFS_NO_FILE) romfs_os_close(f->os);
+    if (f->os != ROMFS_NO_FILE) folder_close(f->os);
     if (f->decoded) release(f->decoded);
     free(f);
 }
