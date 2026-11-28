@@ -49,6 +49,7 @@ struct Texture {
     bool bc = false;          // (and kept as BC3 or BC7: big ones, re-encoded on the GPU after decoding; vk_texture.cpp)
     bool bc_resized = false;  // (longshot-amd: its BC image is a resized copy, uneven block levels on AMD; vk_texture.cpp)
     bool pressed = false;     // (PS5: made small while memory was short, made again at its own size later; vk_texture.cpp)
+    uint16_t pressed_cap = 0;   // (PS5: the texels across it was held to, tex_gov.h; 0: its own size)
     int block_w = 1, block_h = 1, bpb = 0;   // the storage's blocks
     // the game's texture
     uint64_t gpu = 0, guest = 0, guest_size = 0;   // storage (GPU address, guest address, bytes)

@@ -84,6 +84,7 @@
 #endif
 #include "cxx_escape.h"   // (fork_join: a helper that cannot be started at the commit limit leaves its part to the caller)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
+#include "tex_gov.h"   // (PS5: the textures' governor, RX_VK_TEX_GOV)
 
 #ifdef __PROSPERO__
 extern "C" uint64_t hos_ps5_direct_room(void);   // (host/ps5/win32_ps5.c: the title's free direct memory in all)
@@ -101,6 +102,52 @@ uint64_t ps5_tex_reserve() {   // (vk_vma.cpp asks too)
     return v;
 }
 static std::atomic<uint64_t> ps5_pressed_n{0}, ps5_restored_n{0};
+// (tex_gov.h, RX_VK_TEX_GOV=1) the governor's state: the memory free is read at most every 100 ms and its fall is taken
+// over the last second (ten readings back: over 100 ms the game's own taking and giving back reads as 600 MiB/s)
+static bool ps5_gov_on() {
+    static const bool on = getenv("RX_VK_TEX_GOV") && atoi(getenv("RX_VK_TEX_GOV")) > 0;
+    return on;
+}
+static uint64_t ps5_gov_low() {
+    static const uint64_t v = (uint64_t)(getenv("RX_VK_TEX_GOV_LOW_MB") ? atoll(getenv("RX_VK_TEX_GOV_LOW_MB")) : 700) << 20;
+    return v;
+}
+static uint32_t ps5_gov_cap() {
+    static std::mutex mu;
+    static tex_gov::Gov g;
+    static uint64_t rooms[10];
+    static long long times[10];
+    static unsigned ring_n = 0;
+    static long long at_ms = 0;
+    static const tex_gov::Lines lines = [] {
+        const char *hi = getenv("RX_VK_TEX_GOV_HIGH_MB"), *fl = getenv("HOS_PS5_MEM_FLOOR_MB");
+        tex_gov::Lines l{ps5_gov_low(), (uint64_t)(hi ? atoll(hi) : 1000) << 20, (uint64_t)(fl && *fl ? atoll(fl) : 192) << 20};
+        if (l.high < l.low) l.high = l.low;
+        logf("vk: textures' governor (RX_VK_TEX_GOV): own size above %llu MiB free, back up from %llu, the floor at %llu",
+             (unsigned long long)(l.low >> 20), (unsigned long long)(l.high >> 20), (unsigned long long)(l.floor >> 20));
+        return l;
+    }();
+    const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    std::lock_guard<std::mutex> lk(mu);
+    if (at_ms && now - at_ms < 100) return tex_gov::cap_of(g.level);
+    const uint64_t room = hos_ps5_direct_room();
+    long long fall = 0;
+    if (ring_n >= 10) {   // (against the reading ten back: about a second ago)
+        const unsigned old = ring_n % 10;
+        if (now > times[old]) fall = (long long)(((double)rooms[old] - (double)room) * 1000.0 / (double)(now - times[old]));
+    }
+    rooms[ring_n % 10] = room, times[ring_n % 10] = now, ring_n++, at_ms = now;
+    const tex_gov::Gov was = g;
+    g = tex_gov::step(g, room, fall, now, lines);
+    if (g.level != was.level) {
+        static uint64_t changes;
+        if (++changes <= 40 || changes % 50 == 0)
+            logf("vk: textures' governor: %u texels at most now (was %u): %llu MiB free, falling %lld MiB/s (%llu changes)",
+                 tex_gov::cap_of(g.level), tex_gov::cap_of(was.level), (unsigned long long)(room >> 20), fall / (1 << 20),
+                 (unsigned long long)changes);
+    }
+    return tex_gov::cap_of(g.level);
+}
 #endif
 namespace {
 
@@ -2897,9 +2944,13 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
 #ifdef __PROSPERO__
         if (astc && !x.sparse) {   // (memory short: small for now, ps5_tex_reserve)
             const uint64_t room = hos_ps5_direct_room(), reserve = ps5_tex_reserve();
-            const uint32_t cap = room < reserve / 2 ? 32 : 128;
-            while (room < reserve && x.skip + 1 < x.levels && (std::max(x.width, x.height) >> x.skip) > cap) x.skip++, x.pressed = true;
+            // (the governor's cap, RX_VK_TEX_GOV, or the line: 128 under the reserve, 32 under half of it)
+            const bool gov = ps5_gov_on();
+            const uint32_t cap = gov ? ps5_gov_cap() : room < reserve / 2 ? 32 : 128;
+            const bool press = gov ? cap != 0 : room < reserve;
+            while (press && x.skip + 1 < x.levels && (std::max(x.width, x.height) >> x.skip) > cap) x.skip++, x.pressed = true;
             if (x.pressed) {
+                x.pressed_cap = (uint16_t)cap;
                 const uint64_t n = ++ps5_pressed_n;
                 if (n <= 5 || n % 200 == 0)
                     logf("vk: memory short (%llu MB free, %llu kept for the game): ASTC textures made at %u texels at most for now "
@@ -6598,14 +6649,35 @@ void texture_frame(uint64_t completed) {
     // (PS5) the textures made small while memory was short, made again at their own size while more than the reserve and a
     // quarter is free (ps5_tex_reserve): the most recently used first, two every ten presents. Not one the game has finalized
     // (its memory may hold something else by now), one the GPU wrote, or one recorded work may still read
-    if (hos_ps5_direct_room() > ps5_tex_reserve() / 4 * 5) {
+    // (with the governor: once its cap is above the one a texture was made under, six a pass)
+    const bool gov = ps5_gov_on();
+    const uint32_t gov_cap = gov ? ps5_gov_cap() : 0;
+    if (gov ? gov_cap != 32 && gov_cap != 128 : hos_ps5_direct_room() > ps5_tex_reserve() / 4 * 5) {
         int n = 0;
-        for (auto it = order.rbegin(); it != order.rend() && n < 2; ++it) {
+        for (auto it = order.rbegin(); it != order.rend() && n < (gov ? 6 : 2); ++it) {
             Texture* tex = it->second;
             if (!tex->pressed || tex->gpu_written || tex->released || tex->last_value > completed) continue;
+            if (gov && !tex_gov::larger(gov_cap, tex->pressed_cap)) continue;
             if (std::any_of(evict.begin(), evict.end(), [&](const Evict& e) { return e.tex == tex; })) continue;
             evict.push_back({tex, false, false, false});
             n++, ps5_restored_n++;
+        }
+    }
+    // (the governor at 128 or 32 and memory under its line: the decoded ASTC textures larger than that, the most recently
+    // used first, twelve a pass, are made again under the cap at their next use: what the arrival's own textures took comes
+    // back while the game's pages still find room. Not on the forecast alone: that holds the new ones only)
+    if (gov && (gov_cap == 128 || gov_cap == 32) && hos_ps5_direct_room() < ps5_gov_low()) {
+        static std::atomic<uint64_t> shrunk{0};
+        int n = 0;
+        for (auto it = order.rbegin(); it != order.rend() && n < 12; ++it) {
+            Texture* tex = it->second;
+            if (!tex->astc || tex->sparse || !tex_gov::smaller(gov_cap, tex->pressed ? tex->pressed_cap : 0, tex->bytes, tex->layers * tex->depth)) continue;
+            if (tex->gpu_written || tex->released || tex->last_value > completed) continue;
+            if (std::any_of(evict.begin(), evict.end(), [&](const Evict& e) { return e.tex == tex; })) continue;
+            evict.push_back({tex, false, false, false});
+            n++;
+            if (const uint64_t s = ++shrunk; s == 1 || s % 200 == 0)
+                logf("vk: textures' governor: %llu textures larger than %u texels let go to be made again under it", (unsigned long long)s, gov_cap);
         }
     }
 #endif
