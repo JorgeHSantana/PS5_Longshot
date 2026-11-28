@@ -25,7 +25,7 @@
 #include "../ps5/win32_ps5.h"
 #endif
 
-/* the guest window (third_party/a64-kit/rt/a64.h A64_HOST_BASE, host/hos.h HOS_GUEST_SPACE): one mapping, all of it
+/* the guest window (builder/rt/a64.h A64_HOST_BASE, host/hos.h HOS_GUEST_SPACE): one mapping, all of it
    readable and writable, which VirtualQuery reports as committed without asking the kernel */
 #ifdef __PROSPERO__
 #define GUEST_LO HOS_PS5_GUEST_LO
@@ -164,6 +164,17 @@ BOOL WaitOnAddress(volatile void *addr, void *compare, SIZE_T size, DWORD ms) {
 }
 void WakeByAddressSingle(void *addr) { futex((volatile uint32_t *)((uintptr_t)addr & ~(uintptr_t)3), FUTEX_WAKE_PRIVATE, INT_MAX, NULL); }
 void WakeByAddressAll(void *addr) { futex((volatile uint32_t *)((uintptr_t)addr & ~(uintptr_t)3), FUTEX_WAKE_PRIVATE, INT_MAX, NULL); }
+
+/* A guest atomic word needs the kernel's 32-bit comparison, with no plain read by the caller. */
+int hos_posix_wait_atomic32(volatile uint32_t *word, uint32_t expected, DWORD ms) {
+    struct timespec ts = rel_ms(ms);
+    const long r = futex(word, FUTEX_WAIT_PRIVATE, expected, ms == INFINITE ? NULL : &ts);
+    return r == 0 || errno == EAGAIN || errno == EINTR;
+}
+
+void hos_posix_wake_atomic32(volatile uint32_t *word, int all) {
+    futex(word, FUTEX_WAKE_PRIVATE, all ? INT_MAX : 1, NULL);
+}
 
 /* ---- time ---- */
 void Sleep(DWORD ms) {

@@ -4,7 +4,8 @@ NVN's mesh programs are written for 32-lane warps, so a fallback stage with a ba
 on an Iris Xe Hyrule Castle's colour mesh stages spent most of their time spilling there. The translator can instead give such a
 stage a warp made of its 32-thread workgroup, with the ballots, votes and shuffles going through words of workgroup memory
 (emit_spirv_warp.cpp): the stage then has no subgroup instruction and the renderer runs it at fewer lanes (fallback_lanes.h,
-tests/test_fallback_lanes.py). This checks the switch (Intel's Mesa driver, RX_VK_MESH_SHARED_WARP over it) and the program cache's
+tests/test_fallback_lanes.py). This checks the switch (the device policy's mesh_shared_warp, RX_VK_MESH_SHARED_WARP over it; which
+PCs the policy gives it is tests/test_gcn_mesh_shared_warp.py) and the program cache's
 stamp; which stages the planner takes; that the words are a Workgroup array of a type of their own (no ArrayStride, which
 spirv-val refuses there); that every warp operation has its shared form and the stage declares none of the subgroup's
 capabilities or inputs; that a region is opened before its if's merge instruction and closed at its end; that the words are
@@ -20,8 +21,6 @@ RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 ROOT = Path(__file__).resolve().parents[1]
 SPIRV = ROOT / "gpu/vk/eden/shader_recompiler/backend/spirv"
 ENV_H = ROOT / "gpu/vk/compat/longshot_env.h"   # (env_value_off)
-DRIVER_IDS = {"VK_DRIVER_ID_MESA_RADV": 3, "VK_DRIVER_ID_NVIDIA_PROPRIETARY": 4,   # (as the Vulkan headers number them)
-              "VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS": 5, "VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA": 6}
 
 
 def block(text, marker, start=0):
@@ -40,31 +39,35 @@ def need(text, what, why):
 
 
 def switch(cxx):
-    """mesh_pages_wanted, which sets this switch too, cut from vk_coopmat.cpp and run for the GPUs and settings that matter"""
+    """shared_warp_wanted cut from vk_coopmat.cpp and run for the policy's default and the switch's settings that matter"""
     coopmat = (ROOT / "gpu/vk/vk_coopmat.cpp").read_text(encoding="utf-8")
-    fn = block(coopmat, "bool mesh_pages_wanted(")
+    fn = block(coopmat, "bool shared_warp_wanted(")
     init = block(coopmat, "void coopmat_init(")
-    call = re.search(r"mesh_fallback_shared_warp = mesh_pages_wanted\(([^;]+)\);", init)
+    call = re.search(r"mesh_fallback_shared_warp = shared_warp_wanted\(([^;]+)\);", init)
     if not call:
-        raise SystemExit("coopmat_init does not set mesh_fallback_shared_warp from mesh_pages_wanted")
+        raise SystemExit("coopmat_init does not set mesh_fallback_shared_warp from shared_warp_wanted")
     args = " ".join(call.group(1).split())
-    for needed in ("dev.driver_id", '"RX_VK_MESH_SHARED_WARP"'):
+    for needed in ("dev.policy.mesh_shared_warp", '"RX_VK_MESH_SHARED_WARP"'):
         if needed not in args:
-            raise SystemExit(f"mesh_pages_wanted is not given {needed} for mesh_fallback_shared_warp")
+            raise SystemExit(f"shared_warp_wanted is not given {needed} for mesh_fallback_shared_warp")
     check = re.search(r"mesh_fallback_shared_warp_check =\s*([^;]+);", init)
+    need(init, '"vk: mesh_shared_warp=%d (effective, RX_VK_MESH_SHARED_WARP over the policy default)"',
+         "the effective shared warp setting is not logged")
+    need(init, "Shader::Backend::SPIRV::mesh_fallback_shared_warp ? 1 : 0);",
+         "the log does not use the effective shared warp setting")
     if not check or "mesh_fallback_shared_warp &&" not in " ".join(check.group(1).split()) or \
             '"RX_VK_MESH_SHARED_WARP_CHECK"' not in check.group(1):
         raise SystemExit("the check is not RX_VK_MESH_SHARED_WARP_CHECK over the switch")
-    mesa, windows = "VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA", "VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS"
-    nvidia, radv = "VK_DRIVER_ID_NVIDIA_PROPRIETARY", "VK_DRIVER_ID_MESA_RADV"
-    cases = [(mesa, None, True, "Intel, Mesa"), (mesa, "0", False, "Intel, Mesa, =0"), (windows, None, False, "Intel, Windows"),
-             (nvidia, None, False, "NVIDIA"), (radv, None, False, "AMD, RADV"), (radv, "1", True, "AMD, RADV, =1")]
+    # (the policy's default, then the switch over it: unset or empty the default, the off words off, anything else on)
+    cases = [("true", None, True, "the policy's on, unset"), ("false", None, False, "the policy's off, unset"),
+             ("true", "", True, "the policy's on, empty"), ("false", "", False, "the policy's off, empty"),
+             ("true", "0", False, "the policy's on, =0"), ("true", "off", False, "the policy's on, =off"),
+             ("false", "1", True, "the policy's off, =1"), ("false", "on", True, "the policy's off, =on")]
     checks = "\n".join(
-        f'    if (mesh_pages_wanted({v}, {"nullptr" if e is None else chr(34) + e + chr(34)}) != {str(w).lower()}) '
+        f'    if (shared_warp_wanted({p}, {"nullptr" if e is None else chr(34) + e + chr(34)}) != {str(w).lower()}) '
         f'{{ std::puts("FAIL: {name}"); return 1; }}'
-        for v, e, w, name in cases)
-    driver_enum = "enum VkDriverId { " + ", ".join(f"{k} = {n}" for k, n in DRIVER_IDS.items()) + " };\n"
-    source = (ENV_H.read_text(encoding="utf-8") + "\n#include <cstdint>\n#include <cstdio>\n#include <cstdlib>\n" + driver_enum + fn +
+        for p, e, w, name in cases)
+    source = (ENV_H.read_text(encoding="utf-8") + "\n#include <cstdint>\n#include <cstdio>\n#include <cstdlib>\n" + fn +
               "\nint main() {\n" + checks + "\n    return 0;\n}\n")
     with tempfile.TemporaryDirectory(prefix="mesh-shared-warp-") as folder:
         folder = Path(folder)
@@ -131,6 +134,11 @@ def planner():
                         ("Const(WARP_WAIT)", "bounded"), ("OpAtomicLoad(U32[1], pointer", "an atomic read of the word"),
                         ("MeshFallbackWarpCounter(WARP_COUNTER_WAITS)", "counted when it gives up")):
         need(define, needed, f"the wait is not {why}")
+    need(define, "spv::MemorySemanticsMask::Acquire | spv::MemorySemanticsMask::WorkgroupMemory",
+         "the wait does not acquire workgroup data")
+    need(define, "const Id seen{OpAtomicLoad(U32[1], pointer, Const(static_cast<u32>(spv::Scope::Workgroup)),\n"
+                 "                               Const(static_cast<u32>(semantics)))};",
+         "the wait does not use the workgroup acquire semantics")
     mesh = block(ctx, "void EmitContext::DefineMesh(")
     need(mesh, "DefineSharedWarp();", "DefineMesh does not make the shared warp")
     # (with it, no subgroup capability or input: the stage can run at any lane count; its check keeps them)
@@ -146,6 +154,19 @@ def planner():
 
 def emission():
     warp = (SPIRV / "emit_spirv_warp.cpp").read_text(encoding="utf-8")
+    arrival = block(warp, "void WarpOr(")
+    need(arrival, "spv::MemorySemanticsMask::AcquireRelease | spv::MemorySemanticsMask::WorkgroupMemory",
+         "the arrival RMW does not publish and carry workgroup data")
+    need(arrival, "ctx.OpAtomicOr(ctx.U32[1], WarpWord(ctx, word), WarpScope(ctx), ctx.Const(static_cast<u32>(semantics)), bits);",
+         "the arrival RMW does not use the ordering semantics")
+    need(block(warp, "Id WarpScope("), "spv::Scope::Workgroup", "the arrival RMW does not use workgroup scope")
+    for fn, arrival_word in (("Id SharedBallot(", "word + 1"), ("Id SharedShuffle(", "word + 32"),
+                             ("Id SharedBroadcast(", "word + 1"), ("void WarpOpenRegion(", "word + 1")):
+        body = block(warp, fn)
+        signal = body.index(f"WarpOr(ctx, {arrival_word}, ctx.warp_bit);")
+        wait = body.index(f"WarpWait(ctx, {arrival_word},")
+        if signal >= wait or "WarpOr(ctx, word," not in body[:signal] and "ctx.OpAtomicExchange(" not in body[:signal]:
+            raise SystemExit(f"{fn} does not publish data before signaling and waiting")
     for fn, shared in (("Id EmitLaneId(", "ctx.warp_lane"), ("Id EmitVoteAll(", "SharedBallot(ctx, pred)"),
                        ("Id EmitVoteAny(", "SharedBallot(ctx, pred)"), ("Id EmitVoteEqual(", "SharedBallot(ctx, pred)"),
                        ("Id EmitSubgroupBallot(", "SharedBallot(ctx, pred)"), ("Id EmitSubgroupEqMask(", "ctx.warp_bit"),

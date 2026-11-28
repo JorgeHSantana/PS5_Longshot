@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "../host/launcher_startup.h"
 
 #define HOS_APP_ID "authored.app"
 #define HOS_GAME_TITLE "authored window"
@@ -29,7 +30,6 @@ static std::string mode;
 static unsigned loads, inits, windows, threads, offscreen, signals, sleeps, flushes, waited, prepares;
 static std::vector<std::string> logs;
 void hos_discord_start() {} // Inert optional IPC startup; the fixture exercises display startup only.
-int hos_crash_helper_main(int, char**) { return -1; } // (host/hos_crash_dialog.c: not a crash window's helper, the game itself)
 
 static void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
@@ -61,8 +61,9 @@ static int hos_sdl_desktop_size(int* w, int* h) { *w = 2560; *h = 1440; return 1
     require(inits == 1, "monitor dimensions read before SDL startup");
     *w = 2560; *h = 1440; return 1;
 }
-static void* hos_sdl_window(const char*, int w, int h) {
+static void* hos_sdl_window(const char*, int w, int h, int hidden) {
     require(w == 1280 && h == 720, "changed default window size");
+    require(hidden == (mode == "launcher_startup"), "wrong initial window visibility");
     ++windows;
     return mode == "window_failure" ? nullptr : &event_token;
 }
@@ -108,9 +109,12 @@ static void WaitForSingleObject(HANDLE h, unsigned timeout) {
     require(h == &game_token && timeout == INFINITE, "changed game-thread wait");
     ++waited;
 }
+static void hand_over(int, char**) {}   // (host/hos_main.c: started by itself in a version folder, the builder's to start)
+static int bc_claim() { return 0; }   // (host/builder_channel.c: the builder's channel ends kept; none here)
 static void load_longshot_env() {}
-static void hos_game_layout() {}   // (host/game_layout.c: the game folder's cache/ and logs/)
-static void hos_options_choose(int, char**) {}   // (host/options_path.c: the settings file, in the user folder)
+static void profile_start_slot() {}   // (host/hos_main.c: the profile's start_slot handed on)
+static void hos_game_layout() {}   // (game/game_layout.c: the game folder's cache/ and logs/)
+static void hos_options_choose() {}   // (host/options_path.c: the settings file, the profile's)
 static void driver_cache_room() {}   // (host/hos_main.c: the drivers' shader caches' size, #2033)
 static void driver_cache_folder() {}   // (host/hos_main.c: the folder __GL_SHADER_DISK_CACHE_PATH names, made)
 static void driver_env_choose() {}   // (host/hos_main.c: RADV_FORCE_VRS_CONFIG_FILE dropped)
@@ -134,6 +138,14 @@ int main(int argc, char** argv) {
     mode = argc == 2 ? argv[1] : "";
     try {
         headless_setting(mode == "headless" ? "1" : mode == "headless_zero" ? "0" : nullptr);
+#ifdef _WIN32
+        require(_putenv_s("LONGSHOT_LAUNCHER_STARTUP", mode == "launcher_startup" ? "1" : "") == 0,
+                "authored launcher environment failed");
+#else
+        require((mode == "launcher_startup" ? setenv("LONGSHOT_LAUNCHER_STARTUP", "1", 1)
+                                            : unsetenv("LONGSHOT_LAUNCHER_STARTUP")) == 0,
+                "authored launcher environment failed");
+#endif
         char prepare_flag[] = "--prepare-shaders";
         char* prepare_argv[] = {argv[0], argv[1], prepare_flag, nullptr};
         char romfs_flag[] = "--romfs", user_flag[] = "--user";
@@ -160,7 +172,7 @@ int main(int argc, char** argv) {
                     "changed explicit headless/offscreen behavior");
             require(!loads && !inits && !windows && !visible_window_started && !flushes,
                     "explicit headless used the display");
-        } else if (mode == "visible_success" || mode == "headless_zero" || path_value) {   // (HOS_HEADLESS=0: off, a window)
+        } else if (mode == "visible_success" || mode == "launcher_startup" || mode == "headless_zero" || path_value) {
             require(status == 0 && threads == 1 && waited == 1 && loads && inits == 1 && windows == 1 &&
                     visible_window_started == 1 && !offscreen && !flushes && !sleeps,
                     "changed successful visible startup handshake");

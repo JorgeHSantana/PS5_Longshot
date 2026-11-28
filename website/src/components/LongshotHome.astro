@@ -54,7 +54,7 @@ const steps = [
         <div><dt>Launcher</dt><dd><span data-launcher-status><a href="https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases">Longshot Launcher</a></span>: the app you download. It has its own version numbers.</dd></div>
         <div><dt>Game</dt><dd>{game ? <a href={game.url}>Longshot {game.tag}</a> : 'Longshot'}{game && `, ${game.stable ? 'released' : 'a preview released'} ${date(game.publishedAt)}`}: what the launcher builds from your copy. It downloads that version's builder for you.</dd></div>
       </dl>
-      <p class="release-files"><a href="/download/launcher/windows">Windows</a><a href="/download/launcher/windows-portable">Windows, portable</a><a href="/download/launcher/linux">Linux</a><a href="https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases">Launcher release notes ↗</a><a href={stable?.url || `${repository}/releases`}>Game &amp; build release notes ↗</a></p>
+      <p class="release-files"><a href="/download/launcher/windows">Windows</a><a href="/download/launcher/windows-portable" data-launcher-portable>Windows, portable</a><a href="/download/launcher/linux">Linux</a><a href="https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases">Launcher release notes ↗</a><a href={stable?.url || `${repository}/releases`}>Game &amp; build release notes ↗</a></p>
     </div>
     <div class="release-actions">
       <a class="button primary" href="/download">Download <span aria-hidden="true">↓</span></a>
@@ -157,6 +157,7 @@ const steps = [
   .versions a { color: var(--sl-color-text-accent); }
   .release-files { display: flex; flex-wrap: wrap; gap: .25rem 1.2rem; margin-top: .6rem !important; }
   .release-files a { display: inline-flex; align-items: center; min-height: 44px; color: var(--sl-color-text-accent); }
+  .release-files a[hidden] { display: none; }
   .release-actions .text-link { justify-content: center; }
   .team { color: var(--sl-color-white); text-decoration: none; transition: background .18s; }
   .team:hover { background: var(--panel-hover); }

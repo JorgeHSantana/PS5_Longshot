@@ -232,11 +232,14 @@ def menu_fixture():
 
 def option_ids():
     """option 9 is the menu's Vibration strength, and no other option has its id"""
-    replay, api = read("gpu", "vk", "vk_replay.cpp"), read("gpu", "vk", "vk_api.h")
+    replay, api = read("gpu", "vk", "vk_replay.cpp"), read("gpu", "vk", "vk_api.h") + read("game", "options.h")
     value = {}   # (every HOS_OPT_* enum: the cheats', the motion rows', DLSS's jitter and one-name ones as Text size's)
     for first, start, rest in re.findall(r"enum \{ (HOS_OPT_\w+) = (\d+)([^}]*)\}", api):
-        names = [first] + [n.strip() for n in rest.split(",") if n.strip()]
-        value.update({n: int(start) + i for i, n in enumerate(names)})
+        at = int(start) - 1
+        for n in [first + " = " + start] + [n.strip() for n in rest.split(",") if n.strip()]:
+            name, _, given = n.partition("=")   # (a later name's own value: game/options.h's HOS_OPT_SKIP_TITLE = 44)
+            at = int(given) if given.strip() else at + 1
+            value[name.strip()] = at
     table = block(replay, replay.index("t.option = [](int id) -> int {"))
     ids = []
     for name in re.findall(r"\bid == (\w+)", table):
@@ -245,11 +248,11 @@ def option_ids():
         raise SystemExit("vk_replay.cpp: an option id is read twice: %s" % sorted(ids))
     if not re.search(r"\bid == 9 \? opts\.rumble\b", table):
         raise SystemExit("vk_replay.cpp: option 9 is not the menu's Vibration strength")
-    base = int(re.search(r"#define OOT_CHEAT_ITEM_BASE (\d+)", read("gpu", "vk", "oot_cheat_items.h")).group(1))
+    base = int(re.search(r"#define OOT_CHEAT_ITEM_BASE (\d+)", read("game", "oot_cheat_items.h")).group(1))
     if any(i >= base for i in ids):
         raise SystemExit("vk_replay.cpp: an option id is among the cheat items'")
     users = []
-    for folder in ("host", "gpu"):
+    for folder in ("host", "gpu", "game"):
         for path in (ROOT / folder).rglob("*.c*"):
             text = path.read_text(encoding="utf-8", errors="replace")
             if re.search(r"\brx_option(_set)?\(\s*9\s*,", text):

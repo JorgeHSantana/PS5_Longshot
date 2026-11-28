@@ -22,6 +22,7 @@ void hos_input_clear_toggles(void);
 #include "../hos_paths.h"   /* (the game folder: its title and icon) */
 #include "../../gpu/vk/vk_api.h"
 #include "../display_pointer.h"
+#include "../launcher_startup.h"
 #include "../fullscreen_monitor.h"
 #include <math.h>
 #include <limits.h>
@@ -65,6 +66,13 @@ static int ptr_in;
 static uint32_t ptr_held;
 static int menu_open;   /* window-thread only */
 static void *window;
+/* SDL window operations run on the main thread. One game frame requests the reveal. */
+static int launcher_window;
+void hos_display_first_frame(void) {
+    int hidden = 1;
+    if (__atomic_load_n(&launcher_window, __ATOMIC_RELAXED) == hidden)
+        __atomic_compare_exchange_n(&launcher_window, &hidden, 2, 0, __ATOMIC_RELEASE, __ATOMIC_RELAXED);
+}
 int hos_mouse_pointer(MkwVkPointer *out) { return hos_pointer_take(&pointer, out); }
 
 /* SDL's window/mouse queries belong on the main thread, never on the renderer's pointer callback. */
@@ -207,7 +215,8 @@ static DWORD WINAPI renderer_main(void *p) {
     (void)p;
     const int ok = rx_start(&vk_window);
     if (!ok) {   /* (longshot) the game ends at once: behind a black window it played on with its sound until the player closed
-                    it, and only then did the window after it (host/hos_crash_dialog.c) say why. That window reads this line */
+                    it, and only then did the window after it say why. That window (the builder's: builder/crates/crash/src/facts.rs)
+                    reads this line */
         if (!rx_start_failure_claim()) return 0;
         hos_log("display: the renderer did not start: the game ends, and the window after it says why");
         hos_log_flush();
@@ -340,7 +349,8 @@ void hos_display_loop(void) {
         int w = 0, h = 0;
         if (sscanf(getenv("HOS_WINDOW_SIZE"), "%dx%d", &w, &h) == 2 && w >= 64 && h >= 64) win_w = w, win_h = h;
     }
-    window = hos_sdl_window(window_title(hos_game_title(HOS_GAME_TITLE)), win_w, win_h);   /* (the game's own name: host/hos_paths.h) */
+    const int managed = launcher_startup();
+    window = hos_sdl_window(window_title(hos_game_title(HOS_GAME_TITLE)), win_w, win_h, managed);   /* (the game's own name: host/hos_paths.h) */
     if (!window) {
         hos_log("display: SDL_CreateWindow: %s: no window", hos_sdl_error());
         fprintf(stderr, "display: SDL_CreateWindow: %s: no window\n", hos_sdl_error());
@@ -351,7 +361,7 @@ void hos_display_loop(void) {
     }
     vk_window.window = window;
     hos_posix_window[0] = 1;
-    {   /* the window's icon: longshot.png in the game folder (make_game.py puts it there: the game's own icon, else Longshot's),
+    {   /* the window's icon: longshot.png in the game folder (longshot-builder puts it there: the game's own icon, else Longshot's),
            for X11 and the compositors that take one from the window; the others find it through the menu entry. (The folder, not
            the exe's: the game is bin/longshot in a packaged builder's folder, and the icon was looked for in bin/) */
         char png[MAX_PATH];
@@ -361,7 +371,7 @@ void hos_display_loop(void) {
         hos_sdl_icon(window, png);
     }
     refresh_monitors();
-    if (hos_monitor_start_fullscreen()) set_fullscreen(1);
+    if (!managed && hos_monitor_start_fullscreen()) set_fullscreen(1);
     __atomic_store_n(&refresh_now, hos_sdl_refresh_mhz(window), __ATOMIC_RELAXED);
     {   /* (the desktop's size, before the renderer starts: the Quality preset Auto (this PC) reads it once, desktop_size) */
         int dw, dh;
@@ -369,11 +379,22 @@ void hos_display_loop(void) {
             __atomic_store_n(&desktop_w, dw, __ATOMIC_RELAXED), __atomic_store_n(&desktop_h, dh, __ATOMIC_RELAXED);
     }
     pointer_update(0, 0);
+    __atomic_store_n(&launcher_window, managed, __ATOMIC_RELAXED);
     CloseHandle(CreateThread(NULL, 0, renderer_main, NULL, 0, NULL));
     DWORD refresh_asked = GetTickCount();
     int text_on = 0;
     hos_sdl_text_input(window, 0);   /* (SDL2 starts with it on: off until a text field of the menu has the keyboard) */
     for (;;) {
+        if (__atomic_load_n(&launcher_window, __ATOMIC_ACQUIRE) == 2) {
+            __atomic_store_n(&launcher_window, 0, __ATOMIC_RELAXED);
+            if (!hos_sdl_show_window(window)) {
+                hos_log("display: SDL_ShowWindow: %s", hos_sdl_error());
+                hos_log_flush();
+                ExitProcess(1);
+            }
+            if (hos_monitor_start_fullscreen()) set_fullscreen(1);
+            launcher_game_ready();
+        }
         hos_sdl_pads_pump();
         if (GetTickCount() - refresh_asked >= 1000) {   /* (the window may have moved to another display) */
             refresh_asked = GetTickCount();

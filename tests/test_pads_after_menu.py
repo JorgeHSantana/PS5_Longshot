@@ -172,6 +172,10 @@ def main():
         block(hid, "static uint64_t bound_pad_buttons("), state,
         block(hid, "static int pad_sprint_down("),
         block(hid, "void hos_filter_stick("),
+        # (the Stick range row's scaling, which xinput_poll, the XInput thread's read, calls after the dead zone: this
+        # rx_option answers it with its default, 100, which changes nothing)
+        re.search(r"^enum \{ HOS_OPT_STICK_RANGE = \d+ \};", api, re.M).group(0),
+        "static volatile LONG pad_left_raw[2];", block(hid, "void hos_stick_range("),
         # (the XInput code before pads_read: its thread and its reading; never started here, SDL has the pads)
         hid[hid.index("static volatile int xinput_pads_now;"):hid.index("static void pads_read(")],
         block(hid, "static void pads_read("),

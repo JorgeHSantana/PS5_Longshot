@@ -12,7 +12,11 @@
    accelerometer (Switch Pro and pads in Switch mode, DualSense, DualShock 4, others) that was used last has them read
    each poll and turned into the six-axis state OoT aims with (host/hos_motion.h), which nn_hid.c's
    GetSixAxisSensorStates gives the game; Motion sensitivity X/Y and Invert motion X/Y apply there. Off, or with no such pad, the game sees the pad
-   lying still, as before. */
+   lying still, as before.
+
+   (longshot) The Steam Deck's own sensors: started from Steam, SDL opens only Steam Input's stand-in pad, which has
+   none, so with no pad of that kind open the Deck's controller is read instead (host/deck_imu.c): the same report and
+   the same filter, and the pad path is never displaced while a pad has a gyroscope. */
 #include "hos.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +29,7 @@
 #include "rumble_renhdrum.h"
 #include "pad_speaker.h"
 #include "hos_motion.h"
+#include "deck_imu.h"
 #include "steam_pads.h"
 #include "../gpu/vk/vk_api.h"   /* (HOS_PAD_*) */
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
@@ -44,6 +49,7 @@ static SRWLOCK pad_poll_lock = SRWLOCK_INIT;
 static volatile LONG pads_stopped;
 
 #define MAX_PADS 8
+#define MOTION_SRC_DECK (-2)   /* (motion_pad's value while the Deck's own sensors are the source: no pad, no serial) */
 /* (motion: whether it has the sensors, whether they are on, when to try again after they would not turn on; used_ns:
    its last button or stick change; serial: which opening this is, so a pad reconnecting into the slot is a new one;
    bias: its gyroscope's learned resting rate, kept while another pad has motion) */
@@ -109,6 +115,7 @@ static int motion_head, motion_count, motion_live;
 static volatile LONG gyro_status;   /* 0 no controller, 1 controllers but none with a gyro, 2 one with a gyro */
 
 void hos_filter_stick(int16_t x, int16_t y, int zone, int32_t out[2]);   /* nn_hid.c */
+void hos_stick_range(int percent, int32_t v[4]);                         /* nn_hid.c */
 
 /* SDL's controller support started; 0 when it could not be */
 static int pads_start(void) {
@@ -121,9 +128,7 @@ static int pads_start(void) {
        Controller's A, on the right, at the bottom button's place: A acted as B and X as Y: SkyboundTotk issue 12. SDL3's
        are by position always) */
     hos_sdl_hint("SDL_GAMECONTROLLER_USE_BUTTON_LABELS", "0");
-    /* (with no window nothing reads SDL's quit event: SDL's own SIGINT/SIGTERM handlers turned a timeout's or a service
-       manager's SIGTERM into that event, and the run went on until SIGKILL. Without them the signals end it as usual) */
-    if (env_on("HOS_HEADLESS")) hos_sdl_hint("SDL_NO_SIGNAL_HANDLERS", "1");
+    /* (headless, SDL's SIGINT/SIGTERM handlers are off before any subsystem starts: hos_sdl_load, host/hos_sdl.c) */
     /* (longshot) Valve's own pads taken out of the ignore list Steam sets for the games it starts, so that their motion
        sensors are read (host/steam_pads.h). Only with an SDL that tells Steam's stand-in pads apart: without
        that, a real pad and its stand-in would both play. A list emptied or unset in Steam's launch options is left as
@@ -244,10 +249,16 @@ static void motion_poll(int64_t now, int count) {
         }
         if (want && pads[i].motion_on && (pick < 0 || pads[i].used_ns > pads[pick].used_ns)) pick = i;
     }
-    InterlockedExchange(&gyro_status, any ? 2 : count ? 1 : 0);
+    /* (longshot) the Deck's reader is released whenever its fallback is not the source: Motion controls off, or an open
+       pad with sensors of its own. Its setting goes back then, and it opens again if the fallback is needed later */
+    if (!want || any) deck_imu_stop();
     float a[3], g[3];
     const int read = pick >= 0 && hos_sdl_pad_sensor(pads[pick].gc, HOS_SDL_SENSOR_ACCEL, a, 3) &&
                      hos_sdl_pad_sensor(pads[pick].gc, HOS_SDL_SENSOR_GYRO, g, 3);
+    float deck_a[3], deck_g[3];   /* (the Deck's, read from the controller itself: SDL's frame and units too) */
+    const int deck_read = !read && want && !any && deck_imu_poll(deck_a, deck_g, now);
+    /* (the row's status follows a reading: no pad with sensors and no report read is still "the pad has no gyro") */
+    InterlockedExchange(&gyro_status, (any || deck_read) ? 2 : count ? 1 : 0);
     /* (a gyroscope reading the very same values for over a second has stopped when its accelerometer does too: a real
        accelerometer always moves a little, while a gyroscope may read exactly 0 at rest, as a Steam Deck's in its dock
        does. Seen with a Steam Controller under Steam after Alt+Tab, when Steam's layout switch left its sensors off while
@@ -276,22 +287,30 @@ static void motion_poll(int64_t now, int count) {
         memcpy(pads[motion_pad].bias, motion.bias, sizeof motion.bias);
         pads[motion_pad].bias_t = motion.learned_t, pads[motion_pad].has_bias = 1;
     }
-    if (!read) {
+    if (!read && !deck_read) {
         motion_pad = -1;
+        if (!want || any) deck_imu_stop();   /* (Motion off, or a pad's own sensors took over: its setting goes back) */
         AcquireSRWLockExclusive(&state_lock);
         motion_live = 0, motion_count = 0;
         ReleaseSRWLockExclusive(&state_lock);
         return;
     }
     int fresh = 0;
-    if (pick != motion_pad || pads[pick].serial != motion_serial) {   /* (another pad, or one reconnected: a fresh filter) */
+    /* (motion_pad: the pad's index, or MOTION_SRC_DECK while the Deck's own sensors are read: no pad, no serial) */
+    const int src = deck_read ? MOTION_SRC_DECK : pick;
+    const int src_serial = src >= 0 ? pads[src].serial : 0;
+    const char *src_name = src >= 0 ? hos_sdl_pad_name(pads[src].gc) : "the Steam Deck's built-in controls";
+    if (src != motion_pad || src_serial != motion_serial) {   /* (another pad, or one reconnected: a fresh filter) */
         hos_motion_reset(&motion);
-        if (pads[pick].has_bias)
-            memcpy(motion.bias, pads[pick].bias, sizeof motion.bias), motion.learned_t = pads[pick].bias_t;
-        motion_pad = pick, motion_serial = pads[pick].serial, motion_ns = now;
+        if (src >= 0 && pads[src].has_bias)
+            memcpy(motion.bias, pads[src].bias, sizeof motion.bias), motion.learned_t = pads[src].bias_t;
+        motion_pad = src, motion_serial = src_serial, motion_ns = now;
         fresh = 1;
         motion_start_ns = now, motion_warned = 0;
-        hos_log("hid: motion controls from \"%s\"", hos_sdl_pad_name(pads[pick].gc));
+        if (src >= 0)
+            hos_log("hid: motion controls from \"%s\"", src_name);
+        else
+            hos_log("hid: motion controls from the Steam Deck's built-in controls, read from the controller");
     }
     /* the filter runs outside the lock (the game's input calls take it); a repeat of the last reading is no reading */
     const int64_t dt_ns = now - motion_ns;
@@ -301,7 +320,8 @@ static void motion_poll(int64_t now, int count) {
         const int z = rx_option(HOS_OPT_GYRO_DEADZONE, 1);
         motion.threshold = zone[z < 0 ? 0 : z > 2 ? 2 : z];
     }
-    if (!hos_motion_update(&motion, a, g, (float)(dt_ns / 1e9), rx_option(HOS_OPT_GYRO_SENS_X, 100) / 100.0f,
+    const float *ma = deck_read ? deck_a : a, *mg = deck_read ? deck_g : g;
+    if (!hos_motion_update(&motion, ma, mg, (float)(dt_ns / 1e9), rx_option(HOS_OPT_GYRO_SENS_X, 100) / 100.0f,
                            rx_option(HOS_OPT_GYRO_SENS_Y, 100) / 100.0f, rx_option(HOS_OPT_GYRO_INV_X, 0),
                            rx_option(HOS_OPT_GYRO_INV_Y, 0)) && !fresh)
         return;
@@ -309,7 +329,7 @@ static void motion_poll(int64_t now, int count) {
         motion_warned = 1;   /* (a pad noisier than the stillness test allows: its drift is never taken off) */
         hos_log("hid: motion: \"%s\" has not been set down yet, so its gyroscope's drift is not learned: set it on a "
                 "table for a second (if it is on a table and this stays, its sensor may be noisier than the stillness "
-                "test allows)", hos_sdl_pad_name(pads[pick].gc));
+                "test allows)", src_name);
     }
     if (debug && now >= motion_log_ns) {   /* (twice a second: what the game gets) */
         motion_log_ns = now + 500000000LL;
@@ -739,6 +759,7 @@ static void pads_poll(void) {
                the dead zone. Values are already clamped and the circle keeps them, so this changes nothing otherwise. */
             hos_filter_stick((int16_t)v[0], (int16_t)v[1], z, v);
             hos_filter_stick((int16_t)v[2], (int16_t)v[3], z, v + 2);
+            hos_stick_range(rx_option(HOS_OPT_STICK_RANGE, 100), v);   /* (the menu's Stick range: once, after the dead zone) */
             /* Camera inversion changes output, not whether the physical stick crossed its rest position. Otherwise
                toggling the setting admits a held phantom axis, which stays admitted after the setting is restored. */
             if (inv_x) v[2] = -v[2];
@@ -940,5 +961,6 @@ void hos_sdl_vibration_shutdown(void) {
         hos_sdl_pad_close(pads[i].gc);
         pads[i].gc = NULL;
     }
+    deck_imu_stop();   /* (the Deck's own sensors, if they were being read: the setting goes back as it was found) */
     ReleaseSRWLockExclusive(&pad_poll_lock);
 }

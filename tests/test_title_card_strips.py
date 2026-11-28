@@ -1,15 +1,13 @@
 """The wide title-card frame uses independent strips without stretching its ornaments.
 
-Run the real lifted-C patch and host helpers with synthetic constants and allocator/draw
-stand-ins. On main the first fixture builds and fails because it draws one whole quarter.
-No game file is read. Also covers mirrored quarters, immutable prepared choices, guards,
-full-picture reaches, the full host planner and missing anchors across separate lift files.
+Run the real host helpers with synthetic constants and allocator/draw stand-ins. No game
+file is read. Also covers mirrored quarters, immutable prepared choices, guards, full-picture
+reaches and the full host planner. (Their lifted half, the hook sites that call them, is
+tests/test_title_card_sites.py's.)
 
 python -I -B tests/test_title_card_strips.py [--cc gcc]
 """
 import argparse
-import contextlib
-import io
 import os
 from pathlib import Path
 import subprocess
@@ -18,10 +16,7 @@ import tempfile
 
 RUN_ALL_ARGS = ["--cc", "{cc}"]
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "nx2"))
 sys.path.insert(0, str(ROOT / "tests"))
-import oot_patches
-import oot_wide
 from srccut import between
 
 FIXTURE = r'''
@@ -151,103 +146,6 @@ int main(void){
 
 '''
 
-HEAD = r'''
-#include <stdint.h>
-#include <math.h>
-#include <assert.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
-#define A64_NOESC
-typedef struct { uint64_t x[32]; unsigned char v[512]; } Ctx;
-static unsigned guest_reads;
-static unsigned char memory[65536];
-static uint64_t recomp_load8(Ctx*c,uint64_t p){(void)c;guest_reads++;assert(p<sizeof memory);return memory[p];}
-static uint64_t recomp_load32(Ctx*c,uint64_t p){uint32_t v;(void)c;guest_reads++;assert(p+4<=sizeof memory);memcpy(&v,memory+p,4);return v;}
-static uint64_t recomp_load64(Ctx*c,uint64_t p){uint64_t v;(void)c;guest_reads++;assert(p+8<=sizeof memory);memcpy(&v,memory+p,8);return v;}
-static void recomp_store8(Ctx*c,uint64_t p,uint64_t v){(void)c;guest_reads++;assert(p<sizeof memory);memory[p]=(unsigned char)v;}
-static void recomp_store32(Ctx*c,uint64_t p,uint32_t v){(void)c;guest_reads++;assert(p+4<=sizeof memory);memcpy(memory+p,&v,4);}
-static int log_each;
-static unsigned warnings_seen, guard_logs, trace_logs;
-void hos_log(const char*f,...){char b[512];va_list a;va_start(a,f);vsnprintf(b,sizeof b,f,a);va_end(a);if(strstr(b,"unknown frame pane"))warnings_seen++;if(strstr(b,"guard failed"))guard_logs++;}
-#define HOS_LOG_TRACE 0
-void hos_log_at(int level,const char*f,...){assert(level==HOS_LOG_TRACE);(void)f;trace_logs++;}
-
-'''
-
-STUBS = r'''
-static unsigned allocations,draws,draw_ids[64];
-static unsigned char allocated[64][0x640],descs[64][24];
-void f_8154f1c0(Ctx*c){unsigned n=allocations++;assert(n<64);memcpy(allocated[n],memory+c->x[0],0x640);memset(descs[n],0,24);memcpy(descs[n],&allocations,4);memcpy(memory+c->x[8],descs[n],24);c->x[0]=0x12345678;c->x[1]=0x87654321;}
-void title_original_draw(Ctx*c){assert(draws<64);memcpy(&draw_ids[draws++],memory+c->x[0]+0x48,4);c->x[0]=777;}
-static void u64(unsigned p,uint64_t v){memcpy(memory+p,&v,8);}
-static void u32(unsigned p,uint32_t v){memcpy(memory+p,&v,4);}
-static void putf(unsigned char*p,float v){memcpy(p,&v,4);}
-static Ctx ctx;
-enum {PANE=0x1000,LAYOUT=0x2000,RES=0x3000,NAMES=0x4000,PICTURE=0x5000,PARAMS=0x6000,OUT=0x6000-0x54+8,PAIR=0x8000};
-static void setup(const char*name,int right,int bottom){
- memset(memory,0,sizeof memory);memset(&ctx,0,sizeof ctx);allocations=draws=0;
- u64(PANE+0x18,LAYOUT);u32(PANE+0xa8,1u<<22);u64(LAYOUT+0xf8,RES);u64(LAYOUT+0x100,PANE);u32(LAYOUT+0x13c,1);
- u64(RES+0x18,0x4100);strcpy((char*)memory+0x4100,"Location_00");u64(RES+0x20,NAMES);u64(NAMES,0x4200);strcpy((char*)memory+0x4200,name);u64(PICTURE+0x30,0x9000);u64(PAIR+8,PANE);
- u64(0x9030,0x9200);u32(0x9058,3u<<15);memory[0x9270]=memory[0x92c0]=6;
- unsigned char*p=memory+PARAMS;memset(p,0xa5,0x640);putf(p+0x20,1);putf(p+0xb0,1920);putf(p+0xb4,1080);u32(PARAMS+0x630,3);
- putf(p+0x108,512);putf(p+0x190,512);
- for(int row=0;row<3;row++){putf(p+0x40+16*row,row==0?1:0);putf(p+0x4c+16*row,row==0?(right?960:-960):(bottom?-540:540));}
- for(int k=0;k<3;k++){unsigned o=(unsigned[]){0xc0,0x110,0x150}[k];float uv[8]={0,0,1,0,0,1,1,1};if(!k)for(int j=0;j<4;j++){if(right)uv[2*j]=1-uv[2*j];if(bottom)uv[2*j+1]=1-uv[2*j+1];}memcpy(p+o,uv,32);}
-}
-
-'''
-
-LIFT = r'''
-#include "a64.h"
-void f_815505b0(Ctx *__restrict A64_NOESC c) {
-    c->x[30] = 0x815506f4ULL; f_8154f1c0(c);
-}
-void f_81550720(Ctx *__restrict A64_NOESC c) {
-    title_original_draw(c);
-}
-void f_8156abc0(Ctx *__restrict A64_NOESC c) {
-    c->x[8] = 0; /* synthetic arena reset */
-}
-
-'''
-
-REGRESSION = r'''
-
-int main(void) {
-    setup("P_DecoFrameLT_00", 0, 0);
-    @PLAN@
-    ctx.x[0]=PARAMS;ctx.x[1]=0xaaaa;ctx.x[2]=16;ctx.x[8]=OUT;
-    ctx.x[19]=PICTURE;ctx.x[20]=PANE;ctx.x[31]=PARAMS-0x54;
-    f_815505b0(&ctx);
-    memcpy(memory+PICTURE+0x48,memory+OUT,24);
-    ctx.x[0]=PICTURE;ctx.x[1]=PAIR;f_81550720(&ctx);
-    assert(warnings_seen==0);
-    if (allocations!=4 || draws!=3) {
-        fprintf(stderr,"FAIL: wide title frame allocated %u sets and drew %u quarter(s); expected original plus three independent strips, drawn three times\n",allocations,draws);
-        return 1;
-    }
-    assert(guard_logs==0 && trace_logs==0 && guest_reads>0);
-    ctx.x[0]=0xaaaa;ctx.x[8]=123;
-    f_8156abc0(&ctx);
-    assert(ctx.x[8]==0); /* the game's reset body still executes */
-    ctx.x[0]=PICTURE;ctx.x[1]=PAIR;f_81550720(&ctx);
-    assert(draws==4 && draw_ids[3]==1); /* the reset hook retired the strips */
-    /* Exercise the reviewed head too: this fails there for 100 unbounded lines. */
-    putf(memory+PARAMS+0xb0,123);
-    for(int i=0;i<100;i++) {
-        allocations=0;
-        ctx.x[0]=PARAMS;ctx.x[1]=0xaaaa;ctx.x[2]=16;ctx.x[8]=OUT;
-        f_815505b0(&ctx);
-    }
-    assert(guard_logs==1);
-    puts("PASS: actual patch pipeline prepares independent strips and bounds repeated warnings");
-    return 0;
-}
-
-'''
-
-
 def run(cc, source):
     with tempfile.TemporaryDirectory(prefix="title-card-test-") as tmp:
         p = Path(tmp) / "test.c"
@@ -264,57 +162,11 @@ def main():
     args = p.parse_args()
     for key in ("HOS_WIDE_UI", "HOS_HUD_MAX_RATIO", "HOS_HUD_FULL_RATIO"):
         os.environ.pop(key, None)
-    host = (ROOT / "host/hos_wide_ui.c").read_text(encoding="utf-8")
-    marker = "/* The area title card's baked frame"
-    # Main has no strip helper. Its real patch pipeline still builds the same
-    # fixture and fails for one unchanged quarter, not a missing declaration.
-    block = between(host, marker, "void hos_wide_ui_tick(void)") if marker in host else ""
-    lifted, _, _ = oot_patches.patch_file(LIFT, "synthetic.c", True)
-    plan = "title_plan_tick(640);" if block else ""
-    run(args.cc, HEAD + block + STUBS + lifted.replace('#include "a64.h"', "") + REGRESSION.replace("@PLAN@", plan))
+    host = (ROOT / "game/hos_wide_ui.c").read_text(encoding="utf-8")
+    # (the strip helpers, the host's half. Their lifted half, the sites ui.titlePrepare, ui.titleDraw and ui.titleReset
+    # at f_815505b0's call of f_8154f1c0, f_81550720's entry and f_8156abc0's, is tests/test_title_card_sites.py's)
+    block = between(host, "/* The area title card's baked frame", "void hos_wide_ui_tick(void)")
     run(args.cc, FIXTURE.replace("@HOST@", block))
-
-    # Either half may be in the shipped hot list, in a different lifted file.
-    for changed in (None, "call", "include", "reset"):
-        with tempfile.TemporaryDirectory(prefix="title-card-anchors-") as tmp:
-            parts = LIFT.split("void f_81550720", 1)
-            inputs = [parts[0], '#include "a64.h"\nvoid f_81550720' + parts[1]]
-            reset_parts = inputs[1].split("void f_8156abc0", 1)
-            inputs[1] = reset_parts[0]
-            inputs.append('#include "a64.h"\nvoid f_8156abc0' + reset_parts[1])
-            if changed == "reset":
-                inputs[2] = inputs[2].replace("f_8156abc0", "f_8156abc4")
-            if changed == "call":
-                inputs[0] = inputs[0].replace("0x815506f4ULL", "0x815506f8ULL")
-            elif changed == "include":
-                inputs[0] = inputs[0].replace('#include "a64.h"', '#include "different.h"')
-            paths, counts = [], []
-            for i, text in enumerate(inputs):
-                patched, found, _ = oot_patches.patch_file(text, str(i), True)
-                f = Path(tmp) / (str(i) + ".c")
-                f.write_text(patched, encoding="utf-8", newline="\n")
-                paths.append(str(f)); counts.append(found)
-            messages = io.StringIO()
-            with contextlib.redirect_stdout(messages):
-                oot_patches.report(paths, counts, True)
-            if changed:
-                assert "title card preparation/draw/reset anchors" in messages.getvalue()
-                assert [Path(f).read_text() for f in paths] == inputs
-            else:
-                assert "title card preparation, draw and arena reset paired" in messages.getvalue()
-                assert "hos_wide_title_prepare" in Path(paths[0]).read_text()
-                assert "hos_wide_title_draw" in Path(paths[1]).read_text()
-                assert "hos_wide_title_reset" in Path(paths[2]).read_text()
-                once = [Path(f).read_text() for f in paths]
-                counts = []
-                for i, f in enumerate(paths):
-                    patched, found, _ = oot_patches.patch_file(once[i], str(i), True)
-                    Path(f).write_text(patched, encoding="utf-8", newline="\n")
-                    counts.append(found)
-                with contextlib.redirect_stdout(io.StringIO()):
-                    oot_patches.report(paths, counts, True)
-                assert [Path(f).read_text() for f in paths] == once
-    print("PASS: separate hot/cold files pair; a changed anchor warns and restores both originals")
 
     import test_hud_layout as hud
     body = "".join(line for line in host.splitlines(True) if not line.startswith("#include"))

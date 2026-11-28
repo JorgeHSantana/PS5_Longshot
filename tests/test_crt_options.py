@@ -150,6 +150,8 @@ bool gpu_card_missing = false;
 std::mutex options_save_mu;
 std::string output_id_key(const char* id) { return id; }
 std::string output_name_key(const char* name) { return name; }
+std::string dlss5_custom_text() { return {}; }   // (menu/dlss5.cpp: the DLSS 5 Custom set's options line, none here)
+void dlss5_custom_read(const char*) {}
 void refresh_outputs() {}
 bool can_outputs() { return false; }
 void refresh_monitors() {}

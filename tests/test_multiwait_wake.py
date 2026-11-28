@@ -236,16 +236,19 @@ def main():
     # the fixture stubs obj_nockpt: everything it can reach in this file runs under mw_lock during WaitAny's scan, so no
     # function in that call graph may hold a virtual-core call, yield, sleep or wait. event_wait is run for real in the
     # fixture, whose stubs count spins, timed waits and vcore calls under the lock and fail on a sleep. Controls below)
-    sched = re.compile(r"\b(hos_vcore_\w+|vc_\w+|hos_cv_sleep|hos_sleep\w*|hos_thread_wait|hos_yield\w*|Sleep\w*|"
-                       r"SwitchToThread|WaitFor\w+|WaitOnAddress|sched_yield|usleep|nanosleep|wait_until|spin_\w+)\s*\(")
 
     # (an allowlist, not a list of bad names: every call in wait_any's mw_lock region and in what it reaches must be to a
     # function of this file (followed) or to one of these, which keep the core and never sleep; anything else, a wrapper in
-    # another file included, fails)
-    safe_external = {"AcquireSRWLockExclusive", "AcquireSRWLockShared", "ReleaseSRWLockExclusive", "ReleaseSRWLockShared",
+    # another file included, fails. __builtin_ctz is the compiler's: one instruction (tzcnt/bsf), no call.
+    # HOS_OBJ_CACHE=sets hands a thread's new cache to the thread's end (on Linux pthread_once, which waits only for another
+    # thread's pthread_key_create, then pthread_setspecific; on Windows nothing to call); hos_fatal ends the process)
+    safe_external = {"pthread_once", "pthread_setspecific", "hos_fatal",
+                     "AcquireSRWLockExclusive", "AcquireSRWLockShared", "ReleaseSRWLockExclusive", "ReleaseSRWLockShared",
                      "InitializeSRWLock", "InitializeConditionVariable", "InterlockedIncrement", "InterlockedDecrement",
-                     "InterlockedCompareExchange", "InterlockedExchange", "__atomic_load_n", "__atomic_store_n", "__atomic_compare_exchange_n",
-                     "malloc", "calloc", "realloc", "free", "memset", "memcpy", "memmove", "getenv", "env_on", "hos_now_ns", "offsetof"}
+                     "InterlockedCompareExchange", "InterlockedExchange", "__atomic_load_n", "__atomic_store_n",
+                     "__atomic_compare_exchange_n",
+                     "__builtin_ctz", "malloc", "calloc", "realloc", "free", "memset", "memcpy", "memmove", "getenv", "env_on",
+                     "hos_now_ns", "offsetof"}
     not_calls = {"if", "for", "while", "switch", "return", "sizeof", "case", "SLEEP_LETS_MW_LOCK_GO"}
 
     def code_of(s):   # (comments blanked: words in them are not calls)

@@ -8,7 +8,7 @@
    Mouse: a click in the window captures the mouse (hidden, kept in the window), Esc or leaving the window releases
    it (nn_hid.c reads its motion). While the Insert menu is open the mouse is free (the cursor shown, for the menu's
    clicks: hos_mouse_pointer) and the game gets none of it; the capture it had comes back when the menu closes. The same
-   while one of the game's own menus is open (host/oot_menu.c: hos_mouse_game_menu each frame it runs), its clicks and
+   while one of the game's own menus is open (game/oot_menu.c: hos_mouse_game_menu each frame it runs), its clicks and
    wheel for that menu (hos_mouse_game_pointer). */
 #include "hos.h"
 void hos_input_clear_toggles(void);
@@ -22,6 +22,7 @@ void hos_input_clear_toggles(void);
 void rx_close_asked(void);   /* host/rx_backend.c */
 #include "../gpu/vk/vk_api.h"
 #include "display_pointer.h"
+#include "launcher_startup.h"
 #include "fullscreen_monitor.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
@@ -339,17 +340,17 @@ static void menu_mouse(HWND w, int open, int opened_by_escape) {
     menus_mouse(w, open, game_menu_open);
 }
 
-/* (host/oot_menu.c, the game's thread) one of the game's menus ran this frame */
+/* (game/oot_menu.c, the game's thread) one of the game's menus ran this frame */
 void hos_mouse_game_menu(void) {
     const LONG64 before = InterlockedExchange64(&game_menu_seen_ns, (LONG64)hos_now_ns());
     if (!before && hwnd) PostMessageA(hwnd, WM_APP + 10, 1, 0);
 }
-/* (host/oot_menu.c, the game's thread) frames go on with none of the game's menus holding the mouse: closed now */
+/* (game/oot_menu.c, the game's thread) frames go on with none of the game's menus holding the mouse: closed now */
 void hos_mouse_game_menu_gone(void) {
     const LONG64 seen = InterlockedCompareExchange64(&game_menu_seen_ns, 0, 0);
     if (seen && hwnd && InterlockedCompareExchange64(&game_menu_seen_ns, 0, seen) == seen) PostMessageA(hwnd, WM_APP + 11, 0, 0);
 }
-/* (host/oot_menu.c, the game's thread) the wheel's notches since the last call, for a screen that takes only the wheel
+/* (game/oot_menu.c, the game's thread) the wheel's notches since the last call, for a screen that takes only the wheel
    and leaves the mouse as it is (the R button's item choice, in play: the mouse the camera's). Notches count only while
    such a screen reads them (a call in the last 200 ms): a wheel turned in play does not wait for the next one */
 static volatile LONG play_wheel;
@@ -401,6 +402,21 @@ static void paste_clipboard(HWND w) {
 }
 void hos_display_paste(void) {
     if (hwnd) PostMessageA(hwnd, WM_APP + 12, 0, 0);
+}
+
+/* The first game frame asks the window thread to reveal the window. */
+static LONG launcher_window_hidden;
+void hos_display_first_frame(void) {
+    if (__atomic_load_n(&launcher_window_hidden, __ATOMIC_RELAXED) &&
+        __atomic_exchange_n(&launcher_window_hidden, 0, __ATOMIC_RELAXED))
+        PostMessageA(hwnd, WM_APP + 13, 0, 0);
+}
+
+static void show_game_window(HWND window) {
+    if (env_on("HOS_WINDOW_NOACTIVATE"))
+        SetWindowPos(window, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    else
+        ShowWindow(window, SW_SHOW);
 }
 
 static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
@@ -595,6 +611,11 @@ static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         break;
     case WM_ERASEBKGND:
         return renderer ? 1 : DefWindowProcA(w, msg, wp, lp);
+    case WM_APP + 13:
+        show_game_window(w);
+        if (hos_monitor_start_fullscreen()) set_fullscreen(w, 1);
+        launcher_game_ready();
+        return 0;
     case WM_APP + 9:   /* (the Insert menu's Restart now: closed as by the player, then started again: host/hos_relaunch.c) */
         hos_relaunch_ask();
         /* fall through */
@@ -628,7 +649,7 @@ static DWORD WINAPI display_main(void *p) {
     wc.lpfnWndProc = wndproc;
     wc.hInstance = GetModuleHandleA(NULL);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hIcon = LoadIconA(wc.hInstance, MAKEINTRESOURCEA(1));   /* (nx2/make_icon.py; none in a build without the picture) */
+    wc.hIcon = LoadIconA(wc.hInstance, MAKEINTRESOURCEA(1));   /* (builder/crates/build-compile/src/generated/res.rs; none in a build without the picture) */
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.lpszClassName = "Longshot";
     RegisterClassA(&wc);
@@ -642,7 +663,6 @@ static DWORD WINAPI display_main(void *p) {
     }
     RECT r = {0, 0, win_w, win_h};
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    const int noactivate = env_on("HOS_WINDOW_NOACTIVATE");
     hwnd = CreateWindowA("Longshot", HOS_GAME_TITLE, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
                          CW_USEDEFAULT, r.right - r.left, r.bottom - r.top, NULL, NULL, wc.hInstance, NULL);
     if (!hwnd) display_start_failed("CreateWindowA");
@@ -657,14 +677,12 @@ static DWORD WINAPI display_main(void *p) {
         if (MultiByteToWideChar(CP_UTF8, 0, hos_game_title(HOS_GAME_TITLE), -1, title, 256))
             DefWindowProcW(hwnd, WM_SETTEXT, 0, (LPARAM)title);
     }
-    /* (no activate: shown at the bottom of the z-order, so a game in front keeps its focus) */
-    if (noactivate)
-        SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    else
-        ShowWindow(hwnd, SW_SHOW);
+    const int managed = launcher_startup();
+    __atomic_store_n(&launcher_window_hidden, managed, __ATOMIC_RELAXED);
+    if (!managed) show_game_window(hwnd);
     hos_monitor_load();
     refresh_monitors();
-    if (hos_monitor_start_fullscreen()) set_fullscreen(hwnd, 1);
+    if (!managed && hos_monitor_start_fullscreen()) set_fullscreen(hwnd, 1);
     RAWINPUTDEVICE rid = {1, 2, 0, hwnd};   /* generic desktop mouse: WM_INPUT while the window is in front */
     RegisterRawInputDevices(&rid, 1, sizeof rid);
     pointer_update(hwnd, 0, 0);

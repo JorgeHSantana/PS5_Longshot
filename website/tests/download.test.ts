@@ -49,6 +49,20 @@ test("each file by its kind", () => {
   assert.equal(assetOf({ assets: [{ name: "Longshot-v3.0.0-x86_64.AppImage" }] }, "linux"), null);
 });
 
+test("a release with portable mode built in offers no portable file, and its old links get the Windows one", async (t) => {
+  const release = rel('nightly-12-aaaaaaaa', false, true, ['windows-x64.exe', 'windows-x64-setup.exe', 'windows-x64-portable.zip']);
+  assert.equal(assetOf(release, 'windows-portable'), null);
+  assert.equal(launcherVersions([release]).channels.nightly.downloads['windows-portable'], undefined);
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'caches');
+  Object.defineProperty(globalThis, 'caches', { configurable: true, value: { default: { match: async () => Response.json([release]) } } });
+  t.after(() => { if (previous) Object.defineProperty(globalThis, 'caches', previous); else delete globalThis.caches; });
+  for (const path of ['/download/launcher/windows-portable', '/download/launcher/nightly/windows-portable']) {
+    const response = await worker.fetch(new Request('https://preview.example' + path), {}, { waitUntil() {} });
+    assert.equal(response.status, 302, path);
+    assert(response.headers.get('Location').endsWith('windows-x64-setup.exe'), path);
+  }
+});
+
 test("version metadata uses the redirect channel rules and only that release's available files", () => {
   const releases = [rel('v1.0.0', false, false, ['windows-x64-setup.exe']),
     rel('v1.1.0-rc.2', false, true), rel('v9.0.0', true, false), rel('nightly-12-aaaaaaaa', false, true)];

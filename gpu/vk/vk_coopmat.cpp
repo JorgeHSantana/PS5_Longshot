@@ -674,6 +674,12 @@ int table_loads_wanted(const char* env, bool host_import, bool device_addresses)
     if (v != 1 && v != 2) v = 0;
     return host_import && device_addresses ? v : 0;
 }
+/// (longshot, mma_layout.h mesh_fallback_shared_warp) the policy's default (device_policy.h mesh_shared_warp: Mesa's Intel
+/// driver, and AMD's Windows driver on GPUs whose compute stages run only wider than 32 lanes, GCN); env is RX_VK_MESH_SHARED_WARP, unset or empty the
+/// default, an off word off, anything else on (tests/test_mesh_fallback_shared_warp.py, tests/test_gcn_mesh_shared_warp.py)
+bool shared_warp_wanted(bool by_policy, const char* env) {
+    return env && *env ? !env_value_off(env) : by_policy;
+}
 } // namespace
 
 void coopmat_init() {
@@ -711,7 +717,9 @@ void coopmat_init() {
     Shader::Backend::SPIRV::mesh_fallback_global_attributes = mesh_pages_wanted(dev.driver_id, std::getenv("RX_VK_MESH_GLOBAL_ATTRS"));
     if (Shader::Backend::SPIRV::mesh_fallback_global_attributes)
         logf("vk: the mesh fallback's attribute regions in a pool of the records buffer (RX_VK_MESH_GLOBAL_ATTRS=0: in workgroup memory)");
-    Shader::Backend::SPIRV::mesh_fallback_shared_warp = mesh_pages_wanted(dev.driver_id, std::getenv("RX_VK_MESH_SHARED_WARP"));
+    Shader::Backend::SPIRV::mesh_fallback_shared_warp = shared_warp_wanted(dev.policy.mesh_shared_warp, std::getenv("RX_VK_MESH_SHARED_WARP"));
+    logf("vk: mesh_shared_warp=%d (effective, RX_VK_MESH_SHARED_WARP over the policy default)",
+         Shader::Backend::SPIRV::mesh_fallback_shared_warp ? 1 : 0);
     Shader::Backend::SPIRV::mesh_fallback_shared_warp_check =
         Shader::Backend::SPIRV::mesh_fallback_shared_warp && env_on("RX_VK_MESH_SHARED_WARP_CHECK");
     if (Shader::Backend::SPIRV::mesh_fallback_shared_warp)

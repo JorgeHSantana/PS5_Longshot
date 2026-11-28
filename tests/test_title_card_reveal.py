@@ -117,7 +117,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cc", default=os.environ.get("CC", "gcc"))
     args = parser.parse_args()
-    source = (ROOT / "host/hos_wide_ui.c").read_text(encoding="utf-8")
+    source = (ROOT / "game/hos_wide_ui.c").read_text(encoding="utf-8")
     start = "typedef struct {\n    float width, centre, source0, source1"
     helpers = between(source, start, "static unsigned title_work;")
     with tempfile.TemporaryDirectory(prefix="title-reveal-") as tmp:

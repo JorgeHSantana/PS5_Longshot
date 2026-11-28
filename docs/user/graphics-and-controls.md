@@ -90,6 +90,8 @@ elements retain their usual placement, including the width limit on very wide sc
 | | Dynamic resolution | Off, On: lets the game lower the 3D resolution automatically when the GPU is busy (shown unless the Upscaler fixes the render size; hides the fixed Render resolution slider while On) | On; a quality preset sets it |
 | | Render resolution | Stepped slider of fixed render scales (shown while Dynamic resolution is Off). Game's own: 50%, 67%, 75%, 100% (each with its size). With DLSS or FSR 4: Ultra Performance (33%), Performance (50%), Balanced (58%), Quality (67%), 75%, 83%, 92%, Native (DLAA or FSR 4 Native AA: the 3D at full size). With Intel XeSS the same stops, named by the XeSS mode each runs under: Ultra Performance (33%), Balanced (50%, 58%), Ultra Quality (67%, 75%), Ultra Quality Plus (83%, 92%), Native (XeSS Native AA). With FSR 3.1: 33% to 92%, 100% (its native AA). With Off: 33%, 50%, 67%, 75%, 100% | Quality (67%) when Dynamic resolution is turned Off; a quality preset sets it |
 | | Sharpness | 0 to 100%, in steps of 10 | 0%; a quality preset sets it |
+| | DLSS 5 | Off, On: NVIDIA's DLSS 5 model adds detail to faces, skin and surfaces after the upscaler, before the HUD (it costs a lot of GPU time). Shown only with NVIDIA's `nvngx_dlssnr.dll` in the game's `ngx` folder (or `%LOCALAPPDATA%\Longshot\ngx`; on Windows also the community FP16 one in that folder's `fp16` folder, which RTX 20, 30 and 40 cards run), on an NVIDIA GPU, with NVIDIA DLSS, DLAA or AMD FSR as the Upscaler; Longshot does not include or download either file ([DLSS 5](dlss5.md)). The DLSS 5 settings row shows while it is On | Off |
+| | DLSS 5 settings | Opens the DLSS 5 page (shown while DLSS 5 is On; [DLSS 5](dlss5.md) has every row): DLSS 5 preset (Default: our values for the rows below, tuned in the game; Custom: the values you last set there, kept while you try Default), Model resolution (25% to 100% of the picture), Detail strength and Colour strength (0 to 2), Style (Standard, Natural, Cinematic), Model strengths (As in OptiScaler, Model defaults, Applied: whether the next four reach the model), Intensity, Local structure, Local tone (0 to 2), Skin structure (Follows local structure, 0 to 2), Automatic skin mask (Off, On), Highlight guard (1.0x to 8.0x), and DLSS 5 model (Auto, NVIDIA, FP16: which file runs DLSS 5; only on an RTX 50 card with both DLSS 5 files, Windows; `RX_VK_DLSS_NR_MODEL` sets it for a run; a change to it waits for the game to start again) | Default: Default, 65%, 1.64, 1.26, Cinematic, Applied, 1.62, 1.22, 1.14, 0.74, On, 1.7x, Auto |
 | | Frame generation | Off, Auto (it shows who makes its frames: FSR 3.1 FG or Built-in FG), Fixed | Off |
 | | Frame generation multiplier | Stepped slider from 2x to 8x (shown while Frame generation is Fixed); with DLSS FG up to what NVIDIA's runtime makes on the GPU (6x on an RTX 50, 2x on an RTX 40) | 2x |
 | | Frame generation by | Shown while Frame generation is on. DLSS FG (NVIDIA DLSS Frame Generation: RTX 40 and newer, with a temporal Upscaler), FSR 3.1 FG (AMD FSR 3.1's frame interpolation, from the scene's depth and motion: any GPU), Built-in FG. DLSS FG is offered only where it runs; elsewhere the row has FSR 3.1 FG and Built-in FG, and its line at FSR 3.1 FG says why not DLSS FG (the log has NVIDIA's answer). At DLSS FG, FSR 3.1 makes the frames DLSS FG does not (Frame generation's Auto). At DLSS FG, the game's own menus, movies and loading screens show only the game's own frames (they have no Upscaler picture to make frames from): the row's line and the FPS counter say DLSS FG paused. With an Upscaler that is not temporal, the built-in one makes the frames and the line says why. `RX_VK_DLSS_FG=1` fixes the row at DLSS FG for a run. Changes at once | DLSS FG where it runs, else FSR 3.1 FG (an options file's Auto from before is this default) |
@@ -163,6 +165,7 @@ elements retain their usual placement, including the width limit on very wide sc
 | | Invert camera Y | Off, On | Off |
 | | Camera speed | 50% to 400%, in steps of 25 | 100% |
 | | Stick dead zone | Default (24%), 5%, 10%, 15%, 20%, 30% | Default (24%) |
+| | Stick range | 70% to 100%, in steps of 5 | 100% |
 | | Vibration | Auto, Basic, Off | Auto |
 | | Vibration strength | 25% to 200%, in steps of 25 | 100% |
 | | Test vibration | an action: Confirm buzzes the controller used last; the value says what plays it | Motors |
@@ -288,7 +291,10 @@ helper asks you to.
   and can show the footer at every level.
 - **Game speed:** Per frame slows the game whenever it is below 60 fps; Real time keeps normal speed down to 15 fps.
 - **Field of view** changes the gameplay camera's angle: 100% is the game's. Cutscenes, the HUD and movies keep theirs.
-- **Skip title screen** loads your most recent save at the start, once you have saved once.
+- **Skip title screen** loads your most recent save at the start, once you have saved once. It presses A for you on the
+  title screen, its file list and its Yes, each as soon as the game waits there; the game itself loads the save. Where
+  the game does not tell its screens (another version of it, or none told by 45 s), it presses A every couple of
+  seconds instead. With no save yet the title screen stays, so a new game can start. It waits while this menu is open.
 - **Game language** writes `language.txt` in the game folder, read at the next start. **Menu language** is this
   menu's: its translations are machine-made, and corrections are welcome.
 - **Bug report** saves what a report needs in a new folder ([what is in it](reporting-and-contributing.md#report-a-bug)).
@@ -314,6 +320,9 @@ helper asks you to.
 - **Camera speed** is how fast the right stick and the camera keys turn the camera, in percent of the game's own.
 - **Stick dead zone:** how far a stick moves before it counts. Lower it for a precise stick, raise it for one that
   drifts.
+- **Stick range:** how far a stick is pushed before the game counts it as fully tilted. Some controllers report a
+  little less than the whole way on a full push, and Link rolls only from a full tilt, so he keeps running instead.
+  If that happens, lower it to 90%. 100%, the default, passes the stick on as the controller reports it.
 - **Vibration:** Auto plays the best each controller can (a DualSense its voice coils, on a cable or over Bluetooth;
   an Xbox One or Series controller all four motors; a Switch Pro Controller its HD rumble; a Steam Controller (2026) its
   grips, still experimental; any other its two motors); Basic plays the two motors on every controller.
@@ -395,7 +404,7 @@ udev rules, the `steam-devices` package on most distributions). A third-party pa
 weak rumble or none gets the plain motor rumble with `HOS_HD_RUMBLE=0` in `longshot_env.txt`.
 
 **DualSense haptics:** a DualSense on a USB cable plays the game's own fine vibration on its voice coils, through
-RenHDrum, which the Longshot Builder puts beside the game. Without it, the pad gets its motors. With **DualSense HD
+RenHDrum, which the build puts beside the game. Without it, the pad gets its motors. With **DualSense HD
 Haptics** on (the default) its speaker taps and its triggers kick back too; turn it off for the voice coils alone.
 
 **The supported console's Pro Controller over USB (Windows):** the game reads it itself, with its motion sensor and

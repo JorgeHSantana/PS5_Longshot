@@ -54,6 +54,8 @@ export function installLauncherChannel(document: Document, fetcher = fetch) {
     for (const { link, href, label } of originals) {
       const kind = href.split('/').at(-1)!;
       const download = release && release.downloads[kind];
+      // A release that lists no portable file has portable mode in its Windows download.
+      link.hidden = kind === 'windows-portable' && !!release && !download;
       if (versions && !download) {
         link.removeAttribute('href');
         link.setAttribute('role', 'link');
@@ -130,5 +132,8 @@ export async function installLauncherStatus(document: Document, fetcher = fetch)
       ? `Longshot Launcher ${release.tag} · ${channel === 'stable' ? 'stable' : 'nightly'}`
       : 'No launcher release is available yet.';
     for (const status of statuses) status.textContent = text;
+    if (release && !release.downloads['windows-portable']) {
+      for (const link of document.querySelectorAll<HTMLElement>('[data-launcher-portable]')) link.hidden = true;
+    }
   } catch { /* Keep the working download-page link when metadata cannot be reached. */ }
 }

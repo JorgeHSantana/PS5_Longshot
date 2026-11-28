@@ -6,8 +6,8 @@ Longshot is built on your PC, from your own copy of the game, by the Longshot La
 ## 1. Check your PC
 
 Your copy of the game must be the supported version, and your PC needs a Vulkan 1.3 graphics card with 4 GB of video
-memory (12 GB and mesh shaders recommended), 16 GB of system memory (32 GB recommended) and about 60 GB free while
-building. See the [system requirements](requirements.md).
+memory (12 GB and mesh shaders recommended), 16 GB of system memory (32 GB recommended) and about 5 GB free for the
+build ([system requirements](requirements.md)).
 
 ## 2. Download the launcher
 
@@ -15,10 +15,11 @@ building. See the [system requirements](requirements.md).
 - [Download for Linux](https://longshot.magicbean.dev/download/launcher/linux)
 - [Windows, portable zip](https://longshot.magicbean.dev/download/launcher/windows-portable)
 
-**Windows:** run the setup. It asks once: **Install** (for you, no administrator rights, with a Start menu shortcut) or
-**Run portable**. The portable zip needs no setup: unzip it and run `LongshotLauncher.exe`; it keeps its data in
-`LongshotLauncher-data` beside it, so it can live on an external SSD. Windows may flag the launcher, which isn't
-code-signed yet: see [antivirus warnings](https://longshot.magicbean.dev/help/antivirus/).
+**Windows:** run the download. It asks once: **Install** (for you, no administrator rights, with a Start menu shortcut)
+or **Run portable**, which keeps the launcher's data beside it, so it can live on an external SSD. The nightly launcher
+has only this one download. The 1.x launcher also has a portable zip: unzip it and run `LongshotLauncher.exe`; it keeps
+its data in `LongshotLauncher-data` beside it. Windows may flag the launcher, which isn't code-signed yet: see
+[antivirus warnings](https://longshot.magicbean.dev/help/antivirus/).
 
 **Linux and SteamOS:** before opening the `.AppImage`, open its **Properties** in your file manager and enable
 **Allow executing file as program** (the wording differs between desktops), or run
@@ -41,7 +42,8 @@ Press **Build** on the launcher's welcome screen and choose the **Stable** chann
 
 On **Game files**, choose your game from the list: the launcher finds `.nup` files in your Downloads, Desktop and
 Documents folders. If yours isn't listed, use **Browse…** to point at the file, or at the `romfs` and `exefs` folders.
-Choose **Next** once the launcher has checked your selection; if it reports a different game build, compare its
+The game reads its files from your `.nup` where it is: keep it there after the build (moved or deleted, the game asks
+you to build again). Choose **Next** once the launcher has checked your selection; if it reports a different game build, compare its
 message with the [supported version](requirements.md).
 
 <a href="images/guide/launcher-game-files.png">
@@ -54,8 +56,9 @@ message with the [supported version](requirements.md).
 
 Choose where the game goes (`Games\Longshot` in your user folder on Windows, `~/Games/Longshot` on Linux, by
 default), its language and the options ([build options](advanced.md#build-options)). The launcher downloads this
-version's Longshot Builder, checks it against the release's signed checksums, and builds the game: about 15 minutes
-on a 12-core desktop, longer on a slower PC. Then press **Play**. The first start prepares the game's shaders, so it's
+version's builder (one file, with everything it builds with inside), checks it against the release's signed
+checksums, and builds the game: about 3 minutes
+on a 12-core desktop, then a few more to prepare the shaders, longer on a slower PC. Then press **Play**. The first start prepares the game's shaders, so it's
 slower than the next ones. The launcher can also add desktop and Start menu shortcuts (on Linux, an applications menu
 entry).
 

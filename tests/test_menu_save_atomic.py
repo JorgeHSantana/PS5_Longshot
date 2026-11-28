@@ -113,6 +113,7 @@ std::string mic_want;
 unsigned long long auto_for = 0, auto_tuned = 0;
 namespace gpu_choice { struct Card {}; inline std::string card_id(const std::vector<Card>&, int) { return {}; } }   // (the GPU device row's card)
 std::vector<gpu_choice::Card> gpu_device_cards;
+std::string dlss5_custom_text() { return {}; }   // (menu/dlss5.cpp: the DLSS 5 Custom set's options line, none here)
 std::string gpu_saved_card;
 bool gpu_card_missing = false;
 struct { int steps = 0; bool went_down = false; } auto_tuning;

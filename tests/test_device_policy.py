@@ -26,6 +26,7 @@ field the translation reads (vk_shader.cpp, the one stamped file that does) is f
     python -I -B tests/test_device_policy.py --headers <Vulkan-Headers/include> [--cxx g++]
 """
 import argparse
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -45,7 +46,7 @@ BOOLS = """fetch_bounds nan_bits mesh_fallback_strict_fmul bc_copy_per_layer gat
 amd_retry_no_optimizer amd_cloth_no_optimizer fault_gate_serial task_mesh_fallback intel_compile_gate compute_builds_serial
 pcache_fetch_lock split_before_draw astc_on_cpu inline_deku_web_loads networks_left_out dma_buf_imports nv_checkpoints
 allowance_at_count_rule
-mirrors ub_snapshot split_ub_flush native_float_add warp64 batch_submits mma_unroll_try global_table_loop occ_copy
+mirrors ub_snapshot split_ub_flush native_float_add warp64 mesh_shared_warp batch_submits mma_unroll_try global_table_loop occ_copy
 intel_side_by_side_auto fsr4_tune gpu_clock_peak readback_late_newest acquire_ahead pcache_small_pc bc_small_runs small_vram_textures astc_bc_all
 room_in_blocks_rule squeeze_damped linux_hold_caps_budget dlss_cnn auto_render_third rtx rdna4 threaded_auto_render
 threaded_auto_recorder drop_modules_small_ram native_zstd_keep_core""".split()
@@ -168,7 +169,8 @@ PCS = [
          num=(0, 2, 0, 1, 85, 4, 11000, 3072, 768, 512, 1912, -1, 256, 24, 64, 32, 97, 5, 6, 4, 8, 6, 4)),
     # (GCN: no batched submits, the phi limit. Its heap is 8192 MB exactly: the small blocks (<= 8 GB) and the large
     # card's 15% of blocks at the start (< 8 GB is the other branch), the two comparators the study names.
-    # Corrected: fault_gate_serial is off on RADV)
+    # Corrected: fault_gate_serial is off on RADV. Its compute stages run at 64 lanes only, but RADV compiles and draws the
+    # mesh fallback right on the subgroup: no shared warp here, tests/test_gcn_mesh_shared_warp.py)
     dict(name="RX 580 (8 GB), RADV on GCN",
          facts=(0x1002, 0x67DF, "MESA_RADV", 0, "DISCRETE_GPU", "Mesa 26.2.5", "AMD Radeon RX 580 Series (RADV POLARIS10)", 0, 0,
                 8192, 8000, 16000, 8, 8, 4, 0, 1, 1, 0, 0, 0, 1, 64, 64, 0),
@@ -262,7 +264,7 @@ PCS = [
          facts=(0x8086, 0x9A49, "INTEL_OPEN_SOURCE_MESA", 0, "INTEGRATED_GPU", "Mesa 26.0.1", "Mesa Intel(R) Xe Graphics (TGL GT2)", 0, 0,
                 11850, 10000, 15800, 8, 8, 4, 0, 1, 1, 0, 0, 1, 1, 32, 32, 0xFF),
          on="acquire_ahead fetch_bounds networks_left_out gather_offset position_invariant split_before_draw dma_buf_imports "
-            "allowance_at_count_rule ub_snapshot global_table_loop small_vram_textures astc_bc_all linux_hold_caps_budget "
+            "allowance_at_count_rule ub_snapshot mesh_shared_warp global_table_loop small_vram_textures astc_bc_all linux_hold_caps_budget "
             "threaded_auto_render threaded_auto_recorder drop_modules_small_ram native_zstd_keep_core",
          num=(0, 0, 20000, 1, 85, 16, 2560, 2048, 768, 512, 512, -1, 256, 0, 64, 32, 90, 1, 2, 2, 4, 4, 2)),
     # (neither discrete nor integrated: no mirrors, yet a dedicated card's budgets, blocks at the start and 97% line.
@@ -644,6 +646,18 @@ int main() {
 """
 
 
+def stamp_files(vk):
+    """The files of the shader translation's stamp, as the builder lists them (builder/crates/build-compile/src/generated/
+    shader_stamp.rs DIRS and FILES): every file of those folders of gpu/vk, and those files"""
+    rs = (ROOT / "builder" / "crates" / "build-compile" / "src" / "generated" / "shader_stamp.rs").read_text(encoding="utf-8")
+    dirs, files = (re.findall(r'"([^"]+)"', re.search(r"^const %s: \[&str; \d+\] = \[([^\]]*)\]" % k, rs, re.M).group(1))
+                   for k in ("DIRS", "FILES"))
+    out = [str(Path(d) / f) for top in dirs for d, _, fs in os.walk(vk / top) for f in fs]
+    if not out or not files:
+        raise SystemExit("FAIL: shader_stamp.rs's DIRS and FILES were not found")
+    return sorted(out) + [str(vk / f) for f in files]
+
+
 def check_source():
     main = (VK / "vk_main.cpp").read_text(encoding="utf-8")
     create = block(main, "bool create_device() {")
@@ -732,14 +746,12 @@ def check_source():
             if '"%s"' % name in code:
                 raise SystemExit("FAIL: %s reads %s itself: device_policy_env does, by the one rule" % (path.name, name))
     # (the header reads the environment through what it is handed only, and it is no file of the translator's stamp: an
-    # edit to it must not have every player translate again. nx2/translator_files.py lists the stamp's files)
+    # edit to it must not have every player translate again. The builder's shader_stamp.rs lists the stamp's files)
     if "getenv(" in header:
         raise SystemExit("FAIL: device_policy.h calls getenv: device_policy_env is handed its reader")
     internal = (VK / "vk_internal.h").read_text(encoding="utf-8")
     if "DeviceFacts facts{};" not in internal or "DevicePolicy policy{};" not in internal:
         raise SystemExit("FAIL: vk_internal.h's Device does not hold the facts and the policy")
-    sys.path.insert(0, str(ROOT / "nx2"))
-    import translator_files
     # (the translation's own rules are read from the policy by vk_shader.cpp, and by no other file of the stamp. A rule
     # changed in device_policy.h does not change LONGSHOT_SHADER_STAMP, so it reaches the program cache only through the
     # values translator_stamp folds: each field vk_shader.cpp reads is folded there, itself or as the profile's value
@@ -758,7 +770,7 @@ def check_source():
                               "Shader::Backend::SPIRV::Wmma16Fits(profile_pinned(uint64_t(wg[0]) * wg[1] * wg[2]), t->program))))",
                               "dev.policy.networks_left_out ? 1u : 0u"),
     }
-    for path in translator_files.files(str(VK)):
+    for path in stamp_files(VK):
         text = Path(path).read_text(encoding="utf-8", errors="replace")
         if Path(path).name == "device_policy.h":
             raise SystemExit("FAIL: device_policy.h is in the shader translation's stamp")

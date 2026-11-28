@@ -9,6 +9,9 @@
 #include <limits.h>
 #include "audio_output_devices.h"
 #include "fullscreen_monitor.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #ifdef _WIN32
@@ -23,7 +26,7 @@ static int version;   /* 3, 2, or 0 none */
 static struct {
     void *InitSubSystem, *SetHint, *GetError;
     /* window */
-    void *CreateWindow, *SetWindowPosition, *SetWindowFullscreen, *SetRelativeMouseMode, *GetPrimaryDisplay,
+    void *CreateWindow, *ShowWindow, *SetWindowPosition, *SetWindowFullscreen, *SetRelativeMouseMode, *GetPrimaryDisplay,
         *GetDesktopDisplayMode, *Vulkan_CreateSurface, *PixelSize, *GetKeyboardState, *GetMouseState, *WaitEventTimeout,
         *PollEvent, *GetWindowSize, *LoadPNG, *SetWindowIcon, *DestroySurface, *GetWindowDisplay, *GetCurrentDisplayMode;
     void *StartTextInput, *StopTextInput, *GetClipboardText;   /* (longshot: the menu's text fields; optional) */
@@ -65,6 +68,7 @@ static int get_all(HMODULE m, int three) {
     GET(SetHint, "SDL_SetHint");
     GET(GetError, "SDL_GetError");
     GET(CreateWindow, "SDL_CreateWindow");
+    GET(ShowWindow, "SDL_ShowWindow");
     GET(SetWindowFullscreen, "SDL_SetWindowFullscreen");
     GET2(SetRelativeMouseMode, "SDL_SetWindowRelativeMouseMode", "SDL_SetRelativeMouseMode");
     GET(GetDesktopDisplayMode, "SDL_GetDesktopDisplayMode");
@@ -158,6 +162,16 @@ int hos_sdl_load(void) {
         if (m && get_all(m, 1)) version = 3;
         else if ((m = load_one("SDL2.dll")) && get_all(m, 0)) version = 2;
         hos_log(version ? "sdl: SDL%d" : "sdl: no SDL3 or SDL2 found: no window, sound or SDL controllers", version);
+        /* (no window: nothing reads SDL's quit event, and SDL's own SIGINT/SIGTERM handlers turned a timeout's or a service
+           manager's SIGTERM into it: the run went on until SIGKILL. SDL installs them when its first subsystem starts
+           (sound, video and the controllers each start its events) and reads this hint only then, so it is set here,
+           before any: in a headless run the sound starts first, for the Insert menu's list of outputs
+           (gpu/vk/vk_menu.cpp menu_init). Without them the signals end the run as usual. With a window, the window's
+           loop reads the quit event) */
+        if (version && env_on("HOS_HEADLESS")) {
+            if (version == 3) CALL(_Bool (*)(const char *, const char *), SetHint)("SDL_NO_SIGNAL_HANDLERS", "1");
+            else CALL(int (*)(const char *, const char *), SetHint)("SDL_NO_SIGNAL_HANDLERS", "1");
+        }
         InterlockedExchange(&state, 2);
     }
     while (state != 2) Sleep(0);
@@ -201,15 +215,21 @@ void hos_sdl_identity(const char *name, const char *app_id) {
 const char *hos_sdl_error(void) { return version ? CALL(const char *(*)(void), GetError)() : "no SDL"; }
 
 /* ---- the window ---- */
-enum { WIN_SHOWN2 = 0x4, WIN_RESIZABLE = 0x20, WIN_HIGH_DENSITY = 0x2000, WIN_VULKAN = 0x10000000, CENTRED = 0x2FFF0000 };
-void *hos_sdl_window(const char *title, int width, int height) {
+enum { WIN_HIDDEN = 0x8, WIN_RESIZABLE = 0x20, WIN_HIGH_DENSITY = 0x2000, WIN_VULKAN = 0x10000000, CENTRED = 0x2FFF0000 };
+void *hos_sdl_window(const char *title, int width, int height, int hidden) {
+    const uint32_t flags = WIN_RESIZABLE | WIN_HIGH_DENSITY | WIN_VULKAN | (hidden ? WIN_HIDDEN : 0);
     if (version == 2)
         return CALL(void *(*)(const char *, int, int, int, int, uint32_t), CreateWindow)(
-            title, CENTRED, CENTRED, width, height, WIN_SHOWN2 | WIN_RESIZABLE | WIN_HIGH_DENSITY | WIN_VULKAN);
+            title, CENTRED, CENTRED, width, height, flags);
     void *w = CALL(void *(*)(const char *, int, int, uint64_t), CreateWindow)(title, width, height,
-                                                                              WIN_RESIZABLE | WIN_HIGH_DENSITY | WIN_VULKAN);
+                                                                              flags);
     if (w) CALL(_Bool (*)(void *, int, int), SetWindowPosition)(w, CENTRED, CENTRED);
     return w;
+}
+int hos_sdl_show_window(void *window) {
+    if (version == 3) return CALL(_Bool (*)(void *), ShowWindow)(window);
+    CALL(void (*)(void *), ShowWindow)(window);
+    return 1;
 }
 void hos_sdl_fullscreen(void *window, int on) {
     if (version == 3) CALL(_Bool (*)(void *, _Bool), SetWindowFullscreen)(window, on != 0);
@@ -890,7 +910,7 @@ int hos_sdl_audio_channels(void) {
     return n > 0 ? n : 2;
 }
 
-/* ---- (longshot) microphones: SDL3's recording devices, or SDL2's capture devices (the Linux AppImage carries SDL2): a
+/* ---- (longshot) microphones: SDL3's recording devices, or SDL2's capture devices (a Linux build puts SDL2 beside the game): a
    stream each opened, in the format asked for, read as the game asks ---- */
 static struct {
     void *GetDevices, *DeviceName, *Available, *GetData, *Clear, *Destroy;   /* (SDL3) */
