@@ -10588,8 +10588,10 @@ static bool temporal_rejected_network(VkCommandBuffer cmd, uint64_t key, Texture
     // another upscaler draws. Without it, on a card that leaves these networks out, FSR 3.1's own Render resolution steps
     // would be a plain stretch)
     const bool fsr3 = fsr3_upscale(cmd, key, false, src, in_view, dst, out_view, 0);
-    const bool done = fsr3 || ((temporal_wanted() || temporal_off() || temporal_fg_inputs()) &&
-                               temporal_upscale(cmd, key, false, src, in_view, dst, out_view, 0));
+    bool done = fsr3 || ((temporal_wanted() || temporal_off() || temporal_fg_inputs()) &&
+                         temporal_upscale(cmd, key, false, src, in_view, dst, out_view, 0));
+    // (an engine asked for that did not draw this frame: the network does not run here, so the stretch, not a black frame)
+    if (!done && (temporal_wanted() || fsr3_chosen())) done = temporal_stretch_instead(cmd, key, src, in_view, dst, out_view, 0);
     bound().reset();
     if (!done) return false;
     full_barrier(cmd);

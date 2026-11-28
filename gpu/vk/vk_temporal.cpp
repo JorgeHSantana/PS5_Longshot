@@ -1817,6 +1817,17 @@ bool draw_engine(VkCommandBuffer cmd, State& s, int mode, const Camera& cam, uin
 
 bool temporal_fg_inputs() { return temporal_mode() == ur::GAME && fsr3fi::frames_wanted() != 0; }
 
+bool temporal_stretch_instead(VkCommandBuffer cmd, uint64_t key, Texture* in, VkImageView in_view, Texture* out,
+                              VkImageView out_view, uint32_t out_level) {
+    if (!stretch(cmd, key, true, in, in_view, out, out_view, out_level)) return false;
+    static std::atomic<uint64_t> n{0};
+    const uint64_t i = ++n;
+    if (i <= 5 || i % 600 == 0)
+        logf("vk: upscaler: %s did not draw this frame and the game's network does not run here: its input stretched (%ux%u, "
+             "%llu frames so far)", name_of(temporal_mode()), in ? in->width : 0, in ? in->height : 0, (unsigned long long)i);
+    return true;
+}
+
 bool temporal_upscale(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in, VkImageView in_view, Texture* out,
                       VkImageView out_view, uint32_t out_level) {
     const int mode = temporal_mode();

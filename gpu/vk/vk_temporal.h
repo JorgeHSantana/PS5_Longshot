@@ -94,6 +94,12 @@ bool temporal_hdr_input();
 /// frame's scene and its output the picture, and left to run without a word otherwise. true: the engine wrote the output
 /// (the dispatch is left out); false: the network runs, the reason logged. With the Upscaler Off (temporal_off) the same
 /// dispatches get the linear stretch in place of an engine
+/// (PS5, 2026-11-27) The upscale of a frame its engine did not draw, where the game's own network does not run either (it
+/// does not translate on this GPU): the input stretched into the output, as the Upscaler's Off does, so that the frame is a
+/// soft picture and not a black one. With FSR 4 and the dynamic resolution a change of size left frames to nobody ("unexpected
+/// scene colour format", "no scene camera this frame"): the screen went black on a base PS5. true: written
+bool temporal_stretch_instead(VkCommandBuffer cmd, uint64_t key, Texture* in, VkImageView in_view, Texture* out,
+                              VkImageView out_view, uint32_t out_level);
 bool temporal_upscale(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in, VkImageView in_view, Texture* out,
                       VkImageView out_view, uint32_t out_level);
 
