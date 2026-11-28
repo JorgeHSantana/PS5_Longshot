@@ -26,6 +26,7 @@ const USAGE: &str = "usage: longshot-builder dev discover --image <dir>
                                  [--exefs <dir> | --npdm <file>] [--entries <file>] [--devirt <file>]
                                  [--profile-generate | --profile <file> [--hot-share F] [--hot-max N]]
                                  [--no-polls] [--no-mark-bitmap] [--sync-all-at-calls] [--mark-each]
+                                 [--memory-base <hex>] [--dirty-pages N]
                                  [--no-simplify] [--split-over N] [--split-piece N] [--unit-cost N] [--hot-unit-cost N]
                                  [--cold-unit-cost N] [--jobs N] [--store <dir>] [--force]
                                  [--output json|text]

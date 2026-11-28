@@ -56,6 +56,20 @@ fn parse(args: &[String]) -> Result<Args, String> {
                 }
             }
             "--hot-max" => max = number(value("a number")?)? as usize,
+            // (the console's guest window: the PS5 port's lift, ps5/build.py. A title there has 64 GiB of address space for the
+            // guest at 64 GiB and its writable segment is mapped from what memory the title has left: 2^24 pages, 16 MiB of marks)
+            "--memory-base" => {
+                let v = value("an address")?;
+                o.codegen.memory_base = u64::from_str_radix(v.trim_start_matches("0x"), 16)
+                    .map_err(|_| "--memory-base needs a hexadecimal address".to_string())?;
+            }
+            "--dirty-pages" => {
+                let n = number(value("a number")?)? as u64;
+                if !n.is_power_of_two() || n < 4096 {
+                    return Err("--dirty-pages needs a power of two, 4096 or more".into());
+                }
+                o.codegen.dirty_pages = n;
+            }
             "--no-polls" => o.codegen.polls = false,
             "--no-mark-bitmap" => o.codegen.mark_bitmap = false,
             "--sync-all-at-calls" => o.codegen.callee_saved = false,
