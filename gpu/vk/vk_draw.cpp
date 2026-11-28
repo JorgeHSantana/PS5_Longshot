@@ -10587,8 +10587,12 @@ static bool temporal_rejected_network(VkCommandBuffer cmd, uint64_t key, Texture
     // (FSR 3.1 first, as fsr3_stand_in comes before temporal_stand_in: its upscale, or its frame interpolation's inputs while
     // another upscaler draws. Without it, on a card that leaves these networks out, FSR 3.1's own Render resolution steps
     // would be a plain stretch)
-    const bool fsr3 = fsr3_upscale(cmd, key, false, src, in_view, dst, out_view, 0);
-    bool done = fsr3 || ((temporal_wanted() || temporal_off() || temporal_fg_inputs()) &&
+    // (RX_VK_UPSCALE_DECLINE=<n>, a test: every n-th of these frames is taken as one no engine drew, to see the stretch below)
+    static const int decline = getenv("RX_VK_UPSCALE_DECLINE") ? atoi(getenv("RX_VK_UPSCALE_DECLINE")) : 0;
+    static std::atomic<uint64_t> asked{0};
+    const bool declined = decline > 0 && ++asked % (uint64_t)decline == 0;
+    const bool fsr3 = !declined && fsr3_upscale(cmd, key, false, src, in_view, dst, out_view, 0);
+    bool done = fsr3 || (!declined && (temporal_wanted() || temporal_off() || temporal_fg_inputs()) &&
                          temporal_upscale(cmd, key, false, src, in_view, dst, out_view, 0));
     // (an engine asked for that did not draw this frame: the network does not run here, so the stretch, not a black frame)
     if (!done && (temporal_wanted() || fsr3_chosen())) done = temporal_stretch_instead(cmd, key, src, in_view, dst, out_view, 0);
